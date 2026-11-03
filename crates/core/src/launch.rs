@@ -206,3 +206,12 @@ pub mod autostart {
         Ok(())
     }
 }
+
+/// shortcut: launch at sign-in is Windows-only; add a LaunchAgent / XDG autostart entry when macOS or Linux is supported.
+#[cfg(not(windows))]
+pub mod autostart {
+    pub fn get() -> Option<String> { None }
+    pub fn set(_on: bool, _exe: &std::path::Path) -> anyhow::Result<()> {
+        anyhow::bail!("launch at sign-in is only available on Windows for now")
+    }
+}
