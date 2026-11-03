@@ -476,8 +476,11 @@ try {
     await click('[data-testid=follow-end]');
     await waitFor(async () => (await atEnd()) && !(await shown()), 'at the end, button gone');
     await sleep(2500);
+    // a live redraw swaps the conversation in place; the page never blanks to "Opening the session…"
+    await exec("window.__blank = false; new MutationObserver(() => { if (!document.getElementById('chat')) window.__blank = true; }).observe(document.getElementById('sheet'), { childList: true })");
     fs.appendFileSync(f, jl(pair(98, 'And now?', 'Written while you watched.')));
     await hasText('[data-testid=chat]', 'Written while you watched.');
+    assert.ok(!(await exec('return window.__blank')), 'the page stayed on screen during the live redraw');
     await waitFor(atEnd, 'following: still at the end after new messages');
     // scrolled up: following stops, the place is kept, and the button is back
     await exec("const c = document.getElementById('chat'); c.scrollTop = 100; c.dispatchEvent(new Event('scroll'))");

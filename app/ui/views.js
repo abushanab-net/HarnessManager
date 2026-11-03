@@ -61,7 +61,8 @@ const secsOf = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms')
 
 view('session', async (sheet, params) => {
   sheet.className = 'sheet';
-  sheet.innerHTML = '<p class="muted">Opening the session…</p>';
+  // a redraw of the shown session (live update, unfolding a step) keeps it on screen until the new one is ready
+  if (rv.sessionKey !== params.profile + '/' + params.id || !sheet.querySelector('#chat')) sheet.innerHTML = '<p class="muted">Opening the session…</p>';
   const [t, ss] = await Promise.all([call('transcript', { profile: params.profile, id: params.id }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null)]);
   if (rv.sessionKey !== params.profile + '/' + params.id) { rv.sessionKey = params.profile + '/' + params.id; rv.open = new Set(); rv.more = new Set(); rv.follow = false; rv.top = 0; rv.fresh = true; }
   const m = t.meta;
