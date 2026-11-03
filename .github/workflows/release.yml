@@ -29,8 +29,8 @@ jobs:
       matrix:
         include:
           - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe }
-          # shortcut: no .dmg, because its Finder layout step times out on a runner without a desktop session; add dmg back once
-          # the runner may control Finder (System Settings > Privacy & Security > Automation)
+          # Tauri's own .dmg lays out its window through Finder, which a runner without a desktop session may not
+          # control; the .dmg is made with hdiutil after the build instead
           - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: app, ext: '' }
           # 22.04: an AppImage built on the oldest supported glibc runs on the most distributions
           - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE || 'ubuntu-22.04' }}", bundles: 'appimage,deb', ext: '' }
@@ -80,6 +80,20 @@ jobs:
           releaseId: ${{ needs.draft.outputs.id }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+      - name: .dmg (hdiutil, no Finder)
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          test -n "$app"
+          stage=$(mktemp -d)
+          cp -R "$app" "$stage/"
+          ln -s /Applications "$stage/Applications"
+          name="Harness.Manager_${GITHUB_REF_NAME#v}_$(uname -m | sed 's/arm64/aarch64/').dmg"
+          hdiutil create -volname "Harness Manager" -srcfolder "$stage" -ov -format UDZO "$RUNNER_TEMP/$name"
+          curl -sSf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/x-apple-diskimage" \
+            --data-binary @"$RUNNER_TEMP/$name" \
+            "https://uploads.github.com/repos/$GH_REPO/releases/${{ needs.draft.outputs.id }}/assets?name=$name" > /dev/null
 
   publish:
     needs: [draft, build]

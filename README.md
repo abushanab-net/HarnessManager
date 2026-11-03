@@ -42,7 +42,7 @@ Download the installer from the [latest release](https://github.com/abushanab-ne
 | System | File | Notes |
 |---|---|---|
 | **Windows 10/11** | `Harness.Manager_<version>_x64-setup.exe` | Supported and tested. Installs `HarnessManager.exe` and `hrm.exe` for the current user. |
-| macOS (Apple silicon) | `Harness.Manager_aarch64.app.tar.gz` | Built but untested. Unpack it into Applications. Not notarized: open it the first time with right-click → Open. |
+| macOS (Apple silicon) | `Harness.Manager_<version>_aarch64.dmg` | Built but untested. Drag the app into Applications. Not notarized: open it the first time with right-click → Open. |
 | Linux | `.AppImage` or `.deb` | Built but untested. |
 
 API keys can only be saved on Windows for now, because macOS and Linux have no credential store wired in yet.
