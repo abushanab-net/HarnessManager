@@ -41,8 +41,8 @@ Download the installer from the [latest release](https://github.com/abushanab-ne
 
 | System | File | Notes |
 |---|---|---|
-| **Windows 10/11** | `Harness Manager_<version>_x64-setup.exe` | Supported and tested. Installs `HarnessManager.exe` and `hrm.exe` for the current user. |
-| macOS (Apple silicon) | `.app.tar.gz` | Built but untested. Unpack it into Applications. Not notarized: open it the first time with right-click → Open. |
+| **Windows 10/11** | `Harness.Manager_<version>_x64-setup.exe` | Supported and tested. Installs `HarnessManager.exe` and `hrm.exe` for the current user. |
+| macOS (Apple silicon) | `Harness.Manager_aarch64.app.tar.gz` | Built but untested. Unpack it into Applications. Not notarized: open it the first time with right-click → Open. |
 | Linux | `.AppImage` or `.deb` | Built but untested. |
 
 API keys can only be saved on Windows for now, because macOS and Linux have no credential store wired in yet.
@@ -50,7 +50,7 @@ API keys can only be saved on Windows for now, because macOS and Linux have no c
 Silent install on Windows:
 
 ```powershell
-& ".\Harness Manager_1.0.0_x64-setup.exe" /S /D="$env:LOCALAPPDATA\Harness Manager"
+& ".\Harness.Manager_1.0.0_x64-setup.exe" /S /D="$env:LOCALAPPDATA\Harness Manager"
 ```
 
 The app updates itself: it checks for a new version at launch and once a day, and installs only updates
