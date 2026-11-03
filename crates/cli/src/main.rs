@@ -1,0 +1,616 @@
+//! `hrm`: Harness Manager from the command line. Every command has `--json` for scripts.
+
+use std::path::PathBuf;
+
+use anyhow::{bail, Context, Result};
+use clap::{Args, Parser, Subcommand};
+use hrm_core::registry::{Kind, McpServer, Provider, Route};
+use hrm_core::service::{self, AddRequest, SessionFilter};
+use hrm_core::{harness, items, Ctx};
+
+mod router_cmd;
+
+#[derive(Parser)]
+#[command(name = "hrm", version, about = "Run Claude Code, Codex, OpenCode and Antigravity under several accounts side by side")]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Args, Clone, Copy)]
+struct Json {
+    /// Print JSON instead of a table
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// List accounts with plan, limits, tokens and open consoles
+    List { #[command(flatten)] j: Json, /// Import new usage first
+        #[arg(long)] refresh: bool },
+    /// Show one account in detail
+    Show { name: String, #[command(flatten)] j: Json },
+    /// Add an account (subscription login by default)
+    Add {
+        name: String,
+        #[arg(long, default_value = "claude")] harness: String,
+        /// Use an API key instead of a subscription login (prompted, or from HRM_API_KEY)
+        #[arg(long)] api_key: bool,
+        /// Send this profile through the local router using a route
+        #[arg(long)] route: Option<String>,
+        #[arg(long)] email: Option<String>,
+        #[arg(long)] base_url: Option<String>,
+        #[arg(long)] model: Option<String>,
+        /// Create without starting the login
+        #[arg(long)] no_login: bool,
+        #[command(flatten)] j: Json,
+    },
+    /// Log an account in (interactive)
+    Login { name: String },
+    /// Remove an account; --delete-home also deletes its folder
+    Remove { name: String, #[arg(long)] delete_home: bool },
+    /// Run the harness as an account in this console; arguments after -- go to the harness
+    Run { name: String, #[arg(last = true)] args: Vec<String> },
+    /// Open a new terminal running the account
+    Start { name: String, #[arg(long)] cwd: Option<PathBuf>, #[arg(last = true)] args: Vec<String> },
+    /// API keys for API-key accounts (kept in Windows Credential Manager)
+    Key { #[command(subcommand)] cmd: KeyCmd },
+    /// Token usage per account and day
+    Usage { #[arg(long, default_value_t = 7)] days: i64, #[arg(long)] profile: Option<String>, #[command(flatten)] j: Json },
+    /// Totals: cost at API list prices, requests, tokens and cache hit rate
+    Overview { #[arg(long)] days: Option<i64>, #[arg(long)] harness: Option<String>, #[command(flatten)] j: Json },
+    /// Every model response, newest first
+    Requests { #[arg(long)] days: Option<i64>, #[arg(long)] harness: Option<String>, #[arg(long, default_value_t = 30)] limit: i64, #[command(flatten)] j: Json },
+    /// Limits of one account; --live asks Anthropic now (Claude subscription accounts)
+    Quota { name: String, #[arg(long)] live: bool, #[command(flatten)] j: Json },
+    /// Sessions of every tool, grouped by project (or date, account, tool)
+    Sessions {
+        #[arg(long, default_value = "project")] group: String,
+        #[arg(long)] harness: Option<String>,
+        #[arg(long)] profile: Option<String>,
+        #[arg(long)] days: Option<i64>,
+        #[arg(long)] search: Option<String>,
+        #[command(flatten)] j: Json,
+    },
+    /// Print one session as a transcript
+    Session { profile: String, id: String, #[command(flatten)] j: Json },
+    /// Reopen a session in a new terminal, in its own account
+    Resume { profile: String, id: String, #[arg(long)] cwd: Option<PathBuf> },
+    /// Projects: list, rename or merge
+    Projects { #[command(subcommand)] cmd: ProjectCmd },
+    /// Bring every account in step: shared Claude settings, MCP servers and skills
+    Sync { /// Replace folders the old PowerShell launcher copied with links to the main profile
+        #[arg(long)] relink: bool, #[command(flatten)] j: Json },
+    /// MCP servers shared across tools
+    Mcp { #[command(subcommand)] cmd: McpCmd },
+    /// Skills shared across tools
+    Skills { #[command(subcommand)] cmd: SkillCmd },
+    /// Prompt files (CLAUDE.md, AGENTS.md) per tool
+    Prompts { #[command(subcommand)] cmd: PromptCmd },
+    /// Router providers (endpoints and keys)
+    Provider { #[command(subcommand)] cmd: ProviderCmd },
+    /// Routes: failover or aggregate across providers
+    Route { #[command(subcommand)] cmd: RouteCmd },
+    /// The local router
+    Router { #[command(subcommand)] cmd: router_cmd::RouterCmd },
+    /// Import accounts from the old claude-accounts.ps1 launcher
+    Import { path: Option<PathBuf>, #[command(flatten)] j: Json },
+    /// Detect installed tools and add their main profiles
+    Init { #[command(flatten)] j: Json },
+    /// Supported tools and what each can do
+    Harnesses { #[command(flatten)] j: Json },
+    /// Read or change settings
+    Settings { key: Option<String>, value: Option<String> },
+    /// Open the desktop app
+    Open,
+}
+
+#[derive(Subcommand)]
+enum KeyCmd {
+    /// Save or replace the key (prompted, or from HRM_API_KEY)
+    Set { name: String },
+    /// Delete the saved key
+    Delete { name: String },
+}
+
+#[derive(Subcommand)]
+enum ProjectCmd {
+    List { #[command(flatten)] j: Json },
+    Rename { key: String, name: String },
+    Merge { key: String, into: String },
+    Reset { key: String },
+}
+
+#[derive(Subcommand)]
+enum McpCmd {
+    List { #[command(flatten)] j: Json },
+    /// Add a stdio server (--command) or an http/sse server (--url)
+    Add {
+        name: String,
+        #[arg(long)] command: Option<String>,
+        #[arg(long, num_args = 0.., allow_hyphen_values = true)] args: Vec<String>,
+        #[arg(long)] url: Option<String>,
+        #[arg(long, default_value = "")] transport: String,
+        /// KEY=VALUE, repeatable
+        #[arg(long = "env")] env: Vec<String>,
+        /// Name: value, repeatable
+        #[arg(long = "header")] headers: Vec<String>,
+    },
+    Remove { name: String },
+    /// Enable for a tool (all its accounts) or one account with --profile
+    Enable { name: String, harness: String, #[arg(long)] profile: Option<String> },
+    Disable { name: String, harness: String, #[arg(long)] profile: Option<String> },
+    /// Bring a tool's existing MCP servers under management
+    Import { harness: String },
+}
+
+#[derive(Subcommand)]
+enum SkillCmd {
+    List { #[command(flatten)] j: Json },
+    /// From a local folder with SKILL.md, or a GitHub URL (…/tree/<branch>/<path>)
+    Install { source: String, #[arg(long)] name: Option<String> },
+    Remove { name: String },
+    Enable { name: String, harness: String, #[arg(long)] profile: Option<String> },
+    Disable { name: String, harness: String, #[arg(long)] profile: Option<String> },
+    Import { harness: String },
+    /// Check installed skills for updates
+    Check,
+}
+
+#[derive(Subcommand)]
+enum PromptCmd {
+    List { #[command(flatten)] j: Json },
+    /// Add from a file
+    Add { harness: String, title: String, #[arg(long)] file: PathBuf },
+    Enable { id: String },
+    Show { id: String },
+}
+
+#[derive(Subcommand)]
+enum ProviderCmd {
+    List { #[command(flatten)] j: Json },
+    /// Add an endpoint; the key is prompted (or HRM_API_KEY)
+    Add { id: String, #[arg(long)] base_url: String, #[arg(long, default_value = "anthropic")] format: String, #[arg(long, value_delimiter = ',')] models: Vec<String>, #[arg(long)] name: Option<String> },
+    Remove { id: String },
+}
+
+#[derive(Subcommand)]
+enum RouteCmd {
+    List { #[command(flatten)] j: Json },
+    /// --mode failover (try providers in order) or aggregate (one model list)
+    Add { id: String, #[arg(long, default_value = "failover")] mode: String, #[arg(long, value_delimiter = ',')] providers: Vec<String>, #[arg(long)] default: Option<String> },
+    Remove { id: String },
+}
+
+fn main() {
+    // `hrm ... | head` closes the pipe early; that is not an error worth a panic message
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.to_string().contains("failed printing to stdout") { std::process::exit(0); }
+        default_hook(info);
+    }));
+    let cli = Cli::parse();
+    match real_main(cli) {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_json<T: serde::Serialize>(v: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(v)?);
+    Ok(())
+}
+
+fn fmt_tokens(n: i64) -> String {
+    if n >= 1_000_000_000 { format!("{:.2}B", n as f64 / 1e9) } else if n >= 1_000_000 { format!("{:.2}M", n as f64 / 1e6) } else if n >= 1000 { format!("{:.1}k", n as f64 / 1e3) } else { n.to_string() }
+}
+
+fn fmt_reset(ms: Option<i64>) -> String {
+    match ms.and_then(chrono::DateTime::from_timestamp_millis) {
+        Some(d) => d.with_timezone(&chrono::Local).format("%a %H:%M").to_string(),
+        None => "-".into(),
+    }
+}
+
+fn secret_input(prompt: &str) -> Result<String> {
+    if let Ok(k) = std::env::var("HRM_API_KEY") { return Ok(k); }
+    let k = rpassword::prompt_password(prompt)?;
+    if k.trim().is_empty() { bail!("no key entered"); }
+    Ok(k)
+}
+
+fn parse_pairs(items: &[String], sep: char) -> Result<std::collections::BTreeMap<String, String>> {
+    items.iter().map(|s| {
+        let (k, v) = s.split_once(sep).with_context(|| format!("'{s}' should look like KEY{sep}VALUE"))?;
+        Ok((k.trim().to_string(), v.trim().to_string()))
+    }).collect()
+}
+
+fn real_main(cli: Cli) -> Result<i32> {
+    let ctx = Ctx::open()?;
+    // commands that may change the registry hold its lock; ones that wait on the user or run long do not
+    // (`add` takes the lock inside add_profile, before its sign-in)
+    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open))
+        .then(|| ctx.lock_registry());
+    if !matches!(cli.cmd, Cmd::Init { .. } | Cmd::Run { .. }) {
+        let _l = ctx.lock_registry();
+        if let Err(e) = hrm_core::import::first_run(&ctx) { eprintln!("first-run setup: {e:#}"); }
+    }
+    match cli.cmd {
+        Cmd::List { j, refresh } => {
+            if refresh { service::import_usage(&ctx)?; }
+            let views = service::list_views(&ctx)?;
+            if j.json { return print_json(&views).map(|_| 0); }
+            println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}", "ACCOUNT", "TOOL", "PLAN", "5-HOUR", "WEEK", "TOKENS 7D", "OPEN");
+            for v in views {
+                let tier = |id: &str| v.quota.as_ref().and_then(|q| q.tier(id)).map(|t| format!("{:.0}%", t.used)).unwrap_or_else(|| "-".into());
+                let plan = v.identity.plan.clone().unwrap_or_else(|| if v.identity.logged_in { "?".into() } else { "not logged in".into() });
+                // a long plan (OpenCode lists every signed-in provider) is cut to its column
+                println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}", v.name, v.harness_label, hrm_core::util::truncate(&plan, 13), tier("session"), tier("week"), fmt_tokens(v.tokens_7d), v.running.len());
+            }
+        }
+        Cmd::Show { name, j } => {
+            let reg = ctx.registry()?;
+            let v = service::profile_view(&ctx, reg.get(&name)?);
+            if j.json { return print_json(&v).map(|_| 0); }
+            println!("{} ({}, {})", v.name, v.harness_label, if v.main { "main profile" } else { "profile" });
+            println!("  folder     {}", v.home);
+            println!("  logged in  {}", if v.identity.logged_in { v.identity.email.clone().unwrap_or_else(|| "yes".into()) } else { "no".into() });
+            if let Some(p) = &v.identity.plan { println!("  plan       {p}"); }
+            if let Some(o) = &v.identity.org { println!("  org        {o}"); }
+            if v.email_mismatch { println!("  warning    logged in as a different email than {}", v.expected_email.clone().unwrap_or_default()); }
+            if let Some(q) = &v.quota {
+                for t in &q.tiers { println!("  {:<10} {:>3.0}%  resets {}", t.label.chars().take(10).collect::<String>(), t.used, fmt_reset(t.resets_at)); }
+            }
+            println!("  tokens 7d  {}  ({} sessions)", fmt_tokens(v.tokens_7d), v.sessions_7d);
+            for r in &v.running { println!("  open       pid {} {}", r.pid, r.cwd.clone().unwrap_or_default()); }
+        }
+        Cmd::Add { name, harness: h, api_key, route, email, base_url, model, no_login, j } => {
+            let kind = if route.is_some() { Kind::Routed } else if api_key { Kind::ApiKey } else { Kind::Subscription };
+            let key = if kind == Kind::ApiKey { Some(secret_input("API key: ")?) } else { None };
+            let v = service::add_profile(&ctx, AddRequest { name: name.clone(), harness: h, kind, email, api_key: key, base_url, model, route, main: false })?;
+            if j.json { print_json(&v)?; } else { println!("Added {} ({}) at {}", v.name, v.harness_label, v.home); }
+            if kind == Kind::Subscription && !no_login {
+                return login(&ctx, &name);
+            }
+        }
+        Cmd::Login { name } => return login(&ctx, &name),
+        Cmd::Remove { name, delete_home } => {
+            service::remove_profile(&ctx, &name, delete_home)?;
+            println!("Removed {name}{}", if delete_home { " and its folder" } else { "" });
+        }
+        Cmd::Run { name, args } => {
+            let spec = service::launch_spec(&ctx, &name, &args)?;
+            return spec.run();
+        }
+        Cmd::Start { name, cwd, args } => {
+            service::start(&ctx, &name, cwd, &args)?;
+            println!("Opened a terminal for {name}");
+        }
+        Cmd::Key { cmd } => match cmd {
+            KeyCmd::Set { name } => {
+                let k = secret_input(&format!("API key for {name}: "))?;
+                service::set_api_key(&ctx, &name, &k)?;
+                println!("Saved the key for {name}");
+            }
+            KeyCmd::Delete { name } => {
+                hrm_core::secrets::delete(&hrm_core::secrets::key_target(&name))?;
+                println!("Deleted the key for {name}");
+            }
+        },
+        Cmd::Usage { days, profile, j } => {
+            service::import_usage(&ctx)?;
+            let s = service::usage_summary(&ctx, days, profile.as_deref())?;
+            if j.json { return print_json(&s).map(|_| 0); }
+            print!("{:<24}", "ACCOUNT");
+            for d in &s.days { print!(" {:>8}", &d[5..]); }
+            println!(" {:>9}", "TOTAL");
+            for (p, v) in &s.by_profile {
+                print!("{p:<24}");
+                for x in v { print!(" {:>8}", fmt_tokens(*x)); }
+                println!(" {:>9}", fmt_tokens(v.iter().sum()));
+            }
+            println!("Total {} tokens (input + output), cache reads {}", fmt_tokens(s.total), fmt_tokens(s.cache_read));
+        }
+        Cmd::Overview { days, harness, j } => {
+            service::import_usage(&ctx)?;
+            let o = service::overview(&ctx, days, harness.as_deref())?;
+            if j.json { return print_json(&o).map(|_| 0); }
+            let money = |c: Option<f64>| c.map(|c| format!("${c:.2}")).unwrap_or_else(|| "-".into());
+            println!("Cost (API list prices)  {}", money(o.cost));
+            println!("Requests                {}", o.requests);
+            println!("Tokens processed        {}", fmt_tokens(o.tokens));
+            println!("Cache hit rate          {:.1}%", o.cache_hit_rate * 100.0);
+            println!("Today                   {} · {} tokens", money(o.today_cost), fmt_tokens(o.today_tokens));
+        }
+        Cmd::Requests { days, harness, limit, j } => {
+            service::import_usage(&ctx)?;
+            let (total, rows) = service::request_log(&ctx, days, harness.as_deref(), limit, 0)?;
+            if j.json { return print_json(&serde_json::json!({"total": total, "rows": rows})).map(|_| 0); }
+            for r in rows {
+                let t = chrono::DateTime::from_timestamp_millis(r.ts).map(|d| d.with_timezone(&chrono::Local).format("%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+                println!("{t}  {:<9} {:<22} {:<26} {:>9} {:>8} {:>8} {:>9}", r.harness, r.profile, r.model, r.cost.map(|c| format!("${c:.4}")).unwrap_or_else(|| "-".into()), r.input, r.output, r.cache_read);
+            }
+            println!("{total} requests in total");
+        }
+        Cmd::Quota { name, live, j } => {
+            let reg = ctx.registry()?;
+            let p = reg.get(&name)?;
+            let q = if live {
+                if p.harness != "claude" { bail!("live limits are only available for Claude subscription accounts"); }
+                Some(harness::claude::Claude.live_quota(&ctx, p)?)
+            } else {
+                harness::of(p).quota(&ctx, p)
+            };
+            if j.json { return print_json(&q).map(|_| 0); }
+            match q {
+                Some(q) => for t in q.tiers { println!("{:<16} {:>3.0}%  resets {}", t.label, t.used, fmt_reset(t.resets_at)) },
+                None => println!("No limits known yet for {name}"),
+            }
+        }
+        Cmd::Sessions { group, harness: h, profile, days, search, j } => {
+            let f = SessionFilter { harness: h, profile, days, query: search };
+            let groups = service::grouped_sessions(&ctx, &f, &group)?;
+            if j.json { return print_json(&groups).map(|_| 0); }
+            for g in groups {
+                println!("{}  {}  ({} sessions, {} tokens)", g.name, g.root, g.sessions.len(), fmt_tokens(g.tokens));
+                for s in g.sessions {
+                    let when = chrono::DateTime::from_timestamp_millis(s.last_active_at).map(|d| d.with_timezone(&chrono::Local).format("%b %d %H:%M").to_string()).unwrap_or_default();
+                    println!("  {:<8} {:<22} {:<12} {}{}  {}", s.harness, s.profile, when, if s.open { "* " } else { "" }, hrm_core::util::truncate(&s.title, 60), s.id);
+                }
+            }
+        }
+        Cmd::Session { profile, id, j } => {
+            let t = service::transcript(&ctx, &profile, &id)?;
+            if j.json { return print_json(&t).map(|_| 0); }
+            println!("# {}\n{} · {} · {}\n", t.meta.title, t.meta.harness, t.meta.profile, t.meta.cwd);
+            for turn in t.turns {
+                if !turn.prompt.is_empty() { println!("> {}\n", turn.prompt); }
+                for s in &turn.steps {
+                    if s.kind == "thinking" { println!("  * thinking"); continue; }
+                    let mark = match s.status.as_str() { "error" => "x", "ok" => "+", _ => "-" };
+                    println!("  {mark} {}({}) {}", s.tool, s.input, s.result);
+                }
+                for a in &turn.answer { println!("\n{a}\n"); }
+            }
+        }
+        Cmd::Resume { profile, id, cwd } => {
+            let cwd = cwd.or_else(|| service::transcript(&ctx, &profile, &id).ok().map(|t| PathBuf::from(t.meta.cwd)).filter(|p| p.is_dir()));
+            service::resume(&ctx, &profile, &id, cwd)?;
+            println!("Resumed {id} in a new terminal");
+        }
+        Cmd::Projects { cmd } => match cmd {
+            ProjectCmd::List { j } => {
+                let groups = service::grouped_sessions(&ctx, &SessionFilter::default(), "project")?;
+                if j.json { return print_json(&groups.iter().map(|g| serde_json::json!({"key": g.key, "name": g.name, "root": g.root, "remote": g.remote, "sessions": g.sessions.len(), "tokens": g.tokens})).collect::<Vec<_>>()).map(|_| 0); }
+                for g in groups { println!("{:<28} {:>4} sessions  {}", g.name, g.sessions.len(), g.key); }
+            }
+            ProjectCmd::Rename { key, name } => { service::alias_project(&ctx, &key, Some(name), None)?; println!("Renamed"); }
+            ProjectCmd::Merge { key, into } => { service::alias_project(&ctx, &key, None, Some(into))?; println!("Merged"); }
+            ProjectCmd::Reset { key } => { service::alias_project(&ctx, &key, None, None)?; println!("Reset"); }
+        },
+        Cmd::Sync { relink, j } => {
+            let reg = ctx.registry()?;
+            let mut relinked = vec![];
+            if relink {
+                let c = harness::claude::Claude;
+                for p in reg.profiles.iter().filter(|p| p.harness == "claude" && !p.main) {
+                    let done = hrm_core::shared::relink_copies(&harness::Harness::default_home(&c, &ctx), &harness::Harness::home(&c, &ctx, p))?;
+                    if !done.is_empty() { relinked.push(format!("{}: {}", p.name, done.join(", "))); }
+                }
+            }
+            let rep = items::sync(&ctx, &reg)?;
+            if j.json { return print_json(&serde_json::json!({"relinked": relinked, "items": rep})).map(|_| 0); }
+            for r in relinked { println!("relinked {r}"); }
+            for w in &rep.written { println!("wrote    {w}"); }
+            for w in &rep.removed { println!("removed  {w}"); }
+            for w in &rep.conflicts { println!("conflict {w} (a different entry with that name exists; left alone)"); }
+            for w in &rep.skipped { println!("skipped  {w}"); }
+            println!("Accounts are in step.");
+        }
+        Cmd::Mcp { cmd } => return mcp(&ctx, cmd),
+        Cmd::Skills { cmd } => return skills(&ctx, cmd),
+        Cmd::Prompts { cmd } => return prompts(&ctx, cmd),
+        Cmd::Provider { cmd } => {
+            let mut reg = ctx.registry()?;
+            match cmd {
+                ProviderCmd::List { j } => {
+                    if j.json { return print_json(&reg.providers).map(|_| 0); }
+                    for p in &reg.providers { println!("{:<16} {:<10} {}  [{}]", p.id, p.format, p.base_url, p.models.join(", ")); }
+                    return Ok(0);
+                }
+                ProviderCmd::Add { id, base_url, format, models, name } => {
+                    if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id"); }
+                    if !matches!(format.as_str(), "anthropic" | "openai") { bail!("format must be anthropic or openai"); }
+                    let key = secret_input(&format!("Key for {id}: "))?;
+                    hrm_core::secrets::set_key(&hrm_core::secrets::provider_target(&id), key.trim())?;
+                    reg.providers.retain(|p| p.id != id);
+                    reg.providers.push(Provider { name: name.unwrap_or_else(|| id.clone()), id: id.clone(), base_url, format, models });
+                    println!("Added provider {id}");
+                }
+                ProviderCmd::Remove { id } => {
+                    reg.remove_provider(&id)?;
+                    hrm_core::secrets::delete(&hrm_core::secrets::provider_target(&id))?;
+                    println!("Removed provider {id}");
+                }
+            }
+            ctx.save_registry(&reg)?;
+        }
+        Cmd::Route { cmd } => {
+            let mut reg = ctx.registry()?;
+            match cmd {
+                RouteCmd::List { j } => {
+                    if j.json { return print_json(&reg.routes).map(|_| 0); }
+                    for r in &reg.routes { println!("{:<16} {:<10} {}", r.id, r.mode, r.providers.join(" → ")); }
+                    return Ok(0);
+                }
+                RouteCmd::Add { id, mode, providers, default } => {
+                    if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id"); }
+                    if !matches!(mode.as_str(), "failover" | "aggregate") { bail!("mode must be failover or aggregate"); }
+                    for p in &providers { if !reg.providers.iter().any(|x| &x.id == p) { bail!("no provider named '{p}'"); } }
+                    if providers.is_empty() { bail!("give at least one provider"); }
+                    reg.routes.retain(|r| r.id != id);
+                    reg.routes.push(Route { id: id.clone(), mode, providers, default_provider: default });
+                    println!("Added route {id}");
+                }
+                RouteCmd::Remove { id } => { reg.remove_route(&id)?; println!("Removed route {id}"); }
+            }
+            ctx.save_registry(&reg)?;
+        }
+        Cmd::Router { cmd } => return router_cmd::run(&ctx, cmd),
+        Cmd::Import { path, j } => {
+            let mut reg = ctx.registry()?;
+            let mut rep = hrm_core::import::ImportReport::default();
+            let path = path.unwrap_or_else(|| hrm_core::import::default_ps_registry(&ctx));
+            hrm_core::import::import_powershell(&ctx, &mut reg, &path, &mut rep)?;
+            ctx.save_registry(&reg)?;
+            for p in &reg.profiles { let _ = harness::of(p).prepare(&ctx, p); }
+            if j.json { return print_json(&rep).map(|_| 0); }
+            println!("Imported {} accounts and {} keys", rep.accounts.len(), rep.keys.len());
+            for s in rep.skipped { println!("  skipped {s}"); }
+        }
+        Cmd::Init { j } => {
+            let mut reg = ctx.registry()?;
+            let mut rep = hrm_core::import::ImportReport::default();
+            hrm_core::import::detect_main_profiles(&ctx, &mut reg, &mut rep);
+            ctx.save_registry(&reg)?;
+            if j.json { return print_json(&rep).map(|_| 0); }
+            println!("Main profiles added: {}", if rep.main_profiles.is_empty() { "none".into() } else { rep.main_profiles.join(", ") });
+        }
+        Cmd::Harnesses { j } => {
+            let hs = service::harnesses();
+            if j.json { return print_json(&hs).map(|_| 0); }
+            for h in hs { println!("{:<10} {:<12} {}", h.id, h.label, if h.installed { "installed" } else { "not installed" }); }
+        }
+        Cmd::Settings { key, value } => {
+            let mut ctx = ctx;
+            let mut v = serde_json::to_value(&ctx.settings)?;
+            match (key, value) {
+                (None, _) => println!("{}", serde_json::to_string_pretty(&v)?),
+                (Some(k), None) => println!("{}", v.get(&k).context("no such setting")?),
+                (Some(k), Some(val)) => {
+                    let cur = v.get(&k).context("no such setting")?.clone();
+                    v[&k] = if cur.is_number() { serde_json::json!(val.parse::<u64>()?) } else { serde_json::json!(val) };
+                    ctx.settings = serde_json::from_value(v)?;
+                    ctx.save_settings()?;
+                    println!("{k} = {val}");
+                }
+            }
+        }
+        Cmd::Open => {
+            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "harnessmanager" });
+            std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
+        }
+    }
+    Ok(0)
+}
+
+fn login(ctx: &Ctx, name: &str) -> Result<i32> {
+    let reg = ctx.registry()?;
+    let p = reg.get(name)?.clone();
+    let h = harness::of(&p);
+    h.prepare(ctx, &p)?;
+    if p.harness == "agy" { harness::agy::Agy.prepare_login(ctx)?; }
+    let code = h.login(ctx, &p)?.run()?;
+    if p.harness == "agy" && !harness::agy::Agy.finish_login(ctx, &p)? {
+        eprintln!("Antigravity did not save a login; run `hrm login {name}` again.");
+        return Ok(1);
+    }
+    let id = h.identity(ctx, &p);
+    if id.logged_in {
+        println!("{name} is logged in{}", id.email.map(|e| format!(" as {e}")).unwrap_or_default());
+        if let (Some(want), Some(got)) = (&p.email, &h.identity(ctx, &p).email) {
+            if !want.eq_ignore_ascii_case(got) { eprintln!("warning: you entered {want} but logged in as {got}"); }
+        }
+    }
+    Ok(code)
+}
+
+fn targets_for(reg: &hrm_core::Registry, kind: &str, item: &str) -> String {
+    let t: Vec<String> = reg.targets.iter().filter(|t| t.kind == kind && t.item == item).map(|t| match &t.profile { Some(p) => format!("{}:{p}", t.harness), None => t.harness.clone() }).collect();
+    if t.is_empty() { "off".into() } else { t.join(", ") }
+}
+
+fn mcp(ctx: &Ctx, cmd: McpCmd) -> Result<i32> {
+    let mut reg = ctx.registry()?;
+    match cmd {
+        McpCmd::List { j } => {
+            if j.json { return print_json(&serde_json::json!({"servers": reg.mcp, "targets": reg.targets.iter().filter(|t| t.kind == "mcp").collect::<Vec<_>>()})).map(|_| 0); }
+            for s in &reg.mcp { println!("{:<20} {:<6} {:<40} {}", s.name, s.transport, s.command.clone().or(s.url.clone()).unwrap_or_default(), targets_for(&reg, "mcp", &s.name)); }
+            return Ok(0);
+        }
+        McpCmd::Add { name, command, args, url, transport, env, headers } => {
+            let transport = if transport.is_empty() { if url.is_some() { "http".into() } else { "stdio".into() } } else { transport };
+            items::add_mcp(&mut reg, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() })?;
+            println!("Added {name}. Enable it with `hrm mcp enable {name} <tool>`.");
+        }
+        McpCmd::Remove { name } => { items::remove_item(&mut reg, "mcp", &name)?; println!("Removed {name}"); }
+        McpCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), true)?; }
+        McpCmd::Disable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), false)?; }
+        McpCmd::Import { harness: h } => {
+            let (added, kept) = items::import_mcp(ctx, &mut reg, &h)?;
+            println!("Imported {} server(s): {}", added.len(), added.join(", "));
+            if !kept.is_empty() { println!("Left alone, the library has a different server with that name: {}", kept.join(", ")); }
+        }
+    }
+    ctx.save_registry(&reg)?;
+    let rep = items::sync(ctx, &reg)?;
+    for c in rep.conflicts { eprintln!("conflict: {c} (a different entry with that name exists; left alone)"); }
+    for s in rep.skipped { eprintln!("skipped: {s}"); }
+    Ok(0)
+}
+
+fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
+    let mut reg = ctx.registry()?;
+    match cmd {
+        SkillCmd::List { j } => {
+            if j.json { return print_json(&serde_json::json!({"skills": reg.skills, "targets": reg.targets.iter().filter(|t| t.kind == "skill").collect::<Vec<_>>()})).map(|_| 0); }
+            for s in &reg.skills { println!("{:<24} {:<50} {}", s.name, hrm_core::util::truncate(&s.source, 50), targets_for(&reg, "skill", &s.name)); }
+            return Ok(0);
+        }
+        SkillCmd::Install { source, name } => { let s = items::install_skill(ctx, &mut reg, &source, name.as_deref())?; println!("Installed {}", s.name); }
+        SkillCmd::Remove { name } => {
+            items::remove_item(&mut reg, "skill", &name)?;
+            ctx.save_registry(&reg)?;
+            items::sync(ctx, &reg)?;
+            items::delete_skill_files(ctx, &name)?;
+            println!("Removed {name}");
+            return Ok(0);
+        }
+        SkillCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), true)?; }
+        SkillCmd::Disable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), false)?; }
+        SkillCmd::Import { harness: h } => {
+            let (a, kept) = items::import_skills(ctx, &mut reg, &h)?;
+            println!("Imported {} skill(s): {}", a.len(), a.join(", "));
+            if !kept.is_empty() { println!("Left alone, a different skill with that name is already installed: {}", kept.join(", ")); }
+        }
+        SkillCmd::Check => {
+            for (n, upd) in items::check_skill_updates(ctx, &reg) { println!("{n:<24} {}", match upd { Some(true) => "update available", Some(false) => "up to date", None => "could not check (source not reachable)" }); }
+            return Ok(0);
+        }
+    }
+    ctx.save_registry(&reg)?;
+    let rep = items::sync(ctx, &reg)?;
+    for c in rep.conflicts { eprintln!("conflict: {c}"); }
+    Ok(0)
+}
+
+fn prompts(ctx: &Ctx, cmd: PromptCmd) -> Result<i32> {
+    let mut reg = ctx.registry()?;
+    match cmd {
+        PromptCmd::List { j } => {
+            if j.json { return print_json(&reg.prompts).map(|_| 0); }
+            for p in &reg.prompts { println!("{:<18} {:<10} {:<4} {}", p.id, p.harness, if p.enabled { "on" } else { "" }, p.title); }
+            return Ok(0);
+        }
+        PromptCmd::Add { harness: h, title, file } => { let id = items::add_prompt(&mut reg, &h, &title, &std::fs::read_to_string(file)?)?; println!("Added {id}"); }
+        PromptCmd::Enable { id } => { items::enable_prompt(ctx, &mut reg, &id)?; println!("Enabled {id}"); }
+        PromptCmd::Show { id } => { println!("{}", reg.prompts.iter().find(|p| p.id == id).context("no such prompt")?.body); return Ok(0); }
+    }
+    ctx.save_registry(&reg)?;
+    Ok(0)
+}

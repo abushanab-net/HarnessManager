@@ -1,0 +1,91 @@
+name: release
+# Push a tag vX.Y.Z: the app is built for Windows, macOS and Linux at the same time, signed for the updater and
+# published as release X.Y.Z with latest.json (what installed copies check). Only the newest 2 releases are kept.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+permissions: { contents: write }
+concurrency: { group: release, cancel-in-progress: false }
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+jobs:
+  draft:
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    outputs: { id: '${{ steps.r.outputs.id }}' }
+    steps:
+      - id: r
+        run: |
+          id=$(gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$GITHUB_REF_NAME" -f name="Harness Manager ${GITHUB_REF_NAME#v}" \
+            -F draft=true -F generate_release_notes=true --jq .id)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe }
+          - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: 'app,dmg', ext: '' }
+          # 22.04: an AppImage built on the oldest supported glibc runs on the most distributions
+          - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE || 'ubuntu-22.04' }}", bundles: 'appimage,deb', ext: '' }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with: { clean: false }   # self-hosted runners keep target/ between releases
+      - if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v5
+        with: { node-version: 24, cache: "${{ runner.environment == 'github-hosted' && 'npm' || '' }}", cache-dependency-path: app/package-lock.json }
+      - name: Version from the tag
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          # shellcheck disable=SC2016 # the script is JavaScript, quoted on purpose
+          node -e '
+            const fs = require("fs"), v = process.argv[1];
+            const c = JSON.parse(fs.readFileSync("app/src-tauri/tauri.conf.json")); c.version = v;
+            fs.writeFileSync("app/src-tauri/tauri.conf.json", JSON.stringify(c, null, 2));
+            const t = fs.readFileSync("Cargo.toml", "utf8").replace(/(\[workspace\.package\][^\[]*?version = )"[^"]*"/, `$1"${v}"`);
+            fs.writeFileSync("Cargo.toml", t);' "$v"
+          grep -n "^version" Cargo.toml
+      - name: hrm, bundled next to the app
+        shell: bash
+        run: |
+          cargo build --release -p hrm
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p app/src-tauri/binaries
+          cp "target/release/hrm${{ matrix.ext }}" "app/src-tauri/binaries/hrm-${triple}${{ matrix.ext }}"
+      - run: npm ci --prefix app --no-audit --no-fund
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          projectPath: app
+          tauriScript: npx tauri
+          args: >-
+            --bundles ${{ matrix.bundles }}
+            --config src-tauri/tauri.release.conf.json
+            --config src-tauri/tauri.updater.conf.json
+          releaseId: ${{ needs.draft.outputs.id }}
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+  publish:
+    needs: [draft, build]
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    steps:
+      - name: Publish, then keep only the newest 2 releases
+        run: |
+          gh api -X PATCH "repos/$GH_REPO/releases/${{ needs.draft.outputs.id }}" -F draft=false -f make_latest=true --silent
+          gh release list --limit 100 --exclude-drafts --json tagName,publishedAt \
+            --jq 'sort_by(.publishedAt) | reverse | .[2:][] | .tagName' |
+            while read -r tag; do echo "deleting release $tag (its tag stays)"; gh release delete "$tag" -y; done

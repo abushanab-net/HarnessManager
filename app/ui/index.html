@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Manager</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="frame">
+  <aside class="side">
+    <div class="brand" id="brand"><span id="brand-mark"></span><div><b>Harness Manager</b><small id="brand-sub">Loading…</small></div></div>
+    <nav class="nav" id="nav-main">
+      <a data-nav="home" href="#home" data-testid="nav-home"><span data-icon="dash"></span>Overview<span class="count" id="today-cost"></span></a>
+      <a data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span data-icon="users"></span>Accounts<span class="count" id="n-accounts"></span></a>
+      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span>Sessions<span class="count live" id="n-live"></span></a>
+      <a data-nav="usage" href="#usage" data-testid="nav-usage"><span data-icon="chart"></span>Usage by account</a>
+      <a data-nav="routing" href="#routing" data-testid="nav-routing"><span data-icon="route"></span>API keys &amp; routing</a>
+      <div class="navgap"></div>
+      <a data-nav="mcp" href="#mcp" data-testid="nav-mcp"><span data-icon="plug"></span>MCP servers<span class="count" id="n-mcp"></span></a>
+      <a data-nav="skills" href="#skills" data-testid="nav-skills"><span data-icon="spark"></span>Skills<span class="count" id="n-skills"></span></a>
+      <a data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span data-icon="doc"></span>Prompts</a>
+      <a data-nav="apps" href="#apps" data-testid="nav-apps"><span data-icon="grid"></span>Apps<span class="count upd" id="apps-count" title="Tools with a newer version"></span></a>
+    </nav>
+    <nav class="nav bottom">
+      <a data-nav="cli" href="#cli" data-testid="nav-cli"><span data-icon="book"></span>CLI reference</a>
+      <a data-nav="settings" href="#settings" data-testid="nav-settings"><span data-icon="gear"></span>Settings</a>
+    </nav>
+  </aside>
+  <header class="top">
+    <label class="search"><span data-icon="search"></span><input id="find" aria-label="Find an account or session" placeholder="Find an account, session or setting" autocomplete="off" data-testid="find"><kbd>Ctrl K</kbd></label>
+    <div class="right"><span id="fresh" data-testid="fresh"></span><button class="iconbtn help" data-act="tour-start" title="Tour of this page" aria-label="Tour of this page" data-testid="tour-start">?</button><button class="iconbtn" data-act="refresh-now" title="Refresh usage and limits" aria-label="Refresh usage and limits"><span data-icon="refresh"></span></button></div>
+  </header>
+  <main class="sheet" id="sheet" tabindex="-1"></main>
+</div>
+<div id="dialog-root"></div>
+<div id="toast" class="off" role="status"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

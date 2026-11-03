@@ -1,0 +1,51 @@
+name: ci
+# One job: build once, then the Rust tests and the desktop UI tests run at the same time.
+on:
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'design/**']
+  push:
+    branches: [develop]
+    paths-ignore: ['**.md', 'docs/**', 'design/**']
+permissions: { contents: read }
+concurrency: { group: 'ci-${{ github.ref }}', cancel-in-progress: true }
+env:
+  CARGO_INCREMENTAL: 0          # a CI build starts fresh; incremental files only bloat the cache
+  CARGO_PROFILE_DEV_DEBUG: 0    # no debug info: faster to build, smaller cache
+  CARGO_TERM_COLOR: always
+jobs:
+  test:
+    # the self-hosted Windows runner (variable RUNNER_WIN) when set; a pull request from a fork always runs on
+    # GitHub's runner, so code from outside never runs on our machines
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'windows-latest') || vars.RUNNER_WIN || 'windows-latest' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        # a self-hosted runner keeps target/ from the last run, so only what changed is rebuilt
+        with: { clean: false }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        if: runner.environment == 'github-hosted'
+        with:
+          # only develop saves the cache; pull requests restore it, so the cache does not fill with branch copies
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - uses: actions/setup-node@v5
+        # a self-hosted runner keeps npm's own cache; saving it to GitHub would pack the machine's whole cache
+        with: { node-version: 24, cache: "${{ runner.environment == 'github-hosted' && 'npm' || '' }}", cache-dependency-path: e2e/package-lock.json }
+      - run: npm ci --prefix e2e --no-audit --no-fund
+      - name: Build
+        run: cargo build --workspace && cargo test --workspace --no-run
+      - name: Test (Rust and UI in parallel)
+        shell: bash
+        run: |
+          set +e   # wait for both and print both logs, even when one fails
+          cargo test --workspace --no-fail-fast > rust.log 2>&1 & r=$!
+          node e2e/app.e2e.mjs > ui.log 2>&1 & u=$!
+          wait $r; rs=$?; wait $u; us=$?
+          echo "::group::Rust tests (exit $rs)"; cat rust.log; echo "::endgroup::"
+          echo "::group::UI tests (exit $us)"; cat ui.log; echo "::endgroup::"
+          [ $rs -ne 0 ] && grep -E "^test .* FAILED|panicked" rust.log | head -20
+          [ $us -ne 0 ] && grep -A3 "^FAIL" ui.log | head -40
+          exit $(( rs | us ))
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: ui-tests, path: e2e/.work, retention-days: 3, if-no-files-found: ignore }

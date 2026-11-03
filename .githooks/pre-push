@@ -1,0 +1,19 @@
+#!/bin/sh
+# Local gate (not CI): nothing reaches the remote unless every suite passes on this computer.
+# Enabled by: git config core.hooksPath .githooks     Skip once, knowingly: git push --no-verify
+#
+# The suites test the working folder, so the working folder must be exactly what is pushed:
+# no uncommitted changes, and only the checked-out commit.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: commit or stash your changes first; the tests would run on files that are not being pushed." >&2
+  exit 1
+fi
+head=$(git rev-parse HEAD)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in 0000000000000000000000000000000000000000) continue ;; esac
+  if [ "$local_sha" != "$head" ]; then
+    echo "pre-push: $local_ref is not the checked-out commit; check it out and push from there so the tests run on it." >&2
+    exit 1
+  fi
+done
+exec pwsh -NoProfile -File scripts/test.ps1

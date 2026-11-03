@@ -1,0 +1,9 @@
+/target/
+**/node_modules/
+/app/dist/
+/e2e/.work/
+/.taste-skill/
+*.log
+.DS_Store
+/app/src-tauri/binaries/
+/app/src-tauri/gen/

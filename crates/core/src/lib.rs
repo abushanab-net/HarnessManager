@@ -1,0 +1,25 @@
+//! hrm-core: every rule of HarnessManager. The CLI and the desktop app are thin layers over it.
+
+pub mod ctx;
+pub mod dash;
+pub mod db;
+pub mod harness;
+pub mod import;
+pub mod items;
+pub mod launch;
+pub mod model;
+pub mod pricing;
+pub mod procs;
+pub mod projects;
+pub mod registry;
+pub mod secrets;
+pub mod service;
+pub mod shared;
+pub mod util;
+pub mod apps;
+pub mod backup;
+pub mod log;
+
+pub use ctx::Ctx;
+pub use model::*;
+pub use registry::{Kind, Profile, Registry};

@@ -1,0 +1,36 @@
+schema_version: "1.0"
+active:
+  theme: "harness-manager"
+  mode: "light"
+  font_loading: "remote"
+custom_themes:
+  harness-manager:
+    label: "Harness Manager"
+    description: "The desktop app's own tokens from app/ui/app.css: tinted frame, white sheet, teal accent #1b6c80, IBM Plex."
+    typography:
+      sans: "'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif"
+      serif: "'IBM Plex Serif', Georgia, serif"
+      mono: "'IBM Plex Mono', Consolas, ui-monospace, monospace"
+      remote_css_url: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap"
+    light:
+      paper: "#eff4f5"
+      paper-2: "#ffffff"
+      ink: "#131416"
+      muted: "#5d5f60"
+      soft: "#8a8c8d"
+      rule: "rgba(19,20,22,0.12)"
+      rule-solid: "#cdced1"
+      accent: "#1b6c80"
+      accent-tint: "rgba(27,108,128,0.10)"
+      link: "#3f8fa5"
+    dark:
+      paper: "#0e1213"
+      paper-2: "#161a1c"
+      ink: "#e5e8e9"
+      muted: "#9aa4a8"
+      soft: "#74808a"
+      rule: "rgba(229,232,233,0.12)"
+      rule-solid: "#3a4449"
+      accent: "#4fb3c9"
+      accent-tint: "rgba(79,179,201,0.14)"
+      link: "#8fc1cf"

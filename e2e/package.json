@@ -1,0 +1,11 @@
+{
+  "name": "harnessmanager-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node app.e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

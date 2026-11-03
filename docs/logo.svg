@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="312" viewBox="60 10 410 500" role="img" aria-label="Harness Manager"><defs>
+<linearGradient id="hm-lu" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#006D79"/><stop offset="1" stop-color="#009C99"/></linearGradient>
+<linearGradient id="hm-ll" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#393F91"/><stop offset="1" stop-color="#7F82E8"/></linearGradient>
+<linearGradient id="hm-bc" x1="0" y1=".1" x2="1" y2=".8"><stop stop-color="#00616C"/><stop offset=".58" stop-color="#097D8C"/><stop offset="1" stop-color="#57CAC9"/></linearGradient>
+<linearGradient id="hm-ru" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6588DD"/><stop offset=".6" stop-color="#4455AF"/><stop offset="1" stop-color="#283875"/></linearGradient>
+<linearGradient id="hm-rl" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#00A3A8"/><stop offset="1" stop-color="#00676D"/></linearGradient>
+<linearGradient id="hm-fc" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#65DBD8"/><stop offset=".4" stop-color="#36C8C5"/><stop offset=".76" stop-color="#078B98"/><stop offset="1" stop-color="#087680"/></linearGradient>
+<linearGradient id="hm-rm" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#B0E8E4"/><stop offset="1" stop-color="#5BCAD1"/></linearGradient></defs>
+<path d="M84 259 L84 115 C84 90 96 77 121 63 L179 31 C194 23 207 25 207 44 L207 211 C173 229 122 255 84 280 Z" fill="url(#hm-lu)"/>
+<path d="M188 292 C231 302 284 329 333 356 L333 425 C286 402 236 376 184 347 L153 330 Z" fill="url(#hm-bc)"/>
+<path d="M84 342 L84 381 C84 402 96 417 113 428 L176 473 C196 487 207 482 207 465 L207 305 C170 320 119 340 84 342 Z" fill="url(#hm-ll)"/>
+<path d="M333 41 C333 24 342 20 358 28 L418 62 C439 74 447 90 447 110 L447 192 C408 218 372 236 333 251 Z" fill="url(#hm-ru)"/>
+<path d="M333 244 L447 190 L447 287 L333 344 Z" fill="url(#hm-rm)"/>
+<path d="M333 340 L447 283 L447 413 C447 435 437 450 416 464 L365 494 C347 506 333 496 333 479 Z" fill="url(#hm-rl)"/>
+<path d="M84 270 C84 242 106 229 149 208 L333 121 L333 244 L151 332 C111 353 91 368 84 393 Z" fill="url(#hm-fc)"/></svg>

@@ -1,0 +1,24 @@
+[package]
+name = "hrm-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "HarnessManager"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1.0.104"
+hrm-core = { path = "../../crates/core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2.12.5", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-updater = "2.14.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging"] }
