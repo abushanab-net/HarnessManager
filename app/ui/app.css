@@ -692,7 +692,10 @@ a.btn { text-decoration: none; }
 .mcpside dl.ireport dt { display: inline-flex; gap: 6px; align-items: center; font-weight: 500; margin-top: 6px; }
 .mcpside dl.ireport dt:first-child { margin-top: 0; }
 .mcpside dl.ireport dd { margin: 0; overflow-wrap: anywhere; }
-.lbar .lsearch { border-color: var(--ctl); border-radius: 10px; height: 40px; }
+.lbar .lsearch { border-color: var(--ctl); border-radius: 10px; height: 40px; background: var(--s); }
+/* the field fills the box: WebKit (macOS) draws an input's own background and height inside it */
+.lbar .lsearch .input { height: 100%; background: transparent; border-radius: 0; flex: 1; }
+.apgroup > .empty { margin: 0; padding: 18px 20px; }
 
 /* lists that sit in one card: Skills, CLI reference */
 .tcard { background: var(--s); border: 1px solid var(--b); border-radius: 16px; padding: 6px 20px 12px; margin-top: 20px; min-width: 0; overflow-x: auto; }

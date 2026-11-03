@@ -1,7 +1,7 @@
 //! The tools themselves: where each is installed, its version, the newest one, and installing or updating it
 //! in a terminal window the user can watch (npm for npm installs, else the tool's own updater).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
@@ -157,7 +157,7 @@ fn open_shell(line: &str) -> Result<()> {
     // cmd /c "..." keeps the inner quotes; a new console opens in the default terminal
     let line = format!("{line} & echo. & echo Finished. Press any key to close this window. & pause >nul");
     std::process::Command::new("cmd.exe").raw_arg(format!("/c \"{line}\"")).creation_flags(0x10)
-        .current_dir(std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)).spawn()?;
+        .current_dir(std::env::var_os("USERPROFILE").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir)).spawn()?;
     Ok(())
 }
 #[cfg(not(windows))]
