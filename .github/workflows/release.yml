@@ -66,6 +66,30 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp "target/release/hrm${{ matrix.ext }}" "app/src-tauri/binaries/hrm-${triple}${{ matrix.ext }}"
       - run: npm ci --prefix app --no-audit --no-fund
+      # Developer ID signing and notarization when the Apple secrets are set; without them the app is signed
+      # ad hoc (tauri.release.conf.json) and needs Open Anyway the first time. Only set variables are exported:
+      # an empty APPLE_SIGNING_IDENTITY would replace the ad hoc identity
+      - name: Apple signing, when the secrets are set
+        if: matrix.os == 'macos'
+        shell: bash
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          AID: ${{ secrets.APPLE_ID }}
+          APW: ${{ secrets.APPLE_PASSWORD }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$CERT" ]; then echo "no Apple secrets: ad hoc signature"; exit 0; fi
+          for v in CERT_PW IDENTITY AID APW TEAM; do test -n "${!v}" || { echo "Apple secret for $v is missing"; exit 1; }; done
+          {
+            echo "APPLE_CERTIFICATE<<CERT_END"; echo "$CERT"; echo "CERT_END"
+            echo "APPLE_CERTIFICATE_PASSWORD=$CERT_PW"
+            echo "APPLE_SIGNING_IDENTITY=$IDENTITY"
+            echo "APPLE_ID=$AID"
+            echo "APPLE_PASSWORD=$APW"
+            echo "APPLE_TEAM_ID=$TEAM"
+          } >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -88,6 +112,8 @@ jobs:
           test -n "$app"
           # an unsigned bundle downloaded from the internet is reported by macOS as "damaged"
           codesign --verify --deep --strict "$app"
+          # with Developer ID the app must also be notarized, or Gatekeeper still blocks it
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then spctl --assess --type exec -vv "$app"; fi
           stage=$(mktemp -d)
           cp -R "$app" "$stage/"
           ln -s /Applications "$stage/Applications"

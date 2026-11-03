@@ -277,22 +277,23 @@ async function startDialog(name) {
 }
 action('start-in-folder', (el) => startDialog(el.dataset.name));
 
-/** A new session in a project's folder, as any account of any tool; the project's latest account comes first. */
+/** A new session in a project's folder, or in a folder picked here when no project is given, as any account
+ * of any tool; the project's latest account comes first. */
 function newInProject(dir, project, preferred) {
   const tools = shownTools(S.state).map((h) => h.id);
   const ps = (S.state.profiles || []).filter((p) => tools.includes(p.harness) && (p.kind !== 'subscription' || p.identity.logged_in));
   let name = (ps.find((p) => p.name === preferred) || ps[0] || {}).name;
-  openDialog(`${dlgHead('New session in ' + project)}
+  openDialog(`${dlgHead(project ? 'New session in ' + project : 'New session')}
     <div class="sdlg">
       <span class="fl">Folder</span>
-      <div class="pick"><span class="mono" data-testid="np-dir">${esc(dir)}</span></div>
+      <div class="pick"><span class="mono" id="np-dir" data-testid="np-dir">${esc(dir || 'No folder chosen')}</span>${project ? '' : `<button class="btn outline" id="np-choose" data-testid="np-choose">${ic.folder} Choose folder…</button>`}</div>
       <span class="fl">Account</span>
       ${ps.length ? `<div class="recent np-accts">${ps.map((p) => `<button class="chipbtn" data-name="${esc(p.name)}" data-testid="np-${esc(p.name)}">${toolIcon(p.harness, 14)} ${esc(p.label)}</button>`).join('')}</div>`
         : '<p class="empty">No account can start yet: add one, or log one in, on Accounts.</p>'}
       <div id="np-skipw" hidden><label class="switch"><input type="checkbox" id="np-skip" data-testid="np-skip"> Skip permission prompts <span class="mono muted" id="np-flag"></span></label>
         <span class="hint">The tool then runs commands and edits files without asking first. Only for folders you trust.</span></div>
     </div>
-    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="np-ok" data-testid="np-ok" ${name ? '' : 'disabled'}>${ic.play} Start session</button></span></div>`);
+    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="np-ok" data-testid="np-ok" ${name && dir ? '' : 'disabled'}>${ic.play} Start session</button></span></div>`);
   const pick = (n) => {
     name = n;
     const flag = SKIP[ps.find((x) => x.name === n).harness];
@@ -303,12 +304,15 @@ function newInProject(dir, project, preferred) {
   };
   document.querySelectorAll('.np-accts .chipbtn').forEach((b) => (b.onclick = () => pick(b.dataset.name)));
   if (name) pick(name);
+  const choose = document.getElementById('np-choose');
+  if (choose) choose.onclick = async () => { const v = await pickFolder(); if (!v) return; document.getElementById('np-dir').textContent = dir = v; document.getElementById('np-ok').disabled = !name; };
   document.getElementById('np-ok').onclick = async () => {
     const p = ps.find((x) => x.name === name), skip = document.getElementById('np-skip').checked;
-    if (await attempt(() => call('start', { name, cwd: dir, args: skip ? [SKIP[p.harness]] : [] }), `Opened ${p.label} in ${project}`)) closeDialog();
+    if (await attempt(() => call('start', { name, cwd: dir, args: skip ? [SKIP[p.harness]] : [] }), `Opened ${p.label} in ${project || dir}`)) closeDialog();
   };
 }
 action('project-new', (el) => newInProject(el.dataset.dir, el.dataset.name, el.dataset.profile));
+action('session-new', () => newInProject('', ''));
 action('show-window', async (el) => { const ok = await attempt(() => call('show_window', { pid: +el.dataset.pid })); if (ok === false) toast('That console is in another window; switch to it from the taskbar.'); });
 action('open-folder', (el) => attempt(() => call('open_folder', { path: el.dataset.path })));
 action('open-session', (el) => go('session', { profile: el.dataset.profile, id: el.dataset.id }));

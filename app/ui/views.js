@@ -23,7 +23,8 @@ view('sessions', async (sheet, params) => {
   const open = all.filter((s) => s.open).length;
   sheet.innerHTML = `
     <div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${open ? ` <b>${open} running now</b>: open one to follow it live.` : ''}</p></div>
-      <span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${sf.days ? ' · ' + sf.days + ' days' : ''} · ${groups.length} ${sf.group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span></div>
+      <div class="acts"><span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${sf.days ? ' · ' + sf.days + ' days' : ''} · ${groups.length} ${sf.group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
+      <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>
     <div class="fbar sbar"><label class="search"><span>${ic.search}</span><input id="s-q" placeholder="Search titles, prompts and answers" value="${esc(sf.q)}" data-testid="sessions-search"></label>
       <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool']].map(([k, l]) => `<a class="${sf.group === k ? 'on' : ''}" data-act="s-group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
       <span class="seg3">${[['7', '7d'], ['30', '30d'], ['', 'All']].map(([v, l]) => `<a class="${sf.days === v ? 'on' : ''} mono" data-act="s-days" data-v="${v}" data-testid="days-${v || 'all'}">${l}</a>`).join('')}</span></div>

@@ -407,11 +407,19 @@ try {
     // a new session in the project's folder, as any account: the project's latest account comes first
     await exec(`[...document.querySelectorAll('[data-testid=group]')].find((g) => g.innerText.includes('platform-gitops')).querySelector('[data-testid=project-new]').click()`);
     await hasText('[data-testid=np-dir]', repo);
+    assert.ok(!(await exec(`return !!document.querySelector('[data-testid=np-choose]')`)), 'a project session keeps its folder');
     await click('[data-testid=np-codex-main]');
     await $('[data-testid=np-skip]');
     await shot('06b-new-session-in-project');
     await click('[data-testid=np-ok]');
     await waitFor(() => readLines(termLog).some((t) => t.cwd === repo && t.args.join(' ').startsWith('run codex-main')), 'codex-main started in the project folder');
+    // a new session outside any project: the folder is picked in the dialog, and it cannot start before that
+    await click('[data-testid=session-new]');
+    await hasText('[data-testid=np-dir]', 'No folder chosen');
+    await $('[data-testid=np-choose]');
+    assert.ok(await exec(`return document.querySelector('[data-testid=np-ok]').disabled`), 'no start without a folder');
+    await shot('06c-new-session');
+    await click('.dlg .dh [data-act=dialog-close]');
     await click('[data-testid=group-tool]');
     await waitFor(async () => (await exec(`return document.querySelectorAll('[data-testid=group]').length`)) === 4, 'four tool groups');
     await click('[data-testid=group-project]');
