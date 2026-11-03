@@ -1004,3 +1004,13 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .srow .t b { margin-bottom: 0; line-height: inherit; }
 .srow .t b { line-height: 21px; }
 .srow .t > span { line-height: 20px; }
+
+/* in a dialog the switch carries its own words (a Settings row names it instead) */
+.sdlg .switch { font-size: 14px; gap: 10px; }
+#np-skipw { display: flex; flex-direction: column; gap: 6px; }
+
+/* route cards sit 70 px apart: one line each (the full text on hover), so a long one never runs into the next;
+   tool cards have room between them and may wrap */
+.tn small, .tn.router small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tn { overflow: hidden; }
+.tn.tool small { white-space: normal; }

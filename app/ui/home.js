@@ -181,7 +181,7 @@ function topology(state, d) {
   }
   const tps = Object.values(live.accounts).reduce((a, x) => a + x.tokens, 0) / (live.window_ms / 1000);
   const html = `<div class="topo" data-testid="routes" style="height:${H}px"><canvas aria-hidden="true"></canvas>
-    ${nodes.map((n) => `<div class="tn ${n.router ? 'router' : ''} ${n.bad ? 'bad' : ''} ${n.col === 1 ? 'tool' : ''}" data-node="${esc(n.id)}" ${n.hot ? `data-hot="${n.hot}"` : ''} ${n.act} style="left:${n.x};top:${n.y}px;width:${W[n.col]}px;min-height:${n.router ? 64 : 54}px"><b>${esc(n.label)}</b><small class="${n.tone ? n.tone + 'T' : ''}">${esc(n.sub || '')}</small></div>`).join('')}</div>`;
+    ${nodes.map((n) => `<div class="tn ${n.router ? 'router' : ''} ${n.bad ? 'bad' : ''} ${n.col === 1 ? 'tool' : ''}" data-node="${esc(n.id)}" ${n.hot ? `data-hot="${n.hot}"` : ''} ${n.act} style="left:${n.x};top:${n.y}px;width:${W[n.col]}px;min-height:${n.router ? 64 : 54}px" title="${esc(n.label + (n.sub ? ' · ' + n.sub : ''))}"><b>${esc(n.label)}</b><small class="${n.tone ? n.tone + 'T' : ''}">${esc(n.sub || '')}</small></div>`).join('')}</div>`;
   return { html, edges, tps, empty: !ps.length };
 }
 

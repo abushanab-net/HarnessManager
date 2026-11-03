@@ -239,6 +239,10 @@ try {
       return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), gl: !!t.querySelector('canvas').getContext('webgl'), w: t.querySelector('canvas').width };`);
     assert.ok(topo.nodes.includes('a:codex-main') && topo.nodes.includes('t:codex') && topo.nodes.includes('v:OpenAI'), 'account, tool and provider cards: ' + topo.nodes);
     assert.ok(topo.gl && topo.w > 0, 'routes drawn with WebGL');
+    // no card runs into the next one in its column, however long its text
+    const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] [data-node]')].map((n) => n.getBoundingClientRect());
+      return r.filter((a, i) => r.some((b, j) => j !== i && Math.abs(a.left - b.left) < 2 && a.top < b.top && a.bottom > b.top + 0.5)).length;`);
+    assert.equal(overlaps, 0, 'route cards do not overlap');
     await hasText('[data-testid=burn]', 'codex-main');
     await hasText('[data-testid=burn]', '79% left');
     await hasText('[data-testid=limits-timeline]', 'codex-main');
@@ -400,6 +404,14 @@ try {
     // as in the design: a red dot for a session where a command failed
     assert.ok(await exec("return !!document.querySelector('[data-testid=session-s-main-1] .sdot.bad')"), 'the session with a failed command is marked');
     await shot('06-sessions');
+    // a new session in the project's folder, as any account: the project's latest account comes first
+    await exec(`[...document.querySelectorAll('[data-testid=group]')].find((g) => g.innerText.includes('platform-gitops')).querySelector('[data-testid=project-new]').click()`);
+    await hasText('[data-testid=np-dir]', repo);
+    await click('[data-testid=np-codex-main]');
+    await $('[data-testid=np-skip]');
+    await shot('06b-new-session-in-project');
+    await click('[data-testid=np-ok]');
+    await waitFor(() => readLines(termLog).some((t) => t.cwd === repo && t.args.join(' ').startsWith('run codex-main')), 'codex-main started in the project folder');
     await click('[data-testid=group-tool]');
     await waitFor(async () => (await exec(`return document.querySelectorAll('[data-testid=group]').length`)) === 4, 'four tool groups');
     await click('[data-testid=group-project]');
