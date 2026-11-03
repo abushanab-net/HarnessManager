@@ -2,10 +2,11 @@ name: ci
 # One job: build once, then the Rust tests and the desktop UI tests run at the same time.
 on:
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'design/**']
+    paths-ignore: ['**.md', 'docs/**']
   push:
     branches: [develop]
-    paths-ignore: ['**.md', 'docs/**', 'design/**']
+    paths-ignore: ['**.md', 'docs/**']
+  workflow_dispatch:   # run by hand, e.g. after a push that CI skipped
 permissions: { contents: read }
 concurrency: { group: 'ci-${{ github.ref }}', cancel-in-progress: true }
 env:
