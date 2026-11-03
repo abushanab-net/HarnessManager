@@ -66,6 +66,8 @@ jobs:
       - run: npm ci --prefix app --no-audit --no-fund
       - uses: tauri-apps/tauri-action@v0
         env:
+          # CI=true makes the macOS .dmg skip Finder's window layout, which times out on a runner without a desktop
+          CI: 'true'
           GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
