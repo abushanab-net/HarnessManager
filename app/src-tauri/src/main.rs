@@ -63,6 +63,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                 "settings": ctx.settings,
                 "live_quota": ctx.db.kv_get("live_quota")?.as_deref() == Some("1"),
                 "autostart": hrm_core::launch::autostart::get().is_some(),
+                // windows, macos or linux: the window leaves out what only Windows has
+                "os": std::env::consts::OS,
                 // tools with a newer version, from the last check (at launch or on the Apps page)
                 "app_updates": ctx.db.kv_get("apps:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).and_then(|v| v["updates"].as_u64()).unwrap_or(0),
                 "router": {"running": service::router_running(ctx), "port": ctx.settings.router_port},

@@ -68,7 +68,8 @@ view('session', async (sheet, params) => {
   const m = t.meta;
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
   const changes = steps.filter((st) => st.change), failed = steps.filter((st) => st.status === 'error');
-  const term = S.state && S.state.settings.terminal === 'console' ? 'a console window' : 'Windows Terminal';
+  const win = !S.state || !S.state.os || S.state.os === 'windows';
+  const term = !win ? 'Terminal' : S.state.settings.terminal === 'console' ? 'a console window' : 'Windows Terminal';
   const tool = TOOL[m.harness] || m.harness;
   const project = m.project_name || (m.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder';
   // one step: ✓ / ✗ / …, the tool, what it worked on, its time or its change; it unfolds to its output or diff
@@ -106,7 +107,7 @@ view('session', async (sheet, params) => {
         <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
           <span>started ${esc(when(m.started_at))} · ${m.prompts} ${m.prompts === 1 ? 'turn' : 'turns'}</span><span class="mono">${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · $' + ss.cost.toFixed(2) : ''}</span></div></div>
       <div class="acts"><button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>
-        <span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button><button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button></span>
+        <span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button>` : ''}</span>
         <button class="iconbtn sq" data-act="session-menu" data-path="${esc(m.source_path)}" data-cwd="${esc(m.cwd)}" aria-label="More">${ic.dots}</button></div></div>
     <div class="ovkpis skpis">${[['Tokens', fmt(m.tokens)], ['Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—'], ['First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—'],
       ['Failed commands', String(failed.length), failed.length ? 'negT' : ''], ['Files changed', String(files)]]
@@ -402,16 +403,18 @@ view('settings', async (sheet) => {
   S.state = st;
   applyTheme(st);
   const s = st.settings;
+  // the sign-in entry and the choice of terminal are Windows things; macOS opens Terminal
+  const win = !st.os || st.os === 'windows';
   sheet.innerHTML = `<h1>Settings</h1><p class="find">Saved as you change them, for this computer. Keys and logins are never in these files or in backups.</p>
     <h5 class="sh5">Appearance</h5>
     ${row('Light and dark', info('theme', '<b>System (the default):</b> follows the light or dark setting of Windows or macOS.<br><b>Light</b> or <b>Dark</b>: always that.'), 'The colours of this window.', seg('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))}
     ${row('Limits shown as', info('quota', '<b>Left (the default):</b> how much of each limit you still have, as the tools show it.<br><b>Used:</b> how much has gone.'), 'What is left of each limit, or what is used.', seg('quota_display', s.quota_display, [['left', 'Left'], ['used', 'Used']], 'st-quota'))}
-    ${row('Moving routes' + NEW, info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows, the routes are a still picture.<br><b>Default: on.</b>'), "The live particles on Overview. Off, or Windows' reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))}
-    <h5 class="sh5">Window and terminal</h5>
+    ${row('Moving routes' + NEW, info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live particles on Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))}
+    <h5 class="sh5">${win ? 'Window and terminal' : 'Window'}</h5>
     ${row('Close to the tray', info('tray', '<b>On (the default):</b> the window\'s X hides Harness Manager to the tray; usage and limits keep refreshing, and the tray icon opens it again. Quit from the tray menu.<br><b>Off:</b> the X quits.'), 'The window hides and the app keeps refreshing until you choose Quit.', sw('close_to_tray', s.close_to_tray, 'Keep running in the tray', 'st-tray'))}
-    ${row('Launch at sign-in', info('auto', 'Starts Harness Manager in the tray when you sign in to Windows, so usage and limits are current when you open it.<br><b>Default: off.</b>'), 'Starts hidden in the tray.', `<label class="switch"><input type="checkbox" data-act="autostart" ${st.autostart ? 'checked' : ''} data-testid="st-autostart"> Start with Windows</label>`)}
-    ${row('Terminal', info('term', '<b>Windows Terminal</b> (the default): Start and Resume open a new Windows Terminal window running the account.<br><b>Console window</b>: the classic console, for computers without Windows Terminal or if you prefer it.'), 'Where Start and Resume open a console.',
-      seg('terminal', s.terminal, [['wt', 'Windows Terminal'], ['console', 'Console']], 'st-term'))}
+    ${win ? row('Launch at sign-in', info('auto', 'Starts Harness Manager in the tray when you sign in to Windows, so usage and limits are current when you open it.<br><b>Default: off.</b>'), 'Starts hidden in the tray.', `<label class="switch"><input type="checkbox" data-act="autostart" ${st.autostart ? 'checked' : ''} data-testid="st-autostart"> Start with Windows</label>`) : ''}
+    ${win ? row('Terminal', info('term', '<b>Windows Terminal</b> (the default): Start and Resume open a new Windows Terminal window running the account.<br><b>Console window</b>: the classic console, for computers without Windows Terminal or if you prefer it.'), 'Where Start and Resume open a console.',
+      seg('terminal', s.terminal, [['wt', 'Windows Terminal'], ['console', 'Console']], 'st-term')) : ''}
     <h5 class="sh5">Updates</h5>
     ${row('Harness Manager', '', selfUpd && selfUpd.version ? `Version <b>${esc(selfUpd.version)}</b> is available; you have ${esc(st.version)}.${selfUpd.notes ? ' ' + esc(selfUpd.notes) : ''}` : `Version ${esc(st.version)}. New versions are looked for at launch and once a day.`,
       selfUpd && selfUpd.version ? '<button class="btn primary" data-act="self-install" data-testid="self-install">Update and restart</button>' : '<button class="btn outline" data-act="self-check" data-testid="self-check">Check for updates</button>')}
