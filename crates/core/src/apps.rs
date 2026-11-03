@@ -140,7 +140,7 @@ pub fn update(id: &str) -> Result<String> {
         Some("self") => format!("\"{}\" {}", a.path.as_deref().unwrap_or_default(), self_update(id).unwrap_or("update")),
         _ => bail!("{} cannot be installed from here{}", a.label, a.download.as_deref().map(|d| format!("; get it from {d}")).unwrap_or_default()),
     };
-    open_shell(&format!("{cmdline} & echo. & echo Finished. Press any key to close this window. & pause >nul"))?;
+    open_shell(&cmdline)?;
     Ok(cmdline)
 }
 
@@ -155,14 +155,14 @@ fn open_shell(line: &str) -> Result<()> {
         return Ok(());
     }
     // cmd /c "..." keeps the inner quotes; a new console opens in the default terminal
+    let line = format!("{line} & echo. & echo Finished. Press any key to close this window. & pause >nul");
     std::process::Command::new("cmd.exe").raw_arg(format!("/c \"{line}\"")).creation_flags(0x10)
         .current_dir(std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)).spawn()?;
     Ok(())
 }
 #[cfg(not(windows))]
 fn open_shell(line: &str) -> Result<()> {
-    std::process::Command::new("x-terminal-emulator").args(["-e", "sh", "-c", line]).spawn()?;
-    Ok(())
+    crate::launch::shell_window(&format!("{line}; echo; read -rp 'Finished. Press Enter to close this window.'"))
 }
 
 #[cfg(test)]

@@ -166,13 +166,30 @@ pub fn wt_is_default_terminal() -> bool { false }
 
 #[cfg(not(windows))]
 fn new_console(hrm: &Path, args: &[String], cwd: Option<&Path>) -> Result<()> {
-    // shortcut: Linux/macOS terminal launchers (x-terminal-emulator, Terminal.app) come with those builds.
-    let mut c = Command::new("x-terminal-emulator");
-    c.arg("-e").arg(hrm).args(args);
-    if let Some(d) = cwd {
-        c.current_dir(d);
-    }
-    c.spawn().context("open a terminal")?;
+    let run = std::iter::once(hrm.to_string_lossy().into_owned()).chain(args.iter().cloned()).map(|a| sh_quote(&a)).collect::<Vec<_>>().join(" ");
+    let cd = cwd.or(std::env::var_os("HOME").as_deref().map(Path::new)).map(|d| format!("cd {} && ", sh_quote(&d.to_string_lossy()))).unwrap_or_default();
+    shell_window(&format!("{cd}exec {run}"))
+}
+
+/// `s` as one word for sh.
+#[cfg(not(windows))]
+pub fn sh_quote(s: &str) -> String { format!("'{}'", s.replace('\'', r"'\''")) }
+
+/// A new terminal window running a sh command line. On macOS, Terminal.app opens a `.command` file it is given
+/// (no Automation permission needed); the file removes itself when it starts.
+#[cfg(target_os = "macos")]
+pub fn shell_window(line: &str) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let f = std::env::temp_dir().join(format!("hrm-{}-{}.command", std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&f, format!("#!/bin/bash\nrm -f \"$0\"\n{line}\n"))?;
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o700))?;
+    Command::new("open").args(["-a", "Terminal"]).arg(&f).spawn().context("open Terminal")?;
+    Ok(())
+}
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub fn shell_window(line: &str) -> Result<()> {
+    Command::new("x-terminal-emulator").args(["-e", "bash", "-c", line]).spawn().context("open a terminal")?;
     Ok(())
 }
 
@@ -213,5 +230,15 @@ pub mod autostart {
     pub fn get() -> Option<String> { None }
     pub fn set(_on: bool, _exe: &std::path::Path) -> anyhow::Result<()> {
         anyhow::bail!("launch at sign-in is only available on Windows for now")
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod unix_tests {
+    #[test]
+    fn unix_sh_quote_keeps_spaces_and_quotes_in_one_word() {
+        let q = super::sh_quote("/Applications/Harness Manager.app/it's");
+        let out = std::process::Command::new("sh").args(["-c", &format!("printf %s {q}")]).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "/Applications/Harness Manager.app/it's");
     }
 }

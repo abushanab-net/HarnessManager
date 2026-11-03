@@ -404,7 +404,7 @@ view('settings', async (sheet) => {
   const s = st.settings;
   sheet.innerHTML = `<h1>Settings</h1><p class="find">Saved as you change them, for this computer. Keys and logins are never in these files or in backups.</p>
     <h5 class="sh5">Appearance</h5>
-    ${row('Light and dark', info('theme', '<b>Dark (the default)</b> or <b>Light</b>: always that.<br><b>System:</b> follows Windows (Settings &gt; Personalization &gt; Colors).'), 'The colours of this window.', seg('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))}
+    ${row('Light and dark', info('theme', '<b>System (the default):</b> follows the light or dark setting of Windows or macOS.<br><b>Light</b> or <b>Dark</b>: always that.'), 'The colours of this window.', seg('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))}
     ${row('Limits shown as', info('quota', '<b>Left (the default):</b> how much of each limit you still have, as the tools show it.<br><b>Used:</b> how much has gone.'), 'What is left of each limit, or what is used.', seg('quota_display', s.quota_display, [['left', 'Left'], ['used', 'Used']], 'st-quota'))}
     ${row('Moving routes' + NEW, info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows, the routes are a still picture.<br><b>Default: on.</b>'), "The live particles on Overview. Off, or Windows' reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))}
     <h5 class="sh5">Window and terminal</h5>

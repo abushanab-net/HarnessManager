@@ -319,7 +319,7 @@ try {
       const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n; (n = w.nextNode());) for (const [a, b] of swap) n.nodeValue = n.nodeValue.replace(a, b);
       document.getElementById('toast').className = 'off';
-      document.documentElement.dataset.theme = 'dark';`, [os.hostname()]); // the README shows the default look: dark, Harness
+      document.documentElement.dataset.theme = 'dark';`, [os.hostname()]); // the README shows the dark look, Harness
     await sleep(400);
     // HRM_README_SHOT=1 refreshes the tracked copy; otherwise it stays with the other screenshots
     await page.screenshot({ path: process.env.HRM_README_SHOT ? path.join(root, 'docs', 'screenshot.png') : path.join(shots, 'readme.png') });

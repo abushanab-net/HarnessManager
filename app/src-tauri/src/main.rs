@@ -637,6 +637,9 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
 }
 
 fn main() {
+    // before any thread starts: set_var is not safe while others read the environment
+    #[cfg(not(windows))]
+    hrm_core::util::adopt_shell_path();
     let ctx = Arc::new(Ctx::open().unwrap_or_else(|e| fatal(&format!("Harness Manager could not start:\n\n{e:#}"))));
     let first = { let _l = ctx.lock_registry(); hrm_core::import::first_run(&ctx).ok().flatten().map(|r| serde_json::to_value(r).unwrap()) };
     let state = Arc::new(AppState { ctx: Mutex::new(ctx), first_run: Mutex::new(first), settings_mtime: Mutex::new(None) });

@@ -128,7 +128,7 @@ export const shownTools = (st) => st.harnesses.filter((h) => !((st.settings && s
 /** Light, dark, or as Windows is (the stylesheet reads data-theme). */
 export function applyTheme(st) {
   if (!st || !st.settings) return;
-  document.documentElement.dataset.theme = st.settings.theme || 'dark';
+  document.documentElement.dataset.theme = st.settings.theme || 'system';
 }
 
 export async function loadState() {

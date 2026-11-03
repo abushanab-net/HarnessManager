@@ -94,6 +94,43 @@ pub fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// A Mac app started from the Dock or Finder gets launchd's PATH (`/usr/bin:/bin:...`), not the one the user's
+/// shell sets up, so tools installed by npm, Homebrew or their own installers are not found, and neither is the
+/// node they run on. Take the login shell's PATH, then the usual install folders, once at startup.
+#[cfg(not(windows))]
+pub fn adopt_shell_path() {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut dirs: Vec<PathBuf> = vec![];
+    if let Some(p) = login_shell_path() { dirs.extend(std::env::split_paths(&p)); }
+    if let Some(p) = std::env::var_os("PATH") { dirs.extend(std::env::split_paths(&p)); }
+    if let Some(h) = &home {
+        dirs.extend([".local/bin", ".npm-global/bin", ".bun/bin", ".opencode/bin", ".volta/bin"].map(|d| h.join(d)));
+    }
+    dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()));
+    if let Ok(p) = std::env::join_paths(dirs) { std::env::set_var("PATH", p); }
+}
+
+/// PATH as the user's shell has it. Interactive too: nvm and most PATH lines live in .zshrc or .bashrc.
+#[cfg(not(windows))]
+fn login_shell_path() -> Option<String> {
+    use std::io::Read;
+    const MARK: &str = "__HRM_PATH__";
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let mut child = std::process::Command::new(shell).args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    // a shell profile that waits for something must not stop the app from starting
+    let start = std::time::Instant::now();
+    while child.try_wait().ok()?.is_none() {
+        if start.elapsed() > std::time::Duration::from_secs(5) { let _ = child.kill(); return None; }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    out.split(MARK).nth(1).filter(|p| !p.is_empty()).map(String::from)
+}
+
 /// Valid profile and item names: letters, digits, `-` and `_`, as they also become folder names.
 pub fn valid_name(name: &str) -> bool {
     // CON, NUL, COM1 ... name devices on Windows, not folders
@@ -125,4 +162,23 @@ pub fn walk_files(dir: &Path, keep: &dyn Fn(&Path) -> bool, out: &mut Vec<PathBu
 pub fn truncate(s: &str, n: usize) -> String {
     let s = s.trim();
     if s.chars().count() <= n { s.to_string() } else { format!("{}…", s.chars().take(n).collect::<String>().trim_end()) }
+}
+
+#[cfg(all(test, not(windows)))]
+mod unix_tests {
+    #[test]
+    fn unix_shell_path_adds_the_install_folders_and_keeps_the_system_ones() {
+        // as the Dock starts an app
+        std::env::set_var("PATH", "/usr/bin:/bin");
+        super::adopt_shell_path();
+        let p = std::env::var("PATH").unwrap();
+        let dirs: Vec<_> = p.split(':').collect();
+        let home = std::env::var("HOME").unwrap();
+        for d in ["/usr/bin", "/bin", "/opt/homebrew/bin", "/usr/local/bin", &format!("{home}/.local/bin")] {
+            assert!(dirs.contains(&d), "{d} missing from {p}");
+        }
+        assert_eq!(dirs.len(), dirs.iter().collect::<std::collections::HashSet<_>>().len(), "no folder twice: {p}");
+        // the login shell answered: whatever it adds (nvm, Homebrew, npm's prefix) comes first
+        println!("PATH after: {p}");
+    }
 }
