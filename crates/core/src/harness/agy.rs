@@ -206,7 +206,7 @@ impl Harness for Agy {
                 turns.push(Turn { prompt: texts.first().cloned().unwrap_or_default(), prompt_at: s.started_at, ..Default::default() });
             } else if let Some(t) = turns.last_mut() {
                 let body: Vec<String> = texts.into_iter().filter(|x| x.len() > 3).collect();
-                if !body.is_empty() { t.answer.push(body.join("\n\n")); }
+                if !body.is_empty() { t.say(body.join("\n\n")); }
             }
         }
         Ok(Transcript { meta: s.clone(), turns })

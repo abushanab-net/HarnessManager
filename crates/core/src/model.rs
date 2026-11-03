@@ -133,6 +133,16 @@ pub struct Turn {
     pub steps: Vec<Step>,
     /// The assistant's text replies, in order (Markdown).
     pub answer: Vec<String>,
+    /// For each answer, how many steps came before it, so the reading view puts text and steps in order.
+    #[serde(default)]
+    pub answer_pos: Vec<usize>,
+}
+
+impl Turn {
+    pub fn say(&mut self, text: String) {
+        self.answer_pos.push(self.steps.len());
+        self.answer.push(text);
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

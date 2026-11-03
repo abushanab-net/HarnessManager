@@ -424,21 +424,24 @@ try {
     await nav('#sessions');
     await click('[data-testid=read-s-main-1]');
     await hasText('[data-testid=session-title]', 'Longhorn backup target');
-    // the steps, folded: each says what it ran; a click unfolds its output
-    await hasText('[data-testid=steps]', 'argocd app sync longhorn-staging');
-    assert.ok(!(await text('[data-testid=steps]')).includes('connection closed'), 'output folded');
-    await click('[data-testid=steps] .si:has(.negT) [data-act=step-open]');
-    await hasText('[data-testid=steps]', 'connection closed');
-    // the conversation as a chat: the prompt on the right, the answer on the left
+    // the steps inline in the chat, folded: each says what it ran; a click unfolds its output
+    await hasText('[data-testid=chat] .steps', 'argocd app sync longhorn-staging');
+    assert.ok(!(await text('[data-testid=chat]')).includes('connection closed'), 'output folded');
+    await click('[data-testid=chat] .si:has(.negT) [data-act=step-open]');
+    await hasText('[data-testid=chat]', 'connection closed');
+    // the conversation as a chat: the prompt on the right, then the steps, then the answer, in the order they happened
     await hasText('[data-testid=chat] .msg.you', 'Add a Longhorn backup target');
     await hasText('[data-testid=chat] .msg.ai', 'What changed');
+    const order = await exec("return [...document.querySelectorAll('#chat > .msg, #chat > .steps')].map((e) => e.className.split(' ')[0] + (e.classList.contains('you') ? ':you' : e.classList.contains('ai') ? ':ai' : ''))");
+    assert.deepEqual(order, ['msg:you', 'steps', 'msg:ai'], 'prompt, steps, answer');
     await shot('07-session');
     await click('[data-testid=mode-changes]');
-    await click('[data-testid=steps] [data-act=step-open]');
-    await hasText('[data-testid=steps]', 's3://longhorn-backups');
+    await click('[data-testid=chat] [data-act=step-open]');
+    await hasText('[data-testid=chat]', 's3://longhorn-backups');
     await shot('08-session-changes');
     await click('[data-testid=mode-failed]');
-    await hasText('[data-testid=steps]', 'argocd app sync');
+    await hasText('[data-testid=chat]', 'argocd app sync');
+    assert.ok(!(await text('[data-testid=chat]')).includes('values-staging.yaml'), 'Failed lists only the failed command');
     await click('[data-testid=resume]');
     await waitFor(() => readLines(termLog).some((t) => t.args.join(' ') === 'run claude-main -- --resume s-main-1'), 'resume in the session account');
     await click('[data-testid=mode-all]');
@@ -487,7 +490,7 @@ try {
     assert.ok(noFolder.includes('1 msg') || noFolder.includes('2 msgs'));
     await click('[data-testid=read-ses_oc1]');
     await hasText('[data-testid=session-title]', 'Fix the flaky build');
-    await hasText('[data-testid=steps]', 'cargo test --workspace');
+    await hasText('[data-testid=chat]', 'cargo test --workspace');
     await hasText('[data-testid=chat]', 'The build is stable again.');
     await nav('#sessions');
     await click('[data-testid=read-agy-conv-1]');
@@ -506,10 +509,10 @@ try {
       { type: 'response_item', timestamp: now, payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Migration done.' }] } }]));
     await nav('#session?profile=codex-main&id=cx-long');
     await hasText('[data-testid=chat]', 'Migration done.');
-    assert.equal(await exec("return document.querySelectorAll('#steps .si').length"), 41, 'first 30, a link, last 10');
-    await hasText('[data-testid=more-steps]', 'Show 1,960 more steps');
+    assert.equal(await exec("return document.querySelectorAll('#chat .si').length"), 11, 'first 5, a link, last 5');
+    await hasText('[data-testid=more-steps]', 'Show 1,990 more steps');
     await click('[data-testid=more-steps]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('#steps .si').length")) === 2000, 'all steps shown');
+    await waitFor(async () => (await exec("return document.querySelectorAll('#chat .si').length")) === 2000, 'all steps shown');
   });
 
   await test('export a session as Markdown', async () => {
@@ -573,8 +576,8 @@ try {
     await exec("document.querySelector('[data-act=dialog-close]').click()");
     await nav('#session?profile=claude-main&id=s-main-1');
     await $('[data-testid=chat]');
-    const r = await exec("return { panel: !!document.querySelector('[data-testid=steps-panel]'), modes: [...document.querySelectorAll('[data-testid=steps-panel] .seg3 a')].map((a) => a.textContent.trim()), resume: document.querySelector('[data-testid=resume]').textContent.trim() }");
-    assert.ok(r.panel, 'the Steps panel');
+    const r = await exec("return { panel: !!document.querySelector('[data-testid=conv-panel]'), modes: [...document.querySelectorAll('[data-testid=conv-panel] .seg3 a')].map((a) => a.textContent.trim()), resume: document.querySelector('[data-testid=resume]').textContent.trim() }");
+    assert.ok(r.panel, 'the Conversation panel');
     assert.deepEqual(r.modes, ['All', 'Changes', 'Failed']);
     assert.ok(r.resume.startsWith('Resume in'));
   });
@@ -621,7 +624,7 @@ try {
       '#accounts': ['Accounts', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
       '#sessions': ['Sessions', 'platform-gitops'],
-      '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Steps', 'Conversation'],
+      '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
       '#usage': ['Usage by account', 'Tokens per day, by account', 'Accounts', 'By model'],
       '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
       '#mcp': ['MCP servers'], '#skills': ['Skills'], '#prompts': ['Prompts'],

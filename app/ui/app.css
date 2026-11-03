@@ -939,7 +939,10 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .steps .sout { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--sub); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
 .steps .si.more { padding: 12px 34px; font-size: 13px; }
 .steps .si.more a { cursor: pointer; }
-.convp .chat { max-height: 560px; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; position: relative; }
+/* steps inline in the conversation: a run of folded steps between the messages */
+.chat .steps { margin: 0; align-self: stretch; border: 1px solid var(--ru); border-radius: 12px; padding: 0 12px; }
+.chat .steps .sb { padding: 8px 2px; }
+.convp .chat { max-height: max(560px, calc(100vh - 260px)); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; position: relative; }
 .msg { max-width: 72%; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--b); display: flex; flex-direction: column; gap: 4px; }
 .msg .who { font-size: 11px; letter-spacing: .04em; color: var(--m); }
 .msg .tx { font-size: 14px; overflow-wrap: anywhere; }

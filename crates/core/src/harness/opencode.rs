@@ -175,7 +175,7 @@ impl Harness for OpenCode {
             if t.model.is_empty() { t.model = m["modelID"].as_str().unwrap_or("").into(); }
             for x in ps {
                 match x["type"].as_str().unwrap_or("") {
-                    "text" => if let Some(tx) = x["text"].as_str() { if !tx.trim().is_empty() { t.answer.push(tx.trim().into()) } },
+                    "text" => if let Some(tx) = x["text"].as_str() { if !tx.trim().is_empty() { t.say(tx.trim().into()) } },
                     "reasoning" => t.steps.push(Step { kind: "thinking".into(), ..Default::default() }),
                     "tool" => {
                         let tool = x["tool"].as_str().unwrap_or("tool").to_string();

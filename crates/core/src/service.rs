@@ -134,7 +134,11 @@ impl Profile {
 
 pub fn list_views(ctx: &Ctx) -> Result<Vec<ProfileView>> {
     let reg = ctx.registry()?;
-    Ok(reg.profiles.iter().map(|p| profile_view(ctx, p)).collect())
+    // side by side: each account looks for its running processes and session files
+    Ok(std::thread::scope(|s| {
+        let views: Vec<_> = reg.profiles.iter().map(|p| s.spawn(move || profile_view(ctx, p))).collect();
+        views.into_iter().map(|h| h.join().expect("profile view thread panicked")).collect()
+    }))
 }
 
 /// Import new usage for every profile. Returns the number of new rows.
@@ -630,8 +634,11 @@ pub fn router_running(ctx: &Ctx) -> bool { router_answer(ctx).map(|r| r.ends_wit
 /// What answers `GET /health` on the router port, if anything listens there at all.
 fn router_answer(ctx: &Ctx) -> Option<String> {
     use std::io::{Read, Write};
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", ctx.settings.router_port).parse().ok()?;
+    // nothing listens when the port is free; asking a closed port on Windows waits out the whole timeout
+    if std::net::TcpListener::bind(addr).is_ok() { return None; }
     let t = std::time::Duration::from_millis(500);
-    let mut s = std::net::TcpStream::connect_timeout(&format!("127.0.0.1:{}", ctx.settings.router_port).parse().ok()?, t).ok()?;
+    let mut s = std::net::TcpStream::connect_timeout(&addr, t).ok()?;
     s.set_read_timeout(Some(t)).ok()?;
     s.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
     let mut out = String::new();

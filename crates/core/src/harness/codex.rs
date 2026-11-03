@@ -345,7 +345,7 @@ pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Tran
                     } else if pl["role"] == "assistant" && full && !text.trim().is_empty() {
                         if turns.is_empty() { turns.push(Turn { prompt_at: ts, ..Default::default() }); }
                         let t = turns.last_mut().unwrap();
-                        t.answer.push(text.trim().into());
+                        t.say(text.trim().into());
                         t.answer_at = ts;
                     }
                 } else if matches!(ptype, "function_call" | "custom_tool_call" | "local_shell_call") {

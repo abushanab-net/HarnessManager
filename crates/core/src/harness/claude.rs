@@ -441,7 +441,7 @@ pub fn parse_session(text: &str, profile: &str, path: &Path, full: bool) -> Tran
                     match b["type"].as_str().unwrap_or("") {
                         "text" => {
                             let t = b["text"].as_str().unwrap_or("").trim();
-                            if !t.is_empty() { turn.answer.push(t.into()); }
+                            if !t.is_empty() { turn.say(t.into()); }
                         }
                         "thinking" | "redacted_thinking" => turn.steps.push(Step { kind: "thinking".into(), ..Default::default() }),
                         "tool_use" => {

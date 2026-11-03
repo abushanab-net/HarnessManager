@@ -315,10 +315,9 @@ function pilot(state, d, ps, burn) {
 // ---------- the page ----------
 view('home', async (sheet) => {
   sheet.className = 'sheet';
-  const state = await loadState();
   const hours = RANGES.find((r) => r[0] === st.range)[1];
   const days = Math.round(hours / 24);
-  const d = await call('home', { days, hours, harness: st.harness, limit: 50 });
+  const [state, d] = await Promise.all([loadState(), call('home', { days, hours, harness: st.harness, limit: 50 })]);
   st.rows = d.requests.rows;
   st.total = d.requests.total;
   const o = d.overview, k = d.dash, s = state.settings;

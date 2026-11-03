@@ -52,16 +52,17 @@ function projectDialog(key, name, mode) {
 }
 
 // ---------- read a session ----------
-// as drawn: a header, five numbers, the Steps (folded, All / Changes / Failed) and the Conversation as a chat
-// open: the steps unfolded; follow: stay at the end of the conversation as a live session grows
-const rv = { mode: 'all', open: new Set(), more: false, sessionKey: '', follow: false, top: 0 };
+// a header, five numbers, and the conversation as a chat with each turn's steps (folded) where they happened;
+// Changes and Failed list only those steps. open: the steps unfolded; more: the long runs shown in full;
+// follow: stay at the end of the conversation as a live session grows
+const rv = { mode: 'all', open: new Set(), more: new Set(), sessionKey: '', follow: false, top: 0 };
 const secsOf = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms');
 
 view('session', async (sheet, params) => {
   sheet.className = 'sheet';
   sheet.innerHTML = '<p class="muted">Opening the session…</p>';
   const [t, ss] = await Promise.all([call('transcript', { profile: params.profile, id: params.id }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null)]);
-  if (rv.sessionKey !== params.profile + '/' + params.id) { rv.sessionKey = params.profile + '/' + params.id; rv.open = new Set(); rv.more = false; rv.follow = false; rv.top = 0; rv.fresh = true; }
+  if (rv.sessionKey !== params.profile + '/' + params.id) { rv.sessionKey = params.profile + '/' + params.id; rv.open = new Set(); rv.more = new Set(); rv.follow = false; rv.top = 0; rv.fresh = true; }
   const m = t.meta;
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
   const changes = steps.filter((st) => st.change), failed = steps.filter((st) => st.status === 'error');
@@ -75,14 +76,29 @@ view('session', async (sheet, params) => {
     const detail = st.change ? diffHtml(st.change.diff) : `<pre class="sout mono">${esc(st.error || st.result || 'No output.')}</pre>`;
     return `<div class="si ${open ? 'open' : ''}"><button class="sb" data-act="step-open" data-k="${k}" aria-expanded="${open}"><span class="ico ${bad ? 'negT' : busy ? 'warnT' : 'acT'}">${bad ? '✗' : busy ? '…' : '✓'}</span><span class="kind">${esc(st.tool)}</span><span class="what mono" title="${esc(st.input)}">${esc(st.input)}</span><span class="meta mono ${bad ? 'negT' : ''}">${esc(meta)}</span></button>${open ? `<div class="sdet">${detail}</div>` : ''}</div>`;
   };
-  const list = steps.map((st, k) => [st, k]).filter(([st]) => (rv.mode === 'changes' ? st.change : rv.mode === 'failed' ? st.status === 'error' : true));
-  // thousands of steps (long Codex runs): the first and last ones until asked for all
-  const stepsHtml = !list.length ? `<p class="empty">${rv.mode === 'changes' ? 'This session changed no files.' : rv.mode === 'failed' ? 'Nothing failed.' : 'No steps.'}</p>`
-    : rv.more || list.length <= 60 ? list.map(([st, k]) => row(st, k)).join('')
-      : list.slice(0, 30).map(([st, k]) => row(st, k)).join('') + `<div class="si more"><a class="acT" data-act="more-steps" data-testid="more-steps">Show ${(list.length - 40).toLocaleString()} more steps</a></div>` + list.slice(-10).map(([st, k]) => row(st, k)).join('');
+  // a run of steps; a long one (thousands in a Codex run) shows its first and last until asked for all
+  const run = (list, id, head, tail) => !list.length ? '' : `<div class="steps">${rv.more.has(id) || list.length <= head + tail + 2 ? list.map(([st, k]) => row(st, k)).join('')
+    : list.slice(0, head).map(([st, k]) => row(st, k)).join('') + `<div class="si more"><a class="acT" data-act="more-steps" data-run="${id}" data-testid="more-steps">Show ${(list.length - head - tail).toLocaleString()} more steps</a></div>` + list.slice(-tail).map(([st, k]) => row(st, k)).join('')}</div>`;
   const files = new Set(changes.map((st) => st.change.path)).size;
-  const msgs = t.turns.map((x) => `${x.prompt ? `<div class="msg you"><span class="who mono">YOU${x.prompt_at ? ' · ' + hm(x.prompt_at) : ''}</span><div class="tx">${esc(x.prompt)}</div></div>` : ''}
-    ${x.answer.length ? `<div class="msg ai"><span class="who mono">${esc(tool.toUpperCase())}${x.answer_at ? ' · ' + hm(x.answer_at) : ''}${x.model ? ' · ' + esc(x.model) : ''}</span><div class="tx ans">${x.answer.map(md).join('')}</div></div>` : ''}`).join('');
+  const who = (x) => `<span class="who mono">${esc(tool.toUpperCase())}${x.answer_at ? ' · ' + hm(x.answer_at) : ''}${x.model ? ' · ' + esc(x.model) : ''}</span>`;
+  // All: each turn in order, the prompt, then the replies with the steps between them where they happened
+  let k = 0;
+  const chatAll = t.turns.map((x, ti) => {
+    let out = x.prompt ? `<div class="msg you"><span class="who mono">YOU${x.prompt_at ? ' · ' + hm(x.prompt_at) : ''}</span><div class="tx">${esc(x.prompt)}</div></div>` : '';
+    const at = x.steps.map((st) => (st.kind === 'thinking' ? -1 : k++));
+    const pos = x.answer.map((_, i) => (x.answer_pos && x.answer_pos[i] != null ? x.answer_pos[i] : x.steps.length));
+    let from = 0;
+    const flush = (to) => { const l = x.steps.slice(from, to).map((st, i) => [st, at[from + i]]).filter(([, j]) => j >= 0); out += run(l, ti + ':' + from, 5, 5); from = to; };
+    // replies with no step between them share one bubble
+    const groups = [];
+    x.answer.forEach((a, i) => { if (!groups.length || groups[groups.length - 1].p !== pos[i]) groups.push({ p: pos[i], a: [] }); groups[groups.length - 1].a.push(a); });
+    for (const g of groups) { flush(Math.max(from, g.p)); out += `<div class="msg ai">${who(x)}<div class="tx ans">${g.a.map(md).join('')}</div></div>`; }
+    flush(x.steps.length);
+    return out;
+  }).join('');
+  // Changes and Failed: only those steps, as one list
+  const picked = steps.map((st, j) => [st, j]).filter(([st]) => (rv.mode === 'changes' ? st.change : st.status === 'error'));
+  const body = rv.mode === 'all' ? chatAll : run(picked, 'flat', 30, 10) || `<p class="empty">${rv.mode === 'changes' ? 'This session changed no files.' : 'Nothing failed.'}</p>`;
   sheet.innerHTML = `
     <div class="trow sesh"><div><a href="#sessions" class="crumb acT">← Sessions · ${esc(project)}</a><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1>
         <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
@@ -93,11 +109,9 @@ view('session', async (sheet, params) => {
     <div class="ovkpis skpis">${[['Tokens', fmt(m.tokens)], ['Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—'], ['First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—'],
       ['Failed commands', String(failed.length), failed.length ? 'negT' : ''], ['Files changed', String(files)]]
       .map(([l, v, c]) => `<div class="ovk"><div class="kl"><span>${l}</span></div><strong class="${c || ''}">${v}</strong></div>`).join('')}</div>
-    <section class="panel" data-testid="steps-panel"><div class="ph"><h2>Steps <span class="muted mono sm">${rv.open.size ? 'unfolded' : 'folded'} · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed ${failed.length === 1 ? 'command' : 'commands'}</span></h2>
-        <span class="seg3">${[['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']].map(([k, l]) => `<a class="${rv.mode === k ? 'on' : ''}" data-act="rv-mode" data-v="${k}" data-testid="mode-${k}">${l}</a>`).join('')}</span></div>
-      <div class="steps" id="steps" data-testid="steps">${stepsHtml}</div></section>
-    <section class="panel convp"><div class="ph"><h2>Conversation <span class="muted mono sm">${t.turns.length}</span></h2></div>
-      <div class="chat" id="chat" data-testid="chat">${msgs || '<p class="empty">This session has no messages yet.</p>'}
+    <section class="panel convp" data-testid="conv-panel"><div class="ph"><h2>Conversation <span class="muted mono sm">${t.turns.length} ${t.turns.length === 1 ? 'turn' : 'turns'} · ${steps.length} steps · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed</span></h2>
+        <span class="seg3">${[['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']].map(([v, l]) => `<a class="${rv.mode === v ? 'on' : ''}" data-act="rv-mode" data-v="${v}" data-testid="mode-${v}">${l}</a>`).join('')}</span></div>
+      <div class="chat" id="chat" data-testid="chat">${body || '<p class="empty">This session has no messages yet.</p>'}
         <div class="toend" hidden><button class="btn primary sm" data-act="follow-end" data-testid="follow-end">↓ Latest${m.open ? ' · follow live' : ''}</button></div></div></section>`;
   S.cache.transcript = t;
   // a live session opens at its end, following; a redraw keeps the reader's place, or the end while following
@@ -133,7 +147,7 @@ action('follow-end', () => {
   const chat = document.getElementById('chat');
   if (chat) chat.scrollTop = chat.scrollHeight;
 });
-action('more-steps', () => { rv.more = true; render(); });
+action('more-steps', (el) => { rv.more.add(el.dataset.run); render(); });
 action('step-open', (el) => { const k = +el.dataset.k; if (rv.open.has(k)) rv.open.delete(k); else rv.open.add(k); render(); });
 action('rv-mode', (el) => { rv.mode = el.dataset.v; render(); });
 action('terminal-menu', (el) => openMenu(el, [

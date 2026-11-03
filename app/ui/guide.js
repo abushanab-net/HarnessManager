@@ -37,8 +37,8 @@ const TOURS = {
     ['[data-testid=group]', 'Grouped by project', 'Sessions of the same repository sit together, whichever account or tool ran them. Open one to read it.'],
   ],
   session: [
-    ['[data-testid=steps-panel]', 'Steps', 'Every tool call, folded: click one for its output or diff. All, Changes (the files it edited) or Failed.'],
-    ['[data-testid=chat]', 'Conversation', 'Your prompts on the right, the answers on the left. An open session follows as its tool writes.'],
+    ['[data-testid=conv-panel] .seg3', 'Changes and Failed', 'List only the steps that edited files, or only the failed commands.'],
+    ['[data-testid=chat]', 'Conversation', 'Your prompts on the right, the answers on the left, and every tool call (folded) where it happened: click one for its output or diff. An open session follows as its tool writes.'],
     ['[data-testid=resume]', 'Resume', 'Continues this session in a terminal, with the same account.'],
     ['[data-testid=export-md]', 'Export', 'Save the session as a Markdown file.'],
   ],
