@@ -29,7 +29,9 @@ jobs:
       matrix:
         include:
           - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe }
-          - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: 'app,dmg', ext: '' }
+          # shortcut: no .dmg, because its Finder layout step times out on a runner without a desktop session; add dmg back once
+          # the runner may control Finder (System Settings > Privacy & Security > Automation)
+          - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: app, ext: '' }
           # 22.04: an AppImage built on the oldest supported glibc runs on the most distributions
           - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE || 'ubuntu-22.04' }}", bundles: 'appimage,deb', ext: '' }
     runs-on: ${{ matrix.runner }}
@@ -66,8 +68,6 @@ jobs:
       - run: npm ci --prefix app --no-audit --no-fund
       - uses: tauri-apps/tauri-action@v0
         env:
-          # CI=true makes the macOS .dmg skip Finder's window layout, which times out on a runner without a desktop
-          CI: 'true'
           GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
