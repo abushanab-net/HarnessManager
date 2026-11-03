@@ -3,6 +3,9 @@
   "bundle": {
     "externalBin": [
       "binaries/hrm"
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

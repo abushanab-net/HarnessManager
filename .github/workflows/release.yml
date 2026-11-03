@@ -86,6 +86,8 @@ jobs:
         run: |
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
           test -n "$app"
+          # an unsigned bundle downloaded from the internet is reported by macOS as "damaged"
+          codesign --verify --deep --strict "$app"
           stage=$(mktemp -d)
           cp -R "$app" "$stage/"
           ln -s /Applications "$stage/Applications"
