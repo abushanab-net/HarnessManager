@@ -82,7 +82,9 @@ fn write_zip(ctx: &Ctx, out: &Path) -> Result<()> {
         let kv: serde_json::Map<String, Value> = c.prepare("select k, v from kv")?
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter().filter(|(k, _)| keep_kv(k)).map(|(k, v)| (k, json!(v))).collect();
-        Ok(json!({"ledger": ledger, "kv": kv}))
+        let tags: Vec<Value> = c.prepare("select kind, key, tag from tags order by rowid")?
+            .query_map([], |r| Ok(json!([r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?])))?.collect::<rusqlite::Result<_>>()?;
+        Ok(json!({"ledger": ledger, "kv": kv, "tags": tags}))
     })?;
     if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
     let tmp = out.with_extension("zip.part");
@@ -194,6 +196,10 @@ pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
         }
         for (k, v) in state["kv"].as_object().cloned().unwrap_or_default() {
             if keep_kv(&k) { tx.execute("insert or replace into kv values(?,?)", rusqlite::params![k, v.as_str().unwrap_or("")])?; }
+        }
+        if let Some(rows) = state["tags"].as_array() {
+            tx.execute("delete from tags", [])?;
+            for r in rows { tx.execute("insert or ignore into tags values(?,?,?)", rusqlite::params![r[0].as_str().unwrap_or(""), r[1].as_str().unwrap_or(""), r[2].as_str().unwrap_or("")])?; }
         }
         tx.commit()?;
         Ok(())

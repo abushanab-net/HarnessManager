@@ -10,7 +10,7 @@ import { esc } from './lib.js';
 const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode and Antigravity on this computer in one place. This short tour shows each page the first time you open it.'],
-    ['aside.side nav', 'Every page', 'Accounts to add and start accounts, Sessions to read past work, Usage, routing to other providers, and the MCP servers, skills and prompts your tools share.'],
+    ['aside.side nav', 'Every page', 'Accounts to add and start accounts, Sessions to read past work, Usage, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
     ['.ovkpis', 'Key numbers', 'Usage of every account against the period before, read from each tool\'s own logs on this computer; nothing is sent anywhere. Cost is what the tokens would cost at API list prices: subscriptions are not billed per token.'],
     ['.ovhead .acts', 'Tool and period', 'Show one tool or all of them, for the last 24 hours, 7 days or 30 days.'],
     ['[data-testid=routes]', 'Live routes', 'Each account, the tool it runs and where its requests go. Pulses show the tokens of the last five minutes; red is a paused provider or an account not logged in.'],
@@ -32,8 +32,14 @@ const TOURS = {
     ['[data-act=start-in-folder]', 'Start in a folder', 'Opens the account in the project folder you pick.'],
     ['.trow [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
   ],
+  projects: [
+    ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
+    ['[data-testid=project-cards]', 'One card per project', 'Open its sessions, start a new one, pin it to the sidebar, rename or merge it from the card\'s menu.'],
+  ],
   sessions: [
-    ['[data-testid=sessions-search]', 'Find a session', 'Search titles, folders and session ids across every account and tool.'],
+    ['[data-testid=rail]', 'Projects, pinned and recent', 'What runs now, every project, the ones you pinned, and your tags. Pick one to see only its sessions.'],
+    ['.tagc.add', 'Tags', 'Your own labels on a session or a project, shared across tools and accounts. Group by Tag, or click a tag to see what carries it.'],
+    ['[data-testid=find]', 'Find a session', 'The search above narrows this list by title, folder, account and tool as you type.'],
     ['[data-testid=group]', 'Grouped by project', 'Sessions of the same repository sit together, whichever account or tool ran them. Open one to read it.'],
   ],
   session: [
@@ -54,7 +60,7 @@ const TOURS = {
     ['[data-testid=mcp-add]', 'Add an MCP server', 'Then tick the tools that should have it: it is written into every account of those tools. Servers you added by hand in a tool are never overwritten.'],
   ],
   skills: [
-    ['[data-testid=skill-install]', 'Install a skill', 'From a folder or a GitHub link, then tick the tools that should have it. Skills are linked, so one update reaches every tool.'],
+    ['[data-testid=skill-install]', 'Install a skill', 'From a folder or a GitHub link, then tick the tools that should have it. The tick in a tool\'s column header links every skill shown in one go. Skills are linked, so one update reaches every tool.'],
   ],
   prompts: [
     ['.tabs2', 'One list per tool', 'The instructions file of each tool: CLAUDE.md for Claude Code, AGENTS.md for Codex, and so on.'],

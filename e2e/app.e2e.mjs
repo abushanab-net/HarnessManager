@@ -188,9 +188,10 @@ try {
   page.on('console', (m) => { if (m.type() === 'error') console.log('     [window] ' + m.text()); });
   page.on('pageerror', (e) => console.log('     [window] ' + e.message));
   // the first-visit tours are tested on their own; everywhere else they would sit in front of the page
-  const TOURED = ['home', 'accounts', 'account', 'sessions', 'session', 'usage', 'routing', 'mcp', 'skills', 'prompts', 'settings'];
+  const TOURED = ['home', 'accounts', 'account', 'projects', 'sessions', 'session', 'usage', 'routing', 'mcp', 'skills', 'prompts', 'settings'];
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
-  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click();`, [TOURED]);
+  // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
+  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off');`, [TOURED]);
 
   await test('overview: key numbers, live routes, limits, reply timing, mix, events, health and the request log', async () => {
     await $('[data-testid=heatmap]');
@@ -366,8 +367,9 @@ try {
     await click('[data-testid=add-create]');
     await waitFor(() => readLines(termLog).some((t) => JSON.stringify(t.args) === JSON.stringify(['login', 'codex-personal'])), 'login terminal');
     hrm('login', 'codex-personal'); // what the user does in that terminal
-    await click('[data-testid=login-done]').catch(() => {});
-    await nav('#accounts');
+    // the dialog notices the sign-in on its own, and Done redraws the list without leaving the page
+    await hasText('[data-testid=login-status]', 'Signed in as alex@example.com');
+    await click('[data-testid=login-done]');
     await hasText('[data-testid=row-codex-personal]', 'ChatGPT Pro');
   });
 
@@ -423,9 +425,46 @@ try {
     await click('[data-testid=group-tool]');
     await waitFor(async () => (await exec(`return document.querySelectorAll('[data-testid=group]').length`)) === 4, 'four tool groups');
     await click('[data-testid=group-project]');
-    await type('[data-testid=sessions-search]', 'longhorn\n');
-    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow').length`)) === 1, 'search narrows to one session');
-    await type('[data-testid=sessions-search]', '\n');
+    await type('[data-testid=find]', 'longhorn');
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]:not([hidden])').length`)) === 1, 'the top bar search narrows to one session');
+    await page.fill('[data-testid=find]', '');
+    await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]:not([hidden])').length`)) > 1, 'every session is back');
+  });
+
+  await test('projects: cost per project, a project opened in Sessions with its numbers, and a pin in the sidebar', async () => {
+    await nav('#projects');
+    await $('[data-testid=project-tiles]');
+    // the Claude session priced from the catalogue: 1200 in at $4/M, 300 out at $20/M and the small follow-ups
+    await hasText('[data-testid=project-cards]', 'platform-gitops');
+    const card = await exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).innerText");
+    assert.ok(/\$\d+\.\d\d/.test(card), 'a cost on the card: ' + card);
+    await hasText('[data-testid=project-dist]', 'platform-gitops');
+    await shot('06d-projects');
+    // Cost sorts the cards; the distribution can show cost
+    await click('[data-testid=psort-cost]');
+    await $('[data-testid=project-cards]');
+    await click('[data-testid=pmetric-cost]');
+    await $('[data-testid=project-dist]');
+    // open the project: Sessions shows only it, with its numbers in the header
+    await exec("[...document.querySelectorAll('[data-testid^=pcard-open-]')].find((a) => a.innerText.includes('platform-gitops')).click()");
+    await hasText('[data-testid=project-title]', 'platform-gitops');
+    await hasText('[data-testid=project-stats]', 'at list prices');
+    assert.ok(await exec("return [...document.querySelectorAll('.srow[data-search]')].every((r) => r.dataset.search.includes('platform-gitops'))"), 'only the project\'s sessions');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=rail] a.on[data-testid^=rail-]')"), 'the rail marks the project');
+    await shot('06e-project-sessions');
+    // pin it: the sidebar shows it under Projects; unpin takes it away
+    await click('.sesshead [data-act=project-menu]');
+    await exec("[...document.querySelectorAll('.menu a')].find((a) => a.textContent.startsWith('Pin')).click()");
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned in the sidebar');
+    assert.ok(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).pinned_projects.length === 1, 'saved in settings');
+    await click('.sesshead [data-act=project-menu]');
+    await exec("[...document.querySelectorAll('.menu a')].find((a) => a.textContent.startsWith('Unpin')).click()");
+    await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned');
+    // the rail's All projects brings every session back, and the Live now entry links to the live list
+    await click('[data-testid=rail-all]');
+    await hasText('#sheet h1', 'Sessions');
+    assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
   });
 
   await test('reading a session: steps, failed command, answer and changes', async () => {
@@ -491,6 +530,40 @@ try {
     await hasText('[data-testid=chat]', 'Another live line.');
     assert.equal(await exec("return document.getElementById('chat').scrollTop"), 100, 'not following: the place is kept');
     } finally { fs.rmSync(f, { force: true }); await nav('#sessions'); }
+  });
+
+  await test('tags: on a session and a project, grouped and filtered by tag, and seen by the CLI', async () => {
+    await nav('#sessions');
+    await $('[data-testid=session-s-main-1]');
+    // the + on the row opens the editor; Enter adds a tag; Save writes it and the row shows the chip
+    await click('[data-testid=session-s-main-1] .tagc.add');
+    await type('[data-testid=tag-new]', 'release\n');
+    await waitFor(async () => exec("return [...document.querySelectorAll('#tg-list input:checked')].map((i) => i.value).includes('release')"), 'release ticked');
+    await click('[data-testid=tag-save]');
+    await hasText('[data-testid=session-s-main-1]', 'release');
+    assert.ok(JSON.parse(hrm('tags', '--json')).some((t) => t.tag === 'release' && t.sessions === 1), 'the CLI lists it');
+    // Group by Tag: a release group and an untagged one; the chip filters to the tagged session
+    await click('[data-testid=group-tag]');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid=group] .gname')].map((e) => e.textContent.trim())")).join(',').includes('release'), 'a release group');
+    await hasText('#sheet', 'untagged');
+    // (the toast sits over the row at this window size, so the chip is clicked by script)
+    await exec("document.querySelector('[data-testid=session-s-main-1] .tags a.tagc').click()");
+    await $('[data-testid=chip-tag]');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) === 1, 'only the tagged session');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=rail-tag-release]')"), 'the rail lists the tag');
+    await shot('06f-sessions-tags');
+    // a project's tag reaches its sessions: tag platform-gitops from the Projects page, then filter by it
+    await nav('#projects');
+    await $('[data-testid=project-cards]');
+    await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('.tagc.add').click()");
+    await type('[data-testid=tag-new]', 'client-x\n');
+    await click('[data-testid=tag-save]');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).innerText")).includes('client-x'), 'the card shows it');
+    await nav('#sessions?tag=client-x');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) >= 2, 'every session of the project carries the project tag');
+    assert.ok(hrm('sessions', '--tag', 'client-x').includes('platform-gitops'), 'the CLI filters by tag too');
+    await click('[data-testid=chip-tag]');
+    await click('[data-testid=rail-all]');
   });
 
   await test('OpenCode and Antigravity sessions are listed and readable', async () => {
@@ -634,11 +707,12 @@ try {
       '#home': ['Overview', 'Live routes', 'Limit burn-down', 'When limits free up', 'Level', 'Time to first reply', 'Activity, 53 weeks', 'Where tokens went', 'Router and fleet events', 'Fleet health', 'Latest replies'],
       '#accounts': ['Accounts', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
+      '#projects': ['Projects', 'Where the tokens and the cost went'],
       '#sessions': ['Sessions', 'platform-gitops'],
       '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
       '#usage': ['Usage by account', 'Tokens per day, by account', 'Accounts', 'By model'],
       '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
-      '#mcp': ['MCP servers'], '#skills': ['Skills'], '#prompts': ['Prompts'],
+      '#mcp': ['MCP servers'], '#skills': ['Skills'], '#prompts': ['System prompts'],
       '#apps': ['Apps', 'Harness Manager'],
       '#settings': ['Settings', 'Appearance', 'Window and terminal', 'Updates', 'Usage and limits', 'Connections', 'Diagnostic log', 'Maintenance', 'Backups'],
       '#cli': ['CLI reference', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
@@ -772,6 +846,12 @@ try {
     await click('[data-testid=t-skill-my-skill-codex]');
     await waitFor(() => fs.existsSync(path.join(home, '.codex', 'skills', 'my-skill', 'SKILL.md')), 'skill linked into codex');
     await shot('12-skills');
+    // the column header: every skill shown, into OpenCode in one go, then out again
+    await click('[data-testid=skill-bulk-opencode]');
+    await waitFor(() => fs.existsSync(path.join(home, '.config', 'opencode', 'skills', 'my-skill', 'SKILL.md')), 'every skill linked into OpenCode');
+    await waitFor(async () => exec("return document.querySelector('[data-testid=t-skill-my-skill-opencode]').checked"), 'the row shows the tick');
+    await click('[data-testid=skill-bulk-opencode]');
+    await waitFor(() => !fs.existsSync(path.join(home, '.config', 'opencode', 'skills', 'my-skill', 'SKILL.md')), 'and unlinked again');
   });
 
   await test('skills: folders in the store that the list lacks show as Not managed, and Manage adds them', async () => {
@@ -824,8 +904,10 @@ try {
     await nav('#apps');
     await hasText('[data-testid=app-claude]', '2.1.300');
     await hasText('[data-testid=app-claude]', path.join(bin, 'claude.exe'));
-    // a tool outside npm: its version comes from --version
+    // a tool outside npm: its version comes from --version; how each was installed is read from where it sits
     await hasText('[data-testid=app-codex]', '1.0.0');
+    await hasText('[data-testid=app-kind-claude]', 'npm');
+    await hasText('[data-testid=app-kind-codex]', 'manual');
     await shot('16-apps');
     await click('[data-testid=app-update-claude]');
     await waitFor(() => readLines(termLog).some((t) => t.shell && t.shell.startsWith('npm install -g @anthropic-ai/claude-code@latest')), 'the npm update runs in a terminal');
@@ -899,7 +981,7 @@ try {
     await exec("document.querySelector('[data-testid=latency]').scrollIntoView()");
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
-    for (const [h, n] of [['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'], ['#account?name=claude-main', 'account'], ['#usage', 'usage'],
+    for (const [h, n] of [['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'], ['#account?name=claude-main', 'account'], ['#usage', 'usage'],
       ['#routing', 'routing'], ['#mcp', 'mcp'], ['#skills', 'skills'], ['#prompts', 'prompts'], ['#apps', 'apps'], ['#cli', 'cli']]) {
       const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);

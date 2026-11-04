@@ -62,7 +62,7 @@ signed by the release key.
 2. **Accounts → Add account:** name it, pick the tool and sign in. Claude accounts sign in inside the app.
 3. **Start** opens a terminal as that account. **Start in a folder** picks a project first.
 4. **Overview** shows the live routes, the limits and when they free up, and which account has the most room.
-5. **MCP servers**, **Skills** and **Prompts:** add something once and tick the tools it should reach.
+5. **MCP servers**, **Skills** and **System prompts:** add something once and tick the tools it should reach.
 
 Press `Ctrl K` to find an account, session or setting. The **?** button replays the page's tour.
 
@@ -77,13 +77,20 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   limit frees up, and an API-key account can have a daily spending cap.
 - **Usage:** tokens per account, day, model and project, with what they would cost at API prices, a heatmap,
   time to the first reply and a request log. Each account's own logs are read once and counted once.
-- **Sessions:** every tool's sessions in one place, grouped by project, date, account or tool. A reading
-  view shows the steps, failed commands, answers and changed files, and follows a running session live.
-  Resume reopens a session in its own account.
+- **Projects:** every folder your tools ran in, with its sessions, tokens and cost at API list prices, a
+  distribution of where the tokens and the cost went, and a card per project. Pin a project to the sidebar;
+  open one to see only its sessions.
+- **Sessions:** every tool's sessions in one place, grouped by project, date, account, tool or tag, with a
+  project rail beside the list and the running ones pinned at the top; the live count in the sidebar and the
+  top bar lead straight to them. Tag sessions and projects with your own labels. A reading view shows the
+  steps, failed commands, answers and changed files, and follows a running session live. Resume reopens a
+  session in its own account.
 - **MCP servers, skills and prompts, kept once:** each MCP server is written into every tool you tick.
   Skills live once in `~\.agents\skills` and are linked into each tool; Discover installs skills from
   GitHub repositories. A ledger records what Harness Manager wrote, so it only ever removes its own entries.
-- **Apps:** the installed and newest version of each tool, with install and update in one click.
+- **Apps:** every copy of each tool on this computer and how it was installed (the vendor's installer, npm,
+  winget, Homebrew, Scoop or Chocolatey), its version and the newest one from its vendor, and install, update
+  or remove a duplicate copy in a terminal you can watch.
 - **API keys and a local router:** API-key accounts keep their key in Windows Credential Manager, and only
   the launched process receives it. A local router on 127.0.0.1 sends routed accounts to providers, moves to
   the next one when a provider fails, and converts between the Anthropic Messages and OpenAI Chat Completions
@@ -118,7 +125,9 @@ hrm add work --email you@example.com       # a Claude Code account (signs in)
 hrm add codex-personal --harness codex
 hrm run work                               # Claude Code as that account, in this console
 hrm start work --cwd D:\Projects\my-app     # ... in a new terminal
-hrm sessions --group project
+hrm sessions --group project               # --open for the running ones, --project <key>, --tag <tag>
+hrm projects list --days 7                 # sessions, tokens and list-price cost per project
+hrm tag session work/<session id> release  # or: hrm tag project <key> client-x
 hrm usage --days 7 --json
 hrm mcp list; hrm skills list
 hrm help <command>
