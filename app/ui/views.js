@@ -13,7 +13,9 @@ const tagColor = (t) => 'c' + (Math.max(0, (S.cache.tags || []).findIndex((x) =>
 /** Tag chips for a session or project: each a link to that tag's list, plus + to edit when editable. */
 export function tagsHtml(tags, kind, key, name, editable = true) {
   // a chip has its own action, so a click on one inside a row's title does not open the session
-  return `<span class="tags">${(tags || []).map((t) => `<a class="tagc ${tagColor(t)}" href="${href('sessions', { tag: t })}" data-act="tag-go" data-tag="${esc(t)}" title="Sessions tagged ${esc(t)}">${esc(t)}</a>`).join('')}${editable ? `<button class="tagc add" data-act="tag-edit" data-kind="${kind}" data-key="${esc(key)}" data-name="${esc(name)}" data-tags="${esc(JSON.stringify(tags || []))}" title="Tags" aria-label="Tags of ${esc(name)}">+</button>` : ''}</span>`;
+  const all = tags || [], shown = all.slice(0, 2), more = all.slice(2);
+  const chip = (t) => `<a class="tagc ${tagColor(t)}" href="${href('sessions', { tag: t })}" data-act="tag-go" data-tag="${esc(t)}" title="Sessions tagged ${esc(t)}">${esc(t)}</a>`;
+  return `<span class="tags">${editable ? `<button class="ib tagb" data-act="tag-edit" data-kind="${kind}" data-key="${esc(key)}" data-name="${esc(name)}" data-tags="${esc(JSON.stringify(all))}" title="${all.length ? `${all.length} ${all.length === 1 ? 'tag' : 'tags'}: ${esc(all.join(', '))}` : 'Add a tag'}" aria-label="Tags of ${esc(name)}">${ic.tag}${all.length ? `<small>${all.length}</small>` : ''}</button>` : ''}${shown.map(chip).join('')}${more.length ? `<span class="tagc more" title="${esc(more.join(', '))}">+${more.length}</span>` : ''}</span>`;
 }
 action('tag-go', (el) => go('sessions', { tag: el.dataset.tag }));
 action('tag-edit', async (el) => {
@@ -41,7 +43,8 @@ action('tag-edit', async (el) => {
     if (input.value.trim()) input.onkeydown({ key: 'Enter', preventDefault() {} });
     const tags = [...list.querySelectorAll('input:checked')].map((i) => i.value);
     closeDialog();
-    await mutate(() => call('tag_set', { kind, key, tags }), tags.length ? `Tagged ${tags.join(', ')}` : 'Tags cleared');
+    if (!(await attempt(() => call('tag_set', { kind, key, tags }), tags.length ? `Tagged ${tags.join(', ')}` : 'Tags cleared'))) return;
+    if (S.route.view === 'projects') refreshProjects(); else changed();
   };
 });
 
@@ -90,19 +93,31 @@ view('sessions', async (sheet, params) => {
       <a href="#projects" class="all"><span class="acT">Every project, with costs →</span></a>
       ${tlist.length ? `<div class="sec">Tags</div>${tlist.map(tagItem).join('')}` : ''}</aside>`;
   const head = cur
-    ? `<div class="trow sesshead"><div><a href="#projects" class="crumb acT">← Projects</a><h1 data-testid="project-title">${esc(cur.name)} ${tagsHtml(cur.tags, 'project', cur.key, cur.name)}</h1><p class="find mono">${esc(cur.remote || cur.root || '')}</p>
+    ? `<div class="trow sesshead"><div><a href="#projects" class="crumb acT">← Projects</a><h1 data-testid="project-title">${nameEl(cur, true)}<button class="ib edit" data-act="project-rename" data-key="${esc(cur.key)}" title="Rename (or double-click the name)" aria-label="Rename ${esc(cur.name)}">${ic.edit}</button>${pinBtn(cur)}${tagsHtml(cur.tags, 'project', cur.key, cur.name)}</h1><p class="find mono">${esc(cur.remote || cur.root || '')}</p>
         <div class="pstats" data-testid="project-stats"><span><b>${money(cur.cost)}</b> at list prices</span><span><b>${fmt(cur.tokens)}</b> tokens</span><span><b>${cur.sessions}</b> ${cur.sessions === 1 ? 'session' : 'sessions'}</span><span><b>${(cur.accounts || []).length}</b> ${(cur.accounts || []).length === 1 ? 'account' : 'accounts'}</span>${cur.live ? `<span class="acT"><b>${cur.live}</b> running</span>` : ''}</div></div>
       <div class="acts"><button class="iconbtn sq" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge">${ic.dots}</button>
         ${cur.root ? `<button class="btn primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}</div></div>`
     : `<div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${running.length ? ` <b>${running.length} running now</b>: open one to follow it live.` : ''}</p></div>
       <div class="acts"><span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
       <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>`;
+  // a project's view has no rail of other projects: its own accounts and tags are chips in the bar, and a panel
+  // about the project appears only when it spans several folders or accounts
+  const folders = cur ? [...new Set(all.map((s) => s.cwd).filter(Boolean))] : [];
+  const accts = cur ? (cur.accounts && cur.accounts.length ? cur.accounts : [...new Set(all.map((s) => s.profile))]) : [];
+  const ptags = cur ? [...new Set([...(cur.tags || []), ...all.flatMap((s) => s.tags || [])])] : [];
+  const about = cur && (folders.length > 1 || accts.length > 1) ? `<aside class="panel about" data-testid="project-about">
+      <div class="sec">This project</div><div class="kv mono"><b>${money(cur.cost)}</b><span>at list prices</span><b>${fmt(cur.tokens)}</b><span>tokens</span><b>${cur.sessions}</b><span>${cur.sessions === 1 ? 'session' : 'sessions'}</span></div>
+      ${cur.series && cur.series.some((v) => v) ? `<div class="sec">${days === 'all' ? 'Activity' : days + ' days'}</div>${area(cur.series)}` : ''}
+      ${running.length ? `<div class="sec">Running</div>${running.map((s) => `<a class="arun" href="#session?profile=${encodeURIComponent(s.profile)}&id=${encodeURIComponent(s.id)}"><i class="dot live"></i><span>${esc(s.title || 'Untitled session')}</span></a>`).join('')}` : ''}
+      ${accts.length > 1 ? `<div class="sec">Accounts</div>${accts.map((a) => { const n = all.filter((s) => s.profile === a).length; return `<div class="arow"><span>${esc(acctName(a))}</span><span class="mono muted">${n}${all.length ? ' · ' + Math.round((n / all.length) * 100) + '%' : ''}</span></div>`; }).join('')}` : ''}
+      ${folders.length > 1 ? `<div class="sec">Folders</div>${folders.slice(0, 6).map((f) => `<div class="mono afold" title="${esc(f)}">${esc(f)}</div>`).join('')}${folders.length > 6 ? `<div class="muted sm">${folders.length - 6} more</div>` : ''}` : ''}</aside>` : '';
+  const chips = cur ? `${accts.length > 1 ? `<span class="lbl">Accounts</span><span class="seg3">${[['', 'All'], ...accts.map((a) => [a, acctName(a)])].map(([v, l]) => `<a class="${(params.profile || '') === v ? 'on' : ''}" data-act="s-set" data-k="profile" data-v="${esc(v)}" data-testid="pacct-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}${ptags.length ? `<span class="lbl">Tags</span><span class="seg3">${[['', 'All'], ...ptags.map((t) => [t, t])].map(([v, l]) => `<a class="${tag === v ? 'on' : ''}" data-act="s-set" data-k="tag" data-v="${esc(v)}">${esc(l)}</a>`).join('')}</span>` : ''}` : '';
   sheet.innerHTML = `${head}
-    <div class="swrap">${rail}<div class="smain">
-    <div class="fbar sbar">${live ? `<a class="chip on" data-act="s-set" data-k="live" data-v="" role="button" tabindex="0" data-testid="chip-live">Running now ✕</a>` : ''}${tag ? `<a class="chip on" data-act="s-set" data-k="tag" data-v="" role="button" tabindex="0" data-testid="chip-tag"><span class="tagc ${tagColor(tag)}">${esc(tag)}</span> ✕</a>` : ''}${q ? `<a class="chip on" data-act="s-set" data-k="q" data-v="" role="button" tabindex="0">“${esc(q)}” ✕</a>` : ''}
+    <div class="swrap ${cur ? 'pv' : ''} ${about ? 'with' : ''}">${cur ? about : rail}<div class="smain">
+    <div class="fbar sbar">${live ? `<a class="chip on" data-act="s-set" data-k="live" data-v="" role="button" tabindex="0" data-testid="chip-live">Running now ✕</a>` : ''}${tag && !cur ? `<a class="chip on" data-act="s-set" data-k="tag" data-v="" role="button" tabindex="0" data-testid="chip-tag"><span class="tagc ${tagColor(tag)}">${esc(tag)}</span> ✕</a>` : ''}${q ? `<a class="chip on" data-act="s-set" data-k="q" data-v="" role="button" tabindex="0">“${esc(q)}” ✕</a>` : ''}
       <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')).map(([k, l]) => `<a class="${group === k ? 'on' : ''}" data-act="s-set" data-k="group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
       <span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="s-set" data-k="days" data-v="${v}" data-testid="days-${v}">${l}</a>`).join('')}</span>
-      <span class="muted sm">Search above narrows this list</span></div>
+      ${chips}<span class="muted sm">Search above narrows this list</span></div>
     ${running.length && !live ? grp({ name: 'Running now', sessions: running, tokens: running.reduce((a, s) => a + s.tokens, 0) }, 'live', 'livegrp') : ''}
     ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length ? '' : '<p class="empty">No sessions match.</p>'}</div></div>`;
   // the top bar's search narrows the rows on the page; a group with no row left folds away
@@ -121,50 +136,161 @@ action('rail-more', () => { railMore = true; render(); });
 action('go-live', () => go('sessions', { live: '1' }));
 action('project-pin', (el) => mutate(() => call('project_pin', { key: el.dataset.key, on: el.dataset.on === '1' }), el.dataset.on === '1' ? 'Pinned to the sidebar' : 'Unpinned'));
 
-// ---------- projects: every project with its tokens, cost, sessions and activity ----------
+// ---------- projects: every project as a row card, with its tokens, cost, sessions and activity ----------
+// the page's state is in the hash (#projects?days=30&sort=cost&metric=cost&per=25&page=2); a choice redraws only
+// the part it changes, through replaceState, so nothing else on the page moves
 const SH = ['var(--ac)', 'var(--h3)', 'var(--h2)', 'var(--h1)', 'var(--iris)', 'var(--sand)'];
-view('projects', async (sheet, params) => {
-  const days = params.days || '7', sort = params.sort || 'active', metric = params.metric || 'tokens';
-  sheet.className = 'sheet';
-  sheet.innerHTML = `<h1>Projects</h1><p class="find">Reading projects…</p>`;
-  const [list, tlist] = await Promise.all([call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => [])]);
-  S.cache.tags = tlist;
+const pj = { list: null, fetched: '', days: '7', sort: 'active', metric: 'tokens', per: 10, page: 0, tiles: {} };
+const pjHash = () => history.replaceState(null, '', href('projects', { days: pj.days === '7' ? '' : pj.days, sort: pj.sort === 'active' ? '' : pj.sort, metric: pj.metric === 'tokens' ? '' : pj.metric, per: pj.per === 10 ? '' : String(pj.per), page: pj.page ? String(pj.page) : '' }));
+async function fetchProjects() {
+  const [list, tl] = await Promise.all([call('projects', { days: pj.days === 'all' ? null : +pj.days }), call('tag_list').catch(() => [])]);
+  pj.list = list; pj.fetched = pj.days; S.cache.tags = tl;
   drawPins(list);
-  const tokens = list.reduce((a, p) => a + p.tokens, 0), sessions = list.reduce((a, p) => a + p.sessions, 0), live = list.reduce((a, p) => a + p.live, 0);
+}
+const area = (s) => {
+  const w = 300, h = 44, m = Math.max(1, ...s), n = Math.max(2, s.length);
+  const pts = s.map((v, i) => [i * (w / (n - 1)), h - 4 - (v / m) * (h - 8)]);
+  const d = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' ');
+  return `<svg class="area" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d} L${pts[pts.length - 1][0].toFixed(1)} ${h} L0 ${h}Z" fill="var(--ac-soft)"/><path d="${d}" fill="none" stroke="var(--ac)" stroke-width="1.5" vector-effect="non-scaling-stroke"/><circle cx="${pts[pts.length - 1][0].toFixed(1)}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="2.5" fill="var(--ac)"/></svg>`;
+};
+const pinBtn = (p) => `<button class="ib pin ${p.pinned ? 'on' : ''}" data-act="project-pin" data-key="${esc(p.key)}" data-on="${p.pinned ? '' : '1'}" title="${p.pinned ? 'Pinned to the sidebar: click to unpin' : 'Pin to the sidebar'}" aria-label="${p.pinned ? 'Unpin' : 'Pin'} ${esc(p.name)}" data-testid="pin-${esc(p.key)}">${ic.pin}</button>`;
+const editBtn = (p) => `<button class="ib edit" data-act="project-rename" data-key="${esc(p.key)}" title="Rename (or double-click the name)" aria-label="Rename ${esc(p.name)}" data-testid="rename-${esc(p.key)}">${ic.edit}</button>`;
+/** The name of a project, renamed in place by the pencil or a double-click. */
+export const nameEl = (p, big) => `<span class="pname ${big ? 'big' : ''}" data-name="${esc(p.key)}" title="Double-click to rename">${esc(p.name)}</span>`;
+
+view('projects', async (sheet, params) => {
+  pj.days = params.days || '7'; pj.sort = params.sort || 'active'; pj.metric = params.metric || 'tokens'; pj.per = +params.per || 10; pj.page = +params.page || 0;
+  sheet.className = 'sheet';
+  if (!pj.list || pj.fetched !== pj.days) {
+    if (!sheet.querySelector('#pj-rows')) sheet.innerHTML = `<h1>Projects</h1><p class="find">Reading projects…</p>`;
+    await fetchProjects();
+  }
+  sheet.innerHTML = `<div class="trow"><div><h1>Projects</h1><p class="find">${pj.list.length} ${pj.list.length === 1 ? 'project' : 'projects'} ran in ${pj.days === 'all' ? 'all time' : 'the last ' + pj.days + ' days'}. A project is a folder your tools ran in: click one for its sessions; pin, tag or rename it from its icons. Cost is at API list prices.</p></div>
+      <div class="acts"><span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${pj.days === v ? 'on' : ''} mono" data-act="p-set" data-k="days" data-v="${v}" data-testid="pdays-${v}">${l}</a>`).join('')}</span>
+        <span class="seg3" id="pj-sort"></span></div></div>
+    <section class="ovkpis acctk" id="pj-tiles" data-testid="project-tiles"></section>
+    <div id="pj-dist"></div>
+    <div class="pcrows" id="pj-rows" data-testid="project-cards"></div>
+    <div class="pager" id="pj-pager"></div>`;
+  drawTiles(); drawDist(); drawRows();
+});
+
+/** The five tiles; a number that changed since the last draw flashes once. */
+function drawTiles() {
+  const el = document.getElementById('pj-tiles'); if (!el) return;
+  const list = pj.list, tokens = list.reduce((a, p) => a + p.tokens, 0), sessions = list.reduce((a, p) => a + p.sessions, 0), live = list.reduce((a, p) => a + p.live, 0);
   const priced = list.filter((p) => p.cost != null), cost = priced.length ? priced.reduce((a, p) => a + p.cost, 0) : null;
-  const nDays = days === 'all' ? Math.max(1, ...list.map((p) => p.series.length)) : +days;
+  const nDays = pj.days === 'all' ? Math.max(1, ...list.map((p) => p.series.length)) : +pj.days;
   const busiest = [...list].sort((a, b) => b.tokens - a.tokens)[0];
+  const t = { tokens: fmt(tokens), sessions: `${sessions} ${sessions === 1 ? 'session' : 'sessions'}`, cost: money(cost), day: cost != null ? money(cost / nDays) + ' a day' : 'no priced model yet', n: String(list.length), accounts: `${[...new Set(list.flatMap((p) => p.accounts))].length} accounts`, live: String(live), livenote: live ? list.filter((p) => p.live).map((p) => p.name).join(', ') : 'nothing running', busy: busiest ? busiest.name : '—', busynote: busiest && tokens ? Math.round((busiest.tokens / tokens) * 100) + '% of tokens' + (busiest.cost != null && cost ? ' · ' + Math.round((busiest.cost / cost) * 100) + '% of cost' : '') : '' };
+  const was = pj.tiles, flash = (k) => (was[k] !== undefined && was[k] !== t[k] ? 'flash' : '');
+  pj.tiles = t;
+  el.innerHTML = `<div class="ovk"><div class="kl"><span>Tokens · ${pj.days === 'all' ? 'all time' : pj.days + ' days'}</span></div><strong class="${flash('tokens')}">${t.tokens}</strong><div class="kn">${t.sessions}</div></div>
+    <div class="ovk"><div class="kl"><span>At list prices</span></div><strong class="${flash('cost')}">${t.cost}</strong><div class="kn">${t.day}</div></div>
+    <div class="ovk"><div class="kl"><span>Projects</span></div><strong class="${flash('n')}">${t.n}</strong><div class="kn">${t.accounts}</div></div>
+    <div class="ovk ${live ? 'click' : ''}" ${live ? 'data-href="#sessions?live=1"' : ''}><div class="kl"><span>Running now</span></div><strong class="${live ? 'acT' : ''} ${flash('live')}">${t.live}</strong><div class="kn" title="${esc(t.livenote)}">${esc(t.livenote)}</div></div>
+    <div class="ovk"><div class="kl"><span>Busiest</span></div><strong style="font-size:20px" class="${flash('busy')}">${esc(t.busy)}</strong><div class="kn">${esc(t.busynote)}</div></div>`;
+}
+
+/** The distribution: a stacked bar and the top five rows, by tokens, cost or sessions; the tabs redraw only this. */
+function drawDist() {
+  const el = document.getElementById('pj-dist'); if (!el) return;
+  const list = pj.list, metric = pj.metric;
+  if (!list.length) { el.innerHTML = ''; return; }
   const val = (p) => (metric === 'cost' ? p.cost || 0 : metric === 'sessions' ? p.sessions : p.tokens);
   const total = list.reduce((a, p) => a + val(p), 0) || 1;
   const top = [...list].sort((a, b) => val(b) - val(a)), head5 = top.slice(0, 5), others = top.slice(5);
-  const otherVal = others.reduce((a, p) => a + val(p), 0);
-  const show = (p) => (metric === 'cost' ? money(p.cost) : metric === 'sessions' ? p.sessions : fmt(p.tokens));
-  const sorted = [...list].sort((a, b) => sort === 'cost' ? (b.cost || 0) - (a.cost || 0) : sort === 'tokens' ? b.tokens - a.tokens : sort === 'name' ? a.name.localeCompare(b.name) : b.last_active_at - a.last_active_at);
-  const spark = (s) => { const m = Math.max(1, ...s); return `<div class="spark" aria-hidden="true">${s.slice(-14).map((v, i, arr) => `<i style="height:${Math.round((v / m) * 100)}%" class="${i === arr.length - 1 ? 'last' : ''}"></i>`).join('')}</div>`; };
-  const card = (p) => `<div class="panel pcard ${p.live ? 'live' : ''}" data-testid="pcard-${esc(p.key)}"><div class="ph"><a class="pname" href="${href('sessions', { project: p.key })}" data-testid="pcard-open-${esc(p.key)}"><b>${esc(p.name)}</b></a>${tagsHtml(p.tags, 'project', p.key, p.name)}${p.pinned ? '<span class="pill mono">pinned</span>' : ''}<button class="iconbtn sq" data-act="project-menu" data-key="${esc(p.key)}" data-name="${esc(p.name)}" data-root="${esc(p.root)}" data-pinned="${p.pinned ? 1 : ''}" aria-label="More for ${esc(p.name)}">${ic.dots}</button></div>
-      <span class="path mono" title="${esc(p.remote || p.root)}">${esc(p.remote || p.root)}</span>${spark(p.series)}
-      <div class="cost"><b>${money(p.cost)}</b><small>${fmt(p.tokens)} tokens${p.cost != null && p.priced_share < 0.95 ? ' · ' + Math.round(p.priced_share * 100) + '% priced' : ''}</small></div>
-      <div class="row mono"><span>${p.sessions} ${p.sessions === 1 ? 'session' : 'sessions'} · ${p.accounts.length} ${p.accounts.length === 1 ? 'account' : 'accounts'}</span><span class="${p.live ? 'acT' : ''}">${p.live ? p.live + ' live' : esc(when(p.last_active_at))}</span></div></div>`;
-  sheet.innerHTML = `<div class="trow"><div><h1>Projects</h1><p class="find">${list.length} ${list.length === 1 ? 'project' : 'projects'} ran in ${days === 'all' ? 'all time' : 'the last ' + days + ' days'}. A project is a folder your tools ran in; open, pin, rename or merge it from its card. Cost is at API list prices.</p></div>
-      <div class="acts"><span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="p-set" data-k="days" data-v="${v}" data-testid="pdays-${v}">${l}</a>`).join('')}</span>
-        <span class="seg3">${[['active', 'Active'], ['cost', 'Cost'], ['tokens', 'Tokens'], ['name', 'Name']].map(([v, l]) => `<a class="${sort === v ? 'on' : ''}" data-act="p-set" data-k="sort" data-v="${v}" data-testid="psort-${v}">${l}</a>`).join('')}</span></div></div>
-    <section class="ovkpis acctk" data-testid="project-tiles">
-      <div class="ovk"><div class="kl"><span>Tokens · ${days === 'all' ? 'all time' : days + ' days'}</span></div><strong>${fmt(tokens)}</strong><div class="kn">${sessions} ${sessions === 1 ? 'session' : 'sessions'}</div></div>
-      <div class="ovk"><div class="kl"><span>At list prices</span></div><strong>${money(cost)}</strong><div class="kn">${cost != null ? money(cost / nDays) + ' a day' : 'no priced model yet'}</div></div>
-      <div class="ovk"><div class="kl"><span>Projects</span></div><strong>${list.length}</strong><div class="kn">${[...new Set(list.flatMap((p) => p.accounts))].length} accounts</div></div>
-      <div class="ovk ${live ? 'click' : ''}" ${live ? 'data-href="#sessions?live=1"' : ''}><div class="kl"><span>Running now</span></div><strong class="${live ? 'acT' : ''}">${live}</strong><div class="kn">${live ? esc(list.filter((p) => p.live).map((p) => p.name).join(', ')) : 'nothing running'}</div></div>
-      <div class="ovk"><div class="kl"><span>Busiest</span></div><strong style="font-size:20px">${busiest ? esc(busiest.name) : '—'}</strong><div class="kn">${busiest && tokens ? Math.round((busiest.tokens / tokens) * 100) + '% of tokens' + (busiest.cost != null && cost ? ' · ' + Math.round((busiest.cost / cost) * 100) + '% of cost' : '') : ''}</div></div></section>
-    ${list.length ? `<section class="panel" data-testid="project-dist"><div class="ph"><h2>Where the tokens and the cost went</h2><span class="seg3">${[['tokens', 'Tokens'], ['cost', 'Cost'], ['sessions', 'Sessions']].map(([v, l]) => `<a class="${metric === v ? 'on' : ''}" data-act="p-set" data-k="metric" data-v="${v}" data-testid="pmetric-${v}">${l}</a>`).join('')}</span></div>
-      <div class="stackbar" aria-hidden="true">${head5.map((p, i) => `<i style="width:${(val(p) / total) * 100}%;background:${SH[i]}" title="${esc(p.name)}"></i>`).join('')}${otherVal ? `<i style="width:${(otherVal / total) * 100}%;background:var(--track)"></i>` : ''}</div>
-      ${head5.map((p, i) => `<div class="drow"><span class="sw" style="background:${SH[i]}"></span><a class="nm" href="${href('sessions', { project: p.key })}">${esc(p.name)}</a><div class="bar"><i style="width:${(val(p) / total) * 100}%"></i></div><span class="num mono">${show(p)}</span><span class="num mono">${fmt(p.tokens)}</span><span class="num mono">${money(p.cost)}</span><span class="m mono">${p.sessions} sess</span></div>`).join('')}
-      ${others.length ? `<div class="drow"><span class="sw" style="background:var(--track)"></span><span class="nm muted">${others.length} other ${others.length === 1 ? 'project' : 'projects'}</span><div class="bar"><i style="width:${(otherVal / total) * 100}%;background:var(--track)"></i></div><span class="num mono">${metric === 'cost' ? money(others.some((p) => p.cost != null) ? others.reduce((a, p) => a + (p.cost || 0), 0) : null) : metric === 'sessions' ? otherVal : fmt(otherVal)}</span><span class="num mono">${fmt(others.reduce((a, p) => a + p.tokens, 0))}</span><span class="num mono">${money(others.some((p) => p.cost != null) ? others.reduce((a, p) => a + (p.cost || 0), 0) : null)}</span><span class="m mono">${others.reduce((a, p) => a + p.sessions, 0)} sess</span></div>` : ''}</section>
-    <div class="pcards" data-testid="project-cards">${sorted.map(card).join('')}</div>` : '<p class="empty">No sessions in this range yet.</p>'}`;
+  const oVal = others.reduce((a, p) => a + val(p), 0), oCost = others.some((p) => p.cost != null) ? others.reduce((a, p) => a + (p.cost || 0), 0) : null;
+  const on = (k) => (metric === k ? 'on' : '');
+  const row = (name, key, v, cost, tokens, sessions, color, i) => `<div class="prow"><span class="sw" style="background:${color}"></span>${key ? `<a class="nm" href="${href('sessions', { project: key })}">${esc(name)}</a>` : `<span class="nm muted">${esc(name)}</span>`}<div class="track"><i style="width:${(v / total) * 100}%;${i === 'o' ? 'background:var(--ctl)' : ''}"></i></div><span class="num ${on('cost')}">${money(cost)}</span><span class="num ${on('tokens')}">${fmt(tokens)}</span><span class="num ${on('sessions')}">${sessions}</span><span class="m">${Math.round((v / total) * 100)}%</span></div>`;
+  el.innerHTML = `<section class="panel" data-testid="project-dist"><div class="ph"><h2>Where the tokens and the cost went</h2><span class="seg3">${[['tokens', 'Tokens'], ['cost', 'Cost'], ['sessions', 'Sessions']].map(([v, l]) => `<a class="${on(v)}" data-act="p-set" data-k="metric" data-v="${v}" data-testid="pmetric-${v}">${l}</a>`).join('')}</span></div>
+    <div class="stackbar" aria-hidden="true">${head5.map((p, i) => `<i style="width:${(val(p) / total) * 100}%;background:${SH[i]}" title="${esc(p.name)}"></i>`).join('')}${oVal ? `<i style="width:${(oVal / total) * 100}%;background:var(--ctl)"></i>` : ''}</div>
+    <div class="prow head"><span></span><span>Project</span><span>Share of ${metric}</span><span class="num ${on('cost')}">Cost</span><span class="num ${on('tokens')}">Tokens</span><span class="num ${on('sessions')}">Sessions</span><span class="m">Share</span></div>
+    ${head5.map((p, i) => row(p.name, p.key, val(p), p.cost, p.tokens, p.sessions, SH[i], i)).join('')}
+    ${others.length ? row(`${others.length} other ${others.length === 1 ? 'project' : 'projects'}`, '', oVal, oCost, others.reduce((a, p) => a + p.tokens, 0), others.reduce((a, p) => a + p.sessions, 0), 'var(--ctl)', 'o') : ''}</section>`;
+}
+
+/** The rows of the current page, sorted; the sort and the pager redraw only this. */
+function drawRows() {
+  const el = document.getElementById('pj-rows'), pager = document.getElementById('pj-pager'), sortEl = document.getElementById('pj-sort');
+  if (!el) return;
+  const list = pj.list;
+  if (sortEl) sortEl.innerHTML = [['active', 'Active'], ['cost', 'Cost'], ['tokens', 'Tokens'], ['name', 'Name']].map(([v, l]) => `<a class="${pj.sort === v ? 'on' : ''}" data-act="p-set" data-k="sort" data-v="${v}" data-testid="psort-${v}">${l}</a>`).join('');
+  const sorted = [...list].sort((a, b) => pj.sort === 'cost' ? (b.cost || 0) - (a.cost || 0) : pj.sort === 'tokens' ? b.tokens - a.tokens : pj.sort === 'name' ? a.name.localeCompare(b.name) : b.last_active_at - a.last_active_at);
+  const pages = Math.max(1, Math.ceil(sorted.length / pj.per));
+  if (pj.page >= pages) pj.page = pages - 1;
+  const shown = sorted.slice(pj.page * pj.per, pj.page * pj.per + pj.per);
+  el.innerHTML = shown.map((p) => `<div class="panel pcrow ${p.live ? 'running' : ''}" data-act="project-open" data-key="${esc(p.key)}" role="link" tabindex="0" data-testid="pcard-${esc(p.key)}">
+      <div class="who"><div class="hd">${nameEl(p)}${editBtn(p)}</div><span class="path mono" title="${esc(p.remote || p.root)}">${esc(p.remote || p.root)}</span><div class="hd">${tagsHtml(p.tags, 'project', p.key, p.name)}</div></div>
+      ${area(p.series)}
+      <div class="num"><b>${money(p.cost)}</b><small>${fmt(p.tokens)} tokens${p.cost != null && p.priced_share < 0.95 ? ' · ' + Math.round(p.priced_share * 100) + '% priced' : ''}</small></div>
+      <div class="meta">${p.sessions} ${p.sessions === 1 ? 'session' : 'sessions'} · ${p.accounts.length} ${p.accounts.length === 1 ? 'account' : 'accounts'}<br><span class="${p.live ? 'acT' : ''}">${p.live ? p.live + ' live' : esc(when(p.last_active_at))}</span></div>
+      <div class="pacts">${pinBtn(p)}${p.root ? `<button class="ib" data-act="project-new" data-dir="${esc(p.root)}" data-name="${esc(p.name)}" data-profile="" title="New session here" aria-label="New session in ${esc(p.name)}">${ic.play}</button>` : ''}<button class="ib" data-act="project-menu" data-key="${esc(p.key)}" data-name="${esc(p.name)}" data-root="${esc(p.root)}" data-pinned="${p.pinned ? 1 : ''}" aria-label="More for ${esc(p.name)}">${ic.dots}</button></div></div>`).join('') || '<p class="empty">No sessions in this range yet.</p>';
+  if (pager) pager.innerHTML = sorted.length > 10 ? `<button class="btn sm" data-act="p-set" data-k="page" data-v="${Math.max(0, pj.page - 1)}" ${pj.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === pj.page ? 'on' : ''}" data-act="p-set" data-k="page" data-v="${i}" data-testid="ppage-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="p-set" data-k="page" data-v="${Math.min(pages - 1, pj.page + 1)}" ${pj.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
+      <span class="help">${pj.page * pj.per + 1}–${Math.min(sorted.length, (pj.page + 1) * pj.per)} of ${sorted.length}</span><span class="seg3 mono">${[10, 25, 50].map((n) => `<a class="${pj.per === n ? 'on' : ''}" data-act="p-set" data-k="per" data-v="${n}" data-testid="pper-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>` : '';
+}
+
+/** Called by the background refresh: new numbers in place, nothing else moves. */
+export async function refreshProjects() {
+  if (S.route.view !== 'projects' || !pj.list) return;
+  await fetchProjects().catch(() => {});
+  drawTiles(); drawDist(); drawRows();
+}
+
+action('p-set', async (el) => {
+  const k = el.dataset.k, v = el.dataset.v;
+  if (k === 'days') { pj.days = v; pjHash(); await fetchProjects(); pj.page = 0; drawTiles(); drawDist(); drawRows(); return; }
+  if (k === 'metric') { pj.metric = v; pjHash(); drawDist(); return; }
+  if (k === 'per') { pj.per = +v; pj.page = 0; } else if (k === 'page') pj.page = +v; else pj.sort = v;
+  pjHash(); drawRows();
 });
-action('p-set', (el) => go('projects', clean({ ...S.route.params, [el.dataset.k]: el.dataset.v })));
+let openTimer;
+action('project-open', (el, e) => {
+  if (e.target.closest('input')) return;
+  clearTimeout(openTimer);
+  // a click on the name may be the first half of a double-click (rename): it opens only when no second click comes
+  if (e.target.closest('[data-name]')) openTimer = setTimeout(() => go('sessions', { project: el.dataset.key }), 280);
+  else go('sessions', { project: el.dataset.key });
+});
+// the pin: the icon, the row's menu and the sidebar change; the page does not redraw
+action('project-pin', async (el) => {
+  const on = el.dataset.on === '1';
+  if (!(await attempt(() => call('project_pin', { key: el.dataset.key, on }), on ? 'Pinned to the sidebar' : 'Unpinned'))) return;
+  const p = (pj.list || []).find((x) => x.key === el.dataset.key);
+  if (p) p.pinned = on;
+  if (S.route.view === 'projects') { drawRows(); drawPins(pj.list); return; }
+  // elsewhere (a project's Sessions header): the icon flips and the sidebar follows, nothing else moves
+  el.classList.toggle('on', on); el.dataset.on = on ? '' : '1'; el.title = on ? 'Pinned to the sidebar: click to unpin' : 'Pin to the sidebar';
+  call('projects', { days: 30 }).then(drawPins).catch(() => {});
+});
+/** Rename a project where its name is: the pencil, a double-click, or the menu. Enter saves, Esc cancels. */
+export function renameProject(key) {
+  const el = document.querySelector(`[data-name="${CSS.escape(key)}"]`);
+  if (!el || el.querySelector('input')) return;
+  const old = el.textContent;
+  el.innerHTML = `<input value="${esc(old)}" aria-label="Project name" maxlength="80" data-testid="rename-input">`;
+  const inp = el.querySelector('input');
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    const name = inp.value.trim();
+    el.textContent = save && name ? name : old;
+    if (!save || !name || name === old) return;
+    if (!(await attempt(() => call('project_alias', { key, name }), `Renamed to ${name}`))) { el.textContent = old; return; }
+    for (const p of pj.list || []) if (p.key === key) p.name = name;
+    if (pj.list) drawPins(pj.list);
+  };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+  inp.addEventListener('blur', () => finish(true));
+  inp.addEventListener('click', (e) => e.stopPropagation());
+}
+action('project-rename', (el) => renameProject(el.dataset.key));
+document.addEventListener('dblclick', (e) => { const n = e.target.closest('[data-name]'); if (n && !n.querySelector('input')) { clearTimeout(openTimer); e.preventDefault(); renameProject(n.dataset.name); } });
 action('project-menu', (el) => openMenu(el, [
   ...(S.route.view !== 'sessions' || S.route.params.project !== el.dataset.key ? [{ label: 'Open its sessions', run: () => go('sessions', { project: el.dataset.key }) }] : []),
-  { label: el.dataset.pinned ? 'Unpin from the sidebar' : 'Pin to the sidebar', run: () => mutate(() => call('project_pin', { key: el.dataset.key, on: !el.dataset.pinned }), el.dataset.pinned ? 'Unpinned' : 'Pinned to the sidebar') },
-  { label: 'Rename project', run: () => projectDialog(el.dataset.key, el.dataset.name, 'rename') },
+  { label: el.dataset.pinned ? 'Unpin from the sidebar' : 'Pin to the sidebar', run: async () => { if (await attempt(() => call('project_pin', { key: el.dataset.key, on: !el.dataset.pinned }), el.dataset.pinned ? 'Unpinned' : 'Pinned to the sidebar')) { if (S.route.view === 'projects') refreshProjects(); else changed(); } } },
+  { label: 'Rename project', run: () => (document.querySelector(`[data-name="${CSS.escape(el.dataset.key)}"]`) ? renameProject(el.dataset.key) : projectDialog(el.dataset.key, el.dataset.name, 'rename')) },
   { label: 'Merge into another project', run: () => projectDialog(el.dataset.key, el.dataset.name, 'merge') },
   { label: 'Reset name', run: () => mutate(() => call('project_alias', { key: el.dataset.key }), 'Reset') },
 ]));
@@ -297,12 +423,9 @@ const sFold = new Set();
 action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); render(); });
 
 // ---------- usage ----------
-let usageDays = 7;
-// one colour per account, in the brand's order
-const SERIES = ['var(--ac)', 'var(--iris)', '#5b6fb8', 'var(--sand)', 'var(--h3)', '#c084fc', '#94a3b8', '#f472b6'];
 
 /** Tokens per day, each day's bar split by account. */
-function stacked(days, series, w = 900) {
+export function stacked(days, series, w = 900) {
   const h = 200, padB = 22, n = days.length, gap = Math.max(4, Math.min(14, Math.round((w / n) * 0.18))), bw = (w - gap * (n - 1)) / n;
   const tot = days.map((_, i) => series.reduce((a, x) => a + x.vals[i], 0)), max = Math.max(1, ...tot);
   let svg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;max-width:100%" role="img" aria-label="Tokens per day, by account" data-testid="usage-chart">`;
@@ -322,35 +445,8 @@ function stacked(days, series, w = 900) {
   return svg + '</svg>';
 }
 
-view('usage', async (sheet) => {
-  sheet.className = 'sheet';
-  const u = await call('usage', { days: usageDays });
-  const s = u.summary;
-  const tool = (h) => ({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' }[h] || h);
-  const order = u.accounts.map((b) => b.key).concat(Object.keys(s.by_profile).filter((k) => !u.accounts.some((b) => b.key === k)));
-  const color = (k) => SERIES[order.indexOf(k) % SERIES.length];
-  const series = order.filter((k) => s.by_profile[k]).map((k) => ({ name: acctName(k), color: color(k), vals: s.by_profile[k] }));
-  const kind = (k) => { const p = (S.state && S.state.profiles || []).find((x) => x.name === k); return p && p.kind !== 'subscription' ? (p.kind === 'routed' ? ' · routed' : ' · key') : ''; };
-  const top = u.models[0] ? u.models[0].tokens : 1;
-  sheet.innerHTML = `
-    <div class="trow"><div><h1>Usage by account</h1><p class="find">Tokens from each account's own logs, priced at API list prices. Subscriptions are not billed per token.</p></div>
-      <div class="acts"><span class="seg3">${[7, 14, 30].map((d) => `<a class="${d === usageDays ? 'on' : ''} mono" data-act="u-days" data-v="${d}" data-testid="u-days-${d}">${d}d</a>`).join('')}</span>
-      <button class="btn" data-act="u-csv" data-testid="u-csv">Export CSV</button></div></div>
-    <section class="panel"><div class="ph"><h2>Tokens per day, by account</h2><div class="ulegend">${series.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.name)}</span>`).join('')}</div></div>
-      ${series.length ? '<div class="uchart"></div>' : '<p class="empty">No usage in this range.</p>'}</section>
-    <section class="panel"><div class="ph"><h2>Accounts</h2></div>
-      <table class="grid" data-testid="usage-ledger"><thead><tr><th>Account</th><th>Tool</th><th class="num">Tokens</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Requests</th><th class="num">List price</th></tr></thead><tbody>
-      ${u.accounts.map((b) => `<tr><td><b class="usw"><i style="background:${color(b.key)}"></i>${esc(acctName(b.key))}</b></td><td>${esc(tool(b.harness))}${kind(b.key)}</td><td class="num">${fmt(b.tokens)}</td><td class="num">${fmt(b.input)}</td><td class="num">${fmt(b.output)}</td><td class="num">${fmt(b.cache_read)}</td><td class="num">${b.requests.toLocaleString()}</td><td class="num">${b.cost == null ? '—' : '$' + b.cost.toFixed(2)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">No usage yet.</td></tr>'}</tbody></table></section>
-    <section class="panel"><div class="ph"><h2>By model</h2></div>
-      ${u.models.map((m) => `<div class="umodel"><span class="mono">${esc(m.key)}</span><span class="mb"><i style="width:${Math.round((m.tokens / top) * 100)}%"></i></span><b class="mono">${fmt(m.tokens)}</b><span class="mono muted">${m.cost == null ? '—' : '$' + m.cost.toFixed(2)}</span></div>`).join('') || '<p class="empty">No usage yet.</p>'}</section>`;
-  const ch = sheet.querySelector('.uchart');
-  if (ch) fit(ch, (w) => stacked(s.days, series, w));
-});
-action('u-days', (el) => { usageDays = +el.dataset.v; render(); });
-action('u-csv', async () => {
-  const to = await saveFile(`Harness Manager usage ${new Date().toISOString().slice(0, 10)}.csv`, { name: 'CSV', extensions: ['csv'] });
-  if (to) attempt(() => call('usage_csv', { days: usageDays, path: to }), 'Exported');
-});
+// Usage by account lives on Accounts now; the old address still works
+view('usage', async () => { go('accounts'); });
 
 // ---------- routing ----------
 view('routing', async (sheet) => {
@@ -444,7 +540,7 @@ export function headState(table) {
     head.checked = boxes.length > 0 && on === boxes.length;
     head.indeterminate = on > 0 && on < boxes.length;
     const small = th.querySelector('small');
-    if (small) small.textContent = boxes.length ? `${on} of ${boxes.length}` : '';
+    if (small) { small.textContent = boxes.length ? String(on) : ''; small.title = `${on} of ${boxes.length} shown`; }
   }
 }
 action('toggle-target', async (el) => {
@@ -507,7 +603,7 @@ view('prompts', async (sheet) => {
   const where = live ? `Writes to <span class="mono">${esc(live.path)}</span> · every ${esc(tool)} account follows it` : `No profile of ${esc(tool)} yet`;
   sheet.innerHTML = `<div class="trow"><div><h1>System prompts</h1><p class="find">The instructions each tool reads when it starts: CLAUDE.md for Claude Code, AGENTS.md for Codex and OpenCode, GEMINI.md for Antigravity. Keep several here and choose which one is in the file; what the file held before is saved first, so nothing is lost.</p></div>
       <div class="acts"><button class="btn primary" data-act="prompt-new" data-testid="prompt-new">New prompt</button></div></div>
-    <div class="tabs2">${hs.map((h) => `<a class="${h.id === promptTool ? 'on' : ''}" data-act="prompt-tool" data-v="${h.id}">${esc(h.label)} · ${FILE[h.id] || 'prompt'}</a>`).join('')}</div>
+    <div class="tabs2">${hs.map((h) => `<a class="${h.id === promptTool ? 'on' : ''}" data-act="prompt-tool" data-v="${h.id}" title="${esc(h.label)} reads ${FILE[h.id] || 'its prompt file'}">${esc(h.label)}</a>`).join('')}</div>
     <div class="pgrid"><div class="plist">
       <a class="${!sel ? 'on' : ''}" data-act="prompt-sel" data-id=""><span><b>The file now</b><small>${esc(live ? first(live.body) : 'not there yet')}</small></span><span class="pill mono">live</span></a>
       ${list.map((p) => `<a class="${sel && sel.id === p.id ? 'on' : ''}" data-act="prompt-sel" data-id="${esc(p.id)}" data-testid="prompt-${esc(p.id)}"><span><b>${esc(p.title)}</b><small>${esc(first(p.body))}</small></span>${p.enabled ? '<span class="pill teal mono">enabled</span>' : ''}</a>`).join('')}</div>
