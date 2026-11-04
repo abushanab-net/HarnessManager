@@ -78,14 +78,6 @@ nav.nav a.sub .unpin { width: 18px; height: 18px; border-radius: 5px; display: i
 nav.nav a.sub .unpin svg { width: 11px; height: 11px; }
 nav.nav a.sub:hover .unpin, nav.nav a.sub .unpin:focus-visible { opacity: 1; }
 nav.nav a.sub .unpin:hover { background: var(--b); color: var(--t); }
-/* Live routes: the drawer beside the sidebar */
-#routes-drawer .drawer { position: fixed; left: 232px; top: 0; bottom: 0; width: 720px; max-width: calc(100vw - 232px); background: var(--s); border-right: 1px solid var(--b); box-shadow: 8px 0 24px rgba(16, 24, 28, .14); z-index: 51; padding: 18px 22px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
-#routes-drawer .drawer h2 { margin: 0; }
-#routes-drawer .drawer .ph { display: flex; align-items: center; gap: 10px; margin-bottom: 0; }
-#routes-drawer .drawer .ph .iconbtn { margin-left: auto; flex: none; }
-nav.nav a { white-space: nowrap; }
-nav.nav a .count { overflow: hidden; text-overflow: ellipsis; }
-#routes-drawer .drawer p { margin: 0; }
 /* Limits: every limit on a seven-day line */
 .limax { display: grid; grid-template-columns: repeat(7, 1fr); font: 11px var(--mono); color: var(--m); margin-left: 244px; }
 .limax span { border-left: 1px solid var(--ru); padding-left: 4px; }
@@ -776,7 +768,7 @@ table.grid td.num { font-size: 13px; }
 .ovk.warn .sa { fill: var(--warn-bg); }
 .ovk .kn { font-size: 12px; color: var(--t2); }
 
-.ovroutes { flex: 999 1 620px; display: flex; flex-direction: column; gap: 12px; background: var(--sub); }
+.ovroutes { display: flex; flex-direction: column; gap: 12px; background: var(--sub); }
 .topowrap { overflow-x: auto; border-radius: 12px; background: var(--g); }
 .topo { position: relative; width: 100%; min-width: 600px; }
 a.btn { text-decoration: none; }
@@ -908,7 +900,6 @@ nav.nav .count { font-family: var(--mono); font-size: 11px; color: var(--m); }
 nav.nav .count.live { color: var(--acT); }
 nav.nav a .count.upd:not(:empty) { background: none; color: var(--warnT); padding: 0; font-size: 11px; }
 /* Overview, as drawn */
-.ovroutes { flex: 999 1 640px; }
 .tn.tool { background: var(--ac-soft); border-color: var(--ac-b); }
 .tn small.okT { color: var(--acT); }
 .tn small.warnT { color: var(--warnT); }
