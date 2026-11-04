@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview, round two: your choices applied</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+  --g: #f5f7fa; --side: #edf0f6; --s: #ffffff; --act: #e3f1f2; --b: #dde3ec; --ru: #eef2f7; --hover: #f3f6fa; --sub: #f8fafc; --track: #eef2f7;
+  --t: #0f172a; --m: #56607a; --t2: #38415a; --ac: #0f6e7a; --acT: #0f6e7a; --ac-soft: #e3f1f2; --ac-b: #bcdfe1; --btn-fg: #fff;
+  --warn: #d97706; --warnT: #92400e; --warn-bg: #fef3c7; --warn-b: #fcd9a0; --neg: #dc2626; --negT: #b91c1c; --iris: #6d5bd0; --iris-bg: #efecfb;
+  --h0: #eef2f7; --h1: #cfeaec; --h2: #93cdd1; --h3: #2a8f99; --h4: #0f6e7a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--g); color: var(--t); font: 14px/1.5 var(--sans); }
+main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 20px; margin: 44px 0 10px; padding-top: 18px; border-top: 1px solid var(--b); }
+h3 { font-size: 15px; margin: 22px 0 8px; }
+h3 .tag { font: 600 11px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; padding: 2px 7px; margin-right: 8px; vertical-align: 2px; }
+p { margin: 6px 0; }
+.lead { color: var(--m); max-width: 80ch; }
+.mono { font-family: var(--mono); } .muted { color: var(--m); } .sm { font-size: 12px; }
+.note { background: var(--s); border: 1px solid var(--ac-b); border-left: 4px solid var(--ac); border-radius: 10px; padding: 10px 14px; margin: 14px 0; font-size: 13px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 0; font-size: 13px; }
+.toc a { color: var(--acT); text-decoration: none; }
+.choices { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; font-size: 13px; margin: 10px 0; }
+.choices b { color: var(--acT); }
+.pros { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 12.5px; margin: 8px 0 0; }
+.pros b { color: var(--acT); } .pros .con b { color: var(--warnT); }
+.help { font-size: 11.5px; color: var(--m); }
+/* the window */
+.win { display: grid; grid-template-columns: 230px 1fr; border: 1px solid var(--b); border-radius: 14px; overflow: hidden; background: var(--g); box-shadow: 0 2px 10px rgba(15,23,42,.05); position: relative; }
+.win.wide { grid-template-columns: 460px 1fr; }
+.side { background: var(--side); border-right: 1px solid var(--b); padding: 18px 12px 16px; display: flex; flex-direction: column; gap: 14px; min-height: 620px; }
+.brand { display: flex; gap: 10px; align-items: center; padding: 0 8px; }
+.brand .mark { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #0f6e7a, #36c8c5); flex: none; }
+.brand b { display: block; font-size: 15px; } .brand small { font: 11px var(--mono); color: var(--m); }
+.nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav a { display: flex; gap: 10px; align-items: center; height: 34px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-decoration: none; cursor: pointer; font-weight: 500; white-space: nowrap; }
+.nav a:hover { background: var(--hover); }
+.nav a.on { background: var(--s); color: var(--t); font-weight: 600; box-shadow: inset 0 0 0 1px var(--b); }
+.nav a .ic { width: 14px; height: 14px; border-radius: 4px; background: var(--m); opacity: .45; flex: none; }
+.nav a.on .ic { background: var(--ac); opacity: 1; }
+.nav a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.nav a .cnt.live { color: var(--acT); font-weight: 600; } .nav a .cnt.warn { color: var(--warnT); }
+.nav a .udot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+.nav a.sub { height: 30px; padding-left: 30px; font-size: 13px; font-weight: 400; gap: 7px; }
+.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: #c6cedb; flex: none; }
+.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.nav a.sub .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nav a.sub .unpin { width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--m); opacity: 0; flex: none; font-size: 12px; }
+.nav a.sub:hover .unpin { opacity: 1; }
+.nav a.sub .unpin:hover { background: var(--b); color: var(--t); }
+.nav a.sub .unpin.always { opacity: .6; }
+.nav .gap { height: 10px; } .nav .bottom { margin-top: auto; }
+.nav a .caret { margin-left: auto; font-size: 11px; color: var(--m); transition: transform .15s; }
+.nav a.open .caret { transform: rotate(90deg); }
+.nav a .cnt + .caret { margin-left: 8px; }
+.nav .fold { display: flex; flex-direction: column; gap: 2px; } .nav .fold[hidden] { display: none; }
+/* the routes in the side menu */
+.rblk { background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 8px 8px 6px; }
+.rblk[hidden] { display: none; }
+.mini { position: relative; height: 210px; }
+.mini svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mini path { fill: none; stroke: var(--ac-b); stroke-width: 1.2; stroke-dasharray: 2 4; }
+.mini path.on { stroke: var(--ac); stroke-dasharray: 0; stroke-width: 1.6; }
+.mini .nd { position: absolute; font: 10.5px var(--mono); color: var(--t2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 84px; }
+.mini .nd.tool { background: var(--ac-soft); border: 1px solid var(--ac-b); color: var(--acT); border-radius: 5px; padding: 1px 5px; }
+.mini .nd.vend { color: var(--m); }
+.mini .nd.vend.on { color: var(--acT); font-weight: 600; }
+.rfoot { display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--m); padding: 4px 2px 0; }
+.drawer { position: absolute; left: 230px; top: 0; bottom: 0; width: 440px; background: var(--s); border-right: 1px solid var(--b); box-shadow: 8px 0 24px rgba(15,23,42,.08); padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; z-index: 2; }
+.drawer[hidden] { display: none; }
+.drawer .ph { margin-bottom: 0; }
+.drawer .x { margin-left: auto; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--b); background: var(--s); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: var(--m); }
+.dim { position: absolute; inset: 0; left: 670px; background: rgba(15,23,42,.08); z-index: 1; }
+.dim[hidden] { display: none; }
+.body { display: flex; flex-direction: column; min-width: 0; }
+.top { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--b); }
+.top .search { flex: 0 1 300px; height: 28px; border: 1px solid var(--b); border-radius: 8px; background: var(--s); display: flex; align-items: center; padding: 0 10px; color: var(--m); font-size: 12.5px; }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--m); font: 11px var(--mono); }
+.sheet { padding: 18px 22px 22px; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.sheet h1 { font-size: 22px; margin: 0; }
+.sheet .find { color: var(--m); margin: 0; font-size: 13px; max-width: 80ch; }
+.panel { background: var(--s); border: 1px solid var(--b); border-radius: 14px; padding: 14px 18px; min-width: 0; }
+.ph { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.ph h4 { font-size: 16px; margin: 0; }
+.ph .acT { color: var(--acT); font: 500 12px var(--mono); }
+.warnT { color: var(--warnT); } .negT { color: var(--negT); } .acT { color: var(--acT); }
+.ovhead { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.ovhead .live { font-size: 13px; color: var(--m); }
+.ovhead .live i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ac); margin-right: 6px; }
+.ovhead h1 { font-size: 30px; margin: 2px 0; }
+.ovhead .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; border: 1px solid var(--b); border-radius: 8px; overflow: hidden; background: var(--s); }
+.seg a { padding: 5px 11px; font-size: 12.5px; color: var(--t2); border-right: 1px solid var(--b); cursor: pointer; }
+.seg a:last-child { border-right: 0; } .seg a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--b); background: var(--s); font: 500 13px var(--sans); color: var(--t); cursor: pointer; white-space: nowrap; }
+.btn.primary { background: var(--ac); color: var(--btn-fg); border-color: var(--ac); }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.kpi { background: var(--s); border: 1px solid var(--b); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+.kpi .kl { display: flex; justify-content: space-between; font-size: 12px; color: var(--m); }
+.kpi .kd { font: 11px var(--mono); } .kpi.up .kd { color: var(--acT); } .kpi.warn .kd { color: var(--warnT); }
+.kpi strong { display: block; font: 600 22px var(--mono); margin: 4px 0 2px; } .kpi strong small { font-size: 12px; color: var(--m); font-weight: 400; }
+.kpi .kn { font: 11.5px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .sp { height: 26px; margin: 4px 0; } .kpi .sp svg { width: 100%; height: 100%; }
+.kpi .sp path.sl { fill: none; stroke: var(--ac); stroke-width: 1.5; } .kpi .sp path.sa { fill: var(--ac-soft); stroke: none; }
+.ovrow { display: grid; gap: 16px; } .ovrow.r32 { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } .ovrow.r11 { grid-template-columns: 1fr 1fr; }
+/* L3 */
+.axis { display: grid; grid-template-columns: repeat(7, 1fr); font: 11px var(--mono); color: var(--m); }
+.axis span { border-left: 1px solid var(--ru); padding-left: 4px; }
+.l3 { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 6px 14px; align-items: center; }
+.l3 .who { font-size: 13px; display: flex; justify-content: space-between; gap: 6px; } .l3 .who b { font-weight: 600; }
+.l3 .who .w { font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.l3 .row { position: relative; overflow: hidden; height: 24px; background: repeating-linear-gradient(90deg, var(--ru) 0 1px, transparent 1px calc(100% / 7)); border-radius: 4px; }
+.l3 .row .bar { position: absolute; top: 4px; left: 0; height: 16px; border-radius: 4px; background: var(--ac-soft); border: 1px solid var(--ac-b); overflow: hidden; }
+.l3 .row .bar i { position: absolute; left: 0; top: 0; height: 100%; background: var(--ac-b); }
+.l3 .row .bar i.warn { background: var(--warn-b); } .l3 .row .bar i.neg { background: #fecaca; }
+.l3 .row .bar em { position: absolute; top: 0; height: 100%; width: 2px; background: var(--warn); }
+.l3 .row .bar span { position: absolute; left: 6px; top: 0; line-height: 15px; font: 600 10.5px var(--mono); color: var(--t); }
+.l3 .row .at { position: absolute; top: 5px; font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--t2); margin-top: 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+.hm { display: grid; grid-template-columns: repeat(53, 1fr); grid-auto-flow: column; grid-template-rows: repeat(7, 10px); gap: 2px; margin: 10px 0 6px; }
+.hm i { display: block; border-radius: 2px; background: var(--h0); }
+.hm i.l1 { background: var(--h1); } .hm i.l2 { background: var(--h2); } .hm i.l3 { background: var(--h3); } .hm i.l4 { background: var(--h4); }
+table.lr { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.lr th { text-align: left; color: var(--m); font-weight: 500; font-size: 12px; padding: 8px 8px; border-bottom: 1px solid var(--b); white-space: nowrap; }
+table.lr td { padding: 11px 8px; border-bottom: 1px solid var(--ru); } table.lr .num { text-align: right; font-family: var(--mono); }
+table.lr.compact th, table.lr.compact td { padding: 9px 4px; font-size: 12.5px; white-space: nowrap; }
+.ln2 { display: grid; gap: 8px; }
+.ln2 a { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--b); border-radius: 10px; background: var(--sub); text-decoration: none; color: var(--t); font-size: 13px; }
+.ln2 a b { font-weight: 600; } .ln2 a span { font: 11px var(--mono); color: var(--m); display: block; } .ln2 a .tp { color: var(--acT); font: 600 12px var(--mono); }
+/* the big diagram, for the drawer and the wide sidebar */
+.topo { position: relative; height: 330px; background: radial-gradient(circle, #dfe5ee 1px, transparent 1px) 0 0/18px 18px; border-radius: 10px; }
+.topo .nd { position: absolute; background: var(--s); border: 1px solid var(--b); border-radius: 9px; padding: 6px 10px; font-size: 12.5px; width: var(--nw, 128px); }
+.topo .nd b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .topo .nd span { font: 10.5px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.topo .nd.tool { background: var(--ac-soft); border-color: var(--ac-b); color: var(--acT); font-family: var(--mono); text-align: center; }
+.topo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.topo path { fill: none; stroke: var(--ac-b); stroke-width: 1.5; stroke-dasharray: 3 5; } .topo path.on { stroke: var(--ac); stroke-dasharray: 0; }
+.tlegend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--t2); }
+.tlegend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: 3px; margin-right: 5px; background: var(--ac); }
+/* the feedback form */
+.cbox { margin: 10px 0 4px; } .cbox label { display: block; font-size: 12.5px; color: var(--m); margin-bottom: 4px; }
+.cbox textarea, #out { width: 100%; font: 13px/1.45 var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.q { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--ru); }
+.q .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; height: 22px; }
+.q .qt { font-size: 14px; margin-bottom: 6px; } .q .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.q .opts label { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--b); border-radius: 999px; background: var(--s); font-size: 13px; cursor: pointer; }
+.q .opts label:has(input:checked) { background: var(--act); border-color: var(--ac-b); font-weight: 500; } .q .opts input { margin: 0; accent-color: var(--ac); }
+.q .other { margin-top: 6px; } .q .other input { width: 100%; max-width: 520px; font: 13px var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 6px 10px; }
+.fbar2 { display: flex; gap: 8px; align-items: center; margin: 14px 0 8px; } #out { font-family: var(--mono); font-size: 12px; } #copied { color: var(--acT); }
+@media (max-width: 900px) { .win, .win.wide { grid-template-columns: 1fr; } .kpis { grid-template-columns: 1fr 1fr; } .ovrow { grid-template-columns: 1fr !important; } .l3 { grid-template-columns: 1fr; } .drawer { position: static; width: auto; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Overview, round two: your choices applied</h1>
+<p class="lead">Everything below is drawn from your answers of 5 November. The one thing left to pick is how the side menu holds the routes diagram, and how the rest of the Overview sits once the diagram has left it. Each window is live: click <b>Projects</b>' caret, <b>Setup</b>, and <b>Live routes</b> in the menus.</p>
+<div class="choices">
+  <span>Sidebar</span><span><b>B · Collapsible setup</b>, with an unpin beside each pinned name (shown on hover; question 3 asks whether it should always show).</span>
+  <span>Fleet health facts</span><span><b>Dropped.</b> No attention chips; the Settings dot and the counts in the menu are what remains.</span>
+  <span>Limits</span><span><b>L3 · timeline first</b>, one panel, under the tiles.</span>
+  <span>Tiles</span><span><b>Four</b>: Tokens, Cost, Cache hit, Limit risk.</span>
+  <span>Live routes</span><span><b>Out of the Overview, into the side menu, folded by default</b>, keeping the look of the diagram you have.</span>
+  <span>Order of work</span><span>Sidebar, then the limits panel, then the Overview.</span>
+</div>
+<div class="toc"><a href="#v1">V1 · Routes unfold in the menu</a><a href="#v2">V2 · Routes in a drawer</a><a href="#v3">V3 · The menu widens</a><a href="#feedback">Feedback sheet</a></div>
+
+<h2 id="v1">V1 · The routes unfold inside the menu</h2>
+<p class="lead">"Live routes" is a menu entry like Projects: folded, it shows the tokens per second; open, a small copy of the diagram fits in the menu's width, accounts to tools to providers, with the active route drawn solid. The Overview below the tiles is the limits, then Activity beside the latest replies.</p>
+<div class="win" id="w1">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+    <nav class="nav">
+      <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+      <a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a>
+      <a data-fold="p1"><i class="ic"></i>Projects<span class="cnt">222 · 3 live</span><span class="caret">▶</span></a>
+      <div class="fold" id="p1" hidden data-pins></div>
+      <a><i class="ic"></i>Accounts<span class="cnt">8</span></a>
+      <a data-fold="r1"><i class="ic"></i>Live routes<span class="cnt live">466 tok/s</span><span class="caret">▶</span></a>
+      <div class="rblk" id="r1" hidden><div class="mini" data-mini></div><div class="rfoot"><span>last 5 minutes</span><span>Overview opens a card</span></div></div>
+      <div class="gap"></div>
+      <a data-fold="s1"><i class="ic"></i>Setup<span class="cnt warn">2 to look at</span><span class="caret">▶</span></a>
+      <div class="fold" id="s1" hidden data-setup></div>
+      <div class="bottom"></div>
+      <a><i class="ic"></i>CLI reference</a>
+      <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+    </nav>
+  </aside>
+  <div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+  <div class="sheet">
+    <div class="ovhead"><div><div class="live"><i></i>Live · DEVELOPMENTPC · 8 accounts · 8 logged in · <span class="acT">4 consoles open</span></div><h1>Overview</h1><p class="find">Every account has room. <b class="warnT">codex-main</b> runs out of its week Sat 11:33 at this pace.</p></div>
+      <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+    <div class="kpis" data-kpis></div>
+    <section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">each bar runs from now to its reset · the fill is what is used · amber from where it runs out at this pace</span></div><div class="axis" style="margin-left:244px"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div><div class="l3" data-l3></div></section>
+    <div class="ovrow r32"><section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+      <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr compact" data-lr="short"></table></section></div>
+  </div></div>
+</div>
+<div class="pros"><div><b>Keeps</b> the menu at its width and the diagram one click away on every page, not only the Overview.</div><div class="con"><b>Costs</b> detail: the small copy has names and the active lines, not the versions and the "no traffic" notes; those are in the tooltip of each node.</div></div>
+
+<h2 id="v2">V2 · The routes open in a drawer beside the menu</h2>
+<p class="lead">The menu entry opens a drawer over the page with the diagram at the size you have now, legend and all; a click outside, Escape, or the entry again closes it. The Overview below the tiles is the limits, then Activity, then the latest replies, each full width.</p>
+<div class="win" id="w2">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+    <nav class="nav">
+      <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+      <a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a>
+      <a data-fold="p2"><i class="ic"></i>Projects<span class="cnt">222 · 3 live</span><span class="caret">▶</span></a>
+      <div class="fold" id="p2" hidden data-pins></div>
+      <a><i class="ic"></i>Accounts<span class="cnt">8</span></a>
+      <a data-drawer="d2"><i class="ic"></i>Live routes<span class="cnt live">466 tok/s</span><span class="caret">▶</span></a>
+      <div class="gap"></div>
+      <a data-fold="s2"><i class="ic"></i>Setup<span class="cnt warn">2 to look at</span><span class="caret">▶</span></a>
+      <div class="fold" id="s2" hidden data-setup></div>
+      <div class="bottom"></div>
+      <a><i class="ic"></i>CLI reference</a>
+      <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+    </nav>
+  </aside>
+  <div class="dim" id="d2-dim" hidden data-close="d2"></div>
+  <div class="drawer" id="d2" hidden><div class="ph"><h4>Live routes <span class="acT">466 tok/s now</span></h4><button class="x" data-close="d2">✕</button></div><span class="muted sm mono">particles = tokens per second, last 5 minutes, updated each minute</span><div class="topo" data-topo="400"></div>
+    <div class="tlegend"><span><i></i>Subscription login, straight to the provider</span><span><i style="background:var(--iris)"></i>API key, through the local router</span><span><i style="background:var(--neg)"></i>Paused, or a login that needs renewing</span></div><span class="muted sm">Click a card to open it</span></div>
+  <div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+  <div class="sheet">
+    <div class="ovhead"><div><div class="live"><i></i>Live · DEVELOPMENTPC · 8 accounts · 8 logged in · <span class="acT">4 consoles open</span></div><h1>Overview</h1><p class="find">Every account has room. <b class="warnT">codex-main</b> runs out of its week Sat 11:33 at this pace.</p></div>
+      <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+    <div class="kpis" data-kpis></div>
+    <section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">each bar runs from now to its reset · the fill is what is used · amber from where it runs out at this pace</span></div><div class="axis" style="margin-left:244px"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div><div class="l3" data-l3></div></section>
+    <section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+    <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr" data-lr></table></section>
+  </div></div>
+</div>
+<div class="pros"><div><b>Keeps</b> the diagram exactly as it is, with its legend, particles and cards, and reachable from every page.</div><div class="con"><b>Costs</b> a layer over the page: you look at the routes or at the page, not both.</div></div>
+
+<h2 id="v3">V3 · The menu widens to hold the routes</h2>
+<p class="lead">Opening "Live routes" widens the menu to 460 px and draws the diagram under the entries, pushing the page over rather than covering it; the width is remembered, so it can stay open on a wide screen. The Overview below the tiles is the limits, then "Running now" beside the latest replies, then Activity.</p>
+<div class="win wide" id="w3">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+    <nav class="nav" style="flex:0">
+      <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+      <a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a>
+      <a data-fold="p3"><i class="ic"></i>Projects<span class="cnt">222 · 3 live</span><span class="caret">▶</span></a>
+      <div class="fold" id="p3" hidden data-pins></div>
+      <a><i class="ic"></i>Accounts<span class="cnt">8</span></a>
+      <a class="open" data-widen="w3"><i class="ic"></i>Live routes<span class="cnt live">466 tok/s</span><span class="caret">▶</span></a>
+    </nav>
+    <div class="rblk" id="r3" style="padding:10px"><div class="topo" data-topo="414"></div><div class="rfoot"><span>last 5 minutes · click a card to open it</span><span>solid = traffic now</span></div></div>
+    <nav class="nav">
+      <a data-fold="s3"><i class="ic"></i>Setup<span class="cnt warn">2 to look at</span><span class="caret">▶</span></a>
+      <div class="fold" id="s3" hidden data-setup></div>
+      <div class="bottom"></div>
+      <a><i class="ic"></i>CLI reference</a>
+      <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+    </nav>
+  </aside>
+  <div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+  <div class="sheet">
+    <div class="ovhead"><div><div class="live"><i></i>Live · DEVELOPMENTPC · 8 accounts · <span class="acT">4 consoles open</span></div><h1>Overview</h1><p class="find">Every account has room. <b class="warnT">codex-main</b> runs out of its week Sat 11:33 at this pace.</p></div>
+      <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+    <div class="kpis" data-kpis></div>
+    <section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">bar: now to the reset · fill: used · amber: runs out</span></div><div class="axis" style="margin-left:244px"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div><div class="l3" data-l3></div></section>
+    <div class="ovrow r11"><section class="panel"><div class="ph"><h4>Running now <span class="muted sm mono">4</span></h4><a class="acT sm">All sessions</a></div><div class="ln2" data-run></div></section>
+      <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr compact" data-lr="short"></table></section></div>
+    <section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+  </div></div>
+</div>
+<div class="pros"><div><b>Keeps</b> the routes and the page in view together, the diagram near its full size, and adds "Running now", which opens a session in one click.</div><div class="con"><b>Costs</b> 230 px of page width while open; on a 1280 px window the tiles go to two rows.</div></div>
+<div class="cbox"><label for="c-ov">Comments on these three</label><textarea id="c-ov" data-comment="ov" rows="2" placeholder="What to change before building…"></textarea></div>
+
+<h2 id="feedback">Feedback sheet</h2>
+<p>Pick an answer for each question, then press <b>Copy my answers</b> and paste the text into the chat.</p>
+<div id="form"></div>
+<div class="cbox"><label for="c-general">Anything else</label><textarea id="c-general" data-comment="general" rows="3" placeholder="Other requests, priorities, things I missed…"></textarea></div>
+<div class="fbar2"><button class="btn primary" id="copy">Copy my answers</button><button class="btn" id="clear">Clear the draft</button><span id="copied" class="help"></span></div>
+<textarea id="out" rows="8" readonly aria-label="Your answers as text"></textarea>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---- menus: the pins with an unpin, the setup fold ----
+const PINS = [['Bunyan', 1], ['HarnessManager', 1], ['AdminPortal', 1]];
+document.querySelectorAll('[data-pins]').forEach((h) => { h.innerHTML = PINS.map(([n, l]) => `<a class="sub"><i class="dot live"></i><span class="nm">${n}</span><span class="cnt live">${l}</span><span class="unpin" title="Unpin ${n}">✕</span></a>`).join(''); });
+document.querySelectorAll('[data-setup]').forEach((h) => { h.innerHTML = `<a class="sub"><span class="nm">MCP servers</span><span class="cnt warn">12 left alone</span></a><a class="sub"><span class="nm">Skills</span><span class="cnt">251</span></a><a class="sub"><span class="nm">System prompts</span></a><a class="sub"><span class="nm">API keys &amp; routing</span></a><a class="sub"><span class="nm">Apps</span><span class="cnt warn">1 update</span></a>`; });
+document.querySelectorAll('[data-fold]').forEach((a) => a.addEventListener('click', () => { const f = document.getElementById(a.dataset.fold); f.hidden = !f.hidden; a.classList.toggle('open', !f.hidden); }));
+document.querySelectorAll('.unpin').forEach((u) => u.addEventListener('click', (e) => { e.stopPropagation(); u.closest('a').remove(); }));
+// V2: the drawer
+document.querySelectorAll('[data-drawer]').forEach((a) => a.addEventListener('click', () => { const d = document.getElementById(a.dataset.drawer), dim = document.getElementById(a.dataset.drawer + '-dim'); d.hidden = !d.hidden; dim.hidden = d.hidden; a.classList.toggle('open', !d.hidden); }));
+document.querySelectorAll('[data-close]').forEach((x) => x.addEventListener('click', () => { const d = document.getElementById(x.dataset.close); d.hidden = true; document.getElementById(x.dataset.close + '-dim').hidden = true; document.querySelector(`[data-drawer=${x.dataset.close}]`).classList.remove('open'); }));
+// V3: the menu widens
+document.querySelectorAll('[data-widen]').forEach((a) => a.addEventListener('click', () => { const w = document.getElementById(a.dataset.widen); w.classList.toggle('wide'); a.classList.toggle('open'); document.getElementById('r3').hidden = !w.classList.contains('wide'); }));
+// ---- the routes ----
+const ACC = ['claude-main|Max 20x · 74% left', 'codex-main|ChatGPT Pro · 70% left', 'opencode-main|opencode', 'agy-main|Google · active', 'samykabu-teksa|Max 20x · 95% left', 'samykabu-personal|Max 20x · 74% left'];
+const TOOLS = ['Claude Code|2.1.318 · 3 open', 'Codex|0.166.0 · 1 open', 'OpenCode|1.19.5', 'Antigravity|1.5.0'], VEND = ['Anthropic|no traffic', 'OpenAI|139.7k tokens', 'OpenCode|no traffic', 'Google|no traffic'];
+const toolOf = [0, 1, 2, 3, 0, 0];
+// the full diagram, at a given width: three columns of cards and the lines between them
+document.querySelectorAll('[data-topo]').forEach((h) => { const W = +h.dataset.topo, H = 330, nw = Math.min(128, Math.floor((W - 44) / 3)), c1 = 4, c2 = Math.round((W - nw) / 2), c3 = W - nw - 4, rowA = (i) => 8 + i * 52, rowT = (i) => 30 + i * 78; h.style.setProperty('--nw', nw + 'px');
+  h.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${ACC.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M${c1 + nw} ${rowA(i) + 20} C ${c1 + nw + 40} ${rowA(i) + 20}, ${c2 - 40} ${rowT(toolOf[i]) + 22}, ${c2} ${rowT(toolOf[i]) + 22}"/>`).join('')}${TOOLS.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M${c2 + nw} ${rowT(i) + 22} L ${c3} ${rowT(i) + 22}"/>`).join('')}</svg>` +
+    ACC.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd" style="left:${c1}px;top:${rowA(i)}px" title="${n}: ${s}"><b>${n}</b><span>${s}</span></div>`; }).join('') + TOOLS.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd tool" style="left:${c2}px;top:${rowT(i)}px"><b>${n}</b><span>${s}</span></div>`; }).join('') + VEND.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd" style="left:${c3}px;top:${rowT(i)}px"><b>${n}</b><span>${s}</span></div>`; }).join(''); });
+// the small copy for the menu: names, pills, provider names, the active route solid
+document.querySelectorAll('[data-mini]').forEach((h) => { const W = 190, H = 210, c2 = 78, c3 = 150, rowA = (i) => 6 + i * 32, rowT = (i) => 14 + i * 50;
+  h.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${ACC.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M70 ${rowA(i) + 7} C 74 ${rowA(i) + 7}, ${c2 - 6} ${rowT(toolOf[i]) + 9}, ${c2} ${rowT(toolOf[i]) + 9}"/>`).join('')}${TOOLS.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M${c2 + 64} ${rowT(i) + 9} L ${c3} ${rowT(i) + 9}"/>`).join('')}</svg>` +
+    ACC.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd" style="left:0;top:${rowA(i)}px;max-width:70px" title="${n}: ${s}">${n}</div>`; }).join('') + TOOLS.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd tool" style="left:${c2}px;top:${rowT(i)}px;width:64px;text-align:center" title="${n} ${s}">${n.replace(' Code', '')}</div>`; }).join('') + VEND.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd vend ${i === 1 ? 'on' : ''}" style="left:${c3 + 4}px;top:${rowT(i) + 2}px" title="${n}: ${s}">${n}</div>`; }).join(''); });
+// ---- limits, L3 ----
+const L = [
+  { a: 'codex-main', win: 'Week', left: 70, reset: 'Tue 15:46', h: 136, outH: 60, outAt: 'Sat 11:33', note: 'Runs out Sat 11:33, 3 d 4 h before the reset.' },
+  { a: 'claude-main', win: 'Week', left: 74, reset: 'Fri 12:59', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-personal', win: 'Week', left: 74, reset: 'Fri 13:00', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'claude-main', win: 'Week · Fable', left: 85, reset: 'Fri 12:59', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-personal', win: 'Week · Fable', left: 85, reset: 'Fri 13:00', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-teksa', win: '5-hour session', left: 95, reset: '00:40', h: 1.2, note: 'Resets in 1 h 14 m; lasts until then at this pace.' },
+  { a: 'samykabu-teksa', win: 'Week', left: 96, reset: 'Tue 08:00', h: 128.5, note: 'Resets in 5 d 8 h; lasts until then at this pace.' },
+  { a: 'sabushanab-resal', win: 'Week', left: 100, reset: 'Fri 23:00', h: 47.5, note: 'Resets in 1 d 23 h.' },
+  { a: 'service-account-resal', win: 'Week', left: 100, reset: 'Wed 06:00', h: 150.5, note: 'Resets in 6 d 6 h.' },
+];
+const pct = (h) => Math.min(100, (h / 168) * 100), tone = (left) => (left < 20 ? 'neg' : left < 45 ? 'warn' : '');
+document.querySelectorAll('[data-l3]').forEach((host) => { host.innerHTML = L.map((l) => { const w = pct(l.h), used = 100 - l.left, inner = w > 14 && w <= 72; return `<div class="who"><b>${esc(l.a)}</b><span class="w">${esc(l.win)}</span></div><div class="row" title="${esc(l.note)}"><div class="bar" style="width:${Math.max(w, 2.2).toFixed(1)}%"><i class="${tone(l.left)}" style="width:${used}%"></i>${l.outH ? `<i class="warn" style="left:${((l.outH / l.h) * 100).toFixed(0)}%;width:${(100 - (l.outH / l.h) * 100).toFixed(0)}%"></i><em style="left:${((l.outH / l.h) * 100).toFixed(0)}%"></em>` : ''}${inner ? `<span>${l.left}% left</span>` : ''}</div><span class="at" style="${w > 72 ? 'right:calc(' + (100 - w).toFixed(1) + '% + 8px);color:var(--t)' : 'left:calc(' + w.toFixed(1) + '% + 8px)'}">${inner ? '' : l.left + '% left · '}${l.outH ? 'runs out ' + l.outAt + ' · ' : ''}resets ${l.reset}</span></div>`; }).join(''); });
+// ---- tiles, activity, replies, running now ----
+const sp = (v) => { const max = Math.max(...v), min = Math.min(...v), span = max - min || 1; const pts = v.map((x, i) => [(i / (v.length - 1)) * 120, 26 - ((x - min) / span) * 22]); const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '); return `<svg viewBox="0 0 120 28" preserveAspectRatio="none"><path d="${line} L120 28 L0 28 Z" class="sa"></path><path d="${line}" class="sl"></path></svg>`; };
+const K = [['Tokens', '1.49B', '', '+12%', 'up', [40, 55, 48, 70, 62, 90, 100], '91% read from cache · 2,149 requests'], ['Cost at list prices', '$1,175.17', '', '+$102.40', 'warn', [20, 30, 45, 40, 60, 80, 100], 'Subscriptions are not billed per token'], ['Cache hit', '91', '%', '+2 pt', 'up', [80, 82, 85, 88, 87, 90, 91], 'Most tokens: codex-main'], ['Limit risk', '1', 'account', 'Sat 11:33', 'warn', [], 'codex-main runs out of its week']];
+document.querySelectorAll('[data-kpis]').forEach((h) => { h.innerHTML = K.map(([l, v, u, d, t, s, n]) => `<div class="kpi ${t}"><div class="kl"><span>${l}</span><span class="kd">${d}</span></div><strong>${v}<small> ${u}</small></strong><div class="sp">${s.length ? sp(s) : ''}</div><div class="kn">${n}</div></div>`).join(''); });
+let seed = 7; const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+document.querySelectorAll('[data-hm]').forEach((h) => { seed = 7; h.innerHTML = Array.from({ length: 371 }, (_, i) => { const w = Math.floor(i / 7); const v = w < 44 ? (rnd() < 0.08 ? 1 : 0) : Math.min(4, Math.floor(rnd() * 5 * ((w - 40) / 13))); return `<i class="l${v}"></i>`; }).join(''); });
+const R = [['23:25:53', 'claude-main', 'claude-fable-5-1', '90.5k', '—', '≈3.8 s'], ['23:25:46', 'codex-main', 'gpt-6-astra', '205.8k', '—', '—'], ['23:25:46', 'claude-main', 'claude-fable-5-1', '89.6k', '≈404 tok/s', '≈16.6 s'], ['23:25:30', 'codex-main', 'gpt-6.1-sol', '363.0k', '—', '—'], ['23:24:58', 'samykabu-teksa', 'claude-fable-5-1', '41.2k', '≈380 tok/s', '≈2.9 s']];
+document.querySelectorAll('[data-lr]').forEach((t) => { const short = t.dataset.lr === 'short'; t.innerHTML = `<tr><th>Time</th><th>Account</th>${short ? '' : '<th>Model</th>'}<th class="num">Tokens</th>${short ? '' : '<th class="num">Speed</th><th class="num">First reply</th>'}</tr>` + R.map((r) => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td>${short ? '' : `<td class="mono">${r[2]}</td>`}<td class="num">${r[3]}</td>${short ? '' : `<td class="num">${r[4]}</td><td class="num ${r[5].includes('16') ? 'warnT' : ''}">${r[5]}</td>`}</tr>`).join(''); });
+document.querySelectorAll('[data-run]').forEach((h) => { h.innerHTML = [['Bunyan', 'claude-main · Claude Code · 1 h 12 m', '466 tok/s'], ['HarnessManager', 'codex-main · Codex · 23 m', '—'], ['AdminPortal', 'samykabu-teksa · Claude Code · 2 h 05 m', '—'], ['sabus', 'claude-main · Claude Code · 8 m', '—']].map(([p, s, t]) => `<a><div><b>${p}</b><span>${s}</span></div><span class="tp">${t}</span></a>`).join(''); });
+// ---- the feedback form ----
+const Q = [
+  ['The routes in the side menu', ['V1 · unfold inside the menu', 'V2 · a drawer beside the menu', 'V3 · the menu widens'], 'V2 · a drawer beside the menu'],
+  ['Below the tiles', ['Limits, then Activity beside Latest replies (V1)', 'Limits, Activity, Latest replies, each full width (V2)', 'Limits, Running now beside Latest replies, then Activity (V3)'], 'Limits, then Activity beside Latest replies (V1)'],
+  ['The unpin beside a pinned project', ['On hover (shown)', 'Always visible'], 'On hover (shown)'],
+  ['Ready to build in this order: sidebar, limits, Overview?', ['Yes, go ahead', 'Changes first (say them in the box)'], 'Yes, go ahead'],
+];
+const KEY = 'hm.round2.feedback';
+let draft = {};
+try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(draft)); } catch {} };
+document.getElementById('form').innerHTML = Q.map(([t, opts, def], i) => `<div class="q"><span class="n">${i + 1}</span><div><div class="qt">${esc(t)}</div><div class="opts">${opts.map((o) => `<label><input type="radio" name="q${i}" value="${esc(o)}" ${(draft['q' + i] || def) === o ? 'checked' : ''}> ${esc(o)}${o === def ? ' <span class="help" style="margin:0">(suggested)</span>' : ''}</label>`).join('')}<label><input type="radio" name="q${i}" value="__other" ${draft['q' + i] && !opts.includes(draft['q' + i]) ? 'checked' : ''}> Other</label></div><div class="other"><input type="text" data-other="q${i}" placeholder="Or say what you want instead" value="${draft['q' + i] && !opts.includes(draft['q' + i]) ? esc(draft['q' + i]) : ''}"></div></div></div>`).join('');
+document.querySelectorAll('[data-comment]').forEach((t) => { t.value = draft['c:' + t.dataset.comment] || ''; t.addEventListener('input', () => { draft['c:' + t.dataset.comment] = t.value; save(); }); });
+document.getElementById('form').addEventListener('change', (e) => { const r = e.target.closest('input[type=radio]'); if (!r) return; const other = document.querySelector(`[data-other="${r.name}"]`); draft[r.name] = r.value === '__other' ? (other.value || '') : r.value; save(); });
+document.getElementById('form').addEventListener('input', (e) => { const o = e.target.closest('[data-other]'); if (!o) return; draft[o.dataset.other] = o.value; document.querySelector(`input[name="${o.dataset.other}"][value="__other"]`).checked = true; save(); });
+const answers = () => { const lines = ['Feedback, round two (' + new Date().toLocaleString() + ')', '']; Q.forEach(([t, opts, def], i) => { const v = draft['q' + i] || def; lines.push(`${i + 1}. ${t}: ${v}${v === def ? '' : ' (changed)'}`); }); const names = { ov: 'The three variations', general: 'Anything else' }; const cs = Object.entries(names).filter(([k]) => (draft['c:' + k] || '').trim()).map(([k, n]) => `- ${n}: ${draft['c:' + k].trim()}`); if (cs.length) lines.push('', 'Comments:', ...cs); return lines.join('\n'); };
+document.getElementById('copy').onclick = async () => { const text = answers(); document.getElementById('out').value = text; try { await navigator.clipboard.writeText(text); document.getElementById('copied').textContent = 'Copied. Paste it into the chat.'; } catch { document.getElementById('copied').textContent = 'The clipboard was refused here: select the text below and copy it.'; document.getElementById('out').select(); } };
+document.getElementById('clear').onclick = () => { draft = {}; save(); location.reload(); };
+</script>
+</main>
+</body>
+</html>

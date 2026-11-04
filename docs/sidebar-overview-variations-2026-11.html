@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar, limits and Overview: variations</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+  --g: #f5f7fa; --side: #edf0f6; --s: #ffffff; --act: #e3f1f2; --b: #dde3ec; --ru: #eef2f7; --hover: #f3f6fa; --sub: #f8fafc; --track: #eef2f7;
+  --t: #0f172a; --m: #56607a; --t2: #38415a; --ac: #0f6e7a; --acT: #0f6e7a; --ac-soft: #e3f1f2; --ac-b: #bcdfe1; --btn-fg: #fff;
+  --warn: #d97706; --warnT: #92400e; --warn-bg: #fef3c7; --warn-b: #fcd9a0; --neg: #dc2626; --negT: #b91c1c; --iris: #6d5bd0; --iris-bg: #efecfb; --hl: #fef3c7;
+  --h0: #eef2f7; --h1: #cfeaec; --h2: #93cdd1; --h3: #2a8f99; --h4: #0f6e7a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--g); color: var(--t); font: 14px/1.5 var(--sans); }
+main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+h1 { font-size: 26px; margin: 0 0 6px; }
+h2 { font-size: 20px; margin: 44px 0 10px; padding-top: 18px; border-top: 1px solid var(--b); }
+h3 { font-size: 15px; margin: 22px 0 8px; }
+h3 .tag { font: 600 11px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; padding: 2px 7px; margin-right: 8px; vertical-align: 2px; }
+p { margin: 6px 0; }
+.lead { color: var(--m); max-width: 80ch; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--m); }
+.sm { font-size: 12px; }
+.note { background: var(--s); border: 1px solid var(--ac-b); border-left: 4px solid var(--ac); border-radius: 10px; padding: 10px 14px; margin: 14px 0; font-size: 13px; }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 12px 0 0; font-size: 13px; }
+.toc a { color: var(--acT); text-decoration: none; }
+.crit { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; }
+.crit li { margin: 3px 0; }
+.pros { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-size: 12.5px; margin: 8px 0 0; }
+.pros b { color: var(--acT); }
+.pros .con b { color: var(--warnT); }
+.help { font-size: 11.5px; color: var(--m); }
+/* mock windows */
+.win { display: grid; grid-template-columns: 230px 1fr; border: 1px solid var(--b); border-radius: 14px; overflow: hidden; background: var(--g); box-shadow: 0 2px 10px rgba(15,23,42,.05); }
+.side { background: var(--side); border-right: 1px solid var(--b); padding: 18px 12px 16px; display: flex; flex-direction: column; gap: 14px; min-height: 620px; }
+.brand { display: flex; gap: 10px; align-items: center; padding: 0 8px; }
+.brand .mark { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #0f6e7a, #36c8c5); flex: none; }
+.brand b { display: block; font-size: 15px; }
+.brand small { font: 11px var(--mono); color: var(--m); }
+.nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav a { white-space: nowrap; }
+.nav .lbl { font: 600 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 10px 10px 4px; }
+.nav a { display: flex; gap: 10px; align-items: center; height: 34px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-decoration: none; cursor: pointer; font-weight: 500; }
+.nav a:hover { background: var(--hover); }
+.nav a.on { background: var(--s); color: var(--t); font-weight: 600; box-shadow: inset 0 0 0 1px var(--b); }
+.nav a .ic { width: 14px; height: 14px; border-radius: 4px; background: var(--m); opacity: .45; flex: none; }
+.nav a.on .ic { background: var(--ac); opacity: 1; }
+.nav a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.nav a .cnt.live { color: var(--acT); font-weight: 600; }
+.nav a .cnt.warn { color: var(--warnT); }
+.nav a .udot { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+.nav a.sub { height: 30px; padding-left: 30px; font-size: 13px; font-weight: 400; gap: 7px; }
+.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: #c6cedb; flex: none; }
+.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.nav a.sub span:not(.cnt) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav .gap { height: 10px; }
+.nav .bottom { margin-top: auto; }
+.nav a .caret { margin-left: auto; font-size: 11px; color: var(--m); transition: transform .15s; }
+.nav a.open .caret { transform: rotate(90deg); }
+.nav .fold { display: flex; flex-direction: column; gap: 2px; }
+.nav .fold[hidden] { display: none; }
+.liveblk { background: var(--s); border: 1px solid var(--ac-b); border-radius: 10px; padding: 8px 10px; display: grid; gap: 4px; }
+.liveblk .lt { display: flex; align-items: center; gap: 6px; font: 600 11px var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--acT); }
+.liveblk .lt::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ac); }
+.liveblk a { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--t); text-decoration: none; }
+.liveblk a span:last-child { font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.body { display: flex; flex-direction: column; min-width: 0; }
+.top { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--b); }
+.top .search { flex: 0 1 300px; height: 28px; border: 1px solid var(--b); border-radius: 8px; background: var(--s); display: flex; align-items: center; padding: 0 10px; color: var(--m); font-size: 12.5px; }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--m); font: 11px var(--mono); }
+.sheet { padding: 18px 22px 22px; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.sheet h1 { font-size: 22px; margin: 0; }
+.sheet .find { color: var(--m); margin: 0; font-size: 13px; max-width: 80ch; }
+.doors { display: flex; gap: 2px; border-bottom: 1px solid var(--b); margin: -4px 0 4px; }
+.doors a { padding: 8px 12px; font-size: 13px; color: var(--t2); border-bottom: 2px solid transparent; cursor: pointer; margin-bottom: -1px; }
+.doors a.on { color: var(--t); font-weight: 600; border-color: var(--ac); }
+.doors a .cnt { font: 11px var(--mono); color: var(--m); margin-left: 6px; }
+.ph0 { background: var(--s); border: 1px dashed var(--b); border-radius: 12px; padding: 16px; color: var(--m); font-size: 13px; }
+/* three sidebars side by side */
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+.three .side { border: 1px solid var(--b); border-radius: 14px; min-height: 640px; }
+.cap { font: 600 12.5px var(--sans); margin: 10px 0 2px; }
+/* panels, as the app draws them */
+.panel { background: var(--s); border: 1px solid var(--b); border-radius: 14px; padding: 14px 18px; min-width: 0; }
+.ph { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.ph h4 { font-size: 16px; margin: 0; }
+.ph .acT { color: var(--acT); font: 500 12px var(--mono); }
+.pill { font: 500 11px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--sub); color: var(--m); border: 1px solid var(--b); }
+.pill.warn { background: var(--warn-bg); color: var(--warnT); border-color: var(--warn-b); }
+.pill.teal { background: var(--ac-soft); color: var(--acT); border-color: var(--ac-b); }
+/* limits: shared bits */
+.bb { position: relative; height: 7px; border-radius: 4px; background: var(--track); overflow: visible; }
+.bb i { display: block; height: 100%; border-radius: 4px; background: var(--ac); }
+.bb i.warn { background: var(--warn); } .bb i.neg { background: var(--neg); }
+.bb em { position: absolute; top: -3px; width: 2px; height: 13px; background: var(--t); opacity: .7; }
+.warnT { color: var(--warnT); } .negT { color: var(--negT); } .acT { color: var(--acT); }
+/* L1: one row per account, bar and a timeline cell on a shared axis */
+.l1 { display: grid; grid-template-columns: 170px 250px minmax(0, 1fr); gap: 8px 16px; align-items: center; }
+.l1 .hd { font: 11px var(--mono); color: var(--m); padding-bottom: 4px; border-bottom: 1px solid var(--ru); }
+.l1 .who b { font-weight: 600; display: block; }
+.l1 .who span { font: 11px var(--mono); color: var(--m); }
+.l1 .bar { display: grid; gap: 4px; }
+.l1 .bar .t { display: flex; justify-content: space-between; font-size: 12px; }
+.l1 .bar .t .mono { font-size: 11.5px; }
+.axis { display: grid; grid-template-columns: repeat(7, 1fr); font: 11px var(--mono); color: var(--m); }
+.axis span { border-left: 1px solid var(--ru); padding-left: 4px; }
+.tl { position: relative; height: 22px; background: repeating-linear-gradient(90deg, var(--ru) 0 1px, transparent 1px calc(100% / 7)); border-radius: 4px; }
+.tl .seg { position: absolute; top: 5px; height: 12px; border-radius: 3px; background: var(--ac-soft); border: 1px solid var(--ac-b); }
+.tl .seg i { display: block; height: 100%; border-radius: 2px; background: var(--ac-b); }
+.tl .seg.hot i { background: var(--warn-b); } .tl .seg.hot { background: var(--warn-bg); border-color: var(--warn-b); }
+.tl .tick { position: absolute; top: 2px; width: 2px; height: 18px; background: var(--ac); border-radius: 1px; }
+.tl .tick.out { background: var(--warn); }
+.tl .lab { position: absolute; top: 3px; font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.tl .lab.out { color: var(--warnT); }
+/* L2: the burn-down rows with a countdown line under each bar */
+.l2 { display: grid; gap: 14px; }
+.l2 .bt { display: flex; justify-content: space-between; font-size: 13px; }
+.l2 .bt .mono { font-size: 12px; }
+.l2 .cd { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; margin-top: 5px; }
+.l2 .cd .ln { position: relative; height: 4px; border-radius: 2px; background: var(--track); }
+.l2 .cd .ln i { position: absolute; left: 0; top: 0; height: 100%; background: var(--ac-b); border-radius: 2px; }
+.l2 .cd .ln b { position: absolute; top: -4px; width: 2px; height: 12px; background: var(--warn); }
+.l2 .cd .ln em { position: absolute; right: 0; top: -4px; width: 2px; height: 12px; background: var(--ac); }
+.l2 .cd span { font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.l2 .bn { font-size: 12px; color: var(--m); margin-top: 4px; }
+/* L3: timeline first; the bar from now to the reset, filled by what is used */
+.l3 { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 6px 14px; align-items: center; }
+.l3 .who { font-size: 13px; display: flex; justify-content: space-between; gap: 6px; }
+.l3 .who b { font-weight: 600; }
+.l3 .who .w { font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.l3.tight { grid-template-columns: 150px minmax(0, 1fr); }
+.l3.tight .who { flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.2; }
+.rl .who span, .rl .who b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+table.lr th { white-space: nowrap; }
+.l3 .row { position: relative; height: 24px; background: repeating-linear-gradient(90deg, var(--ru) 0 1px, transparent 1px calc(100% / 7)); border-radius: 4px; }
+.l3 .row .bar { position: absolute; top: 4px; left: 0; height: 16px; border-radius: 4px; background: var(--ac-soft); border: 1px solid var(--ac-b); overflow: hidden; }
+.l3 .row .bar i { position: absolute; left: 0; top: 0; height: 100%; background: var(--ac-b); }
+.l3 .row .bar i.warn { background: var(--warn-b); } .l3 .row .bar i.neg { background: #fecaca; }
+.l3 .row .bar em { position: absolute; top: 0; height: 100%; width: 2px; background: var(--warn); }
+.l3 .row .bar span { position: absolute; left: 6px; top: 0; line-height: 15px; font: 600 10.5px var(--mono); color: var(--t); }
+.l3 .row .at { position: absolute; top: 5px; font: 11px var(--mono); color: var(--m); white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--t2); margin-top: 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
+/* Overview mocks, scaled down */
+.ovmock { font-size: 13px; }
+.ovhead { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.ovhead .live { font-size: 13px; color: var(--m); display: flex; align-items: center; gap: 6px; }
+.ovhead .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--ac); }
+.ovhead h1 { font-size: 30px; margin: 2px 0; }
+.ovhead .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.seg { display: inline-flex; border: 1px solid var(--b); border-radius: 8px; overflow: hidden; background: var(--s); }
+.seg a { padding: 5px 11px; font-size: 12.5px; color: var(--t2); border-right: 1px solid var(--b); cursor: pointer; }
+.seg a:last-child { border-right: 0; }
+.seg a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--b); background: var(--s); font: 500 13px var(--sans); color: var(--t); cursor: pointer; white-space: nowrap; }
+.btn.primary { background: var(--ac); color: var(--btn-fg); border-color: var(--ac); }
+.btn.sm { height: 26px; font-size: 12px; padding: 0 10px; }
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.kpis.four { grid-template-columns: repeat(4, 1fr); }
+.kpi { background: var(--s); border: 1px solid var(--b); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+.kpi .kl { display: flex; justify-content: space-between; font-size: 12px; color: var(--m); }
+.kpi .kd { font: 11px var(--mono); }
+.kpi.up .kd { color: var(--acT); } .kpi.warn .kd { color: var(--warnT); }
+.kpi strong { display: block; font: 600 22px var(--mono); margin: 4px 0 2px; }
+.kpi strong small { font-size: 12px; color: var(--m); font-weight: 400; }
+.kpi .kn { font: 11.5px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .sp { height: 26px; margin: 4px 0; }
+.kpi .sp svg { width: 100%; height: 100%; }
+.kpi .sp path.sl { fill: none; stroke: var(--ac); stroke-width: 1.5; } .kpi .sp path.sa { fill: var(--ac-soft); stroke: none; }
+.ovrow { display: grid; gap: 16px; }
+.ovrow.r21 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.ovrow.r11 { grid-template-columns: 1fr 1fr; }
+.ovrow.r32 { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+.ovrow.r23 { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+.topo { position: relative; height: 330px; background: radial-gradient(circle, #dfe5ee 1px, transparent 1px) 0 0/18px 18px; border-radius: 10px; }
+.topo .nd { position: absolute; background: var(--s); border: 1px solid var(--b); border-radius: 9px; padding: 8px 12px; font-size: 13px; width: 150px; }
+.topo .nd b { display: block; font-weight: 600; } .topo .nd span { font: 11px var(--mono); color: var(--m); }
+.topo .nd.tool { background: var(--ac-soft); border-color: var(--ac-b); color: var(--acT); font-family: var(--mono); text-align: center; }
+.topo svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.topo path { fill: none; stroke: var(--ac-b); stroke-width: 1.5; stroke-dasharray: 3 5; }
+.topo path.on { stroke: var(--ac); stroke-dasharray: 0; }
+.rl { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 12px; font-size: 13px; align-items: center; }
+.rl .who { min-width: 0; }
+.rl > .mono, .rl > .tp { white-space: nowrap; }
+table.lr.compact th, table.lr.compact td { padding: 9px 4px; font-size: 12.5px; white-space: nowrap; }
+.rl .mono { font-size: 11.5px; color: var(--m); }
+.rl .hd { font: 11px var(--mono); color: var(--m); border-bottom: 1px solid var(--ru); padding-bottom: 4px; }
+.rl .tp { color: var(--acT); font-weight: 600; font-family: var(--mono); font-size: 12px; }
+.rl .who b { display: block; font-weight: 600; }
+.rl .who span { font: 11px var(--mono); color: var(--m); }
+.hm { display: grid; grid-template-columns: repeat(53, 1fr); grid-auto-flow: column; grid-template-rows: repeat(7, 10px); gap: 2px; margin: 10px 0 6px; }
+.hm i { display: block; border-radius: 2px; background: var(--h0); }
+.hm i.l1 { background: var(--h1); } .hm i.l2 { background: var(--h2); } .hm i.l3 { background: var(--h3); } .hm i.l4 { background: var(--h4); }
+table.lr { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.lr th { text-align: left; color: var(--m); font-weight: 500; font-size: 12px; padding: 8px 8px; border-bottom: 1px solid var(--b); }
+table.lr td { padding: 11px 8px; border-bottom: 1px solid var(--ru); }
+table.lr .num { text-align: right; font-family: var(--mono); }
+.ln2 { display: grid; gap: 8px; }
+.ln2 a { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--b); border-radius: 10px; background: var(--sub); text-decoration: none; color: var(--t); font-size: 13px; }
+.ln2 a b { font-weight: 600; } .ln2 a span { font: 11px var(--mono); color: var(--m); display: block; }
+.ln2 a .tp { color: var(--acT); font: 600 12px var(--mono); }
+.attn { display: flex; flex-wrap: wrap; gap: 8px; }
+.attn a { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--warn-b); background: var(--warn-bg); color: var(--warnT); font-size: 12.5px; text-decoration: none; }
+.attn a::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.attn a.ok { border-color: var(--ac-b); background: var(--ac-soft); color: var(--acT); }
+.attn a.ok::before { background: var(--ac); }
+/* the feedback form */
+.cbox { margin: 10px 0 4px; }
+.cbox label { display: block; font-size: 12.5px; color: var(--m); margin-bottom: 4px; }
+.cbox textarea, #out { width: 100%; font: 13px/1.45 var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.cbox textarea:focus, #out:focus { outline: 2px solid var(--ac); outline-offset: 1px; }
+.q { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--ru); }
+.q .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; height: 22px; }
+.q .qt { font-size: 14px; margin-bottom: 6px; }
+.q .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.q .opts label { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--b); border-radius: 999px; background: var(--s); font-size: 13px; cursor: pointer; }
+.q .opts label:has(input:checked) { background: var(--act); border-color: var(--ac-b); font-weight: 500; }
+.q .opts input { margin: 0; accent-color: var(--ac); }
+.q .other { margin-top: 6px; }
+.q .other input { width: 100%; max-width: 520px; font: 13px var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 6px 10px; }
+.fbar2 { display: flex; gap: 8px; align-items: center; margin: 14px 0 8px; }
+#out { font-family: var(--mono); font-size: 12px; }
+#copied { color: var(--acT); }
+.toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--t); color: var(--g); padding: 8px 14px; border-radius: 8px; font-size: 12.5px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+@media (max-width: 900px) { .three { grid-template-columns: 1fr; } .win { grid-template-columns: 1fr; } .kpis, .kpis.four { grid-template-columns: 1fr 1fr; } .ovrow { grid-template-columns: 1fr !important; } .l1 { grid-template-columns: 1fr; } .l3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Sidebar, limits and Overview: variations</h1>
+<p class="lead">Working mockups with your numbers from today (8 accounts, 222 projects, 4 live sessions, 11 MCP servers, 251 skills, the seven limits on your Overview). The sidebar menus, the collapsible groups, the doors and the limit bars behave as they would in the app. Nothing here is applied yet; the <a href="#feedback">feedback sheet</a> at the end decides what is built.</p>
+<div class="note"><b>Already built, uncommitted on develop:</b> the Skills header spacing and the Antigravity mark at the same size as the other three; MCP servers read from every tool when Harness Manager starts, the list paged at 25, 50 or 100, and an info button on each server that says in which file of each tool it is written, not written, or left alone (the side panel is gone); the Overview without the five crossed-out panels (score and moves, time to first reply, where tokens went, events, fleet health; the two Settings rows that only served them are gone too); an amber dot on the Settings link while a newer Harness Manager waits.</div>
+<div class="toc"><a href="#side">The sidebar</a><a href="#limits">Limits: one panel</a><a href="#overview">The Overview</a><a href="#feedback">Feedback sheet</a></div>
+
+<h2 id="side">The sidebar</h2>
+<p>What is wrong with it today, in order of harm:</p>
+<ul class="crit">
+  <li><b>Two kinds of things in one list.</b> Pages you watch (Overview, Projects, Sessions, Accounts) sit among pages you set up once (MCP servers, Skills, System prompts, Apps), with API keys &amp; routing between them. The one gap says nothing about why.</li>
+  <li><b>The pinned projects push everything down.</b> Three pins and their live counts take as much room as four pages, and they move as sessions start and stop.</li>
+  <li><b>The counts mean different things.</b> "Today $378.37", "8", "222", "4 LIVE", "11", "251": a cost, a count, a live count and a size, all in the same column and type.</li>
+  <li><b>Apps is misfiled.</b> It is about the tools' installers and versions, not shared setup, and its update badge is the only warning in the menu.</li>
+</ul>
+<div class="three">
+  <div>
+    <h3><span class="tag">A</span>Grouped</h3>
+    <aside class="side" id="sideA">
+      <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+      <nav class="nav">
+        <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+        <div class="lbl">Activity</div>
+        <a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a>
+        <a><i class="ic"></i>Projects<span class="cnt">222</span></a>
+        <a class="sub"><i class="dot live"></i><span>Bunyan</span><span class="cnt live">1</span></a>
+        <a class="sub"><i class="dot live"></i><span>HarnessManager</span><span class="cnt live">1</span></a>
+        <a class="sub"><i class="dot live"></i><span>AdminPortal</span><span class="cnt live">1</span></a>
+        <a><i class="ic"></i>Accounts<span class="cnt">8</span></a>
+        <div class="lbl">Shared setup</div>
+        <a><i class="ic"></i>MCP servers<span class="cnt warn">12 left alone</span></a>
+        <a><i class="ic"></i>Skills<span class="cnt">251</span></a>
+        <a><i class="ic"></i>System prompts</a>
+        <div class="lbl">Tools</div>
+        <a><i class="ic"></i>Apps<span class="cnt warn">1 update</span></a>
+        <a><i class="ic"></i>API keys &amp; routing</a>
+        <div class="bottom"></div>
+        <a><i class="ic"></i>CLI reference</a>
+        <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+      </nav>
+    </aside>
+    <div class="pros"><div><b>Keeps</b> every page one click away; the groups say why a page is where it is.</div><div class="con"><b>Costs</b> three labels of height; the pins still move the list.</div></div>
+  </div>
+  <div>
+    <h3><span class="tag">B</span>Collapsible setup</h3>
+    <aside class="side" id="sideB">
+      <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+      <nav class="nav">
+        <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+        <a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a>
+        <a class="open" data-fold="pins"><i class="ic"></i>Projects<span class="cnt">222 · 3 live</span><span class="caret">▶</span></a>
+        <div class="fold" id="pins">
+          <a class="sub"><i class="dot live"></i><span>Bunyan</span><span class="cnt live">1</span></a>
+          <a class="sub"><i class="dot live"></i><span>HarnessManager</span><span class="cnt live">1</span></a>
+          <a class="sub"><i class="dot live"></i><span>AdminPortal</span><span class="cnt live">1</span></a>
+        </div>
+        <a><i class="ic"></i>Accounts<span class="cnt">8</span></a>
+        <div class="gap"></div>
+        <a data-fold="setup"><i class="ic"></i>Setup<span class="cnt warn">2 to look at</span><span class="caret">▶</span></a>
+        <div class="fold" id="setup" hidden>
+          <a class="sub"><span>MCP servers</span><span class="cnt warn">12 left alone</span></a>
+          <a class="sub"><span>Skills</span><span class="cnt">251</span></a>
+          <a class="sub"><span>System prompts</span></a>
+          <a class="sub"><span>API keys &amp; routing</span></a>
+          <a class="sub"><span>Apps</span><span class="cnt warn">1 update</span></a>
+        </div>
+        <div class="bottom"></div>
+        <a><i class="ic"></i>CLI reference</a>
+        <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+      </nav>
+    </aside>
+    <div class="pros"><div><b>Keeps</b> the menu short: five lines when Setup is folded; the pins fold with Projects. Click Projects' caret and Setup to try.</div><div class="con"><b>Costs</b> a second click for the setup pages; the fold state has to be remembered.</div></div>
+  </div>
+  <div>
+    <h3><span class="tag">C</span>Four doors</h3>
+    <aside class="side" id="sideC">
+      <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+      <div class="liveblk"><div class="lt">Live now · 4</div>
+        <a><span>Bunyan</span><span>claude-main · 466 tok/s</span></a>
+        <a><span>HarnessManager</span><span>codex-main</span></a>
+        <a><span>AdminPortal</span><span>samykabu-teksa</span></a>
+        <a><span>sabus</span><span>claude-main</span></a></div>
+      <nav class="nav">
+        <a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a>
+        <a><i class="ic"></i>Activity<span class="cnt">sessions · projects</span></a>
+        <a><i class="ic"></i>Accounts<span class="cnt">8 · routing</span></a>
+        <a><i class="ic"></i>Setup<span class="cnt warn">2</span></a>
+        <div class="bottom"></div>
+        <a><i class="ic"></i>CLI reference</a>
+        <a><i class="ic"></i>Settings<i class="udot" title="1.2.2 is available"></i></a>
+      </nav>
+    </aside>
+    <div class="pros"><div><b>Keeps</b> the menu to four doors; what is running is always in view and opens the session. Pins live on the Projects page only.</div><div class="con"><b>Costs</b> a tab bar on three pages (below); MCP servers and Skills are two clicks away.</div></div>
+  </div>
+</div>
+<h3>How C's doors open</h3>
+<div class="win" style="min-height:0">
+  <aside class="side" style="min-height:0;padding-bottom:12px">
+    <div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div>
+    <nav class="nav"><a><i class="ic"></i>Overview</a><a><i class="ic"></i>Activity</a><a><i class="ic"></i>Accounts</a><a class="on"><i class="ic"></i>Setup<span class="cnt warn">2</span></a></nav>
+  </aside>
+  <div class="body">
+    <div class="top"><div class="search">Find an account, session or setting</div><div class="right">limits read just now</div></div>
+    <div class="sheet">
+      <div class="doors" id="doors"><a class="on" data-door="mcp">MCP servers<span class="cnt">11 · 12 left alone</span></a><a data-door="skills">Skills<span class="cnt">251</span></a><a data-door="prompts">System prompts</a><a data-door="apps">Apps<span class="cnt">1 update</span></a><a data-door="keys">API keys &amp; routing</a></div>
+      <div class="ph0" id="door-mcp">The MCP servers page as it is today: the list, Import from apps, Add MCP server. Activity opens the same way with Sessions and Projects as its tabs; Accounts with Accounts and API keys &amp; routing.</div>
+      <div class="ph0" id="door-skills" hidden>The Skills page as it is today, with Installed and Discover below this bar.</div>
+      <div class="ph0" id="door-prompts" hidden>System prompts, one tab per tool as today.</div>
+      <div class="ph0" id="door-apps" hidden>Apps: the installers and versions.</div>
+      <div class="ph0" id="door-keys" hidden>API keys &amp; routing.</div>
+    </div>
+  </div>
+</div>
+<div class="cbox"><label for="c-side">Comments on the sidebar</label><textarea id="c-side" data-comment="side" rows="2" placeholder="Which groups, which names, what to move…"></textarea></div>
+
+<h2 id="limits">Limits: one panel instead of two</h2>
+<p class="lead">"Limit burn-down" says how much is left and when it resets; "When limits free up" draws the same resets on a time axis. One panel can say both. Each variation below uses your seven limits and today's resets.</p>
+
+<h3><span class="tag">L1</span>One row per account: the bar and the timeline side by side</h3>
+<section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">tightest window first · bar: what is left · timeline: the open window until it resets, amber tick: runs out at this pace</span></div>
+  <div class="l1" id="l1"></div></section>
+<div class="pros"><div><b>Keeps</b> both readings on one line, the accounts comparable top to bottom on a shared week.</div><div class="con"><b>Costs</b> width: below about 1100 px the timeline drops under the bar.</div></div>
+
+<h3><span class="tag">L2</span>The burn-down rows, with the countdown under each bar</h3>
+<section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">tightest first · bar: what is left, mark: level at the reset · line: now to the reset, amber: runs out</span></div>
+  <div class="l2" id="l2"></div></section>
+<div class="pros"><div><b>Keeps</b> the panel narrow, so it still fits beside Live routes; each account is read on its own.</div><div class="con"><b>Costs</b> the shared axis: you cannot see at a glance which reset comes first.</div></div>
+
+<h3><span class="tag">L3</span>Timeline first: the bar runs to the reset, filled by what is used</h3>
+<section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">each bar runs from now to its reset · the fill is what is used · amber from where it runs out at this pace</span></div>
+  <div class="axis" style="margin-left:244px"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div>
+  <div class="l3" id="l3"></div>
+  <div class="legend"><span><i style="background:var(--ac-b)"></i>used so far</span><span><i style="background:var(--ac-soft);border:1px solid var(--ac-b)"></i>still free until the reset</span><span><i style="background:var(--warn-b)"></i>runs out before the reset at this pace</span></div></section>
+<div class="pros"><div><b>Keeps</b> one mark per limit: length is time, fill is use, colour is risk. The 5-hour window shows as a short bar.</div><div class="con"><b>Costs</b> precision on the percentage; the number is in the bar, not in a column.</div></div>
+<div class="cbox"><label for="c-limits">Comments on the limits panel</label><textarea id="c-limits" data-comment="limits" rows="2" placeholder="Which one, what to add, which limits to show…"></textarea></div>
+
+<h2 id="overview">The Overview</h2>
+<p class="lead">O1 is the page as it is now after the removals. O2 and O3 go further. All three use the same numbers; the limits panel in O2 and O3 is whichever of L1 to L3 you pick.</p>
+
+<h3><span class="tag">O1</span>The changes only</h3>
+<div class="win ovmock"><aside class="side" style="min-height:0"><div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div><nav class="nav"><a class="on"><i class="ic"></i>Overview<span class="cnt">Today $378.37</span></a><a><i class="ic"></i>Accounts<span class="cnt">8</span></a><a><i class="ic"></i>Projects<span class="cnt">222</span></a><a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a><a><i class="ic"></i>MCP servers<span class="cnt">11</span></a><a><i class="ic"></i>Skills<span class="cnt">251</span></a><a><i class="ic"></i>Apps</a><div class="bottom"></div><a><i class="ic"></i>Settings<i class="udot"></i></a></nav></aside>
+<div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+<div class="sheet">
+  <div class="ovhead"><div><div class="live"><i></i>Live · DEVELOPMENTPC · 8 accounts · 8 logged in · <span class="acT">4 consoles open</span> · router :8787 stopped</div><h1>Overview</h1><p class="find">Every account has room. <b class="warnT">codex-main</b> runs out of its week Sat 11:33 at this pace.</p></div>
+    <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+  <div class="kpis" data-kpis></div>
+  <div class="ovrow r21"><section class="panel"><div class="ph"><h4>Live routes <span class="acT">466 tok/s now</span></h4><span class="muted sm mono">particles = tokens per second, last 5 minutes</span></div><div class="topo" data-topo></div></section>
+    <section class="panel"><div class="ph"><h4>Limit burn-down</h4><span class="muted sm">tightest limit</span></div><div class="l2" data-burn></div></section></div>
+  <section class="panel"><div class="ph"><h4>When limits free up</h4><span class="muted sm">bar: open 5-hour window · teal tick: weekly reset · amber tick: runs out at this pace</span></div><div class="axis" style="margin-left:170px"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div><div class="l1" style="grid-template-columns:170px minmax(0,1fr)" data-tlonly></div></section>
+  <section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+  <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr" data-lr></table></section>
+</div></div></div>
+<div class="pros"><div><b>Keeps</b> everything you did not cross out, in its place.</div><div class="con"><b>Costs</b> nothing new; the two limit panels still say the same thing twice, and Activity now stands alone at full width.</div></div>
+
+<h3><span class="tag">O2</span>Limits first, what is running beside the routes</h3>
+<div class="win ovmock"><aside class="side" style="min-height:0"><div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div><nav class="nav"><a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a><div class="lbl">Activity</div><a><i class="ic"></i>Sessions<span class="cnt live">4 live</span></a><a><i class="ic"></i>Projects<span class="cnt">222</span></a><a><i class="ic"></i>Accounts<span class="cnt">8</span></a><div class="lbl">Shared setup</div><a><i class="ic"></i>MCP servers<span class="cnt warn">12 left alone</span></a><a><i class="ic"></i>Skills<span class="cnt">251</span></a><a><i class="ic"></i>System prompts</a><div class="bottom"></div><a><i class="ic"></i>Settings<i class="udot"></i></a></nav></aside>
+<div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+<div class="sheet">
+  <div class="ovhead"><div><div class="live"><i></i>Live · DEVELOPMENTPC · 8 accounts · 8 logged in · <span class="acT">4 consoles open</span></div><h1>Overview</h1>
+    <div class="attn"><a>Harness Manager 1.2.2 is available · Settings</a><a>12 MCP or skill entries left alone · MCP servers</a><a>codex-main runs out of its week Sat 11:33 · Accounts</a></div></div>
+    <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+  <div class="kpis" data-kpis></div>
+  <section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">tightest window first · the timeline is the open window until it resets · amber: runs out at this pace</span></div><div class="l1" data-l1></div></section>
+  <div class="ovrow r21"><section class="panel"><div class="ph"><h4>Live routes <span class="acT">466 tok/s now</span></h4><span class="muted sm mono">last 5 minutes</span></div><div class="topo" data-topo></div></section>
+    <section class="panel"><div class="ph"><h4>Running now <span class="muted sm mono">4</span></h4><a class="acT sm">All sessions</a></div><div class="ln2" data-run></div></section></div>
+  <div class="ovrow r32"><section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+    <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr compact" data-lr="short"></table></section></div>
+</div></div></div>
+<div class="pros"><div><b>Keeps</b> the routes and the six tiles. The attention chips carry what Fleet health used to say, and only when something needs a look. "Running now" opens a session in one click, which the sidebar's live count did not.</div><div class="con"><b>Costs</b> a taller page: limits and routes no longer share a row.</div></div>
+
+<h3><span class="tag">O3</span>Two columns, the routes as a list</h3>
+<div class="win ovmock"><aside class="side" style="min-height:0"><div class="brand"><span class="mark"></span><div><b>Harness Manager</b><small>DEVELOPMENTPC · 8 accounts</small></div></div><div class="liveblk"><div class="lt">Live now · 4</div><a><span>Bunyan</span><span>claude-main</span></a><a><span>HarnessManager</span><span>codex-main</span></a><a><span>AdminPortal</span><span>samykabu-teksa</span></a><a><span>sabus</span><span>claude-main</span></a></div><nav class="nav"><a class="on"><i class="ic"></i>Overview<span class="cnt">$378 today</span></a><a><i class="ic"></i>Activity</a><a><i class="ic"></i>Accounts<span class="cnt">8</span></a><a><i class="ic"></i>Setup<span class="cnt warn">2</span></a><div class="bottom"></div><a><i class="ic"></i>Settings<i class="udot"></i></a></nav></aside>
+<div class="body"><div class="top"><div class="search">Find an account, session or setting</div><div class="right">Limits read just now · usage 1 m ago</div></div>
+<div class="sheet">
+  <div class="ovhead"><div><h1>Overview</h1><div class="attn"><a>Harness Manager 1.2.2 is available</a><a>12 entries left alone</a><a class="ok">8 of 8 logged in · backup 6 h ago</a></div></div>
+    <div class="acts"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="seg mono"><a class="on">24h</a><a>7d</a><a>30d</a></span><button class="btn primary">▶ Start sabushanab-resal</button></div></div>
+  <div class="kpis four" data-kpis="four"></div>
+  <div class="ovrow r21">
+    <div style="display:grid;gap:16px">
+      <section class="panel"><div class="ph"><h4>Limits</h4><span class="muted sm">bar: now to the reset · fill: used · amber: runs out</span></div><div class="axis" style="margin-left:164px"><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div><div class="l3 tight" data-l3></div></section>
+      <section class="panel"><div class="ph"><h4>Activity, 53 weeks</h4><span class="muted sm mono">daily tokens</span></div><div class="hm" data-hm></div><p class="muted sm mono">Busiest day: Wed, Sep 30 · 4.79B</p></section>
+    </div>
+    <div style="display:grid;gap:16px;align-content:start">
+      <section class="panel"><div class="ph"><h4>Routes <span class="acT">466 tok/s</span></h4><span class="muted sm">last 5 minutes</span></div>
+        <div class="rl"><span class="hd">Account</span><span class="hd">now</span><span class="hd">room</span>
+          <span class="who"><b>claude-main</b><span>Claude Code 2.1.318 · Anthropic</span></span><span class="tp">466 tok/s</span><span class="mono">74% left</span>
+          <span class="who"><b>codex-main</b><span>Codex 0.166.0 · OpenAI</span></span><span class="tp">139.7k</span><span class="mono warnT">70% · Sat 11:33</span>
+          <span class="who"><b>samykabu-teksa</b><span>Claude Code · Anthropic</span></span><span class="mono">—</span><span class="mono">95% left</span>
+          <span class="who"><b>opencode-main</b><span>OpenCode 1.19.5 · OpenCode</span></span><span class="mono">—</span><span class="mono">open</span>
+          <span class="who"><b>agy-main</b><span>Antigravity 1.5.0 · Google</span></span><span class="mono">—</span><span class="mono">active</span>
+          <span class="who"><b>sabushanab-resal</b><span>Claude Code · Anthropic</span></span><span class="mono">—</span><span class="mono">100% left</span></div>
+        <p class="muted sm" style="margin-top:8px">Click a row to open the account; the diagram is one click away under the title.</p></section>
+      <section class="panel"><div class="ph"><h4>Latest replies <span class="muted sm mono">7,067</span></h4><a class="acT sm">Request log</a></div><table class="lr compact" data-lr="short"></table></section>
+    </div>
+  </div>
+</div></div></div>
+<div class="pros"><div><b>Keeps</b> the page to one screen on a 1440 px display: four tiles, the limits and the routes side by side, the replies at hand. The routes list says the same as the diagram in a fifth of the height and adds each account's room.</div><div class="con"><b>Costs</b> the diagram as the first thing you see, and the tiles for Requests and First reply p95.</div></div>
+<div class="cbox"><label for="c-overview">Comments on the Overview</label><textarea id="c-overview" data-comment="overview" rows="2" placeholder="Which one, which tiles, what the attention chips should say…"></textarea></div>
+
+<h2 id="feedback">Feedback sheet</h2>
+<p>Pick an answer for each question, add what you like in the boxes, then press <b>Copy my answers</b> and paste the text into the chat. Your draft stays in this browser until you clear it.</p>
+<div id="form"></div>
+<div class="cbox"><label for="c-general">Anything else</label><textarea id="c-general" data-comment="general" rows="3" placeholder="Other requests, priorities, things I missed…"></textarea></div>
+<div class="fbar2"><button class="btn primary" id="copy">Copy my answers</button><button class="btn" id="clear">Clear the draft</button><span id="copied" class="help"></span></div>
+<textarea id="out" rows="10" readonly aria-label="Your answers as text" placeholder="Your answers appear here after Copy, in case the clipboard is refused: select and copy them by hand."></textarea>
+<div class="toast" id="toast"></div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// ---- your limits, Wed 23:26 (hours to each reset, from the Overview) ----
+const L = [
+  { a: 'codex-main', plan: 'ChatGPT Pro', win: 'Week', left: 70, at: 62, reset: 'Tue 15:46', h: 136, outH: 60, outAt: 'Sat 11:33', note: 'Runs out Sat 11:33, 3 d 4 h before the reset.' },
+  { a: 'claude-main', plan: 'Max 20x', win: 'Week', left: 74, at: 40, reset: 'Fri 12:59', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-personal', plan: 'Max 20x', win: 'Week', left: 74, at: 42, reset: 'Fri 13:00', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'claude-main', plan: 'Max 20x', win: 'Week · Fable', left: 85, at: 70, reset: 'Fri 12:59', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-personal', plan: 'Max 20x', win: 'Week · Fable', left: 85, at: 72, reset: 'Fri 13:00', h: 37.5, note: 'Resets in 1 d 13 h; lasts until then at this pace.' },
+  { a: 'samykabu-teksa', plan: 'Max 20x', win: '5-hour session', left: 95, at: 93, reset: '00:40', h: 1.2, note: 'Resets in 1 h 14 m; lasts until then at this pace.' },
+  { a: 'samykabu-teksa', plan: 'Max 20x', win: 'Week', left: 96, at: 80, reset: 'Tue 08:00', h: 128.5, note: 'Resets in 5 d 8 h; lasts until then at this pace.' },
+  { a: 'sabushanab-resal', plan: 'Max 5x', win: 'Week', left: 100, at: 100, reset: 'Fri 23:00', h: 47.5, note: 'Resets in 1 d 23 h.' },
+  { a: 'service-account-resal', plan: 'Max 5x', win: 'Week', left: 100, at: 100, reset: 'Wed 06:00', h: 150.5, note: 'Resets in 6 d 6 h.' },
+];
+const WEEK = 168, pct = (h) => Math.min(100, (h / WEEK) * 100);
+const tone = (left) => (left < 20 ? 'neg' : left < 45 ? 'warn' : '');
+// the tightest window of each account, then the others of the same account under it
+const byAccount = () => { const seen = new Set(); return L.filter((l) => (seen.has(l.a) ? false : seen.add(l.a))); };
+const side = (p) => (p > 72 ? `right:calc(${(100 - p).toFixed(1)}% + 6px)` : `left:calc(${p.toFixed(1)}% + 6px)`);
+const tlCell = (l, full = true) => `<div class="tl"><div class="seg ${l.outH ? 'hot' : ''}" style="left:0;width:${pct(l.h).toFixed(1)}%"><i style="width:${l.outH ? ((l.outH / l.h) * 100).toFixed(0) : 100 - l.left}%"></i></div>${l.outH ? `<em class="tick out" style="left:${pct(l.outH).toFixed(1)}%" title="Runs out ${l.outAt}"></em><span class="lab out" style="${side(pct(l.outH))}">runs out ${l.outAt}</span>` : ''}<em class="tick" style="left:${pct(l.h).toFixed(1)}%" title="Resets ${l.reset}"></em>${!l.outH && full ? `<span class="lab" style="${side(pct(l.h))}">${esc(l.win.toLowerCase())} resets ${l.reset}</span>` : ''}</div>`;
+// L1
+const l1 = (host) => { host.innerHTML = `<span class="hd">Account</span><span class="hd">Tightest window · left</span><div class="axis"><span>Wed now</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span><span>Mon</span><span>Tue</span></div>` +
+  byAccount().map((l) => `<div class="who"><b>${esc(l.a)}</b><span>${esc(l.plan)}</span></div><div class="bar"><div class="t"><span>${esc(l.win)}</span><span class="mono ${tone(l.left)}T">${l.left}% left</span></div><div class="bb"><i class="${tone(l.left)}" style="width:${100 - l.left}%"></i><em style="left:${l.at}%" title="level at the reset"></em></div></div>${tlCell(l)}`).join(''); };
+l1(document.getElementById('l1'));
+document.querySelectorAll('[data-l1]').forEach(l1);
+// the timeline only (O1's "When limits free up")
+document.querySelectorAll('[data-tlonly]').forEach((host) => { host.innerHTML = byAccount().map((l) => `<div class="who" style="font-size:13px"><b>${esc(l.a)}</b></div>${tlCell(l)}`).join(''); });
+// L2
+const l2 = (host, n = 9) => { host.innerHTML = L.slice(0, n).map((l) => `<div><div class="bt"><span><b>${esc(l.a)}</b> <span class="muted">${esc(l.win)}</span></span><span class="mono ${tone(l.left)}T">${l.left}% left</span></div>
+  <div class="bb"><i class="${tone(l.left)}" style="width:${100 - l.left}%"></i><em style="left:${l.at}%"></em></div>
+  <div class="cd"><div class="ln" title="now to the reset"><i style="width:${l.outH ? ((l.outH / l.h) * 100).toFixed(0) : 100}%"></i>${l.outH ? `<b style="left:${((l.outH / l.h) * 100).toFixed(0)}%" title="runs out ${l.outAt}"></b>` : ''}<em title="resets ${l.reset}"></em></div><span>${l.outH ? `runs out ${l.outAt} · ` : ''}resets ${l.reset}</span></div></div>`).join(''); };
+l2(document.getElementById('l2'));
+document.querySelectorAll('[data-burn]').forEach((h) => { h.innerHTML = L.slice(0, 7).map((l) => `<div><div class="bt"><span><b>${esc(l.a)}</b> <span class="muted">${esc(l.win)}</span></span><span class="mono ${tone(l.left)}T">${l.left}% left</span></div><div class="bb"><i class="${tone(l.left)}" style="width:${100 - l.left}%"></i><em style="left:${l.at}%"></em></div><div class="bn">${esc(l.note)}</div></div>`).join(''); });
+// L3
+const l3 = (host) => { host.innerHTML = L.map((l) => { const w = pct(l.h), used = 100 - l.left, inner = w > 14 && w <= 72; return `<div class="who"><b>${esc(l.a)}</b><span class="w">${esc(l.win)}</span></div><div class="row" title="${esc(l.note)}"><div class="bar" style="width:${Math.max(w, 2.2).toFixed(1)}%"><i class="${tone(l.left)}" style="width:${used}%"></i>${l.outH ? `<i class="warn" style="left:${((l.outH / l.h) * 100).toFixed(0)}%;width:${(100 - (l.outH / l.h) * 100).toFixed(0)}%"></i><em style="left:${((l.outH / l.h) * 100).toFixed(0)}%"></em>` : ''}${inner ? `<span>${l.left}% left</span>` : ''}</div><span class="at" style="${w > 72 ? 'right:calc(' + (100 - w).toFixed(1) + '% + 8px);color:var(--t)' : 'left:calc(' + w.toFixed(1) + '% + 8px)'}">${inner ? '' : l.left + '% left · '}${l.outH ? 'runs out ' + l.outAt + ' · ' : ''}resets ${l.reset}</span></div>`; }).join(''); };
+l3(document.getElementById('l3'));
+document.querySelectorAll('[data-l3]').forEach(l3);
+// ---- the Overview mocks ----
+const sp = (v) => { const max = Math.max(...v), min = Math.min(...v), span = max - min || 1; const pts = v.map((x, i) => [(i / (v.length - 1)) * 120, 26 - ((x - min) / span) * 22]); const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' '); return `<svg viewBox="0 0 120 28" preserveAspectRatio="none"><path d="${line} L120 28 L0 28 Z" class="sa"></path><path d="${line}" class="sl"></path></svg>`; };
+const K = [
+  ['Tokens', '1.49B', '', '+12%', 'up', [40, 55, 48, 70, 62, 90, 100], '91% read from cache'],
+  ['Requests', '2,149', '', '+4%', 'up', [30, 50, 40, 60, 55, 70, 65], '4 consoles open now'],
+  ['Cost at list prices', '$1,175.17', '', '+$102.40', 'warn', [20, 30, 45, 40, 60, 80, 100], 'Subscriptions are not billed per token'],
+  ['Cache hit', '91', '%', '+2 pt', 'up', [80, 82, 85, 88, 87, 90, 91], 'Most tokens: codex-main'],
+  ['First reply p95', '26.4', 's', '+1.1 s', 'warn', [20, 22, 25, 24, 26, 25, 26], 'p50 6.5 s · 2,149 timed replies'],
+  ['Limit risk', '1', 'account', 'Sat 11:33', 'warn', [], 'codex-main runs out of its week'],
+];
+document.querySelectorAll('[data-kpis]').forEach((h) => { const ks = h.dataset.kpis === 'four' ? [K[0], K[2], K[3], K[5]] : K; h.innerHTML = ks.map(([l, v, u, d, t, s, n]) => `<div class="kpi ${t}"><div class="kl"><span>${l}</span><span class="kd">${d}</span></div><strong>${v}<small> ${u}</small></strong><div class="sp">${s.length ? sp(s) : ''}</div><div class="kn">${n}</div></div>`).join(''); });
+document.querySelectorAll('[data-topo]').forEach((h) => { const acc = ['claude-main|Max 20x · 74% left', 'codex-main|ChatGPT Pro · 70% left', 'opencode-main|opencode', 'agy-main|Google · active', 'samykabu-teksa|Max 20x · 95% left', 'samykabu-personal|Max 20x · 74% left'];
+  const tools = ['Claude Code|2.1.318 · 3 open', 'Codex|0.166.0 · 1 open', 'OpenCode|1.19.5', 'Antigravity|1.5.0'], vend = ['Anthropic|no traffic', 'OpenAI|139.7k tokens', 'OpenCode|no traffic', 'Google|no traffic'];
+  h.innerHTML = `<svg viewBox="0 0 900 330" preserveAspectRatio="none">${acc.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M160 ${28 + i * 52} C 260 ${28 + i * 52}, 260 ${50 + Math.min(i, 3) * 80}, 330 ${50 + Math.min(i, 3) * 80}"/>`).join('')}${tools.map((_, i) => `<path class="${i === 1 ? 'on' : ''}" d="M490 ${50 + i * 80} L 740 ${50 + i * 80}"/>`).join('')}</svg>` +
+    acc.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd" style="left:10px;top:${8 + i * 52}px"><b>${n}</b><span>${s}</span></div>`; }).join('') + tools.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd tool" style="left:330px;top:${28 + i * 80}px"><b>${n}</b><span>${s}</span></div>`; }).join('') + vend.map((a, i) => { const [n, s] = a.split('|'); return `<div class="nd" style="left:740px;top:${28 + i * 80}px"><b>${n}</b><span>${s}</span></div>`; }).join(''); });
+document.querySelectorAll('[data-run]').forEach((h) => { h.innerHTML = [['Bunyan', 'claude-main · Claude Code · 1 h 12 m', '466 tok/s'], ['HarnessManager', 'codex-main · Codex · 23 m', '—'], ['AdminPortal', 'samykabu-teksa · Claude Code · 2 h 05 m', '—'], ['sabus', 'claude-main · Claude Code · 8 m', '—']].map(([p, s, t]) => `<a><div><b>${p}</b><span>${s}</span></div><span class="tp">${t}</span></a>`).join(''); });
+let seed = 7; const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+document.querySelectorAll('[data-hm]').forEach((h) => { h.innerHTML = Array.from({ length: 371 }, (_, i) => { const w = Math.floor(i / 7); const v = w < 44 ? (rnd() < 0.08 ? 1 : 0) : Math.min(4, Math.floor(rnd() * 5 * ((w - 40) / 13))); return `<i class="l${v}"></i>`; }).join(''); });
+const R = [['23:25:53', 'claude-main', 'claude-fable-5-1', '90.5k', '—', '≈3.8 s'], ['23:25:46', 'codex-main', 'gpt-6-astra', '205.8k', '—', '—'], ['23:25:46', 'claude-main', 'claude-fable-5-1', '89.6k', '≈404 tok/s', '≈16.6 s'], ['23:25:30', 'codex-main', 'gpt-6.1-sol', '363.0k', '—', '—'], ['23:24:58', 'samykabu-teksa', 'claude-fable-5-1', '41.2k', '≈380 tok/s', '≈2.9 s']];
+document.querySelectorAll('[data-lr]').forEach((t) => { const short = t.dataset.lr === 'short'; t.innerHTML = `<tr><th>Time</th><th>Account</th>${short ? '' : '<th>Model</th>'}<th class="num">Tokens</th>${short ? '' : '<th class="num">Speed</th><th class="num">First reply</th>'}</tr>` + R.map((r) => `<tr><td class="mono">${r[0]}</td><td>${r[1]}</td>${short ? '' : `<td class="mono">${r[2]}</td>`}<td class="num">${r[3]}</td>${short ? '' : `<td class="num">${r[4]}</td><td class="num ${r[5].includes('16') ? 'warnT' : ''}">${r[5]}</td>`}</tr>`).join(''); });
+// ---- the interactive bits ----
+document.querySelectorAll('[data-fold]').forEach((a) => a.addEventListener('click', () => { const f = document.getElementById(a.dataset.fold); f.hidden = !f.hidden; a.classList.toggle('open', !f.hidden); }));
+document.getElementById('doors').addEventListener('click', (e) => { const a = e.target.closest('[data-door]'); if (!a) return; document.querySelectorAll('#doors a').forEach((x) => x.classList.toggle('on', x === a)); document.querySelectorAll('[id^=door-]').forEach((d) => { d.hidden = d.id !== 'door-' + a.dataset.door; }); });
+// ---- the feedback form ----
+const Q = [
+  ['The sidebar', ['A · Grouped', 'B · Collapsible setup', 'C · Four doors'], 'B · Collapsible setup'],
+  ['Pinned projects in the sidebar', ['Under Projects, as now', 'Folded under Projects (B)', 'Only the live ones, in a Live block (C)', 'None; pins on the Projects page only'], 'Folded under Projects (B)'],
+  ['What Fleet health used to say (new version, tool updates, left alone, logins, backup)', ['Attention chips on the Overview, only when something needs a look', 'The sidebar dots and counts only', 'Drop it'], 'Attention chips on the Overview, only when something needs a look'],
+  ['The limits panel', ['L1 · bar and timeline side by side', 'L2 · burn-down with the countdown under each bar', 'L3 · timeline first'], 'L1 · bar and timeline side by side'],
+  ['The Overview', ['O1 · the changes only', 'O2 · limits first, running now beside the routes', 'O3 · two columns, routes as a list'], 'O2 · limits first, running now beside the routes'],
+  ['The key-number tiles', ['Keep the six', 'Four: Tokens, Cost, Cache hit, Limit risk', 'Five: drop First reply p95'], 'Keep the six'],
+  ['Live routes', ['Keep the diagram', 'The list (O3), diagram one click away', 'The diagram, folded by default'], 'Keep the diagram'],
+  ['Order of work', ['Sidebar, then the limits panel, then the Overview', 'The limits panel first', 'The Overview first', 'Everything in one go'], 'Sidebar, then the limits panel, then the Overview'],
+];
+const KEY = 'hm.variations2.feedback';
+let draft = {};
+try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(draft)); } catch {} };
+document.getElementById('form').innerHTML = Q.map(([t, opts, def], i) => `<div class="q"><span class="n">${i + 1}</span><div><div class="qt">${esc(t)}</div><div class="opts">${opts.map((o) => `<label><input type="radio" name="q${i}" value="${esc(o)}" ${(draft['q' + i] || def) === o ? 'checked' : ''}> ${esc(o)}${o === def ? ' <span class="help" style="margin:0">(suggested)</span>' : ''}</label>`).join('')}<label><input type="radio" name="q${i}" value="__other" ${draft['q' + i] && !opts.includes(draft['q' + i]) ? 'checked' : ''}> Other</label></div><div class="other"><input type="text" data-other="q${i}" placeholder="Or say what you want instead" value="${draft['q' + i] && !opts.includes(draft['q' + i]) ? esc(draft['q' + i]) : ''}"></div></div></div>`).join('');
+document.querySelectorAll('[data-comment]').forEach((t) => { t.value = draft['c:' + t.dataset.comment] || ''; t.addEventListener('input', () => { draft['c:' + t.dataset.comment] = t.value; save(); }); });
+document.getElementById('form').addEventListener('change', (e) => { const r = e.target.closest('input[type=radio]'); if (!r) return; const other = document.querySelector(`[data-other="${r.name}"]`); draft[r.name] = r.value === '__other' ? (other.value || '') : r.value; save(); });
+document.getElementById('form').addEventListener('input', (e) => { const o = e.target.closest('[data-other]'); if (!o) return; draft[o.dataset.other] = o.value; document.querySelector(`input[name="${o.dataset.other}"][value="__other"]`).checked = true; save(); });
+const answers = () => {
+  const lines = ['Feedback on the sidebar / limits / Overview variations (' + new Date().toLocaleString() + ')', ''];
+  Q.forEach(([t, opts, def], i) => { const v = draft['q' + i] || def; lines.push(`${i + 1}. ${t}: ${v}${v === def ? '' : ' (changed)'}`); });
+  const names = { side: 'The sidebar', limits: 'The limits panel', overview: 'The Overview', general: 'Anything else' };
+  const cs = Object.entries(names).filter(([k]) => (draft['c:' + k] || '').trim()).map(([k, n]) => `- ${n}: ${draft['c:' + k].trim()}`);
+  if (cs.length) lines.push('', 'Comments:', ...cs);
+  return lines.join('\n');
+};
+document.getElementById('copy').onclick = async () => {
+  const text = answers(); document.getElementById('out').value = text;
+  try { await navigator.clipboard.writeText(text); document.getElementById('copied').textContent = 'Copied. Paste it into the chat.'; }
+  catch { document.getElementById('copied').textContent = 'The clipboard was refused here: select the text below and copy it.'; document.getElementById('out').select(); }
+};
+document.getElementById('clear').onclick = () => { draft = {}; save(); location.reload(); };
+</script>
+</main>
+</body>
+</html>

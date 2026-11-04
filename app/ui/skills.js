@@ -2,7 +2,7 @@
 // Discover (skills in GitHub repositories, installed into Harness Manager's one store and linked into the tools you pick).
 
 import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openMenu, action, render, shownTools, setNavCounts } from './core.js';
-import { esc, ic, toolIcon } from './lib.js';
+import { esc, ic, toolIcon, pager } from './lib.js';
 import { syncReport, headState } from './views.js';
 
 const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false, per: 25, page: 0 };
@@ -54,15 +54,12 @@ view('skills', async (sheet) => {
     const t = find.value.trim().toLowerCase();
     if (reset) sk.page = 0;
     const match = [...sheet.querySelectorAll('table.sklist tbody tr[data-search]')].filter((tr) => { tr.hidden = (t && !tr.dataset.search.includes(t)) || (sk.source && tr.dataset.source !== sk.source); return !tr.hidden; });
-    const pages = Math.max(1, Math.ceil(match.length / sk.per));
-    if (sk.page >= pages) sk.page = pages - 1;
-    match.forEach((tr, i) => tr.classList.toggle('paged', i < sk.page * sk.per || i >= (sk.page + 1) * sk.per));
+    const pg = pager(match, sk, 'sk');
     sheet.querySelectorAll('.unmcard tr[data-search]').forEach((tr) => { tr.hidden = (t && !tr.dataset.search.includes(t)) || (sk.source && tr.dataset.source !== sk.source); });
     const nm = sheet.querySelector('tr.nomatch');
     if (nm) nm.hidden = match.length > 0;
-    const pager = document.getElementById('sk-pager');
-    if (pager) pager.innerHTML = match.length > 25 ? `<button class="btn sm" data-act="sk-page" data-v="${Math.max(0, sk.page - 1)}" ${sk.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === sk.page ? 'on' : ''}" data-act="sk-page" data-v="${i}" data-testid="sk-page-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="sk-page" data-v="${Math.min(pages - 1, sk.page + 1)}" ${sk.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
-      <span class="help">${sk.page * sk.per + 1}–${Math.min(match.length, (sk.page + 1) * sk.per)} of ${match.length}</span><span class="seg3 mono">${[25, 50, 100].map((n) => `<a class="${sk.per === n ? 'on' : ''}" data-act="sk-per" data-v="${n}" data-testid="sk-per-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>` : '';
+    const pgEl = document.getElementById('sk-pager');
+    if (pgEl) pgEl.innerHTML = pg;
     if (table) headState(table);
   };
   S.pageFind = filter;

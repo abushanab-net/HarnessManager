@@ -231,6 +231,12 @@ function drawRows() {
 }
 
 /** Called by the background refresh: new numbers in place, nothing else moves. */
+// an unpin from the sidebar: the Projects page fetches again; a project's header icon flips
+document.addEventListener('hm:unpinned', (e) => {
+  if (S.route.view === 'projects') { refreshProjects(); return; }
+  const b = document.querySelector(`.ib.pin[data-key="${CSS.escape(e.detail)}"]`);
+  if (b) { b.classList.remove('on'); b.dataset.on = '1'; b.title = 'Pin to the sidebar'; }
+});
 export async function refreshProjects() {
   if (S.route.view !== 'projects' || !pj.list) return;
   await fetchProjects().catch(() => {});
@@ -675,8 +681,6 @@ view('settings', async (sheet) => {
     <h5 class="sh5">Usage and limits</h5>
     ${row('Refresh', info('refresh', 'How often, in minutes, Harness Manager reads new usage from the tools\' logs and the cached limits, in the background.<br><b>Default: 5.</b> A smaller number updates sooner but reads the logs more often. <b>Sync now</b> on Home reads them at once whatever this is.'), 'How often usage and limits are read in the background.', seg('refresh_minutes', String(s.refresh_minutes), [['1', '1 min'], ['5', '5 min'], ['15', '15 min']], 'st-refresh'))}
     ${row('Live Claude limits', info('live', '<b>Off (the default):</b> limits are what Claude Code last saved, so they are as fresh as the account\'s last run; a window whose reset time has passed shows as empty.<br><b>On:</b> when those numbers are more than 10 minutes old, Harness Manager asks Anthropic for current ones with the login Claude Code saved, while it is valid. It never refreshes or copies that login.'), 'Off: limits are what Claude Code last wrote. On: Harness Manager also asks Anthropic, with the login Claude Code saved on this computer while it is valid. It never refreshes or copies that login.', `<label class="switch"><input type="checkbox" id="st-live" data-act="live-now" ${st.live_quota ? 'checked' : ''} data-testid="st-live"> Ask Anthropic for current limits</label>`)}
-    ${row('First reply goal' + NEW, info('goal', 'Overview checks that 95% of replies start within this many seconds, from the times each tool logs.<br><b>Default: 20 s.</b>'), 'The time to a first reply you aim for.', `<select class="input" data-act="set-now" data-key="first_reply_goal_s" style="max-width:150px" aria-label="First-reply goal" data-testid="st-goal">${[5, 10, 15, 20, 30, 45, 60].map((v) => `<option value="${v}" ${s.first_reply_goal_s === v ? 'selected' : ''}>${v} seconds</option>`).join('')}</select>`)}
-    ${row('Levels, XP and moves' + NEW, info('game', 'An efficiency score (cache hits, limit room, the first-reply goal and balance across accounts), a level from your use, and the next best moves.<br><b>Default: on.</b>'), 'The game layer on Overview.', sw('game_layer', s.game_layer, 'Show score, level and moves', 'st-game'))}
     <h5 class="sh5">Connections</h5>
     ${row('Router port', info('port', 'The port of the local router that routed accounts talk to. It listens on 127.0.0.1 only, so nothing outside this computer can reach it.<br><b>Default: 15731.</b> Change it only if another program uses that port; routed accounts use the new port the next time they start.'), 'The router listens on 127.0.0.1 only.', `<input class="input mono" type="number" id="st-port" value="${s.router_port}" style="max-width:110px" aria-label="Router port"><button class="btn outline" data-act="set-field" data-key="router_port" data-from="st-port" data-testid="st-port-save">Change</button>`)}
     ${row('Account list', info('reg', 'Where profiles.json lives: your accounts, providers, routes, MCP servers, skills and prompts. No keys or logins are ever stored in it.<br><b>Empty (the default):</b> it stays in this computer\'s Harness Manager folder (%APPDATA%\\HarnessManager). Enter a path in a OneDrive folder to share the same accounts with your other computer; each computer keeps its own keys and logins.'), 'Profiles, providers, routes, MCP servers, skills and prompts. No keys or logins are stored in it.', `<input class="input mono" id="st-reg" value="${esc(s.registry_path)}" placeholder="${esc(st.registry_path)}" aria-label="Account list path" style="min-width:300px"><button class="btn outline" data-act="set-field" data-key="registry_path" data-from="st-reg" data-testid="st-reg-save">Move…</button>`)}
@@ -752,11 +756,11 @@ action('backup-import', async () => {
 action('log-open', () => attempt(() => call('log_open')));
 // Harness Manager's own update: found at launch (the self-update event) or by Check for updates
 let selfUpd = null;
-export function setSelfUpdate(v) { selfUpd = v; }
+export function setSelfUpdate(v) { selfUpd = v; const dot = document.getElementById('settings-upd'); if (dot) dot.hidden = !(v && v.version); }
 action('self-check', async () => {
   const v = await attempt(() => call('self_update_check'));
   if (!v) return;
-  selfUpd = v;
+  setSelfUpdate(v);
   if (!v.version) toast(`Harness Manager ${v.current} is the newest version`);
   render();
 });

@@ -82,7 +82,8 @@ write(path.join(home, '.claude', 'projects', 'p', 's-main-1.jsonl'), jl([
   { type: 'assistant', sessionId: 's-main-1', cwd: repo, timestamp: now, message: { id: 'm3', model: 'claude-opus-5-5', usage: { input_tokens: 1, output_tokens: 40 }, content: [{ type: 'text', text: 'The staging backup target now points at the `longhorn-backups` bucket.\n\n## What changed\n\n- `values-staging.yaml`: new backup target\n- ArgoCD synced after a retry' }] } },
   { type: 'ai-title', aiTitle: 'Longhorn backup target for staging', sessionId: 's-main-1' },
 ]));
-write(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: {} }));
+// a server Claude Code already has: in the list from launch, without an Import click
+write(path.join(home, '.claude.json'), JSON.stringify({ mcpServers: { pre: { type: 'stdio', command: 'mcp-pre' } } }));
 const rollout = jl([
   { type: 'session_meta', timestamp: now, payload: { id: 'cx-1', cwd: path.join(repo, 'apps') } },
   { type: 'turn_context', timestamp: now, payload: { model: 'gpt-6' } },
@@ -214,7 +215,7 @@ try {
     await waitFor(async () => Math.abs((await fill()) - 1) < 0.1 && (await exec("return document.querySelector('[data-testid=heatmap]').getBoundingClientRect().width <= document.querySelector('.hmwrap').clientWidth")), 'redrawn for the card again');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] rect.hm:not([data-l=\"0\"])').length")) > 0, 'today shaded');
     await hasText('[data-testid=kpi-cost]', '$0.01');
-    await hasText('[data-testid=kpi-requests]', '5');
+    await hasText('[data-testid=kpi-tokens]', '5 requests');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
     await hasText('#today-cost', 'Today $');
@@ -226,16 +227,11 @@ try {
     await click('[data-testid=tool-agy]');
     await hasText('[data-testid=request-log]', 'No replies in this range.');
     await click('[data-testid=tool-all]');
-    await click('[data-testid=mix-model]');
-    await hasText('[data-testid=mix]', 'gpt-6');
-    await click('[data-testid=mix-account]');
-    await hasText('[data-testid=mix]', 'codex-main');
-    await click('[data-testid=mix-project]');
-    await hasText('[data-testid=mix]', 'platform-gitops');
     // the other sections, each from real data
-    await hasText('[data-testid=kpi-requests]', '5');
-    await $('[data-testid=kpi-p95]');
     await $('[data-testid=kpi-risk]');
+    // Live routes: a drawer from the sidebar, over the page
+    await click('[data-testid=nav-routes]');
+    await $('[data-testid=routes]');
     const topo = await exec(`const t = document.querySelector('[data-testid=routes]');
       return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), gl: !!t.querySelector('canvas').getContext('webgl'), w: t.querySelector('canvas').width };`);
     assert.ok(topo.nodes.includes('a:codex-main') && topo.nodes.includes('t:codex') && topo.nodes.includes('v:OpenAI'), 'account, tool and provider cards: ' + topo.nodes);
@@ -244,33 +240,38 @@ try {
     const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] [data-node]')].map((n) => n.getBoundingClientRect());
       return r.filter((a, i) => r.some((b, j) => j !== i && Math.abs(a.left - b.left) < 2 && a.top < b.top && a.bottom > b.top + 0.5)).length;`);
     assert.equal(overlaps, 0, 'route cards do not overlap');
-    await hasText('[data-testid=burn]', 'codex-main');
-    await hasText('[data-testid=burn]', '79% left');
-    await hasText('[data-testid=limits-timeline]', 'codex-main');
-    await hasText('[data-testid=latency]', 'Goal (Settings): 95% within 20 s');
-    await hasText('[data-testid=fleet]', 'Last backup');
-    await $('[data-testid=events]');
-    await hasText('[data-testid=pilot]', 'Level');
-    await hasText('[data-testid=pilot]', 'Start the next session on');
+    await shot('00b-overview-routes');
+    await click('[data-testid=routes-close]');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=routes]')")), 'the drawer closed');
+    await hasText('[data-testid=limits]', 'codex-main');
+    await hasText('[data-testid=limits]', '79% left');
+    await hasText('[data-testid=activity]', 'Activity, 53 weeks');
     // a range picks the period; the cards follow
     await click('[data-testid=range-7d]');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('on')")), '7 days picked');
-    await hasText('[data-testid=kpi-requests]', '5');
-    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
-    await shot('00b-overview-routes');
-    await exec("document.querySelector('[data-testid=latency]').scrollIntoView()");
+    await hasText('[data-testid=kpi-tokens]', '5 requests');
+    await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('00c-overview-panels');
     await click('[data-testid=range-24h]');
-    // Settings > Overview turns the game layer off
-    await nav('#settings');
-    await click('[data-testid=st-game]');
-    await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).game_layer === false, 'game layer off');
+  });
+
+  await test('sidebar: Setup folds and stays as left, a page inside opens it, the pinned projects fold', async () => {
     await nav('#home');
-    await $('[data-testid=latency]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=pilot]')")), 'no score or moves');
-    await nav('#settings');
-    await click('[data-testid=st-game]');
-    await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).game_layer === true, 'and on again');
+    const shut = () => exec("return document.getElementById('nav-setup').hidden");
+    const was = await shut();
+    await click('[data-testid=nav-setup]');
+    await waitFor(async () => (await shut()) === !was, 'Setup toggled');
+    await click('[data-testid=nav-setup]');
+    await waitFor(async () => (await shut()) === was, 'and back');
+    if (!(await shut())) { await click('[data-testid=nav-setup]'); await waitFor(async () => shut(), 'shut'); }
+    await nav('#skills');
+    await waitFor(async () => !(await shut()), 'open for the page shown');
+    await click('[data-testid=nav-mcp]');
+    await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
+    await click('[data-testid=fold-pins]');
+    await waitFor(async () => exec("return document.getElementById('nav-pins').hidden"), 'pins folded');
+    await click('[data-testid=fold-pins]');
+    await waitFor(async () => !(await exec("return document.getElementById('nav-pins').hidden")), 'and shown');
   });
 
   await test('accounts list shows the main profiles of installed tools', async () => {
@@ -279,15 +280,10 @@ try {
     await $('[data-testid=row-claude-main]');
     await $('[data-testid=row-codex-main]');
     await hasText('[data-testid=row-codex-main]', 'ChatGPT');
-    // every account with plan limits has a row in "When limits free up" on Overview, read or not, and the chart fills its card
+    // every account with plan limits has a row in Limits on Overview, read or not
     await nav('#home');
-    await hasText('[data-testid=limits-timeline]', 'claude-main');
-    await hasText('[data-testid=limits-timeline]', 'codex-main');
-    const fill = () => exec("const w = document.querySelector('.tlwrap'); return w.querySelector('svg').getBoundingClientRect().width / w.clientWidth");
-    assert.ok((await fill()) > 0.95, 'the limits chart fills its card');
-    await exec("document.querySelector('.tlwrap').style.width = '1700px'; window.dispatchEvent(new Event('resize'))");
-    await waitFor(async () => (await fill()) > 0.95, 'the limits chart grows with the window');
-    await exec("document.querySelector('.tlwrap').style.width = ''");
+    await hasText('[data-testid=limits]', 'claude-main');
+    await hasText('[data-testid=limits]', 'codex-main');
     await nav('#accounts');
     await hasText('[data-testid=row-codex-main]', '79% left');
     await shot('01-accounts');
@@ -453,6 +449,12 @@ try {
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned in the sidebar');
     assert.ok(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).pinned_projects.length === 1, 'saved in settings');
     assert.ok(await exec("return document.getElementById('pj-tiles') === window.__tiles"), 'pinning did not redraw the page');
+    // the ✕ beside the pin in the sidebar takes it off; the card pins it again
+    await exec("document.querySelector('[data-testid=nav-pins] .unpin').click()");
+    await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned from the sidebar');
+    await waitFor(async () => exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops'))?.querySelector('[data-act=project-pin]')?.dataset.on === '1'"), 'the card shows it unpinned');
+    await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('[data-act=project-pin]').click()");
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned again from the card');
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('[data-act=project-pin]').click()");
     await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned');
     // rename by double-clicking the name: Enter saves, the row and the CLI show the new name; the pencil renames back
@@ -463,6 +465,7 @@ try {
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('Platform GitOps')).querySelector('[data-act=project-rename]').click()");
     await type('[data-testid=rename-input]', 'platform-gitops\n');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=project-cards]').innerText")).includes('platform-gitops'), 'renamed back');
+    await waitFor(() => !hrm('projects', 'list').includes('Platform GitOps'), 'and on disk, before the project opens');
     // open the project by clicking the row: Sessions shows only it, with its numbers in the header
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).click()");
     await hasText('[data-testid=project-title]', 'platform-gitops');
@@ -682,7 +685,7 @@ try {
   // The design pages (Main, PartNav, PartTopbar, PartHeader, PartKpis, PartBurn) set these sizes; the window must use the same.
   await test('measurements match the design pages', async () => {
     await nav('#home');
-    await $('[data-testid=routes]');
+    await $('[data-testid=limits]');
     const d = await exec(`
       const cs = (el) => getComputedStyle(el), q = (s) => document.querySelector(s);
       const box = (s) => q(s).getBoundingClientRect();
@@ -717,7 +720,7 @@ try {
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Live routes', 'Limit burn-down', 'When limits free up', 'Level', 'Time to first reply', 'Activity, 53 weeks', 'Where tokens went', 'Router and fleet events', 'Fleet health', 'Latest replies'],
+      '#home': ['Overview', 'Limits', 'Activity, 53 weeks', 'Latest replies'],
       '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'By model'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
@@ -731,7 +734,7 @@ try {
     };
     // the replies panel as the design opens it (an earlier test left the full log open)
     await nav('#home');
-    await $('[data-testid=routes]');
+    await $('[data-testid=limits]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
       const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
@@ -748,7 +751,7 @@ try {
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
     const counts = await exec("return [...document.querySelectorAll('.sset')].map((s) => s.querySelectorAll('.frow').length)");
-    assert.deepEqual(counts.slice(0, 7), [3, 3, 2, 4, 2, 3, 3], 'settings per section, as the design counts them (less the Classic choice)');
+    assert.deepEqual(counts.slice(0, 7), [3, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them (less the Classic choice and the two Overview rows)');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
@@ -796,16 +799,18 @@ try {
     await click('[data-testid=cap-save]');
     await waitFor(() => (JSON.parse(fs.readFileSync(path.join(data, 'profiles.json'), 'utf8')).profiles.find((x) => x.name === 'capped') || {}).daily_cap_usd === 5, 'cap saved');
     await nav('#home');
-    await hasText('[data-testid=burn]', '$5.00 daily cap');
-    await hasText('[data-testid=burn]', 'The router stops at the cap');
-    await hasText('[data-testid=limits-timeline]', 'daily cap resets at midnight');
-    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
+    await hasText('[data-testid=limits]', '$5.00 daily cap');
+    await hasText('[data-testid=limits]', 'resets');
+    await exec("document.querySelector('[data-testid=limits]').scrollIntoView()");
     await shot('10b-overview-cap');
     hrm('remove', 'capped');
   });
 
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
     const claudeMcp = () => JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
+    await nav('#mcp');
+    await $('[data-testid=mcp-row-pre]');
+    assert.ok(await exec(`return document.querySelector('[data-testid=t-mcp-pre-claude]').checked`), 'read from .claude.json at launch, ticked for Claude Code');
     await nav('#mcp');
     await click('[data-testid=mcp-add]');
     await $('[data-testid=mcp-form]');
@@ -849,14 +854,27 @@ try {
     await type('[data-testid=find]', 'solo');
     await waitFor(async () => exec(`return document.querySelector('[data-testid=mcp-row-fs]').hidden && !document.querySelector('[data-testid=mcp-row-solo]').hidden`), 'only solo shown');
     await type('[data-testid=find]', '');
-    // import from apps: says which file of each tool it read
+    // import from apps reads the tools again; the info dialog says which file of each tool holds a server
     await click('[data-testid=mcp-import]');
-    await hasText('[data-testid=import-report]', 'Last import from apps');
-    await hasText('[data-testid=import-report]', 'No new MCP servers found');
-    await hasText('[data-testid=import-report]', '.claude.json');
-    await hasText('[data-testid=import-report]', 'config.toml');
-    await shot('11c-mcp-import');
-    await click('[data-testid=import-ok]');
+    await hasText('#toast', 'No new MCP servers found');
+    await click('[data-testid=mcp-info-fs]');
+    await hasText('[data-testid=mcp-info]', '.claude.json');
+    await hasText('[data-testid=mcp-info]', 'config.toml');
+    await hasText('[data-testid=mcp-info]', 'written');
+    await shot('11c-mcp-info');
+    await click('.dlg .dh [data-act=dialog-close]');
+    // thirty servers more in Claude Code's file: the list pages at 25
+    const cj = JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'));
+    for (let i = 0; i < 30; i++) cj.mcpServers[`bulk-${String(i).padStart(2, '0')}`] = { type: 'stdio', command: 'mcp-bulk' };
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify(cj));
+    await click('[data-testid=mcp-import]');
+    await $('[data-testid=mcp-page-1]');
+    const onPage = () => exec("return document.querySelectorAll('[data-testid=mcp-matrix] tbody tr[data-search]:not([hidden]):not(.paged)').length");
+    assert.equal(await onPage(), 25, '25 on the first page');
+    await click('[data-testid=mcp-page-1]');
+    await waitFor(async () => (await onPage()) === 8, 'the rest on the second page');
+    await click('[data-testid=mcp-per-50]');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=mcp-page-1]')")), 'one page at 50');
   });
 
   await test('skills: install from a folder and link into Codex', async () => {
@@ -1021,12 +1039,15 @@ description: Bulk skill ${i}
     await $('[data-testid=accounts-table]');
     await shot('17b-dark-accounts');
     await nav('#home');
-    await $('[data-testid=routes]');
+    await $('[data-testid=limits]');
     await sleep(600);
     await shot('17c-dark-overview');
-    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
+    await click('[data-testid=nav-routes]');
+    await $('[data-testid=routes]');
+    await sleep(400);
     await shot('17d-dark-overview-routes');
-    await exec("document.querySelector('[data-testid=latency]').scrollIntoView()");
+    await click('[data-testid=routes-close]');
+    await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
     for (const [h, n] of [['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'], ['#account?name=claude-main', 'account'],
@@ -1089,11 +1110,12 @@ description: Bulk skill ${i}
   });
 
   if (!process.env.HRM_E2E_APP_DIR) await test('a new Harness Manager: found at launch, offered in Settings > Updates', async () => {
+    // the check at launch found it: the dot on the Settings link, and the offer without a click
+    await waitFor(async () => exec("return !document.getElementById('settings-upd').hidden"), 'the dot on the Settings link');
     await nav('#settings');
-    await click('[data-testid=self-check]');
+    await $('[data-testid=self-install]');
     await hasText('.sheet', 'Version 9.9.9 is available');
     await hasText('.sheet', 'Faster limits.');
-    await $('[data-testid=self-install]');
   });
 
   await test('settings: change the terminal', async () => {
