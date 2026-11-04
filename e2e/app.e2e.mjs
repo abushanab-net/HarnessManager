@@ -442,11 +442,13 @@ try {
     await hasText('[data-testid=project-dist]', 'platform-gitops');
     await shot('06d-projects');
     // Cost sorts the cards; the distribution can show cost
+    // (each choice redraws the page from the hash: wait for the choice to show as chosen, not for the old page)
     await click('[data-testid=psort-cost]');
-    await $('[data-testid=project-cards]');
+    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('on')"), 'sorted by cost');
     await click('[data-testid=pmetric-cost]');
-    await $('[data-testid=project-dist]');
+    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('on')"), 'distribution by cost');
     // open the project: Sessions shows only it, with its numbers in the header
+    await waitFor(() => exec("return !!document.querySelector('[data-testid=project-cards]') && [...document.querySelectorAll('[data-testid^=pcard-open-]')].some((a) => a.innerText.includes('platform-gitops'))"), 'the cards drawn again');
     await exec("[...document.querySelectorAll('[data-testid^=pcard-open-]')].find((a) => a.innerText.includes('platform-gitops')).click()");
     await hasText('[data-testid=project-title]', 'platform-gitops');
     await hasText('[data-testid=project-stats]', 'at list prices');
