@@ -464,6 +464,7 @@ try {
     // the rail's All projects brings every session back, and the Live now entry links to the live list
     await click('[data-testid=rail-all]');
     await hasText('#sheet h1', 'Sessions');
+    await $('[data-testid=rail-live]'); // the title shows while the list loads; the rail comes with the list
     assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
   });
 
