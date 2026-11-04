@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Manager UX review</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Plan: the app's own "framed sheet" palette (teal accent, amber/red only for state), Inter + JetBrains Mono,
+   a reading column for the review and full-width mockup frames that imitate the app window. */
+:root {
+  --g: #f5f7fa; --side: #edf0f6; --s: #ffffff; --act: #e3f1f2; --b: #dde3ec; --ru: #eef2f7;
+  --t: #0f172a; --m: #56607a; --t2: #38415a;
+  --ac: #0f6e7a; --ac-soft: #e3f1f2; --ac-b: #bcdfe1; --btn-fg: #ffffff;
+  --warn: #d97706; --warn-bg: #fef3c7; --neg: #dc2626; --neg-bg: #fee2e2; --pos: #16a34a; --iris: #6d5bd0; --iris-bg: #efecfb; --sand: #c8a45a;
+  --h1: #cfeaec; --h2: #93cdd1; --h3: #2a8f99;
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --g: #0a0f13; --side: #0c1216; --s: #10171c; --act: #1f3a44; --b: #1f2b34; --ru: #1b262e;
+  --t: #e6edf1; --m: #93a4ae; --t2: #a9b8c1; --ac: #36c8c5; --ac-soft: #0f3a3e; --ac-b: #1f6e78; --btn-fg: #04282a;
+  --warn: #f59e0b; --warn-bg: #3a2a0c; --neg: #f87171; --neg-bg: #3b1418; --pos: #22c55e; --iris: #9d8ff0; --iris-bg: #221d42;
+  --h1: #173f4b; --h2: #176068; --h3: #1f8f95;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --g: #0a0f13; --side: #0c1216; --s: #10171c; --act: #1f3a44; --b: #1f2b34; --ru: #1b262e;
+  --t: #e6edf1; --m: #93a4ae; --t2: #a9b8c1; --ac: #36c8c5; --ac-soft: #0f3a3e; --ac-b: #1f6e78; --btn-fg: #04282a;
+  --warn: #f59e0b; --warn-bg: #3a2a0c; --neg: #f87171; --neg-bg: #3b1418; --pos: #22c55e; --iris: #9d8ff0; --iris-bg: #221d42;
+  --h1: #173f4b; --h2: #176068; --h3: #1f8f95;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--g); color: var(--t); font: 15px/1.55 var(--sans); font-variant-numeric: tabular-nums; }
+main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 80px; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; }
+h2 { font-size: 21px; margin: 48px 0 12px; padding-top: 18px; border-top: 1px solid var(--b); text-wrap: balance; }
+h3 { font-size: 16px; margin: 26px 0 8px; }
+h4 { font-size: 14px; margin: 18px 0 6px; }
+p, li { max-width: 72ch; }
+.lead { color: var(--m); font-size: 16px; margin: 0 0 18px; }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+code { background: var(--ru); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--ac); }
+table.list { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0 16px; }
+table.list th { text-align: left; font-weight: 600; color: var(--m); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--b); }
+table.list td { padding: 9px 10px; border-bottom: 1px solid var(--ru); vertical-align: top; }
+table.list td:first-child { white-space: nowrap; }
+table.list.wide { display: block; overflow-x: auto; }
+table.list.wide td { min-width: 150px; white-space: normal; font-size: 13px; }
+table.list.wide td:first-child { min-width: 90px; font-weight: 600; }
+.pill { display: inline-block; font: 500 11px/18px var(--mono); padding: 0 7px; border-radius: 999px; border: 1px solid var(--b); color: var(--t2); white-space: nowrap; }
+.pill.bug { background: var(--neg-bg); color: var(--neg); border-color: transparent; }
+.pill.gap { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.pill.ask { background: var(--iris-bg); color: var(--iris); border-color: transparent; }
+.pill.teal { background: var(--ac-soft); color: var(--ac); border-color: transparent; }
+.pill.p0 { background: var(--neg); color: #fff; border-color: transparent; }
+.pill.p1 { background: var(--warn); color: #fff; border-color: transparent; }
+.pill.p2 { background: var(--ac); color: var(--btn-fg); border-color: transparent; }
+.pill.p3 { background: var(--iris); color: #fff; border-color: transparent; }
+.pill.ok { background: var(--ac-soft); color: var(--ac); border-color: transparent; }
+.note { background: var(--s); border: 1px solid var(--b); border-left: 3px solid var(--ac); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.note b { color: var(--ac); }
+.ask-box { border: 1px dashed var(--iris); background: var(--iris-bg); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.ask-box b { color: var(--iris); }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 8px; }
+.toc a { font-size: 13px; padding: 4px 10px; border: 1px solid var(--b); border-radius: 999px; text-decoration: none; background: var(--s); color: var(--t2); }
+.toc a:hover { border-color: var(--ac); color: var(--ac); }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.threecol { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .twocol, .threecol { grid-template-columns: 1fr; } }
+.card { background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 14px 16px; }
+.card h4 { margin: 0 0 6px; font-size: 14px; }
+.card p { font-size: 13.5px; color: var(--t2); margin: 0 0 6px; }
+.pros { font-size: 13px; margin: 6px 0 0; padding-left: 18px; }
+.pros li { margin: 2px 0; }
+.pros .y::marker { color: var(--pos); } .pros .n::marker { color: var(--neg); }
+kbd { font: 500 11px var(--mono); border: 1px solid var(--b); border-radius: 4px; padding: 1px 5px; background: var(--ru); color: var(--m); }
+details { margin: 10px 0; }
+summary { cursor: pointer; font-weight: 600; color: var(--t2); }
+
+/* ---- mock window, imitating the app ---- */
+.mock { margin: 14px 0 6px; border: 1px solid var(--b); border-radius: 12px; overflow: hidden; background: var(--g); font-size: 12.5px; line-height: 1.4; box-shadow: 0 1px 0 rgba(15,23,42,.04); }
+.mock .cap { font-size: 12px; color: var(--m); padding: 6px 12px; background: var(--s); border-bottom: 1px solid var(--b); display: flex; justify-content: space-between; gap: 8px; }
+.mock .cap b { color: var(--t); }
+.win { display: grid; grid-template-columns: 196px minmax(0, 1fr); min-height: 420px; }
+.side { background: var(--side); padding: 8px 8px 10px; border-right: 1px solid var(--b); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px; font-weight: 600; font-size: 12.5px; }
+.brand i { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--ac), var(--iris)); display: inline-block; flex: none; }
+.brand small { display: block; font-weight: 400; color: var(--m); font-size: 10.5px; }
+.nav a { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 7px; color: var(--t2); text-decoration: none; white-space: nowrap; overflow: hidden; }
+.nav a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.nav a .ic { width: 13px; height: 13px; border-radius: 3px; background: var(--m); opacity: .55; flex: none; }
+.nav a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.nav a .cnt.live { color: var(--ac); font-weight: 600; }
+.nav a .cnt.live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ac); margin-right: 4px; box-shadow: 0 0 0 3px var(--ac-soft); }
+.nav .gap { height: 10px; }
+.nav .sec { font: 600 10px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 10px 8px 3px; display: flex; justify-content: space-between; }
+.nav .sec a { height: auto; padding: 0; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ac); font-size: 10.5px; }
+.nav a.sub { padding-left: 22px; height: 24px; font-size: 12px; }
+.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--b); flex: none; margin-right: 2px; }
+.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.nav .bottom { margin-top: auto; }
+.body { display: flex; flex-direction: column; min-width: 0; }
+.top { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--b); background: var(--g); }
+.top .search { flex: 0 1 300px; height: 26px; border: 1px solid var(--b); border-radius: 7px; background: var(--s); display: flex; align-items: center; padding: 0 8px; color: var(--m); gap: 6px; font-size: 12px; }
+.top .search kbd { margin-left: auto; }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--m); font: 11px var(--mono); }
+.livestrip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--ac-soft); border: 1px solid var(--ac-b); color: var(--ac); font: 500 11px var(--sans); }
+.livestrip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ac); }
+.sheet { padding: 14px 18px 16px; background: var(--s); margin: 10px; border: 1px solid var(--b); border-radius: 10px; flex: 1; min-width: 0; }
+.sheet.split { display: grid; grid-template-columns: 230px minmax(0, 1fr); padding: 0; overflow: hidden; }
+.sheet h1 { font-size: 20px; margin: 0 0 2px; }
+.sheet .find { color: var(--m); margin: 0 0 10px; font-size: 12.5px; }
+.trow { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--b); background: var(--s); font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--t); }
+.btn.primary { background: var(--ac); color: var(--btn-fg); border-color: var(--ac); }
+.btn.sm { height: 22px; font-size: 11.5px; padding: 0 8px; }
+.seg { display: inline-flex; border: 1px solid var(--b); border-radius: 7px; overflow: hidden; }
+.seg a { padding: 3px 9px; font-size: 12px; color: var(--t2); border-right: 1px solid var(--b); }
+.seg a:last-child { border-right: 0; }
+.seg a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.fbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 12px; }
+.fbar .lbl { color: var(--m); font-size: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; font: 500 11px var(--sans); border: 1px solid var(--b); color: var(--t2); background: var(--s); }
+.chip.tag { background: var(--iris-bg); border-color: transparent; color: var(--iris); }
+.chip.tag.c2 { background: var(--ac-soft); color: var(--ac); }
+.chip.tag.c3 { background: var(--warn-bg); color: var(--warn); }
+.chip.tag.c4 { background: var(--neg-bg); color: var(--neg); }
+.chip.add { border-style: dashed; color: var(--m); }
+.chip.on { background: var(--act); border-color: var(--ac-b); color: var(--t); }
+.grp { border: 1px solid var(--b); border-radius: 9px; margin-bottom: 10px; overflow: hidden; }
+.gh { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--g); border-bottom: 1px solid var(--b); }
+.gh b { font-size: 13px; }
+.gh .mono { color: var(--m); font-size: 11px; }
+.gh .tot { margin-left: auto; color: var(--m); font: 11px var(--mono); }
+.gh.live { background: var(--ac-soft); border-color: var(--ac-b); }
+.srow { display: grid; grid-template-columns: 14px minmax(0, 1fr) 90px 70px 64px 86px 68px; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--ru); min-height: 36px; }
+.srow:last-child { border-bottom: 0; }
+.srow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--b); }
+.srow .dot.live { background: var(--ac); box-shadow: 0 0 0 3px var(--ac-soft); }
+.srow .t b { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow .t small { color: var(--m); font-family: var(--mono); font-size: 11px; }
+.srow .t .tags { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: 1px; }
+.srow .num { text-align: right; font-family: var(--mono); font-size: 11.5px; }
+.srow .when { font-family: var(--mono); font-size: 11px; color: var(--m); }
+.srow .when.live { color: var(--ac); font-weight: 600; }
+.tool { font: 500 10.5px var(--mono); padding: 1px 6px; border-radius: 999px; background: var(--iris-bg); color: var(--iris); }
+.tool.claude { background: var(--warn-bg); color: var(--warn); }
+.tool.opencode { background: var(--ac-soft); color: var(--ac); }
+.rail { background: var(--g); border-right: 1px solid var(--b); padding: 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rail .q { height: 26px; border: 1px solid var(--b); border-radius: 7px; background: var(--s); color: var(--m); display: flex; align-items: center; padding: 0 8px; margin-bottom: 6px; font-size: 12px; }
+.rail .sec { font: 600 10px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 8px 6px 3px; }
+.rail a { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; color: var(--t2); text-decoration: none; min-width: 0; }
+.rail a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.rail a .cnt.live { color: var(--ac); font-weight: 600; }
+.rail a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.rail a .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--b); flex: none; }
+.rail a .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.pane { padding: 12px 16px; min-width: 0; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pcard { border: 1px solid var(--b); border-radius: 9px; padding: 10px 12px; background: var(--s); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pcard b { font-size: 13px; }
+.pcard .path { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .row { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--m); }
+.pcard .spark { height: 22px; display: flex; align-items: flex-end; gap: 2px; }
+.pcard .spark i { flex: 1; background: var(--ac-b); border-radius: 1px 1px 0 0; display: block; }
+.pcard .spark i.last { background: var(--ac); }
+.pcard.live { border-color: var(--ac-b); box-shadow: inset 3px 0 0 var(--ac); }
+.pcard .cost { font: 600 13px var(--sans); color: var(--t); }
+.pcard .cost small { font: 11px var(--mono); color: var(--m); margin-left: 4px; }
+.kpis { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--b); border-radius: 9px; overflow: hidden; margin-bottom: 12px; }
+.kpi { padding: 8px 12px; border-right: 1px solid var(--b); background: var(--s); }
+.kpi:last-child { border-right: 0; }
+.kpi .l { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--m); font-weight: 600; }
+.kpi strong { display: block; font-size: 18px; line-height: 1.2; margin: 2px 0; }
+.kpi .n { font: 11px var(--mono); color: var(--m); }
+.kpi.live strong { color: var(--ac); }
+.dist { border: 1px solid var(--b); border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; background: var(--s); }
+.dist .dh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.dist .dh b { font-size: 13px; }
+.stack { display: flex; height: 16px; border-radius: 5px; overflow: hidden; gap: 1px; margin-bottom: 8px; }
+.stack i { display: block; height: 100%; }
+.drow { display: grid; grid-template-columns: 16px 150px minmax(0, 1fr) 70px 70px 62px; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; }
+.drow .sw { width: 10px; height: 10px; border-radius: 3px; }
+.drow .bar { height: 8px; background: var(--ru); border-radius: 4px; overflow: hidden; }
+.drow .bar i { display: block; height: 100%; background: var(--ac-b); }
+.drow .bar i.cost { background: var(--sand); }
+.drow .num { text-align: right; font: 11.5px var(--mono); }
+.drow .m { color: var(--m); font: 11px var(--mono); text-align: right; }
+.phead { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: start; padding-bottom: 10px; border-bottom: 1px solid var(--ru); margin-bottom: 10px; }
+.phead .stats { display: flex; gap: 16px; font: 11.5px var(--mono); color: var(--m); margin-top: 4px; flex-wrap: wrap; }
+.phead .stats b { color: var(--t); font-family: var(--sans); font-size: 12.5px; }
+.pop { display: inline-block; vertical-align: top; width: 250px; background: var(--s); border: 1px solid var(--b); border-radius: 9px; box-shadow: 0 10px 30px rgba(15,23,42,.16); padding: 8px; font-size: 12.5px; }
+.pop .in { height: 26px; border: 1px solid var(--b); border-radius: 7px; display: flex; align-items: center; padding: 0 8px; color: var(--m); margin-bottom: 6px; }
+.pop .it { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.pop .it input { margin: 0; }
+.pop .hint { color: var(--m); font-size: 11px; padding: 6px 6px 0; }
+.matrix { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.matrix th { font-weight: 600; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--b); color: var(--t2); font-size: 12px; }
+.matrix th.c, .matrix td.c { text-align: center; width: 84px; }
+.matrix th.c small { display: block; font: 10.5px var(--mono); color: var(--m); font-weight: 400; }
+.matrix td { padding: 6px 8px; border-bottom: 1px solid var(--ru); vertical-align: top; }
+.matrix td .d { color: var(--m); font-size: 11.5px; }
+.matrix input { margin: 0; }
+.bar2 { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 7px; background: var(--ac-soft); border: 1px solid var(--ac-b); font-size: 12px; margin-bottom: 8px; }
+.bar2.warn { background: var(--warn-bg); border-color: transparent; }
+.bar2 .btn { margin-left: auto; }
+.apr { display: grid; grid-template-columns: 24px minmax(0, 1.5fr) 80px 80px 130px 150px; gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--ru); font-size: 12.5px; }
+.apr.h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--m); font-weight: 600; border-bottom: 1px solid var(--b); }
+.apr .ti { width: 18px; height: 18px; border-radius: 5px; background: var(--iris-bg); }
+.apr .ti.claude { background: var(--warn-bg); } .apr .ti.oc { background: var(--ac-soft); } .apr .ti.agy { background: var(--h1); }
+.apr b { display: block; }
+.apr .path { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.apr .v { font: 12px var(--mono); }
+.apr .v.new { color: var(--warn); font-weight: 600; }
+.apr .acts { display: flex; gap: 4px; }
+.phase { display: grid; grid-template-columns: 60px 1fr; gap: 12px; align-items: start; padding: 14px 0; border-top: 1px solid var(--ru); }
+.phase h3 { margin: 0 0 4px; font-size: 15px; }
+.phase ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+.phase li { margin: 3px 0; }
+.phase .eff { font: 11px var(--mono); color: var(--m); margin-left: 6px; }
+.fb { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--ru); font-size: 14px; align-items: start; }
+.fb .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; }
+.fb .opts { color: var(--m); font-size: 13px; }
+.fb.done { opacity: .6; }
+.fb.done .n { color: var(--ac); background: var(--ac-soft); }
+@media (prefers-reduced-motion: no-preference) { .livestrip::before, .nav .cnt.live::before { animation: pulse 2s ease-in-out infinite; } }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (max-width: 720px) { .win { grid-template-columns: 1fr; } .side { display: none; } .cards { grid-template-columns: 1fr; } .sheet.split { grid-template-columns: 1fr; } .srow { grid-template-columns: 14px 1fr 70px; } .srow > :nth-child(n+4) { display: none; } .kpis { grid-template-columns: 1fr 1fr; } .drow { grid-template-columns: 16px 1fr 60px; } .drow > :nth-child(n+4) { display: none; } .apr { grid-template-columns: 24px 1fr 80px; } .apr > :nth-child(n+4) { display: none; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Harness Manager UX review</h1>
+<p class="lead">Read from the UI and installer code at version 1.0.4 (branch develop, 4 November 2026), revised after your first round of feedback. The combined navigation direction with project costs, a design for live sessions and tags, a deep look at how the Apps page detects and installs the tools, every issue found with its cause, and a phased fix plan. The <a href="#feedback">feedback sheet</a> at the end lists what is decided and what is still open.</p>
+<div class="toc">
+<a href="#status">Status</a><a href="#summary">Summary</a><a href="#nav">Navigation: the combined direction</a><a href="#explored">The three directions explored</a><a href="#live">Live sessions</a><a href="#tags">Tags</a><a href="#skills">Skills</a><a href="#installers">Installers</a><a href="#issues">All issues</a><a href="#plan">Fix plan</a><a href="#feedback">Feedback sheet</a>
+</div>
+
+<h2 id="status">Implementation status</h2>
+<p>Built on 4 November 2026 on the develop branch, uncommitted. Every phase below is in the working tree and covered by the test suites: the Rust suites (78 tests) and the window's end-to-end suite (38 tests, including new ones for each phase).</p>
+<table class="list">
+<thead><tr><th>Phase</th><th>Done</th><th>Left out, on purpose</th></tr></thead>
+<tbody>
+<tr><td><span class="pill p0">P0</span> Redraw</td><td>One <code>mutate</code> helper in core.js; every mutating action uses it. Skill ops return the sync report instead of failing after the save. Terminal sign-ins (Codex, OpenCode, Antigravity) are watched every 2 s and the dialog says when they land. A background refresh that arrives under a dialog redraws when it closes. A failure stays on screen as a notice until dismissed.</td><td>The accounts list still redraws every 60 s; folds are not yet kept.</td></tr>
+<tr><td><span class="pill p1">P1</span> Quick wins</td><td>System prompts. Skills header row with a tri-state tick per tool, one bulk write; Discover remembers the tools to install into. The live count in the sidebar, the Overview and the Accounts page are links; a live strip in the top bar; a Running now group pinned at the top of Sessions. The top bar search narrows Sessions in place. Sub-agent Codex threads are named after their agent, other untitled ones after their first answer.</td><td>&nbsp;</td></tr>
+<tr><td><span class="pill p1">P1b</span> Installers</td><td>One installer record per tool; every copy found on PATH and in the vendors' folders, kind read from where it sits, the running copy marked; the newest version from each vendor's own endpoint; update, reinstall, install (with the methods this computer can run) and remove-a-copy, each shown as a command and run in a terminal; the page watches the version after a change.</td><td>Removing a brew, winget, scoop or choco copy is left to that manager.</td></tr>
+<tr><td><span class="pill p2">P2</span> Navigation</td><td>Projects in the sidebar with up to five pins; the Projects page with tiles, the tokens/cost/sessions distribution and a card per project; the Sessions rail with Live now, pinned, recent and tags; the project header with cost; every filter in the hash; groups capped at 20 rows. <code>hrm projects list</code> shows cost.</td><td>The command palette (a later day, as planned). Filters are not saved across restarts.</td></tr>
+<tr><td><span class="pill p3">P3</span> Tags</td><td>A tags table keyed by session (profile/id) or project; chips on rows, cards, the project header and the reading view; the editor; Group by Tag; the tag filter and rail section; project tags reach their sessions in filters; backups carry tags; <code>hrm tag</code>, <code>hrm tags</code> and <code>hrm sessions --tag</code>.</td><td>Renaming a tag has a backend call but no window control yet.</td></tr>
+</tbody>
+</table>
+
+<h2 id="summary">Summary</h2>
+<ul>
+<li><b>Navigation, decided.</b> Projects become a first-class sidebar entry (from A). It opens a Projects page with a cost and token distribution summary, a chart, and a card per project (from C, now with cost). Opening a project lands in Sessions with the project rail (from B). The three fit together with no overlap; the mockups below show the whole path.</li>
+<li><b>The stale-page problem is one bug.</b> There is no single "something changed, redraw" path. One helper used by every mutation fixes Manage all, the sign-in state, and the cases you have not hit yet.</li>
+<li><b>Installers are npm-only in a world that moved to native installers.</b> On your own machine three of the four tools are native installs and one is installed twice. The Apps page cannot read the newest version for any of them, offers an updater command that does not exist for Antigravity, and would install a missing tool with npm even when the vendor's native script is the documented route. Every vendor now publishes a version endpoint the app can read with one HTTP call, so this is fixable without guesswork.</li>
+<li><b>Tags, live sessions, bulk skill ticks and the Prompts rename</b> stand as in the first round, with your answers folded in.</li>
+</ul>
+
+<h2 id="nav">Navigation: the combined direction</h2>
+<p>Three screens, one path: the sidebar entry, the Projects page, and a project opened inside Sessions. Costs are at API list prices, as the Overview already labels them, since subscriptions are not billed per token. The cost per project comes from the same pricing table the Overview uses, summed per project and model.</p>
+
+<h3>1. Projects in the sidebar</h3>
+<p>A <b>Projects</b> entry sits between Accounts and Sessions, with the project count. Below it, up to five pinned projects, each with its live dot and session count; you pin from a project's menu. A pinned project opens Sessions filtered to it. The <b>1 live</b> count beside Sessions is a link to the live list. Nothing else in the sidebar changes except the Prompts rename.</p>
+
+<h3>2. The Projects page</h3>
+<div class="mock"><div class="cap"><b>Projects page</b><span>summary tiles, distribution chart with tokens and cost, then a card per project</span></div>
+<div class="win">
+<aside class="side">
+  <div class="brand"><i></i><div>Harness Manager<small>ABU-DESK · 9 accounts</small></div></div>
+  <div class="nav">
+    <a><span class="ic"></span>Overview<span class="cnt">$4.12</span></a>
+    <a><span class="ic"></span>Accounts<span class="cnt">9</span></a>
+    <a class="on"><span class="ic"></span>Projects<span class="cnt">37</span></a>
+    <a class="sub"><span class="dot live"></span><span>Bunyan</span><span class="cnt live">1</span></a>
+    <a class="sub"><span class="dot"></span><span>HarnessManager</span><span class="cnt">41</span></a>
+    <a class="sub"><span class="dot"></span><span>Sanduq</span><span class="cnt">23</span></a>
+    <a><span class="ic"></span>Sessions<span class="cnt live">1 live</span></a>
+    <a><span class="ic"></span>Usage by account</a>
+    <a><span class="ic"></span>API keys &amp; routing</a>
+    <div class="gap"></div>
+    <a><span class="ic"></span>MCP servers<span class="cnt">14</span></a>
+    <a><span class="ic"></span>Skills<span class="cnt">251</span></a>
+    <a><span class="ic"></span>System prompts</a>
+    <a><span class="ic"></span>Apps<span class="cnt" style="color:var(--warn)">1 update</span></a>
+    <div class="bottom"></div>
+    <a><span class="ic"></span>CLI reference</a>
+    <a><span class="ic"></span>Settings</a>
+  </div>
+</aside>
+<div class="body">
+  <div class="top"><div class="search">Find a project, account, session or setting <kbd>Ctrl K</kbd></div><div class="right"><span class="livestrip">1 live · Bunyan</span><span>Limits read 8 m ago · usage just now</span></div></div>
+  <div class="sheet">
+    <div class="trow"><div><h1>Projects</h1><p class="find">37 projects ran in the last 7 days. A project is a folder your tools ran in; rename, merge, pin or tag it from its card.</p></div><div><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span> <span class="seg"><a class="on">Active</a><a>Cost</a><a>Tokens</a><a>Name</a></span></div></div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Tokens · 7 days</div><strong>9.84B</strong><div class="n">71% read from cache</div></div>
+      <div class="kpi"><div class="l">At list prices</div><strong>$612.40</strong><div class="n">$87 a day · $4.12 today</div></div>
+      <div class="kpi"><div class="l">Sessions</div><strong>258</strong><div class="n">37 projects · 9 accounts</div></div>
+      <div class="kpi live"><div class="l">Running now</div><strong>1</strong><div class="n">Bunyan · codex-main</div></div>
+      <div class="kpi"><div class="l">Busiest</div><strong>Bunyan</strong><div class="n">73% of tokens · 68% of cost</div></div>
+    </div>
+    <div class="dist">
+      <div class="dh"><b>Where the tokens and the cost went</b><span class="seg"><a class="on">Tokens</a><a>Cost</a><a>Sessions</a></span></div>
+      <div class="stack"><i style="width:73%;background:var(--ac)"></i><i style="width:9%;background:var(--h3)"></i><i style="width:4%;background:var(--h2)"></i><i style="width:2%;background:var(--h1)"></i><i style="width:12%;background:var(--ru)"></i></div>
+      <div class="drow"><span class="sw" style="background:var(--ac)"></span><span>Bunyan</span><div class="bar"><i style="width:73%"></i></div><span class="num">7.23B</span><span class="num">$418.90</span><span class="m">112 sess</span></div>
+      <div class="drow"><span class="sw" style="background:var(--h3)"></span><span>HarnessManager</span><div class="bar"><i style="width:9%"></i></div><span class="num">912M</span><span class="num">$71.20</span><span class="m">41 sess</span></div>
+      <div class="drow"><span class="sw" style="background:var(--h2)"></span><span>Sanduq</span><div class="bar"><i style="width:4%"></i></div><span class="num">310M</span><span class="num">$38.05</span><span class="m">23 sess</span></div>
+      <div class="drow"><span class="sw" style="background:var(--h1)"></span><span>printing-press</span><div class="bar"><i style="width:2%"></i></div><span class="num">44M</span><span class="num">$9.80</span><span class="m">9 sess</span></div>
+      <div class="drow"><span class="sw" style="background:var(--ru);border:1px solid var(--b)"></span><span>33 other projects</span><div class="bar"><i style="width:12%;background:var(--b)"></i></div><span class="num">1.35B</span><span class="num">$74.45</span><span class="m">73 sess</span></div>
+    </div>
+    <div class="cards">
+      <div class="pcard live"><b>Bunyan <span class="chip tag" style="margin-left:4px">release</span></b><span class="path">github.com/abushanab-net/bunyan</span><div class="spark"><i style="height:30%"></i><i style="height:55%"></i><i style="height:40%"></i><i style="height:80%"></i><i style="height:65%"></i><i style="height:90%"></i><i class="last" style="height:100%"></i></div><div class="cost">$418.90<small>7.23B tokens</small></div><div class="row"><span>112 sessions · 3 accounts</span><span style="color:var(--ac);font-weight:600">1 live</span></div></div>
+      <div class="pcard"><b>HarnessManager</b><span class="path">D:\Projects\abushanab-net\HarnessManager</span><div class="spark"><i style="height:60%"></i><i style="height:20%"></i><i style="height:70%"></i><i style="height:45%"></i><i style="height:30%"></i><i style="height:50%"></i><i class="last" style="height:35%"></i></div><div class="cost">$71.20<small>912M tokens</small></div><div class="row"><span>41 sessions · 2 accounts</span><span>2 h ago</span></div></div>
+      <div class="pcard"><b>Sanduq</b><span class="path">github.com/abushanab-net/sanduq</span><div class="spark"><i style="height:10%"></i><i style="height:35%"></i><i style="height:25%"></i><i style="height:15%"></i><i style="height:60%"></i><i style="height:40%"></i><i class="last" style="height:20%"></i></div><div class="cost">$38.05<small>310M tokens</small></div><div class="row"><span>23 sessions · 1 account</span><span>yesterday</span></div></div>
+      <div class="pcard"><b>printing-press</b><span class="path">D:\Projects\printing-press</span><div class="spark"><i style="height:5%"></i><i style="height:0"></i><i style="height:25%"></i><i style="height:15%"></i><i style="height:0"></i><i style="height:10%"></i><i class="last" style="height:8%"></i></div><div class="cost">$9.80<small>44M tokens</small></div><div class="row"><span>9 sessions · 1 account</span><span>3 d ago</span></div></div>
+      <div class="pcard"><b>resal-wiki</b><span class="path">D:\Projects\resal-wiki</span><div class="spark"><i style="height:15%"></i><i style="height:10%"></i><i style="height:0"></i><i style="height:0"></i><i style="height:20%"></i><i style="height:5%"></i><i class="last" style="height:0"></i></div><div class="cost">$4.10<small>28M tokens</small></div><div class="row"><span>7 sessions · 1 account</span><span>4 d ago</span></div></div>
+      <div class="pcard" style="justify-content:center;align-items:center;color:var(--m);border-style:dashed">32 more projects</div>
+    </div>
+  </div>
+</div>
+</div></div>
+<p>What the page shows, top to bottom:</p>
+<ul>
+<li><b>Five tiles</b>: tokens, cost at list prices with the daily average, sessions, running now (a link to the live list), and the busiest project with its share of tokens and of cost. The two shares differ when a project runs on a cheaper model, which is the point of showing both.</li>
+<li><b>The distribution</b>: one stacked bar for the share, then a row per project with its bar, tokens, cost and session count. The segment toggle redraws the same rows by tokens, cost or sessions. The top five plus "others" keeps it readable; "others" expands.</li>
+<li><b>Cards</b>, sorted by activity, cost, tokens or name. Each card: name, tags, path or remote, a 7-day sparkline, cost with tokens beneath, sessions and accounts, last activity or the live count. The card's menu: open, new session, pin, rename, merge, tag.</li>
+</ul>
+<p>Backend: one new call, <code>projects</code>, returning per project the sessions, tokens, cost, accounts, last activity, live count and the 7-day series. It groups the usage table by project and model and prices each group with the pricing table the Overview already uses. The CLI gets <code>hrm projects</code> with the same columns.</p>
+
+<h3>3. A project opened inside Sessions</h3>
+<div class="mock"><div class="cap"><b>Sessions with the project rail</b><span>the rail lists Live now, pinned, recent and tags; the pane shows the chosen project with its numbers</span></div>
+<div class="win">
+<aside class="side">
+  <div class="brand"><i></i><div>Harness Manager<small>ABU-DESK · 9 accounts</small></div></div>
+  <div class="nav">
+    <a><span class="ic"></span>Overview<span class="cnt">$4.12</span></a>
+    <a><span class="ic"></span>Accounts<span class="cnt">9</span></a>
+    <a><span class="ic"></span>Projects<span class="cnt">37</span></a>
+    <a class="sub on"><span class="dot live"></span><span>Bunyan</span><span class="cnt live">1</span></a>
+    <a class="sub"><span class="dot"></span><span>HarnessManager</span><span class="cnt">41</span></a>
+    <a class="sub"><span class="dot"></span><span>Sanduq</span><span class="cnt">23</span></a>
+    <a class="on" style="background:transparent;font-weight:400"><span class="ic"></span>Sessions<span class="cnt live">1 live</span></a>
+    <a><span class="ic"></span>Usage by account</a>
+    <a><span class="ic"></span>API keys &amp; routing</a>
+    <div class="gap"></div>
+    <a><span class="ic"></span>MCP servers<span class="cnt">14</span></a>
+    <a><span class="ic"></span>Skills<span class="cnt">251</span></a>
+    <a><span class="ic"></span>System prompts</a>
+    <a><span class="ic"></span>Apps<span class="cnt" style="color:var(--warn)">1 update</span></a>
+    <div class="bottom"></div>
+    <a><span class="ic"></span>CLI reference</a>
+    <a><span class="ic"></span>Settings</a>
+  </div>
+</aside>
+<div class="body">
+  <div class="top"><div class="search">Search titles, prompts and answers in Bunyan <kbd>Ctrl K</kbd></div><div class="right"><span class="livestrip">1 live</span><span>Limits read 8 m ago · usage just now</span></div></div>
+  <div class="sheet split">
+    <div class="rail">
+      <div class="q">Filter projects…</div>
+      <a><span class="dot live"></span><span>Live now</span><span class="cnt live">1</span></a>
+      <a><span class="dot"></span><span>All projects</span><span class="cnt">258</span></a>
+      <div class="sec">Pinned</div>
+      <a class="on"><span class="dot live"></span><span>Bunyan</span><span class="cnt">112</span></a>
+      <a><span class="dot"></span><span>HarnessManager</span><span class="cnt">41</span></a>
+      <a><span class="dot"></span><span>Sanduq</span><span class="cnt">23</span></a>
+      <div class="sec">Recent</div>
+      <a><span class="dot"></span><span>printing-press</span><span class="cnt">9</span></a>
+      <a><span class="dot"></span><span>resal-wiki</span><span class="cnt">7</span></a>
+      <a><span class="dot"></span><span>Athar</span><span class="cnt">6</span></a>
+      <a><span class="dot"></span><span>31 more…</span></a>
+      <div class="sec">Tags</div>
+      <a><span class="chip tag" style="height:16px;font-size:10px">release</span><span class="cnt">14</span></a>
+      <a><span class="chip tag c2" style="height:16px;font-size:10px">bugfix</span><span class="cnt">9</span></a>
+    </div>
+    <div class="pane">
+      <div class="phead"><div><h1 style="font-size:18px;margin:0">Bunyan <span class="chip tag" style="vertical-align:3px">release</span></h1><span class="path mono" style="color:var(--m);font-size:11px">github.com/abushanab-net/bunyan · D:\Projects\abushanab-net\Bunyan</span>
+        <div class="stats"><span><b>$418.90</b> at list prices</span><span><b>7.23B</b> tokens</span><span><b>112</b> sessions</span><span><b>3</b> accounts</span><span style="color:var(--ac)"><b style="color:var(--ac)">1</b> running</span></div></div>
+        <div><span class="btn">⋯</span> <span class="btn primary">▶ New session</span></div></div>
+      <div class="fbar"><span class="seg"><a class="on">Date</a><a>Account</a><a>Tool</a><a>Tag</a></span><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span><span class="chip">Account ▾</span><span class="chip">Tool ▾</span></div>
+      <div class="grp"><div class="gh live"><b>Running now</b><span class="tot">1 session</span></div>
+        <div class="srow"><span class="dot live"></span><div class="t"><b>Start the Sanduq Workflow for abushanab-net/Bunyan#1061 <span class="tags"><span class="chip tag">release</span></span></b><small>840 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">1.25B</span><span class="when live">live</span><span class="btn sm">Follow</span></div></div>
+      <div class="grp"><div class="gh"><b>Today</b><span class="tot">12 sessions · 510M tokens · $29.60</span></div>
+        <div class="srow"><span class="dot"></span><div class="t"><b>Codex session</b><small>11 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">9.10M</span><span class="when">17:47</span><span class="btn sm">Resume</span></div>
+        <div class="srow"><span class="dot"></span><div class="t"><b>Codex session <span class="tags"><span class="chip tag c2">bugfix</span></span></b><small>97 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">149.04M</span><span class="when">16:43</span><span class="btn sm">Resume</span></div>
+        <div class="srow"><span class="dot"></span><div class="t"><b>Codex session</b><small>200 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">351.35M</span><span class="when">16:40</span><span class="btn sm">Resume</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div></div>
+<p>The pane header carries the project's cost, tokens, sessions, accounts and running count, so you do not need to go back to the Projects page for the numbers. Group headers also show cost. The top-bar search filters the open list in place; the page's own search box is gone. Everything in the rail and the filter bar is in the URL, so a pinned project in the sidebar, a card on the Projects page and the live strip are all plain links.</p>
+<div class="note"><b>Cost caveat:</b> cost is only known for requests whose model has a price in the pricing table. The tiles say what share was priced, as the Overview does today, and a project with unpriced models shows "from $x" rather than a wrong total.</div>
+
+<h2 id="explored">The three directions explored</h2>
+<p>Kept for reference: these are the mockups from the first round that the combined direction was assembled from.</p>
+<details><summary>Direction A: projects in the sidebar</summary>
+<div class="mock"><div class="cap"><b>A · Projects in the sidebar</b><span>the sidebar section carried over into the combined direction, trimmed to five pins</span></div>
+<div class="win">
+<aside class="side">
+  <div class="brand"><i></i><div>Harness Manager<small>ABU-DESK · 9 accounts</small></div></div>
+  <div class="nav">
+    <a><span class="ic"></span>Overview<span class="cnt">$4.12</span></a>
+    <a><span class="ic"></span>Accounts<span class="cnt">9</span></a>
+    <a class="on"><span class="ic"></span>Sessions<span class="cnt live">1 live</span></a>
+    <div class="sec">Projects <a>all 37</a></div>
+    <a class="sub"><span class="dot live"></span><span>Live now</span><span class="cnt live">1</span></a>
+    <a class="sub on"><span class="dot live"></span><span>Bunyan</span><span class="cnt">112</span></a>
+    <a class="sub"><span class="dot"></span><span>HarnessManager</span><span class="cnt">41</span></a>
+    <a class="sub"><span class="dot"></span><span>Sanduq</span><span class="cnt">23</span></a>
+    <a class="sub"><span class="dot"></span><span>printing-press</span><span class="cnt">9</span></a>
+    <a class="sub" style="color:var(--m)"><span class="dot" style="background:transparent"></span><span>33 more…</span></a>
+    <div class="gap"></div>
+    <a><span class="ic"></span>Usage by account</a>
+    <a><span class="ic"></span>API keys &amp; routing</a>
+    <div class="gap"></div>
+    <a><span class="ic"></span>MCP servers<span class="cnt">14</span></a>
+    <a><span class="ic"></span>Skills<span class="cnt">251</span></a>
+    <a><span class="ic"></span>System prompts</a>
+    <a><span class="ic"></span>Apps</a>
+    <div class="bottom"></div>
+    <a><span class="ic"></span>CLI reference</a>
+    <a><span class="ic"></span>Settings</a>
+  </div>
+</aside>
+<div class="body">
+  <div class="top"><div class="search">Find a project, account, session or setting <kbd>Ctrl K</kbd></div><div class="right"><span class="livestrip">1 live · Bunyan</span><span>Limits read 8 m ago · usage just now</span></div></div>
+  <div class="sheet">
+    <div class="trow"><div><h1>Bunyan</h1><p class="find">github.com/abushanab-net/bunyan · 112 sessions · 7.23B tokens</p></div><div><span class="btn primary">▶ New session</span></div></div>
+    <div class="fbar"><span class="chip on">Project: Bunyan ✕</span><span class="chip">Tag ▾</span><span class="lbl">Group by</span><span class="seg"><a>None</a><a class="on">Date</a><a>Account</a><a>Tag</a></span><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span></div>
+    <div class="grp"><div class="gh"><b>Today</b><span class="tot">13 sessions · 1.76B tokens</span></div>
+      <div class="srow"><span class="dot live"></span><div class="t"><b>Start the Sanduq Workflow for abushanab-net/Bunyan#1061</b><small>840 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">1.25B</span><span class="when live">live · 17:47</span><span class="btn sm">Follow</span></div>
+    </div>
+  </div>
+</div>
+</div></div>
+</details>
+<details><summary>Direction B: a project rail inside Sessions</summary>
+<p>Now the third screen of the combined direction, unchanged apart from the project header gaining cost and the sidebar gaining the Projects entry.</p>
+</details>
+<details><summary>Direction C: a Projects page plus a command palette</summary>
+<p>The Projects page is now the second screen of the combined direction, with cost added to the tiles, the distribution and the cards. The command palette stays a later step: <kbd>Ctrl K</kbd> finds pages, projects, sessions, accounts and tags from anywhere.</p>
+<div class="palette" style="position:relative;margin:12px 0 0;width:520px;max-width:100%;background:var(--s);border:1px solid var(--b);border-radius:10px;box-shadow:0 12px 40px rgba(15,23,42,.18);overflow:hidden;font-size:12.5px">
+  <div style="padding:9px 12px;border-bottom:1px solid var(--b);font-size:13px"><span style="color:var(--m)">›</span> bun</div>
+  <div style="font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--m);padding:8px 12px 2px">Projects</div>
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:var(--act)"><span style="width:7px;height:7px;border-radius:50%;background:var(--ac);display:inline-block"></span>Bunyan<span style="margin-left:auto;font:11px var(--mono);color:var(--m)">$418.90 · 1 live</span></div>
+  <div style="font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--m);padding:8px 12px 2px">Sessions</div>
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 12px">Start the Sanduq Workflow for abushanab-net/Bunyan#1061<span style="margin-left:auto;font:11px var(--mono);color:var(--m)">live</span></div>
+  <div style="font:600 10px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--m);padding:8px 12px 2px">Actions</div>
+  <div style="display:flex;align-items:center;gap:8px;padding:6px 12px 10px">New session in Bunyan<span style="margin-left:auto;font:11px var(--mono);color:var(--m)">↵</span></div>
+</div>
+</details>
+
+<h2 id="live">Reaching live sessions</h2>
+<p>Four changes, all visible in the mockups above and independent of the navigation work.</p>
+<ol>
+<li><b>The "1 live" count beside Sessions becomes a link</b> that opens Sessions with the live filter on. Today it is text.</li>
+<li><b>A live strip in the top bar</b> on every page: a pulsing pill reading "1 live · Bunyan". One running session opens its reading view directly; several open the live list. It disappears when nothing runs.</li>
+<li><b>A "Running now" group pinned to the top of Sessions</b>, whatever the grouping, so a running session never hides inside a fold.</li>
+<li><b>The Overview's "running now" tile, the Projects tile, and the Accounts page's "N consoles open" become links</b> to the same live list.</li>
+</ol>
+<p>Behind this, the sessions call gets an <code>open: true</code> filter, and the sessions page state (group, days, query, project, tag, live) moves into the hash so these links are plain URLs like <code>#sessions?live=1</code>.</p>
+
+<h2 id="tags">Tagging sessions</h2>
+<p>Tags are free text, created by typing, shared across every tool and account, stored in Harness Manager's own database and never written into the tools' session files. Projects can carry tags too; a project's tag shows on its card and in the project header, and filtering by a tag includes sessions of projects carrying it.</p>
+<div class="mock"><div class="cap"><b>Tag editor</b><span>from the row's ⋯ menu, the reading view header, a project card, or <kbd>T</kbd> on a focused row</span></div>
+<div style="padding:16px;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;background:var(--s)">
+  <div style="flex:1;min-width:320px">
+    <div class="srow" style="border:1px solid var(--b);border-radius:8px"><span class="dot live"></span><div class="t"><b>Start the Sanduq Workflow for abushanab-net/Bunyan#1061 <span class="tags"><span class="chip tag">release</span><span class="chip tag c3">review</span><span class="chip add">+</span></span></b><small>840 msgs · Instance_2\Bunyan</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">1.25B</span><span class="when live">live</span><span class="btn sm">Follow</span></div>
+    <p style="color:var(--m);font-size:12px;margin:8px 0 0">Tags show on the row after the title. The dashed + opens the editor. A tag chip is a link: it filters the list to that tag.</p>
+    <div style="margin-top:14px" class="fbar"><span class="lbl">Group by</span><span class="seg"><a>Date</a><a>Account</a><a>Tool</a><a class="on">Tag</a></span><span class="chip tag on">release ✕</span><span class="chip">+ tag</span></div>
+    <div class="grp"><div class="gh"><span class="chip tag">release</span><b style="font-weight:400;color:var(--m)">14 sessions · 3 projects</b><span class="tot">2.1B tokens · $126.30</span></div>
+      <div class="srow"><span class="dot live"></span><div class="t"><b>Start the Sanduq Workflow for abushanab-net/Bunyan#1061</b><small>Bunyan · 840 msgs</small></div><span>codex-main</span><span class="tool">Codex</span><span class="num">1.25B</span><span class="when live">live</span><span class="btn sm">Follow</span></div>
+      <div class="srow"><span class="dot"></span><div class="t"><b>Release 1.0.4: macOS finds the tools</b><small>HarnessManager · 63 msgs</small></div><span>claude-work</span><span class="tool claude">Claude</span><span class="num">41.2M</span><span class="when">Mon 21:10</span><span class="btn sm">Resume</span></div>
+    </div>
+    <div class="grp"><div class="gh"><span class="chip" style="color:var(--m)">untagged</span><b style="font-weight:400;color:var(--m)">231 sessions</b><span class="tot">folded</span></div></div>
+  </div>
+  <div class="pop">
+    <div class="in">Add a tag or pick one…</div>
+    <div class="it"><input type="checkbox" checked> <span class="chip tag">release</span><span style="margin-left:auto;color:var(--m);font:11px var(--mono)">14</span></div>
+    <div class="it"><input type="checkbox" checked> <span class="chip tag c3">review</span><span style="margin-left:auto;color:var(--m);font:11px var(--mono)">5</span></div>
+    <div class="it"><input type="checkbox"> <span class="chip tag c2">bugfix</span><span style="margin-left:auto;color:var(--m);font:11px var(--mono)">9</span></div>
+    <div class="it"><input type="checkbox"> <span class="chip tag c4">needs-follow-up</span><span style="margin-left:auto;color:var(--m);font:11px var(--mono)">2</span></div>
+    <div class="hint">Enter adds what you typed as a new tag. Tags are shared across tools and accounts.</div>
+  </div>
+</div></div>
+<h3>What it takes</h3>
+<ul>
+<li><b>Database:</b> one table, <code>tags(kind, key, tag)</code>, where kind is session or project and key is the existing sessions key or project key. Four operations: <code>tag_set</code>, <code>tag_list</code> (every tag with its counts), <code>tag_rename</code>, <code>tag_delete</code>.</li>
+<li><b>Sessions call:</b> a <code>tag</code> filter and a <code>tag</code> grouping; a session with two tags appears under both, untagged ones under one folded group.</li>
+<li><b>Window:</b> chips on rows, cards and headers; the editor popover; Group by tag; the filter chip; the Tags section of the rail. Colours come from a fixed palette of six in creation order.</li>
+<li><b>CLI:</b> <code>hrm sessions --tag release</code> and <code>hrm tag &lt;session|project&gt; release</code>.</li>
+</ul>
+
+<h2 id="skills">Skills: install for a whole tool, and Manage all</h2>
+<p>The skills list has no header row, so there is nowhere to put a per-tool control. The MCP list has one, with a count under each tool. Giving skills the same header makes the two pages consistent and gives each tool a tri-state tick: all, none, or some. A click on "some" or "none" ticks every visible skill for that tool in one backend call. The source filter and search still apply, so "tick all" means "tick all shown", and the header says how many.</p>
+<div class="mock"><div class="cap"><b>Skills with a header row and bulk ticks</b><span>same layout as MCP servers</span></div>
+<div style="padding:14px 16px;background:var(--s)">
+  <div class="bar2">Ticking a tool's header links every skill shown to it, in one go. 251 shown · Codex has 12 of them.<span class="btn sm">Undo</span></div>
+  <table class="matrix">
+    <thead><tr><th>Skill</th><th>Source</th><th class="c">Claude<small>251 · all</small><br><input type="checkbox" checked></th><th class="c">Codex<small>12 · some</small><br><input type="checkbox" style="opacity:.6"></th><th class="c">OpenCode<small>0 · none</small><br><input type="checkbox"></th><th class="c">Antigravity<small>0 · none</small><br><input type="checkbox"></th><th></th></tr></thead>
+    <tbody>
+      <tr><td><b>agents-sdk</b><div class="d">Build, debug, or review Cloudflare Agents SDK applications.</div></td><td class="mono" style="color:var(--m)">Store</td><td class="c"><input type="checkbox" checked></td><td class="c"><input type="checkbox" checked></td><td class="c"><input type="checkbox"></td><td class="c"><input type="checkbox"></td><td>⋯</td></tr>
+      <tr><td><b>archify</b><div class="d">Create polished, validated architecture, workflow and sequence diagrams.</div></td><td class="mono" style="color:var(--m)">Store</td><td class="c"><input type="checkbox" checked></td><td class="c"><input type="checkbox"></td><td class="c"><input type="checkbox"></td><td class="c"><input type="checkbox"></td><td>⋯</td></tr>
+      <tr><td><b>asc-ad-hoc-distribution</b><div class="d">Prepare, publish, resume and verify private iOS release-testing installs.</div></td><td class="mono" style="color:var(--m)">Store</td><td class="c"><input type="checkbox" checked></td><td class="c"><input type="checkbox"></td><td class="c"><input type="checkbox"></td><td class="c"><input type="checkbox"></td><td>⋯</td></tr>
+    </tbody>
+  </table>
+</div></div>
+<ul>
+<li><b>Discover → Install</b> installs for the tools you chose last time, shown on the button, with a one-click change.</li>
+<li><b>Manage all</b> redraws the page whatever happens (issue 1), and the backend reports link problems in the result instead of failing after it has already saved.</li>
+</ul>
+
+<h2 id="installers">Installers: how the Apps page finds and installs the tools</h2>
+<p>What the code does today, in <code>crates/core/src/apps.rs</code>: it finds each tool on PATH, and if the file sits next to an npm <code>node_modules</code> folder it is an npm install; otherwise it runs <code>--version</code> and, for Claude, OpenCode and Antigravity, assumes the tool can update itself with a fixed subcommand. "Check for updates" asks npm for the newest version and nothing else. "Install" for a missing tool is always <code>npm install -g</code>.</p>
+
+<h3>What every vendor ships now</h3>
+<p>Read from the vendors' own installer scripts and docs on 4 November 2026. These are the facts the fix is built on.</p>
+<table class="list wide">
+<thead><tr><th>Tool</th><th>Native install</th><th>Where it lands</th><th>Newest version, readable without installing</th><th>Updating a native install</th><th>Package managers</th></tr></thead>
+<tbody>
+<tr><td>Claude Code</td><td>Windows: <code>irm https://claude.ai/install.ps1 | iex</code><br>macOS/Linux: <code>curl -fsSL https://claude.ai/install.sh | bash</code><br>Both accept <code>stable</code>, <code>latest</code> or a version.</td><td>Windows: <code>%USERPROFILE%\.local\bin\claude.exe</code><br>Unix: <code>~/.local/bin/claude</code>, a link into <code>~/.local/share/claude/versions/</code></td><td><code>https://downloads.claude.ai/claude-code-releases/latest</code> returns the bare version string (2.1.318 today). The per-version <code>manifest.json</code> has checksums.</td><td><code>claude update</code>. It also auto-updates in the background. <code>claude doctor</code> reports the install kind.</td><td>winget <code>Anthropic.ClaudeCode</code>, brew casks <code>claude-code</code> and <code>claude-code@latest</code>, apt/dnf/apk <code>claude-code</code>, npm <code>@anthropic-ai/claude-code</code></td></tr>
+<tr><td>Codex</td><td>Windows: <code>irm https://chatgpt.com/codex/install.ps1 | iex</code><br>macOS/Linux: <code>curl -fsSL https://chatgpt.com/codex/install.sh | sh</code></td><td>Windows: <code>%LOCALAPPDATA%\Programs\OpenAI\Codex\bin</code> (the script says), files under <code>%USERPROFILE%\.codex\packages\standalone</code><br>Unix: <code>~/.local/bin/codex</code><br>Both honour <code>CODEX_INSTALL_DIR</code> and add the folder to PATH.</td><td><code>https://releases.openai.com/codex/channels/latest</code>, JSON with <code>tag_name</code> like <code>rust-v0.166.0</code>; fallback <code>api.github.com/repos/openai/codex/releases/latest</code>.</td><td>No update subcommand. Re-run the installer; it replaces the install.</td><td>brew cask <code>codex</code>, npm <code>@openai/codex</code>, GitHub Releases archives</td></tr>
+<tr><td>OpenCode</td><td><code>curl -fsSL https://opencode.ai/install | bash</code> installs OpenCode 1; <code>https://opencode.ai/v2/install</code> installs OpenCode 2. Bash only; on Windows they run under Git Bash or MSYS and need <code>unzip</code>. No PowerShell installer.</td><td><code>~/.opencode/bin/opencode</code> on every OS (hard-coded)</td><td>OpenCode 1: <code>registry.npmjs.org/opencode-ai/latest</code>. OpenCode 2: <code>https://opencode.ai/update/api/latest/cli/npm</code>, or <code>registry.npmjs.org/@opencode/cli/latest</code>.</td><td><code>opencode upgrade [version] [--method curl|npm|pnpm|bun|brew]</code>; <code>--major</code> moves 1 to 2. It auto-checks unless <code>OPENCODE_DISABLE_AUTOUPDATE</code> is set.</td><td>brew <code>anomalyco/tap/opencode-v2</code> or <code>opencode</code>, scoop <code>opencode</code>, choco <code>opencode</code>, npm <code>opencode-ai</code> (1) or <code>@opencode/cli</code> (2)</td></tr>
+<tr><td>Antigravity CLI</td><td>Windows: <code>irm https://antigravity.google/cli/install.ps1 | iex</code><br>macOS/Linux: <code>curl -fsSL https://antigravity.google/cli/install.sh | bash</code><br>The installer exits early if the binary already exists.</td><td>Windows: <code>%LOCALAPPDATA%\agy\bin\agy.exe</code><br>Unix: <code>~/.local/bin/agy</code></td><td>The installer's manifest, <code>…run.app/manifests/&lt;platform&gt;.json</code>, with a <code>version</code> field (1.5.0 today). Not a documented API; the URL lives in Google's script.</td><td><b>No <code>agy update</code> command.</b> It self-updates in the background every run (15-minute debounce), unless <code>AGY_CLI_DISABLE_AUTO_UPDATE</code> is set. A forced update is: remove the binary, re-run the installer.</td><td>brew cask <code>antigravity-cli</code> (third-party report). The desktop app at antigravity.google is a separate product.</td></tr>
+</tbody>
+</table>
+
+<h3>What is wrong today</h3>
+<table class="list">
+<thead><tr><th>#</th><th>Where</th><th>What</th><th>Cause and fix</th></tr></thead>
+<tbody>
+<tr><td>I1 <span class="pill bug">bug</span></td><td>Apps › Antigravity</td><td>"Run its updater" opens a terminal that runs <code>agy update</code>, which does not exist.</td><td><code>self_update("agy")</code> returns "update" by assumption. <b>Fix:</b> Antigravity's update action becomes "remove and reinstall with the official script", and the row says it updates itself in the background.</td></tr>
+<tr><td>I2 <span class="pill bug">bug</span></td><td>Apps › Newest column</td><td>Native installs never show a newest version, so "Check for updates" finds nothing for three of your four tools and the sidebar update count stays at zero. Antigravity 1.5.0 is out and you have 1.4.0.</td><td><code>latest()</code> only runs <code>npm view</code>, and only for rows marked npm. <b>Fix:</b> a version source per tool (the four URLs above), read with the HTTP client the pricing module already uses; npm stays as the source for npm installs.</td></tr>
+<tr><td>I3 <span class="pill bug">bug</span></td><td>Apps › Codex on this machine</td><td>Codex is installed twice: the npm copy in <code>AppData\Roaming\npm</code> and the native copy in <code>.local\bin</code>. PATH picks the npm one, so the Apps page calls it an npm install and would update it with npm, while the native copy quietly drifts.</td><td><code>which</code> returns the first PATH hit and stops. <b>Fix:</b> look in every known install folder as well as PATH, list every copy, mark which one PATH runs, and offer "Remove the npm copy" (runs <code>npm uninstall -g</code>) when a native one exists. Also warn when the copy that runs is older than another copy.</td></tr>
+<tr><td>I4 <span class="pill gap">gap</span></td><td>Apps › Install</td><td>A missing tool is always installed with npm, which needs Node and is no longer the vendors' first choice.</td><td><code>manager</code> is npm whenever a package name exists. <b>Fix:</b> Install opens a small dialog: the vendor's native installer first, then winget/brew/scoop/choco when that manager is on the machine, then npm. The command is shown before it runs; the choice is remembered per tool.</td></tr>
+<tr><td>I5 <span class="pill gap">gap</span></td><td>Apps › Updated by</td><td>The column says "npm", "updates itself" or "—"; it never says native, winget, brew, scoop or choco, so you cannot tell what you have.</td><td><b>Fix:</b> detect the kind from the path: <code>.local\bin</code> or <code>LOCALAPPDATA\Programs\OpenAI</code> or <code>LOCALAPPDATA\agy</code> or <code>.opencode\bin</code> are native; <code>node_modules</code> is npm; <code>Cellar</code>/<code>Caskroom</code> is brew; <code>scoop\apps</code>, <code>ProgramData\chocolatey</code>, <code>WindowsApps</code> or winget's links folder for the others. The update command follows the kind.</td></tr>
+<tr><td>I6 <span class="pill gap">gap</span></td><td>Apps › OpenCode</td><td>Your OpenCode binary sits in <code>.local\bin</code>, not in the folder the install script uses. The page cannot say how it got there, and its updater may install a second copy in <code>.opencode\bin</code>.</td><td><b>Fix:</b> part of I3 and I5: list every copy, and run <code>opencode upgrade --method</code> with the method that matches the kind.</td></tr>
+<tr><td>I7 <span class="pill gap">gap</span></td><td>Apps › Antigravity</td><td>The "not installed" row points at the desktop app's website, which is not where the CLI comes from.</td><td><code>download_page("agy")</code>. <b>Fix:</b> the native installer command from the table; the website link stays as a secondary action labelled "the desktop app".</td></tr>
+<tr><td>I8 <span class="pill gap">gap</span></td><td>Apps › after an update</td><td>The page says "shows the new version once it finishes and you open it again".</td><td><b>Fix:</b> after the terminal opens, poll the tool's version every 5 s for two minutes and redraw when it changes (issue 13 in the list below).</td></tr>
+<tr><td>I9 <span class="pill gap">gap</span></td><td>macOS</td><td>Native installs live in <code>~/.local/bin</code>, which an app started from the Dock does not have on PATH.</td><td>util.rs already reads the shell's PATH for this. <b>Fix:</b> add the known native folders to the search regardless, so detection does not depend on the shell profile.</td></tr>
+</tbody>
+</table>
+
+<h3>The Apps page after the fix</h3>
+<div class="mock"><div class="cap"><b>Apps</b><span>every copy listed, the one PATH runs marked, the install kind named, and the right action per kind</span></div>
+<div style="padding:14px 16px;background:var(--s)">
+  <div class="bar2 warn">Codex is installed twice. Your terminals run the npm copy (0.166.0); the native copy in .local\bin is the same version. Keep one.<span class="btn sm">Remove the npm copy</span></div>
+  <div class="apr h"><span></span><span>Tool</span><span>Installed</span><span>Newest</span><span>Install kind</span><span></span></div>
+  <div class="apr"><span class="ti claude"></span><div><b>Claude Code</b><span class="path">C:\Users\sabus\.local\bin\claude.exe</span></div><span class="v">2.1.318</span><span class="v">2.1.318</span><span>native · auto-updates</span><span class="acts"><span class="btn sm">Up to date</span><span class="btn sm">⋯</span></span></div>
+  <div class="apr"><span class="ti"></span><div><b>Codex</b><span class="path">C:\Users\sabus\AppData\Roaming\npm\codex.cmd · runs</span></div><span class="v">0.166.0</span><span class="v">0.166.0</span><span>npm</span><span class="acts"><span class="btn sm">Up to date</span><span class="btn sm">⋯</span></span></div>
+  <div class="apr" style="background:var(--g)"><span></span><div><span class="path" style="padding-left:12px">C:\Users\sabus\.local\bin\codex.exe · second copy</span></div><span class="v">0.166.0</span><span></span><span>native</span><span class="acts"><span class="btn sm">Use this one</span></span></div>
+  <div class="apr"><span class="ti oc"></span><div><b>OpenCode</b><span class="path">C:\Users\sabus\.local\bin\opencode.exe</span></div><span class="v">1.19.5</span><span class="v">1.19.5</span><span>native</span><span class="acts"><span class="btn sm">Up to date</span><span class="btn sm">⋯</span></span></div>
+  <div class="apr"><span class="ti agy"></span><div><b>Antigravity CLI</b><span class="path">C:\Users\sabus\AppData\Local\agy\bin\agy.exe</span></div><span class="v">1.4.0</span><span class="v new">1.5.0</span><span>native · auto-updates</span><span class="acts"><span class="btn sm primary">Reinstall 1.5.0</span><span class="btn sm">⋯</span></span></div>
+  <div class="apr h" style="margin-top:14px"><span></span><span>Not installed</span><span></span><span></span><span></span><span></span></div>
+  <div class="apr"><span class="ti"></span><div><b>Example tool</b><span class="path">Install with the vendor's installer, winget, or npm</span></div><span class="v">—</span><span class="v">1.2.0</span><span></span><span class="acts"><span class="btn sm primary">Install ▾</span></span></div>
+</div></div>
+<p>The ⋯ menu per row: Update, Reinstall with the native installer, Open its folder, Copy its path, Show the command. Install ▾ lists the methods available on this machine with the exact command under each.</p>
+
+<h3>The change in the code</h3>
+<ul>
+<li><b>apps.rs:</b> replace the three string tables with one <code>Installer</code> record per tool: native folders per OS, install commands per OS, the newest-version URL and how to read it (text, JSON field, manifest), the update command per install kind, package names per manager. About 80 lines of data, no new abstraction beyond the record.</li>
+<li><b>Detection:</b> <code>list()</code> looks in PATH and in the known folders, returns every copy with its version and kind, and marks the one PATH runs. The version read stays as it is.</li>
+<li><b>Newest:</b> <code>latest()</code> reads the tool's URL with the existing HTTP client; npm only for npm copies. Results are cached in the same <code>apps:latest</code> key.</li>
+<li><b>Actions:</b> <code>app_update</code> takes the kind into account; two new ops, <code>app_install(id, method)</code> and <code>app_remove_copy(id, path)</code>. All open a terminal as today, so you see what runs.</li>
+<li><b>Tests:</b> the terminal log the tests already use records the command; one test per tool and kind asserts the right command, and one asserts the two-copies warning.</li>
+<li><b>Risk to say out loud:</b> the Antigravity manifest URL and the Codex channel URL are the vendors' own but undocumented. If one changes, that tool's Newest column shows "could not check" and a link to the vendor page, never a wrong version.</li>
+</ul>
+
+<h2 id="issues">All issues found</h2>
+<p>Severity: <span class="pill bug">bug</span> something is wrong today · <span class="pill gap">gap</span> missing or confusing · <span class="pill ask">ask</span> your request. Installer issues I1 to I9 are in their own table above.</p>
+<table class="list">
+<thead><tr><th>#</th><th>Where</th><th>What</th><th>Cause and fix</th></tr></thead>
+<tbody>
+<tr><td>1 <span class="pill bug">bug</span></td><td>Everywhere</td><td>A page keeps showing the old state after an action until you leave and come back. Seen on Manage all and after sign-in; also true of saving an endpoint, Sync now, Import PowerShell, the live-limits switch, launch at sign-in, and app updates.</td><td>No shared "changed → redraw" path. Each action calls <code>render()</code> by hand and only on success; the ones listed never do. Pages also read <code>S.state</code> as a cache that only a few actions clear. <b>Fix:</b> one helper in core.js, <code>mutate(fn, okMsg)</code>, that runs the call, toasts, clears <code>S.state</code>, reloads the sidebar counts and redraws in a <code>finally</code>. Every mutating action uses it. About 40 call sites.</td></tr>
+<tr><td>2 <span class="pill bug">bug</span></td><td>Skills › Manage all</td><td>Clicking Manage all shows nothing; the skills are managed when you come back.</td><td>The backend saves the registry and then syncs every tool; if any link fails, the call errors after the save, so the window shows a short error toast and does not redraw. <b>Fix:</b> issue 1, plus the backend returns <code>{adopted, sync}</code> with the existing conflict report instead of failing.</td></tr>
+<tr><td>3 <span class="pill bug">bug</span></td><td>Accounts › sign in</td><td>After signing in, the account still says "Not logged in" until you navigate away and back.</td><td>Codex, OpenCode and Antigravity sign in in a terminal; the dialog says "this account updates when you are done" but nothing watches, so Done before the terminal finishes leaves the stale state. Claude's dialog polls, then Done redraws only that page. <b>Fix:</b> poll the account's identity every 2 s while any sign-in dialog is open and close it on success; redraw via issue 1.</td></tr>
+<tr><td>4 <span class="pill ask">ask</span></td><td>Skills</td><td>No way to install or link every skill for one tool.</td><td>No header row. <b>Fix:</b> header with tri-state tick per tool; one backend op <code>target_bulk</code>; Discover's Install remembers the tools.</td></tr>
+<tr><td>5 <span class="pill ask">ask</span></td><td>Sidebar, Prompts page</td><td>"Prompts" does not say what the page does.</td><td><b>Fix:</b> "System prompts"; subtitle "The instructions each tool reads at start: CLAUDE.md, AGENTS.md, GEMINI.md". Nav, h1, tour step, README, Apps tooltip. Test ids and the hash stay.</td></tr>
+<tr><td>6 <span class="pill ask">ask</span></td><td>Sessions, sidebar</td><td>No way to go to a project; 37 groups all open; 112 rows in one group with no limit; no project costs.</td><td>Project is only a group key. <b>Fix:</b> the combined direction above; folds and filters in the hash; groups show 20 rows with "show all"; the <code>projects</code> call with cost.</td></tr>
+<tr><td>7 <span class="pill ask">ask</span></td><td>Sessions, sidebar, Overview</td><td>"1 running now" and "1 live" are not links; a live session hides inside its project.</td><td><b>Fix:</b> the four live changes above.</td></tr>
+<tr><td>8 <span class="pill gap">gap</span></td><td>Sessions</td><td>Two search boxes: the top bar's and the page's. Typing in the top bar does nothing here until Enter, which reloads the page with the query.</td><td>Sessions sets no page filter, so the top-bar search falls through to a navigation. <b>Fix:</b> the top bar filters in place; the page's box goes away.</td></tr>
+<tr><td>9 <span class="pill gap">gap</span></td><td>Sessions</td><td>Group, range and query are forgotten on restart and cannot be linked to.</td><td>Filter state is a module variable. <b>Fix:</b> keep it in the hash; the last value restored from settings on open.</td></tr>
+<tr><td>10 <span class="pill gap">gap</span></td><td>Skills › Discover</td><td>Install enables Claude Code only; the toast tells you to go tick the others.</td><td>Hard-coded <code>enable: ['claude']</code>. <b>Fix:</b> part of issue 4.</td></tr>
+<tr><td>11 <span class="pill gap">gap</span></td><td>Skills vs MCP servers</td><td>The two lists look different for the same job.</td><td><b>Fix:</b> same table on both, from issue 4.</td></tr>
+<tr><td>12 <span class="pill gap">gap</span></td><td>All pages</td><td>Errors appear only as a toast for 7 s. A failed bulk action on 251 skills is a one-line toast you may not read.</td><td><b>Fix:</b> a dismissable notice at the top of the page for failed mutations and sync conflicts, with the full report in a dialog.</td></tr>
+<tr><td>13 <span class="pill gap">gap</span></td><td>Apps</td><td>"Show" tick saves but nothing on the page changes; after an update the page says to reopen it.</td><td><b>Fix:</b> issue 1 and I8.</td></tr>
+<tr><td>14 <span class="pill gap">gap</span></td><td>Sidebar counts</td><td>Skills and MCP counts update only when those pages are drawn.</td><td><b>Fix:</b> the mutate helper reloads counts.</td></tr>
+<tr><td>15 <span class="pill gap">gap</span></td><td>Background refresh</td><td>The background usage import skips the redraw while a dialog is open and never catches up after it closes.</td><td><b>Fix:</b> remember "dirty" and redraw on dialog close.</td></tr>
+<tr><td>16 <span class="pill gap">gap</span></td><td>Accounts</td><td>The accounts list redraws every 60 s to catch opened consoles, which resets any fold you made.</td><td><b>Fix:</b> keep folds in settings.</td></tr>
+<tr><td>17 <span class="pill gap">gap</span></td><td>Keyboard</td><td><kbd>Ctrl K</kbd> only focuses a text box.</td><td><b>Fix:</b> the command palette, in a later phase.</td></tr>
+<tr><td>18 <span class="pill gap">gap</span></td><td>Sessions row</td><td>Many sessions are titled "Codex session" so the row says nothing.</td><td>The tool wrote no title. <b>Fix:</b> fall back to the first user prompt's first line as the title.</td></tr>
+</tbody>
+</table>
+
+<h2 id="plan">Fix plan</h2>
+<p>Five phases, each shippable on its own. The first one goes before anything else, since every later feature would inherit the stale-page bug otherwise.</p>
+<div class="phase"><span class="pill p0">P0</span><div><h3>Redraw correctly after every action <span class="eff">1 day</span></h3><p>Issues 1, 2, 3, 13, 14, 15.</p><ul>
+<li>core.js: <code>mutate(fn, okMsg)</code>; replace every <code>attempt(...).then(render)</code> and the bare <code>attempt</code> calls on mutating actions.</li>
+<li>main.rs <code>skill_adopt</code>, <code>skill_install</code>, <code>skill_import</code>: return the sync report instead of failing after the save.</li>
+<li>accounts.js: terminal sign-ins poll the identity every 2 s and close on success.</li>
+<li>app.js: the background-refresh event marks the page dirty when a dialog is open; dialog close redraws.</li>
+<li>Tests: one window test per fixed action asserting the page shows the new state without navigation.</li>
+</ul></div></div>
+<div class="phase"><span class="pill p1">P1</span><div><h3>Quick wins <span class="eff">1 to 2 days</span></h3><p>Issues 4, 5, 7, 8, 10, 11, 12, 18.</p><ul>
+<li>Rename Prompts to System prompts.</li>
+<li>Skills: header row with tri-state ticks; <code>target_bulk</code>; Discover's Install remembers the tools.</li>
+<li>Live: sidebar count and Overview tile become links; "Running now" group pinned; live strip in the top bar; <code>open</code> filter on the sessions call.</li>
+<li>Sessions: top-bar search filters in place; untitled sessions fall back to the first prompt.</li>
+<li>A page-level notice for failed mutations and sync conflicts.</li>
+</ul></div></div>
+<div class="phase"><span class="pill p1">P1b</span><div><h3>Installers <span class="eff">2 days</span></h3><p>Issues I1 to I9.</p><ul>
+<li>apps.rs: the <code>Installer</code> record per tool; detection across PATH and the known folders; every copy listed with the running one marked.</li>
+<li>Newest version per tool from the vendor URL; npm only for npm copies; "could not check" with a link when a URL fails.</li>
+<li>Actions by kind: update, reinstall with the native installer, remove a duplicate copy, install with a chosen method. Each shows its command and opens a terminal.</li>
+<li>Apps page: the kind column, the duplicate warning, Install ▾ with the methods available on the machine, version polling after an update.</li>
+<li>Tests on the recorded terminal commands, one per tool and kind.</li>
+</ul></div></div>
+<div class="phase"><span class="pill p2">P2</span><div><h3>Navigation: the combined direction <span class="eff">4 days</span></h3><p>Issues 6, 9, 16, 17.</p><ul>
+<li>Backend: the <code>projects</code> call with cost, accounts, last activity, live count and the 7-day series; pins in settings; <code>hrm projects</code>.</li>
+<li>Sidebar: the Projects entry with up to five pins.</li>
+<li>Projects page: tiles, distribution with the tokens/cost/sessions toggle, cards with sort.</li>
+<li>Sessions: the project rail, the project header with numbers, all state in the hash, groups capped at 20 rows with "show all", group headers with cost.</li>
+<li>Then the command palette, one more day, once the rest is in.</li>
+</ul></div></div>
+<div class="phase"><span class="pill p3">P3</span><div><h3>Tags <span class="eff">2 days</span></h3><ul>
+<li>db.rs: the <code>tags</code> table with a migration; service.rs: tag filter and grouping; project tags inherited in filters.</li>
+<li>main.rs and the CLI: <code>tag_set</code>, <code>tag_list</code>, <code>tag_rename</code>, <code>tag_delete</code>; <code>hrm tag</code> and <code>hrm sessions --tag</code>.</li>
+<li>Window: chips on rows, cards and headers; the editor popover; Group by tag; the filter chip; the Tags section of the rail.</li>
+<li>Backups include the tags table.</li>
+</ul></div></div>
+
+<h2 id="feedback">Feedback sheet</h2>
+<p>Decided in the first round, and what is still open. Unanswered items get the default in brackets.</p>
+<div class="fb done"><span class="n">✓</span><div>Navigation: the combined direction. Projects in the sidebar with pins, a Projects page with the cost and token distribution, the project rail inside Sessions. The command palette follows.</div></div>
+<div class="fb done"><span class="n">✓</span><div>Project cost at list prices on the tiles, the distribution, every card and the project header.</div></div>
+<div class="fb"><span class="n">1</span><div>How many pinned projects in the sidebar before it overflows? <span class="opts">[5; the rest are one click away on the Projects page]</span></div></div>
+<div class="fb"><span class="n">2</span><div>Pins chosen by you, or automatic (the five most active this week)? <span class="opts">[yours, with "pin the five most active" as a one-click starting point]</span></div></div>
+<div class="fb"><span class="n">3</span><div>Live strip in the top bar on every page: yes or no? When several sessions run, open the list or the newest one? <span class="opts">[yes; the list]</span></div></div>
+<div class="fb"><span class="n">4</span><div>Tags on projects as well as sessions? <span class="opts">[yes, one table]</span></div></div>
+<div class="fb"><span class="n">5</span><div>"System prompts" or "Harness prompts" or "Instructions"? <span class="opts">[System prompts]</span></div></div>
+<div class="fb"><span class="n">6</span><div>Skills "tick all for a tool": all shown (after search and filter) or always all? <span class="opts">[shown]</span></div></div>
+<div class="fb"><span class="n">7</span><div>Installers: when a tool is missing, default to the vendor's native installer, or to winget/brew when present? <span class="opts">[native; package managers listed under it]</span></div></div>
+<div class="fb"><span class="n">8</span><div>Installers: should the app offer to remove the duplicate Codex npm copy, or only warn? <span class="opts">[offer; the command is shown and runs in a terminal]</span></div></div>
+<div class="fb"><span class="n">9</span><div>Installers: for Antigravity, is "Reinstall" (remove the binary, run the script) acceptable as the update action, given there is no update command? <span class="opts">[yes]</span></div></div>
+<div class="fb"><span class="n">10</span><div>Order of work: P0, P1, P1b, P2, P3, or installers before the quick wins? <span class="opts">[as listed]</span></div></div>
+<p style="color:var(--m);font-size:13px;margin-top:24px">Sources in the code: app/ui/core.js, app.js, accounts.js, views.js, skills.js, mcp.js, apps.js; app/src-tauri/src/main.rs; crates/core/src/apps.rs, util.rs, launch.rs, items.rs, service.rs, db.rs. Vendor facts: the installer scripts at claude.ai, chatgpt.com/codex, opencode.ai and antigravity.google, and the Claude Code, Codex, OpenCode and Antigravity CLI docs, all read on 4 November 2026. Not checked: the macOS build, winget's link folder layout, and the reading view's live follow.</p>
+</main>
+</body>
+</html>

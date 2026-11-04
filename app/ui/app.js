@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast } from './core.js';
+import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins } from './core.js';
 import { ic, brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
@@ -25,12 +25,18 @@ find.addEventListener('keydown', (e) => {
 
 // the backend imports usage in the background and says when it is done
 const ev = window.__TAURI__ && window.__TAURI__.event;
-if (ev) ev.listen('refreshed', () => { S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {}); if (['home', 'accounts', 'account', 'usage'].includes(S.route.view) && !document.getElementById('dialog-root').innerHTML) render(); });
+if (ev) ev.listen('refreshed', () => {
+  S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
+  if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
+  // a dialog stays as it is; the page catches up when it closes
+  if (document.getElementById('dialog-root').innerHTML) S.dirty = true; else render();
+});
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
 call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); }).catch(() => {});
-// how many MCP servers and skills there are, beside their pages
+// how many MCP servers and skills there are, beside their pages; the pinned projects under Projects
 call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {});
+call('projects', { days: 30 }).then(drawPins).catch(() => {});
 S.usageAt = Date.now();
 if (ev) ev.listen('app-updates', (e) => setAppUpdates(e.payload));
 // a new Harness Manager: Settings > Updates offers it

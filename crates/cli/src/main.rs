@@ -71,8 +71,18 @@ enum Cmd {
         #[arg(long)] profile: Option<String>,
         #[arg(long)] days: Option<i64>,
         #[arg(long)] search: Option<String>,
+        /// Only sessions a console is working in now
+        #[arg(long)] open: bool,
+        /// Only one project, by its key
+        #[arg(long)] project: Option<String>,
+        /// Only sessions carrying this tag (their own or their project's)
+        #[arg(long)] tag: Option<String>,
         #[command(flatten)] j: Json,
     },
+    /// Tag a session (session <profile>/<id>) or a project (project <key>): the tags given replace its tags; none clears them
+    Tag { kind: String, key: String, tags: Vec<String> },
+    /// Every tag, with how many sessions and projects carry it
+    Tags { #[command(flatten)] j: Json },
     /// Print one session as a transcript
     Session { profile: String, id: String, #[command(flatten)] j: Json },
     /// Reopen a session in a new terminal, in its own account
@@ -116,7 +126,8 @@ enum KeyCmd {
 
 #[derive(Subcommand)]
 enum ProjectCmd {
-    List { #[command(flatten)] j: Json },
+    List { /// Only the last N days (default: all time)
+        #[arg(long)] days: Option<i64>, #[command(flatten)] j: Json },
     Rename { key: String, name: String },
     Merge { key: String, into: String },
     Reset { key: String },
@@ -352,8 +363,8 @@ fn real_main(cli: Cli) -> Result<i32> {
                 None => println!("No limits known yet for {name}"),
             }
         }
-        Cmd::Sessions { group, harness: h, profile, days, search, j } => {
-            let f = SessionFilter { harness: h, profile, days, query: search };
+        Cmd::Sessions { group, harness: h, profile, days, search, open, project, tag, j } => {
+            let f = SessionFilter { harness: h, profile, days, query: search, open: open.then_some(true), project, tag };
             let groups = service::grouped_sessions(&ctx, &f, &group)?;
             if j.json { return print_json(&groups).map(|_| 0); }
             for g in groups {
@@ -378,16 +389,28 @@ fn real_main(cli: Cli) -> Result<i32> {
                 for a in &turn.answer { println!("\n{a}\n"); }
             }
         }
+        // `hrm tag project github.com/o/r release` or `hrm tag session work-max/abc123 release bugfix`
+        Cmd::Tag { kind, key, tags } => {
+            if kind != "project" && kind != "session" { bail!("the kind is session or project"); }
+            ctx.db.tag_set(&kind, &key, &tags)?;
+            println!("{} {key}: {}", kind, if tags.is_empty() { "no tags".into() } else { tags.join(", ") });
+        }
+        Cmd::Tags { j } => {
+            let list = ctx.db.tag_list()?;
+            if j.json { return print_json(&list.iter().map(|(t, s, p)| serde_json::json!({"tag": t, "sessions": s, "projects": p})).collect::<Vec<_>>()).map(|_| 0); }
+            for (t, s, p) in list { println!("{t:<24} {s:>4} sessions  {p:>3} projects"); }
+        }
         Cmd::Resume { profile, id, cwd } => {
             let cwd = cwd.or_else(|| service::transcript(&ctx, &profile, &id).ok().map(|t| PathBuf::from(t.meta.cwd)).filter(|p| p.is_dir()));
             service::resume(&ctx, &profile, &id, cwd)?;
             println!("Resumed {id} in a new terminal");
         }
         Cmd::Projects { cmd } => match cmd {
-            ProjectCmd::List { j } => {
-                let groups = service::grouped_sessions(&ctx, &SessionFilter::default(), "project")?;
-                if j.json { return print_json(&groups.iter().map(|g| serde_json::json!({"key": g.key, "name": g.name, "root": g.root, "remote": g.remote, "sessions": g.sessions.len(), "tokens": g.tokens})).collect::<Vec<_>>()).map(|_| 0); }
-                for g in groups { println!("{:<28} {:>4} sessions  {}", g.name, g.sessions.len(), g.key); }
+            ProjectCmd::List { days, j } => {
+                let list = service::projects(&ctx, days)?;
+                if j.json { return print_json(&list).map(|_| 0); }
+                println!("{:<28} {:>5}  {:>10}  {:>10}  {}", "project", "sess", "tokens", "list $", "key");
+                for p in list { println!("{:<28} {:>5}  {:>10}  {:>10}  {}{}", p.name, p.sessions, fmt_tokens(p.tokens), p.cost.map(|c| format!("{c:.2}")).unwrap_or_else(|| "-".into()), p.key, if p.live > 0 { format!("  ({} live)", p.live) } else { String::new() }); }
             }
             ProjectCmd::Rename { key, name } => { service::alias_project(&ctx, &key, Some(name), None)?; println!("Renamed"); }
             ProjectCmd::Merge { key, into } => { service::alias_project(&ctx, &key, None, Some(into))?; println!("Merged"); }

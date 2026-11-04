@@ -17,6 +17,15 @@ export function setAppUpdates(n) {
   if (el) el.textContent = n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '';
 }
 
+/** The pinned projects under Projects in the sidebar (at most five), and the project count. */
+export function drawPins(list) {
+  const el = document.getElementById('nav-pins');
+  if (!el) return;
+  const cur = S.route.view === 'sessions' ? S.route.params.project : '';
+  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions || ''}</span></a>`).join('');
+  setNavCounts({ 'n-projects': list.length });
+}
+
 /** The counts beside the pages in the sidebar; each one only when known. */
 export function setNavCounts(c) {
   for (const [id, v] of Object.entries(c)) { const el = document.getElementById(id); if (el) el.textContent = v || ''; }
@@ -77,9 +86,34 @@ export async function attempt(fn, okMsg) {
     if (okMsg) toast(okMsg);
     return r;
   } catch (e) {
-    toast(String(e).replace(/^Error: /, ''), true);
+    const msg = String(e).replace(/^Error: /, '');
+    toast(msg, true);
+    notice(msg);
     return undefined;
   }
+}
+
+/** A failure that stays on screen until dismissed, unlike a toast; the next failure replaces it. */
+export function notice(msg) {
+  const el = document.getElementById('notice');
+  if (!el) return;
+  document.getElementById('notice-text').textContent = msg;
+  el.className = '';
+}
+
+/** Something changed on disk: forget the cached state, refresh the sidebar's counts, and draw the page again. */
+export async function changed() {
+  await Promise.all([loadState().catch(() => {}), call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {}),
+    call('projects', { days: 30 }).then(drawPins).catch(() => {})]);
+  return render();
+}
+
+/** A change the user asked for: run it, say what happened, and draw the page again whatever the outcome,
+ * so the page never shows a state older than what is on disk. Resolves to the call's result, or undefined. */
+export async function mutate(fn, okMsg) {
+  const r = await attempt(fn, okMsg);
+  await changed();
+  return r;
 }
 
 const routes = {};
@@ -110,6 +144,7 @@ async function renderNow() {
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  document.querySelectorAll('nav.nav a[data-nav-project]').forEach((a) => a.classList.toggle('on', S.route.view === 'sessions' && a.dataset.navProject === S.route.params.project));
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
   try {
@@ -134,9 +169,17 @@ export function applyTheme(st) {
 export async function loadState() {
   S.state = await call('state');
   applyTheme(S.state);
-  const n = S.state.profiles.length, live = S.state.profiles.reduce((a, p) => a + p.running.length, 0);
+  const n = S.state.profiles.length, running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name }))), live = running.length;
   document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
   setNavCounts({ 'n-accounts': n, 'n-live': live ? live + ' live' : '' });
+  // the live strip in the top bar: one session opens straight away, several open the live list
+  const strip = document.getElementById('live-strip');
+  if (strip) {
+    strip.hidden = !live;
+    const one = live === 1 ? running[0] : null;
+    strip.textContent = live ? `${live} live${one && one.cwd ? ' · ' + one.cwd.split(/[\\/]/).filter(Boolean).pop() : ''}` : '';
+    strip.href = one && one.session_id ? `#session?profile=${encodeURIComponent(one.profile)}&id=${encodeURIComponent(one.session_id)}` : '#sessions?live=1';
+  }
   setFresh();
   return S.state;
 }
@@ -156,6 +199,8 @@ export function closeDialog() {
   const root = document.getElementById('dialog-root');
   if (root._onClose) { const f = root._onClose; root._onClose = null; f(); }
   root.innerHTML = '';
+  // a background refresh that arrived while the dialog was open catches up now
+  if (S.dirty) { S.dirty = false; render(); }
 }
 
 export const dlgHead = (title) => `<div class="dh"><b>${esc(title)}</b><button class="iconbtn" data-act="dialog-close" aria-label="Close">${ic.x}</button></div>`;
@@ -201,6 +246,7 @@ export function closeMenu() {
 // ---------- actions by data-act ----------
 const actions = {
   'dialog-close': () => closeDialog(),
+  'notice-close': () => { document.getElementById('notice').className = 'off'; },
   reload: () => render(),
 };
 export function action(name, fn) { actions[name] = fn; }

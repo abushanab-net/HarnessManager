@@ -394,6 +394,15 @@ pub struct SessionFilter {
     pub days: Option<i64>,
     #[serde(default)]
     pub query: Option<String>,
+    /// Only sessions a console is working in now.
+    #[serde(default)]
+    pub open: Option<bool>,
+    /// Only sessions of one project, by its key.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// Only sessions carrying this tag, their own or their project's.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -411,6 +420,7 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
     let reg = ctx.registry()?;
     let since = f.days.map(|d| now_ms() - d * 86_400_000).unwrap_or(0);
     let mut res = Resolver::new(&reg.projects);
+    let (stags, ptags) = (ctx.db.tags_of("session").unwrap_or_default(), ctx.db.tags_of("project").unwrap_or_default());
     let mut out = vec![];
     for p in &reg.profiles {
         if f.harness.as_deref().map(|h| h != p.harness).unwrap_or(false) { continue; }
@@ -436,6 +446,11 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             s.project_key = info.key;
             s.project_name = info.name;
             s.open = open_ids.contains(&s.id);
+            if f.open == Some(true) && !s.open { continue; }
+            if f.project.as_deref().map(|k| k != s.project_key).unwrap_or(false) { continue; }
+            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
+            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
+            if let Some(t) = &f.tag { if !s.tags.contains(t) && !s.project_tags.contains(t) { continue; } }
             out.push(s);
         }
     }
@@ -451,6 +466,22 @@ pub fn grouped_sessions(ctx: &Ctx, f: &SessionFilter, by: &str) -> Result<Vec<Pr
     let mut groups: Vec<ProjectGroup> = vec![];
     let mut index: HashMap<String, usize> = HashMap::new();
     for s in list {
+        // by tag: a session sits under each of its tags (its own and its project's); none puts it under "untagged"
+        if by == "tag" {
+            let mut tags: Vec<String> = s.tags.iter().chain(s.project_tags.iter()).cloned().collect();
+            tags.sort();
+            tags.dedup();
+            if tags.is_empty() { tags.push(String::new()); }
+            for t in tags {
+                let name = if t.is_empty() { "untagged".to_string() } else { t.clone() };
+                let gi = *index.entry(format!("tag:{t}")).or_insert_with(|| { groups.push(ProjectGroup { key: t.clone(), name, root: String::new(), remote: None, tokens: 0, last_active_at: 0, sessions: vec![] }); groups.len() - 1 });
+                let g = &mut groups[gi];
+                g.tokens += s.tokens;
+                g.last_active_at = g.last_active_at.max(s.last_active_at);
+                g.sessions.push(s.clone());
+            }
+            continue;
+        }
         let (key, name, root, remote) = match by {
             "date" => {
                 let d = chrono::DateTime::from_timestamp_millis(s.last_active_at).map(|d| d.with_timezone(&chrono::Local).format("%A %-d %B %Y").to_string()).unwrap_or_default();
@@ -474,6 +505,66 @@ pub fn grouped_sessions(ctx: &Ctx, f: &SessionFilter, by: &str) -> Result<Vec<Pr
     }
     groups.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(groups)
+}
+
+/// A project as the Projects page shows it: its sessions, tokens, cost at list prices, accounts, activity and a day series.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectStat {
+    pub key: String,
+    pub name: String,
+    pub root: String,
+    pub remote: Option<String>,
+    pub sessions: usize,
+    /// Tokens of its sessions, as the Sessions page counts them.
+    pub tokens: i64,
+    /// API list-price cost of its requests in range; None when no model's price is known.
+    pub cost: Option<f64>,
+    /// Share of its request tokens that had a price.
+    pub priced_share: f64,
+    pub accounts: Vec<String>,
+    pub last_active_at: i64,
+    pub live: usize,
+    /// Request tokens per calendar day, oldest first, for the range.
+    pub series: Vec<i64>,
+    pub pinned: bool,
+    pub tags: Vec<String>,
+}
+
+/// Every project with sessions in the last `days` days (None: all time), busiest first.
+pub fn projects(ctx: &Ctx, days: Option<i64>) -> Result<Vec<ProjectStat>> {
+    let reg = ctx.registry()?;
+    let f = SessionFilter { days, ..Default::default() };
+    let groups = grouped_sessions(ctx, &f, "project")?;
+    // cost and the day series come from the request log, priced per model as Overview does
+    let prices = crate::pricing::load(ctx);
+    let span = days.unwrap_or(30).clamp(1, 53 * 7);
+    let day_list = last_days(span);
+    let from = from_day(days);
+    let rows: Vec<(String, String, String, i64, i64, i64, i64)> = ctx.db.with(|c| {
+        let mut st = c.prepare("select project, day, model, sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 group by project, day, model")?;
+        let r = st.query_map([&from], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?.collect::<rusqlite::Result<_>>()?;
+        Ok(r)
+    })?;
+    let mut res = Resolver::new(&reg.projects);
+    let mut by_key: HashMap<String, (Option<f64>, i64, i64, Vec<i64>)> = HashMap::new(); // cost, priced tokens, all tokens, series
+    for (dir, day, model, i, out, cr, cw) in rows {
+        let key = res.resolve(&dir).key;
+        let e = by_key.entry(key).or_insert_with(|| (None, 0, 0, vec![0; day_list.len()]));
+        let tokens = i + out + cr + cw;
+        e.2 += tokens;
+        if let Some(c) = crate::pricing::find(&prices, &model).map(|p| p.cost(i, out, cr, cw)) { e.0 = Some(e.0.unwrap_or(0.0) + c); e.1 += tokens; }
+        if let Some(di) = day_list.iter().position(|d| *d == day) { e.3[di] += tokens; }
+    }
+    let pins = &ctx.settings.pinned_projects;
+    let ptags = ctx.db.tags_of("project").unwrap_or_default();
+    Ok(groups.into_iter().map(|g| {
+        let (cost, priced, all, series) = by_key.remove(&g.key).unwrap_or((None, 0, 0, vec![0; day_list.len()]));
+        let mut accounts: Vec<String> = g.sessions.iter().map(|s| s.profile.clone()).collect();
+        accounts.sort();
+        accounts.dedup();
+        ProjectStat { pinned: pins.contains(&g.key), tags: ptags.get(&g.key).cloned().unwrap_or_default(), key: g.key, name: g.name, root: g.root, remote: g.remote, sessions: g.sessions.len(), tokens: g.tokens, cost,
+            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open).count(), series }
+    }).collect())
 }
 
 pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {

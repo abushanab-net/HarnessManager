@@ -21,7 +21,7 @@ pub struct Settings {
     pub router_port: u16,
     /// The window's X hides it to the tray; off: the X quits.
     pub close_to_tray: bool,
-    /// Ask npm for the tools' newest versions when the app starts.
+    /// Ask each vendor for the tools' newest versions when the app starts.
     pub check_updates_at_launch: bool,
     /// "system" (the default: as Windows or macOS is), "light" or "dark".
     pub theme: String,
@@ -42,6 +42,8 @@ pub struct Settings {
     pub game_layer: bool,
     /// Overview: particles moving along the live routes; off: a still picture.
     pub moving_routes: bool,
+    /// Projects shown in the sidebar, by key, in this order.
+    pub pinned_projects: Vec<String>,
 }
 
 impl Default for Settings {
@@ -49,7 +51,7 @@ impl Default for Settings {
         Settings { registry_path: String::new(), terminal: "wt".into(), refresh_minutes: 5, quota_max_age_minutes: 10, router_port: 15731,
             close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), quota_display: "left".into(), hidden_tools: vec![],
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
-            first_reply_goal_s: 20, game_layer: true, moving_routes: true }
+            first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![] }
     }
 }
 

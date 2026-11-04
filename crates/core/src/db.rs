@@ -32,6 +32,7 @@ create table if not exists events(ts integer not null, level text not null, kind
 create index if not exists events_ts on events(ts);
 create table if not exists quota_hist(ts integer not null, profile text not null, tier text not null, used real not null, resets_at integer);
 create index if not exists quota_hist_p on quota_hist(profile, tier, ts);
+create table if not exists tags(kind text not null, key text not null, tag text not null, primary key(kind, key, tag));
 "#;
 
 impl Db {
@@ -153,6 +154,45 @@ impl Db {
             } else {
                 c.execute("delete from ledger where target=? and kind=? and item=?", [target, kind, item])?;
             }
+            Ok(())
+        })
+    }
+
+    /// Every tag of one kind ("session": profile/id, "project": the project key), by key.
+    pub fn tags_of(&self, kind: &str) -> Result<std::collections::HashMap<String, Vec<String>>> {
+        self.with(|c| {
+            let mut st = c.prepare("select key, tag from tags where kind=? order by rowid")?;
+            let mut m: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            for r in st.query_map([kind], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() { m.entry(r.0).or_default().push(r.1); }
+            Ok(m)
+        })
+    }
+
+    /// Replace the tags of one session or project.
+    pub fn tag_set(&self, kind: &str, key: &str, tags: &[String]) -> Result<()> {
+        self.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
+            for t in tags { tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t.as_str()])?; }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Every tag with how many sessions and projects carry it, oldest first (so each keeps its colour).
+    pub fn tag_list(&self) -> Result<Vec<(String, i64, i64)>> {
+        self.with(|c| {
+            let mut st = c.prepare("select tag, sum(kind='session'), sum(kind='project') from tags group by tag order by min(rowid)")?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(v)
+        })
+    }
+
+    /// Rename a tag everywhere; an empty new name deletes it.
+    pub fn tag_rename(&self, from: &str, to: &str) -> Result<()> {
+        self.with(|c| {
+            if to.is_empty() { c.execute("delete from tags where tag=?", [from])?; }
+            else { c.execute("insert or ignore into tags select kind, key, ?2 from tags where tag=?1", [from, to])?; c.execute("delete from tags where tag=?", [from])?; }
             Ok(())
         })
     }

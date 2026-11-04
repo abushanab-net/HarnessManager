@@ -115,6 +115,11 @@ pub struct SessionMeta {
     pub project_name: String,
     #[serde(default)]
     pub open: bool,
+    /// The session's own tags, and the tags of its project (which it inherits in filters).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub project_tags: Vec<String>,
 }
 
 /// A transcript as typed blocks, grouped into turns (one user prompt and the answer to it).

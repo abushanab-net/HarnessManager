@@ -315,6 +315,8 @@ pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Tran
     let mut turns: Vec<Turn> = vec![];
     let mut calls: HashMap<String, (usize, usize, i64)> = HashMap::new();
     let mut first_prompt = String::new();
+    let mut first_answer = String::new();
+    let mut agent = String::new();
     let mut last_total = 0i64;
     for v in &lines {
         let ts = v["timestamp"].as_str().map(ts_ms).unwrap_or(0);
@@ -329,6 +331,11 @@ pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Tran
             "session_meta" => {
                 meta.id = pl["id"].as_str().or(pl["session_id"].as_str()).unwrap_or("").into();
                 meta.cwd = pl["cwd"].as_str().unwrap_or("").into();
+                // a thread Codex spawned for a sub-agent: its task never appears as a prompt
+                let sub = &pl["source"]["subagent"]["thread_spawn"];
+                if sub.is_object() {
+                    agent = format!("Sub-agent {}{}", sub["agent_nickname"].as_str().unwrap_or("thread"), sub["agent_role"].as_str().map(|r| format!(" · {r}")).unwrap_or_default());
+                }
             }
             "turn_context" => if let Some(m) = pl["model"].as_str() { meta.model = m.into() },
             "event_msg" => match ptype {
@@ -342,7 +349,10 @@ pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Tran
                     let text = pl["content"].as_array().map(|a| a.iter().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n")).unwrap_or_default();
                     if pl["role"] == "user" && !has_events {
                         prompt = real_prompt(&text);
-                    } else if pl["role"] == "assistant" && full && !text.trim().is_empty() {
+                    } else if pl["role"] == "assistant" && first_answer.is_empty() && !text.trim().is_empty() {
+                        first_answer = text.trim().lines().next().unwrap_or("").trim_start_matches('#').trim().to_string();
+                    }
+                    if pl["role"] == "assistant" && full && !text.trim().is_empty() {
                         if turns.is_empty() { turns.push(Turn { prompt_at: ts, ..Default::default() }); }
                         let t = turns.last_mut().unwrap();
                         t.say(text.trim().into());
@@ -398,7 +408,7 @@ pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Tran
     }
     meta.tokens = last_total;
     meta.title = truncate(&first_prompt, 80);
-    if meta.title.is_empty() { meta.title = "Codex session".into(); }
+    if meta.title.is_empty() { meta.title = if !agent.is_empty() { agent } else if !first_answer.is_empty() { truncate(&first_answer, 80) } else { "Codex session".into() }; }
     Transcript { meta, turns }
 }
 
