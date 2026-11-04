@@ -1,14 +1,14 @@
-// Overview: the whole setup at a glance. Key numbers against the period before, live routes drawn with WebGL,
-// limit burn-down and forecast, reply timing, the usage mix, events, the health of the parts, and the request log.
+// Overview: the whole setup at a glance. Key numbers against the period before, every limit on a seven-day line,
+// the activity grid, and the latest replies or the request log. Live routes (WebGL) open in a drawer from the sidebar.
 
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
-import { esc, fmt, hm, dur, toolIcon, toolPill, ic, timeline } from './lib.js';
+import { esc, fmt, hm, dur, toolIcon, toolPill, ic } from './lib.js';
 import { findings, limitRows } from './accounts.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
 const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google' };
 const RANGES = [['24h', 24], ['7d', 168], ['30d', 720]];
-const st = { harness: '', range: '24h', metric: 'tokens', mix: 'account', rows: null, total: 0, log: false };
+const st = { harness: '', range: '24h', metric: 'tokens', rows: null, total: 0, log: false };
 const money = (c, digits = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 const secs = (ms) => (ms == null ? '—' : (ms / 1000).toFixed(1));
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -99,7 +99,7 @@ function change(cur, prev, kind) {
   return [(d > 0 ? '+' : '−') + Math.abs(d).toFixed(1) + ' s', d > 0 ? 'warn' : 'up'];
 }
 function kpis(d, ps, risks) {
-  const c = d.cur, p = d.prev, sp = d.spark, fresh = !p.requests, open = ps.reduce((a, x) => a + x.running.length, 0);
+  const c = d.cur, p = d.prev, sp = d.spark, fresh = !p.requests;
   const best = d.mix.account.filter((m) => m.tokens > 0)[0];
   // no change to show when the period before had no usage at all
   const vs = (...a) => (fresh ? [c.requests ? 'new' : '', 'flat'] : change(...a));
@@ -107,11 +107,9 @@ function kpis(d, ps, risks) {
       <div class="kl"><span>${label}</span><span class="kd">${esc(delta)}</span></div><strong>${value}<small> ${unit}</small></strong>${spark(vals)}<div class="kn">${note}</div></div>`;
   const first = risks[0];
   return `<section class="ovkpis" aria-label="Key numbers">
-    ${tile('tokens', 'Tokens', fmt(c.tokens), '', vs(c.tokens, p.tokens, 'pct'), sp.tokens, `${Math.round(c.hit * 100)}% read from cache`, true)}
-    ${tile('requests', 'Requests', c.requests.toLocaleString(), '', vs(c.requests, p.requests, 'pct'), sp.requests, `${open} ${open === 1 ? 'console' : 'consoles'} open now`, true)}
+    ${tile('tokens', 'Tokens', fmt(c.tokens), '', vs(c.tokens, p.tokens, 'pct'), sp.tokens, `${Math.round(c.hit * 100)}% read from cache · ${c.requests.toLocaleString()} ${c.requests === 1 ? 'request' : 'requests'}`, true)}
     ${tile('cost', 'Cost at list prices', money(c.cost), '', vs(c.cost, p.cost, 'money'), sp.cost, c.billed ? `Billed per token: ${money(c.billed)}` : 'Subscriptions are not billed per token', true)}
     ${tile('hit', 'Cache hit', Math.round(c.hit * 100), '%', vs(c.hit, p.hit, 'pt'), sp.hit, best ? `Most tokens: ${esc(acctName(best.key))}` : 'No usage in this range')}
-    ${tile('p95', 'First reply p95', secs(c.p95), 's', vs(c.p95, p.p95, 's'), sp.p95, c.p50 != null ? `p50 ${secs(c.p50)} s · ${c.replies.toLocaleString()} timed replies` : 'No timed replies in this range')}
     ${tile('risk', 'Limit risk', risks.length, risks.length === 1 ? 'account' : 'accounts', [first ? when(first.out) : '', risks.length ? 'warn' : 'flat'], [], first ? `<b>${esc(first.name)}</b> runs out ${dur(first.reset - first.out)} before its reset` : 'Every limit lasts until its reset at this pace')}
   </section>`;
 }
@@ -279,38 +277,62 @@ function burnRows(ps, d) {
 }
 const tone = (left) => (left < 20 ? 'neg' : left < 45 ? 'warn' : '');
 
-// ---------- game layer ----------
-function pilot(state, d, ps, burn) {
-  const g = d.game, c = d.cur;
-  const lim = burn.length ? burn.reduce((a, b) => a + b.left, 0) / burn.length / 100 : 1;
-  const goal = c.replies ? d.latency.within / c.replies : 1;
-  // balance: how evenly the logged-in plan accounts share the tokens (1 = evenly, 0 = all on one)
-  const plans = ps.filter((p) => p.kind === 'subscription' && p.identity.logged_in && p.quota && p.quota.tiers.length);
-  const sh = plans.map((p) => (d.mix.account.find((m) => m.key === p.name) || { tokens: 0 }).tokens), tot = sh.reduce((a, b) => a + b, 0);
-  const balance = plans.length < 2 || !tot ? 1 : -sh.filter((x) => x > 0).reduce((a, x) => a + (x / tot) * Math.log(x / tot), 0) / Math.log(plans.length);
-  const score = Math.round(30 * c.hit + 30 * lim + 20 * goal + 20 * balance);
-  const level = Math.floor(Math.sqrt(g.xp / 50)), base = 50 * level * level, next = 50 * (level + 1) * (level + 1);
-  const title = level < 5 ? 'Operator' : level < 10 ? 'Pilot' : level < 20 ? 'Orchestrator' : 'Fleet commander';
-  const streak = g.streak_days == null ? 'Limit readings start today' : `${g.streak_days} ${g.streak_days === 1 ? 'day' : 'days'} without a limit hit${g.since_hit ? '' : ' (since readings began)'}`;
-  // next best moves: each one is a real action
-  const moves = [];
-  const { best } = findings(ps, d.now);
-  if (best && (best.identity.logged_in || best.kind !== 'subscription')) moves.push([`Start the next session on <b>${esc(best.label)}</b>`, `data-act="start" data-name="${esc(best.name)}"`, 'Start', 50]);
-  if (state.app_updates) moves.push([`Update ${state.app_updates} ${state.app_updates === 1 ? 'tool' : 'tools'} to the newest version`, 'data-href="#apps"', 'Open', 20]);
-  for (const [id, b] of Object.entries(d.live.breakers)) if (b.state === 'open') moves.push([`Retry <b>${esc(id)}</b>, or drop it from its route`, 'data-href="#routing"', 'Open', 30]);
-  const sync = d.fleet.sync;
-  if (sync && sync.conflicts) moves.push([`${sync.conflicts} MCP or skill entries were left alone: a hand-made one has the same name`, 'data-href="#mcp"', 'Open', 15]);
-  for (const p of ps.filter((x) => x.kind === 'subscription' && !x.identity.logged_in).slice(0, 2)) moves.push([`Log <b>${esc(p.label)}</b> in`, `data-act="login" data-name="${esc(p.name)}"`, 'Log in', 10]);
-  const R = 42, L = 2 * Math.PI * R;
-  return `<section class="panel pilot" data-testid="pilot"><div class="pt">
-      <svg width="96" height="96" viewBox="0 0 100 100" role="img" aria-label="Efficiency score ${score} of 100"><circle cx="50" cy="50" r="${R}" class="rt"/><circle cx="50" cy="50" r="${R}" class="rv" transform="rotate(-90 50 50)" stroke-dasharray="${(L * score) / 100} ${L}"/><text x="50" y="49" text-anchor="middle" class="rn">${score}</text><text x="50" y="65" text-anchor="middle" class="rl">efficiency</text></svg>
-      <div><h2>Level ${level} · ${title}</h2><div class="xp"><i style="width:${Math.round(((g.xp - base) / (next - base)) * 100)}%"></i></div>
-      <div class="mono muted">${g.xp.toLocaleString()} / ${next.toLocaleString()} XP · ${esc(streak)}</div></div></div>
-    <p class="hint">Score: cache hits 30% · limit room 30% · first-reply goal 20% · balance across accounts 20%. XP: a point a reply, ten a day used.</p>
-    <div class="cap">Next best moves</div>
-    ${moves.slice(0, 4).map(([t, act, b, xp]) => `<div class="mv"><span>${t}</span><button class="btn outline sm" ${act}>${b} <span class="mono">+${xp}</span></button></div>`).join('') || '<p class="empty">Nothing to do: every account is in good shape.</p>'}
-  </section>`;
+/** One panel for every limit: a bar from now to its reset on a seven-day line, filled by what is used, amber from
+ * where it runs out at this pace. Accounts whose limits are not read yet are listed without a bar. */
+function limitsPanel(burn, ps, now) {
+  const DAY = 86400000, pct = (ts) => Math.min(100, Math.max(0, ((ts - now) / (7 * DAY)) * 100));
+  const days = Array.from({ length: 7 }, (_, i) => new Date(now + i * DAY).toLocaleDateString([], { weekday: 'short' }));
+  const leftOf = (b) => (b.left === 0 ? 'used up' : b.left + '% left');
+  const rows = burn.map((b) => {
+    // the number sits in the bar when it has room; a bar near the week's end carries its label on its left
+    const w = pct(b.reset), inner = w > 14 && w <= 72, outP = b.out ? Math.round(((b.out - now) / (b.reset - now)) * 100) : null;
+    const text = `${inner ? '' : leftOf(b) + ' · '}${b.out ? 'runs out ' + when(b.out) + ' · ' : ''}resets ${when(b.reset)}`;
+    return `<div class="limw"><b>${esc(b.name)}</b><span class="mono muted">${esc(b.win)}</span></div>
+      <div class="limr" title="${esc(b.note)}"><div class="limb" style="width:${Math.max(w, 1.5).toFixed(1)}%"><i class="${tone(b.left)}" style="width:${Math.round(b.used)}%"></i>${outP != null ? `<i class="out" style="left:${outP}%;width:${100 - outP}%"></i><em style="left:${outP}%"></em>` : ''}${inner ? `<span>${leftOf(b)}</span>` : ''}</div><span class="limt ${b.out ? 'warnT' : ''}" style="${w > 72 ? `right:calc(${(100 - w).toFixed(1)}% + 8px)` : `left:calc(${w.toFixed(1)}% + 8px)`}">${text}</span></div>`;
+  }).concat(limitRows(ps).filter((r) => r.note).map((r) => `<div class="limw"><b>${esc(r.name)}</b></div><div class="limr"><span class="limt muted" style="left:8px">${esc(r.note)}</span></div>`)).join('');
+  return `<section class="panel" data-testid="limits"><div class="ph"><h2>Limits</h2><span class="muted sm">each bar runs from now to its reset · the fill is what is used · amber from where it runs out at this pace</span></div>
+    ${rows ? `<div class="limax">${days.map((d, i) => `<span>${esc(d)}${i ? '' : ' now'}</span>`).join('')}</div><div class="limg">${rows}</div>` : '<p class="empty">Limits show once an account with a plan has run on this computer.</p>'}</section>`;
 }
+
+// ---------- the routes drawer ----------
+/** The tokens per second of the last five minutes, beside Live routes in the sidebar. */
+export function setTps(d) {
+  const el = document.getElementById('n-tps');
+  if (!el || !d) return;
+  const tps = Object.values(d.live.accounts).reduce((a, x) => a + x.tokens, 0) / (d.live.window_ms / 1000);
+  el.textContent = tps >= 1 ? `${Math.round(tps)} tok/s` : '';
+}
+export function closeRoutes() {
+  const root = document.getElementById('routes-drawer');
+  if (!root || !root.innerHTML) return;
+  cancelAnimationFrame(topoRaf);
+  root.innerHTML = '';
+  document.getElementById('nav-routes').classList.remove('on');
+}
+/** Live routes: the drawer beside the sidebar, over whatever page is open; the entry again, Escape or a click outside closes it. */
+export async function openRoutes() {
+  const root = document.getElementById('routes-drawer');
+  if (root.innerHTML) return closeRoutes();
+  const [state, d] = await Promise.all([loadState(), call('live')]);
+  setTps(d);
+  // the tools' versions on the cards, read once (each tool is asked), then the drawer is drawn again
+  if (!S.appVersions) {
+    S.appVersions = {};
+    call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); if (root.innerHTML) { closeRoutes(); openRoutes(); } }).catch(() => {});
+  }
+  const topo = topology(state, d);
+  root.innerHTML = `<div class="dimA" data-act="routes-close"></div><aside class="drawer" role="dialog" aria-label="Live routes" data-testid="routes-drawer">
+    <div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><button class="iconbtn" data-act="routes-close" aria-label="Close" data-testid="routes-close">${ic.x}</button></div>
+    <p class="muted mono sm">particles = tokens per second over the last 5 minutes</p>
+    ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
+    <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span><span>Click a card to open it</span></div></aside>`;
+  document.getElementById('nav-routes').classList.add('on');
+  const host = root.querySelector('.topo');
+  if (host) startTopo(host, topo.edges, !state.settings.moving_routes);
+}
+action('routes-open', openRoutes);
+action('routes-close', closeRoutes);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRoutes(); });
 
 // ---------- the page ----------
 view('home', async (sheet) => {
@@ -327,29 +349,6 @@ view('home', async (sheet) => {
   const burn = burnRows(ps, k), risks = burn.filter((b) => b.out).sort((a, b) => a.out - b.out);
   const tools = state.harnesses.filter((h) => shown.some((x) => x.id === h.id));
   const logged = ps.filter((p) => p.identity.logged_in).length, open = ps.reduce((a, p) => a + p.running.length, 0);
-  // the tools' versions, read once (each tool is asked for its version), then the cards are drawn again
-  if (!S.appVersions) {
-    S.appVersions = {};
-    call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); if (S.route.view === 'home') render(); }).catch(() => {});
-  }
-  const topo = topology(state, k);
-  const lat = k.latency, c = k.cur;
-  const goalMet = c.replies ? lat.within / c.replies >= 0.95 : null;
-  // the timeline: each limit's runs-out tick, and the capped accounts, whose caps reset at midnight
-  const tl = limitRows(ps).map((r) => ({ ...r, out: (risks.find((b) => b.name === r.name) || {}).out }))
-    .concat(ps.filter((p) => k.caps[p.name]).map((p) => ({ name: p.label, note: `$${k.caps[p.name].cap.toFixed(2)} daily cap resets at midnight` })));
-  const paused = Object.values(k.live.breakers).filter((b) => b.state === 'open').length;
-  const f = k.fleet, apps = f.apps;
-  const fleet = [
-    ['Harness Manager', !f.self ? `${state.version} · not checked yet` : f.self.version ? `${state.version} · ${f.self.version} available` : `${state.version} · newest`, f.self && f.self.version ? 'warn' : ''],
-    ['Tools', !apps ? 'not checked yet' : apps.updates ? `${apps.updates} ${apps.updates === 1 ? 'has' : 'have'} an update` : 'up to date', apps && apps.updates ? 'warn' : ''],
-    ['Logins', `${logged} valid${ps.length - logged ? ` · ${ps.length - logged} not logged in` : ''}`, ps.length - logged ? 'warn' : ''],
-    ['Shared MCP and skills', !f.sync ? 'not synced yet' : f.sync.conflicts + f.sync.skipped ? `${f.sync.conflicts + f.sync.skipped} left alone · ${dur(now - f.sync.at)} ago` : `in step · ${dur(now - f.sync.at)} ago`, f.sync && f.sync.conflicts + f.sync.skipped ? 'warn' : ''],
-    ['Router', `${state.router.running ? 'running' : 'stopped'}${paused ? ` · ${paused} paused` : ''}`, paused ? 'warn' : ''],
-    ['Last backup', f.backup ? `${dur(now - f.backup.at)} ago · ${f.backups} kept` : 'none yet', f.backup ? '' : 'warn'],
-    ['Diagnostic log', !f.log_enabled ? 'off' : `${f.log_errors_today} ${f.log_errors_today === 1 ? 'error' : 'errors'} today`, f.log_errors_today ? 'warn' : ''],
-  ];
-  const evTone = { ok: '', warn: 'warn', bad: 'neg' };
   sheet.innerHTML = `
     <div class="trow ovhead"><div>
         <div class="live"><i></i>Live · ${esc(state.computer || 'this computer')} · ${ps.length} accounts · ${logged} logged in · ${open ? `<a href="#sessions?live=1" class="acT" data-testid="home-live">${open} ${open === 1 ? 'console' : 'consoles'} open</a>` : '0 consoles open'} · router :${state.router.port} ${state.router.running ? 'running' : 'stopped'}</div>
@@ -360,44 +359,18 @@ view('home', async (sheet) => {
         <span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${r}</a>`).join('')}</span>
         ${best ? `<button class="btn primary" data-act="start" data-name="${esc(best.name)}" data-testid="start-best">${ic.play} Start ${esc(best.label)}</button>` : ''}</div></div>
     ${kpis(k, ps, risks)}
-    <div class="ovrow">
-      <section class="panel ovroutes"><div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><span class="muted mono sm">particles = tokens per second, last 5 minutes, updated each minute</span></div>
-        ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
-        <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span><span>Click a card to open it</span></div></section>
-      <section class="panel ovburn" data-testid="burn"><div class="ph"><h2>Limit burn-down</h2><span class="muted sm">tightest limit · mark = level at reset</span></div>
-        ${burn.length ? burn.slice(0, 7).map((b) => `<div class="bd"><div class="bt"><span><b>${esc(b.name)}</b> <span class="muted">${esc(b.win)}</span></span><span class="mono ${tone(b.left)}T">${b.left === 0 ? 'Used up' : b.left + '% left'}</span></div>
-          <div class="bb"><i class="${tone(b.left)}" style="width:${b.used}%"></i>${b.at != null ? `<em style="left:${b.at}%"></em>` : ''}</div><div class="bn">${esc(b.note)}</div></div>`).join('')
-          : '<p class="empty">Limits show once an account with a plan has run on this computer.</p>'}</section></div>
-    <section class="panel"><div class="ph"><h2>When limits free up</h2><span class="muted sm">bar: open 5-hour window until it resets · teal tick: weekly reset · amber tick: runs out at this pace</span></div>
-      ${tl.length ? '<div class="tlwrap" data-testid="limits-timeline"></div>' : '<p class="empty">Limits appear once an account has run its tool on this computer.</p>'}</section>
-    <div class="ovcols">
-      ${s.game_layer ? pilot(state, k, ps, burn) : ''}
-      <section class="panel" data-testid="latency"><div class="ph"><h2>Time to first reply</h2><span class="mono muted sm">${c.replies.toLocaleString()} replies</span></div>
-        <div class="hist" role="img" aria-label="Time to first reply: p50 ${secs(c.p50)} s, p95 ${secs(c.p95)} s">${lat.hist.map((n, i) => { const hi = ((i + 1) * lat.top_ms) / 16, mx = Math.max(...lat.hist) || 1; return `<i class="${hi <= lat.goal_ms * 0.5 ? '' : hi <= lat.goal_ms ? 'b2' : hi <= lat.goal_ms * 1.5 ? 'warn' : 'neg'}" style="height:${Math.max(n ? 4 : 1, Math.round((n / mx) * 100))}%" title="${secs((i * lat.top_ms) / 16)}–${secs(hi)} s: ${n} replies"></i>`; }).join('')}</div>
-        <div class="hl mono"><span>0 s</span><span>p50 ${secs(c.p50)} s</span><span>p95 ${secs(c.p95)} s</span><span>${lat.top_ms / 1000} s</span></div>
-        <p class="hint">From each tool's log: the prompt to the first finished part of the reply, a little above the true first token. Goal (Settings): 95% within ${lat.goal_ms / 1000} s. ${goalMet == null ? '' : goalMet ? '<b class="acT">Met.</b>' : `<b class="warnT">Not met: ${Math.round((lat.within / c.replies) * 100)}% within.</b>`}</p></section>
-      <section class="panel"><div class="ph"><h2>Activity, 53 weeks</h2><span class="muted mono sm">daily ${st.metric === 'cost' ? 'cost' : st.metric}</span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
-      <section class="panel"><div class="ph"><h2>Where tokens went</h2><span class="seg3">${[['account', 'Account'], ['model', 'Model'], ['project', 'Project']].map(([v, l]) => `<a class="${st.mix === v ? 'on' : ''}" data-act="home-mix" data-v="${v}" data-testid="mix-${v}">${l}</a>`).join('')}</span></div>
-        <div data-testid="mix">${k.mix[st.mix].map((m) => `<div class="mx"><div class="mt"><span class="${st.mix === 'model' ? 'mono' : ''}" title="${esc(m.key)}">${esc(st.mix === 'account' ? acctName(m.key) : m.key)}</span><span class="mono">${fmt(m.tokens)} · ${money(m.cost)}</span></div><span class="mb"><i style="width:${Math.round((m.tokens / (k.mix[st.mix][0].tokens || 1)) * 100)}%"></i></span></div>`).join('') || '<p class="empty">No usage in this range.</p>'}</div></section>
-      <section class="panel" data-testid="events"><div class="ph"><h2>Router and fleet events</h2></div>
-        ${k.events.map((e) => `<div class="ev"><span class="mono muted">${new Date(e.ts).toDateString() === new Date().toDateString() ? hm(e.ts) : new Date(e.ts).toLocaleDateString([], { day: 'numeric', month: 'short' })}</span><i class="${evTone[e.level] || ''}"></i><span>${esc(e.text)}</span></div>`).join('') || '<p class="empty">Nothing yet. Provider pauses, failovers, backups, syncs and tool updates show here.</p>'}</section>
-      <section class="panel" data-testid="fleet"><div class="ph"><h2>Fleet health</h2></div>
-        ${fleet.map(([n, v, t]) => `<div class="fl"><span>${n}</span><span class="mono ${t}T"><i class="${t}"></i>${esc(v)}</span></div>`).join('')}</section>
-    </div>
+    ${limitsPanel(burn, ps, now)}
+    <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2><span class="muted mono sm">daily ${st.metric === 'cost' ? 'cost' : st.metric}</span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
     <section class="panel" style="padding-bottom:6px"><div class="ph"><h2>${st.log ? 'Request log' : 'Latest replies'} <span class="muted mono sm">${d.requests.total.toLocaleString()}</span></h2>
         <a class="acT sm linkb" data-act="home-log" data-testid="request-log-open">${st.log ? 'Latest replies' : 'Request log'}</a></div>
       ${st.log ? `<p class="hint">Costs are what these tokens would cost at API list prices (models.dev). Subscriptions are not billed per token.</p>
       <div class="tscroll" id="home-table">${requestTable(st.rows)}</div>
       ${st.rows.length < st.total ? '<div style="padding:10px 0"><button class="btn outline sm" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}` : latestTable(st.rows)}</section>`;
   fit(sheet.querySelector('.hmwrap'), (w) => heatmap(o.heatmap, st.metric, w));
-  if (tl.length) fit(sheet.querySelector('.tlwrap'), (w) => timeline(tl, now, w));
-  const host = sheet.querySelector('.topo');
-  if (host) startTopo(host, topo.edges, !s.moving_routes);
 });
 
 action('home-metric', (el) => { st.metric = el.dataset.v; render(); });
 action('home-log', () => { st.log = !st.log; render(); });
-action('home-mix', (el) => { st.mix = el.dataset.v; render(); });
 action('home-tool', (el) => { st.harness = el.dataset.v; render(); });
 action('home-range', (el) => { st.range = el.dataset.v; render(); });
 action('home-more', async (el) => {

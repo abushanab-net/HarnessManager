@@ -316,7 +316,7 @@ pub fn import_mcp_all(ctx: &Ctx, reg: &mut Registry) -> Vec<Value> {
         let part = match fmt { "codex-toml" => "[mcp_servers]", "opencode-json" => "\"mcp\"", _ => "top-level mcpServers" };
         let shown = file.strip_prefix(&ctx.home).map(|r| format!("~\\{}", r.display())).unwrap_or_else(|_| file.display().to_string());
         let label = if p.main { h.label().to_string() } else { format!("{} · {}", h.label(), p.label.clone().unwrap_or_else(|| p.name.clone())) };
-        let base = json!({"harness": h.id(), "label": label, "file": shown, "part": part, "exists": file.exists()});
+        let base = json!({"harness": h.id(), "label": label, "profile": p.name, "file": shown, "part": part, "exists": file.exists()});
         let mut v = base.clone();
         match import_mcp_from(ctx, reg, &p) {
             Ok((added, kept)) => {

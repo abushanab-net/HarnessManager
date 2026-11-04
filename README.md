@@ -61,7 +61,8 @@ signed by the release key.
 1. **Start Harness Manager.** It adds a main account for each tool it finds installed.
 2. **Accounts → Add account:** name it, pick the tool and sign in. Claude accounts sign in inside the app.
 3. **Start** opens a terminal as that account. **Start in a folder** picks a project first.
-4. **Overview** shows the live routes, the limits and when they free up, and which account has the most room.
+4. **Overview** shows every limit on one seven-day line and which account has the most room; **Live routes** in the
+   sidebar opens the map of accounts, tools and providers over any page.
 5. **MCP servers**, **Skills** and **System prompts:** add something once and tick the tools it should reach.
 
 Press `Ctrl K` to find an account, session or setting. The **?** button replays the page's tour.
@@ -76,8 +77,8 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   the saved login while it is valid. Codex limits come from its session logs. One timeline shows when every
   limit frees up, and an API-key account can have a daily spending cap.
 - **Usage, on Accounts:** each account's tokens per day, its tokens and cost for the last 7, 14 or 30 days
-  beside its limits, the split by model, and a CSV export; the Overview adds a heatmap,
-  time to the first reply and a request log. Each account's own logs are read once and counted once.
+  beside its limits, the split by model, and a CSV export; the Overview adds a heatmap and a request log.
+  Each account's own logs are read once and counted once.
 - **Projects:** every folder your tools ran in, with its sessions, tokens and cost at API list prices, a
   distribution of where the tokens and the cost went, and a card per project. Pin a project to the sidebar;
   open one to see only its sessions.

@@ -43,6 +43,17 @@ fn sync_items(ctx: &Ctx) -> Result<Value> {
     Ok(serde_json::to_value(items::sync(ctx, &reg)?)?)
 }
 
+/// The MCP servers every tool already has, into the list and written back in step; the report of which files
+/// were read is kept for the MCP page.
+fn import_mcp_now(ctx: &Ctx) -> Result<Vec<Value>> {
+    let mut reg = ctx.registry()?;
+    let report = items::import_mcp_all(ctx, &mut reg);
+    ctx.save_registry(&reg)?;
+    sync_items(ctx)?;
+    ctx.db.kv_set("mcp:last_import", &json!({"at": hrm_core::util::now_ms(), "report": report}).to_string())?;
+    Ok(report)
+}
+
 /// The sync report, or `{"error": ...}`: after a change is saved, a link that fails must not undo the answer.
 fn sync_soft(ctx: &Ctx) -> Value {
     sync_items(ctx).unwrap_or_else(|e| json!({"error": format!("{e:#}")}))
@@ -50,7 +61,7 @@ fn sync_soft(ctx: &Ctx) -> Value {
 
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv"];
 
@@ -176,6 +187,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"overview": service::overview(ctx, days, h)?, "requests": {"total": total, "rows": rows},
                    "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h)?})
         }
+        // the last five minutes of traffic, for the routes drawer and the tokens per second beside it in the sidebar
+        "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
             let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
             let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
@@ -298,15 +311,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             ctx.save_registry(&reg)?;
             sync_items(ctx)?
         }
-        "mcp_import_all" => {
-            let mut reg = ctx.registry()?;
-            let report = items::import_mcp_all(ctx, &mut reg);
-            ctx.save_registry(&reg)?;
-            sync_items(ctx)?;
-            // kept for the MCP page's "Last import from apps" panel
-            ctx.db.kv_set("mcp:last_import", &json!({"at": hrm_core::util::now_ms(), "report": report}).to_string())?;
-            json!(report)
-        }
+        "mcp_import_all" => json!(import_mcp_now(ctx)?),
         // what Accounts adds to each row: limit forecasts and daily caps
         "session_stats" => hrm_core::dash::session_stats(ctx, &s(a, "profile")?, &s(a, "id")?)?,
         "account_stats" => hrm_core::dash::account_stats(ctx, &s(a, "name")?)?,
@@ -605,7 +610,7 @@ async fn self_update(app: &tauri::AppHandle, install: bool) -> Result<Value> {
     if let Ok(u) = std::env::var("HRM_UPDATE_URL") { b = b.endpoints(vec![u.parse()?])?; }
     let current = app.package_info().version.to_string();
     let found = b.build()?.check().await?;
-    let seen = json!({"at": hrm_core::util::now_ms(), "current": current, "version": found.as_ref().map(|u| u.version.clone())});
+    let seen = json!({"at": hrm_core::util::now_ms(), "current": current, "version": found.as_ref().map(|u| u.version.clone()), "notes": found.as_ref().and_then(|u| u.body.clone())});
     let _ = app.state::<Arc<AppState>>().ctx().db.kv_set("self:latest", &seen.to_string());
     let Some(up) = found else { return Ok(json!({"current": current})) };
     if install {
@@ -715,8 +720,14 @@ fn main() {
             // background refresh: new usage and (opted-in) live limits, then tell the window
             let handle = app.handle().clone();
             let st = state.clone();
+            let mut first = true;
             std::thread::spawn(move || loop {
                 let ctx = st.ctx();
+                // the servers the tools already have are in the list from the first start, without an Import click
+                if std::mem::take(&mut first) {
+                    let _l = ctx.lock_registry();
+                    if let Err(e) = import_mcp_now(&ctx) { hrm_core::log::warn(&format!("reading the tools' MCP servers: {e:#}")); }
+                }
                 let n = service::import_usage(&ctx).unwrap_or(0);
                 let _ = service::refresh_quotas(&ctx, false);
                 if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }

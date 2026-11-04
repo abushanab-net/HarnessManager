@@ -233,7 +233,7 @@ fn forecast(pts: &[(i64, f64, Option<i64>)], now: i64) -> Option<Value> {
 }
 
 /// The last five minutes: tokens per account and per router provider, and the circuit breakers.
-fn live(ctx: &Ctx, now: i64) -> Result<Value> {
+pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
     ctx.db.with(|c| {
         let since = now - LIVE_MS;
         let mut st = c.prepare("select profile, sum(input + output + cache_read + cache_write), count(*) from usage where ts >= ? group by profile")?;

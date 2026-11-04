@@ -22,8 +22,9 @@ export function drawPins(list) {
   const el = document.getElementById('nav-pins');
   if (!el) return;
   const cur = S.route.view === 'sessions' ? S.route.params.project : '';
-  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions || ''}</span></a>`).join('');
-  setNavCounts({ 'n-projects': list.length });
+  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions || ''}</span><span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">${ic.x}</span></a>`).join('');
+  const live = list.filter((p) => p.live).length;
+  setNavCounts({ 'n-projects': list.length ? `${list.length}${live ? ' · ' + live + ' live' : ''}` : '' });
 }
 
 /** The counts beside the pages in the sidebar; each one only when known. */
@@ -149,6 +150,9 @@ async function renderNow() {
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   document.querySelectorAll('nav.nav a[data-nav-project]').forEach((a) => a.classList.toggle('on', S.route.view === 'sessions' && a.dataset.navProject === S.route.params.project));
+  // a page inside a shut fold of the sidebar opens the fold
+  const fold = document.querySelector('nav.nav a[data-nav].on')?.closest('.navfold');
+  if (fold && fold.hidden) setFold(fold.id, false);
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
   try {
@@ -296,3 +300,23 @@ export async function pickFile(filter) {
   if (!d) return null;
   return await d.open({ multiple: false, directory: false, filters: [filter] });
 }
+
+// ---------- the sidebar's folds and pins ----------
+// the pinned projects and the Setup pages fold; the shut ones are remembered on this computer (Setup starts shut)
+const FOLD_KEY = 'hm.nav.shut';
+const shutFolds = () => { try { const v = JSON.parse(localStorage.getItem(FOLD_KEY)); return Array.isArray(v) ? v : ['nav-setup']; } catch { return ['nav-setup']; } };
+export function setFold(id, shut, save = true) {
+  const f = document.getElementById(id), head = document.querySelector(`[data-fold="${id}"]`);
+  if (!f || !head) return;
+  f.hidden = shut;
+  (head.closest('a') || head).classList.toggle('shut', shut);
+  if (save) { const v = shutFolds().filter((x) => x !== id); if (shut) v.push(id); try { localStorage.setItem(FOLD_KEY, JSON.stringify(v)); } catch {} }
+}
+export function restoreFolds() { const shut = shutFolds(); for (const id of ['nav-pins', 'nav-setup']) setFold(id, shut.includes(id), false); }
+action('nav-fold', (el) => setFold(el.dataset.fold, !document.getElementById(el.dataset.fold).hidden));
+// the ✕ beside a pinned project in the sidebar
+action('pin-off', async (el) => {
+  await attempt(() => call('project_pin', { key: el.dataset.key, on: false }));
+  call('projects', { days: 30 }).then(drawPins).catch(() => {});
+  document.dispatchEvent(new CustomEvent('hm:unpinned', { detail: el.dataset.key }));
+});

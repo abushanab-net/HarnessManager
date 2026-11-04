@@ -1,9 +1,9 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins } from './core.js';
+import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
 import { ic, brandMark } from './lib.js';
 import './accounts.js';
-import { setTodayBadge } from './home.js';
+import { setTodayBadge, setTps, closeRoutes } from './home.js';
 import { setSelfUpdate, refreshProjects } from './views.js';
 import './mcp.js';
 import './skills.js';
@@ -15,7 +15,7 @@ document.getElementById('brand-mark').innerHTML = brandMark(28);
 document.querySelectorAll('[data-icon]').forEach((el) => { el.outerHTML = ic[el.dataset.icon] || ''; });
 
 // moving to another page closes any dialog left open
-window.addEventListener('hashchange', () => { closeDialog(); render(); });
+window.addEventListener('hashchange', () => { closeDialog(); closeRoutes(); render(); });
 
 const find = document.getElementById('find');
 find.addEventListener('input', () => { if (S.route.view === 'accounts') render(); else if (S.pageFind) S.pageFind(find.value); });
@@ -26,7 +26,7 @@ find.addEventListener('keydown', (e) => {
 // the backend imports usage in the background and says when it is done
 const ev = window.__TAURI__ && window.__TAURI__.event;
 if (ev) ev.listen('refreshed', () => {
-  S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
+  S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {}); call('live').then(setTps).catch(() => {});
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
   if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
@@ -36,9 +36,14 @@ if (ev) ev.listen('refreshed', () => {
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
 call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); }).catch(() => {});
+// a newer Harness Manager found by an earlier check: the dot on Settings
+call('self_latest').then((v) => v && setSelfUpdate(v)).catch(() => {});
 // how many MCP servers and skills there are, beside their pages; the pinned projects under Projects
 call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {});
 call('projects', { days: 30 }).then(drawPins).catch(() => {});
+// the tokens per second beside Live routes
+call('live').then(setTps).catch(() => {});
+restoreFolds();
 S.usageAt = Date.now();
 if (ev) ev.listen('app-updates', (e) => setAppUpdates(e.payload));
 // a new Harness Manager: Settings > Updates offers it

@@ -41,6 +41,16 @@ export const hue = (name) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0
 export const avatar = (name, sm = false) => `<span class="av${sm ? ' sm' : ''}">${esc(initials(name))}</span>`;
 
 /** The tool's own icon (LobeHub Icons, see icons/README.md). */
+/** Pages rows in place: those off the page get `.paged`. Returns the pager's HTML, or nothing when one page holds all;
+ * the page and size buttons carry `<act>-page` and `<act>-per` actions. */
+export function pager(rows, st, act) {
+  const pages = Math.max(1, Math.ceil(rows.length / st.per));
+  if (st.page >= pages) st.page = pages - 1;
+  rows.forEach((tr, i) => tr.classList.toggle('paged', i < st.page * st.per || i >= (st.page + 1) * st.per));
+  if (rows.length <= 25) return '';
+  return `<button class="btn sm" data-act="${act}-page" data-v="${Math.max(0, st.page - 1)}" ${st.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === st.page ? 'on' : ''}" data-act="${act}-page" data-v="${i}" data-testid="${act}-page-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="${act}-page" data-v="${Math.min(pages - 1, st.page + 1)}" ${st.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
+    <span class="help">${st.page * st.per + 1}–${Math.min(rows.length, (st.page + 1) * st.per)} of ${rows.length}</span><span class="seg3 mono">${[25, 50, 100].map((n) => `<a class="${st.per === n ? 'on' : ''}" data-act="${act}-per" data-v="${n}" data-testid="${act}-per-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>`;
+}
 export const toolIcon = (h, s = 16) => `<img class="ticon" src="icons/${esc(h)}.svg" width="${s}" height="${s}" alt="">`;
 export const toolPill = (h, label) => `<span class="tool ${esc(h)}">${toolIcon(h, 13)}${esc(label || h)}</span>`;
 
