@@ -932,16 +932,20 @@ pub struct Breakdown {
 }
 
 /// Requests, tokens and cost per account ("profile") or per model, biggest first.
-pub fn breakdown(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str>) -> Result<Vec<Breakdown>> {
+pub fn breakdown(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str>) -> Result<Vec<Breakdown>> { breakdown_of(ctx, by, days, harness, None) }
+
+/// `breakdown`, kept to one account when `profile` is given.
+pub fn breakdown_of(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str>, profile: Option<&str>) -> Result<Vec<Breakdown>> {
     let prices = crate::pricing::load(ctx);
     let since = from_day(days);
     let (hc, hv) = harness_clause(harness);
+    let (pc, pv) = match profile { Some(p) if !p.is_empty() => ("profile = ?3", p.to_string()), _ => ("?3 = ?3", String::new()) };
     let key = if by == "model" { "model" } else { "profile" };
     ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select {key}, model, max(harness), count(*), sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 and {hc} group by {key}, model"))?;
+        let mut st = c.prepare(&format!("select {key}, model, max(harness), count(*), sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 and {hc} and {pc} group by {key}, model"))?;
         let mut map: BTreeMap<String, Breakdown> = BTreeMap::new();
         let mut prompt: HashMap<String, (i64, i64)> = HashMap::new();
-        for r in st.query_map(rusqlite::params![since, hv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?, r.get::<_, i64>(6)?, r.get::<_, i64>(7)?)))?.flatten() {
+        for r in st.query_map(rusqlite::params![since, hv, pv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?, r.get::<_, i64>(6)?, r.get::<_, i64>(7)?)))?.flatten() {
             let (k, model, h, n, i, o, cr, cw) = r;
             let e = map.entry(k.clone()).or_insert(Breakdown { key: k.clone(), harness: h, requests: 0, tokens: 0, input: 0, output: 0, cache_read: 0, cost: None, cache_hit_rate: 0.0 });
             e.requests += n;

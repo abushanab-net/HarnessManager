@@ -2,7 +2,7 @@
 // Discover (skills in GitHub repositories, installed into Harness Manager's one store and linked into the tools you pick).
 
 import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openMenu, action, render, shownTools, setNavCounts } from './core.js';
-import { esc, ic } from './lib.js';
+import { esc, ic, toolIcon } from './lib.js';
 import { syncReport, headState } from './views.js';
 
 const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false };
@@ -41,7 +41,7 @@ view('skills', async (sheet) => {
   const total = d.skills.length + d.unmanaged.length;
   if (d.unmanaged.length && !sources.includes('Not managed')) sources.push('Not managed');
   // the header: each tool's tick stands for every skill shown; some ticked shows as indeterminate
-  const thead = `<thead><tr><th>Skill</th><th>Source</th>${hs.map((h) => `<th class="c" data-label="${esc(h.label)}" title="${esc(h.label)}: tick every skill shown"><label class="ti">${esc(h.label.replace(/ Code$/, ''))}<small></small><input type="checkbox" data-act="skill-bulk" data-h="${h.id}" aria-label="Every skill shown, for ${esc(h.label)}" data-testid="skill-bulk-${h.id}"></label></th>`).join('')}<th></th></tr></thead>`;
+  const thead = `<thead><tr><th>Skill</th><th>Source</th>${hs.map((h) => `<th class="c" data-label="${esc(h.label)}" title="${esc(h.label)}: tick to link every skill shown"><label class="ti">${toolIcon(h.id, 18)}<small></small><input type="checkbox" data-act="skill-bulk" data-h="${h.id}" aria-label="Every skill shown, for ${esc(h.label)}" data-testid="skill-bulk-${h.id}"></label></th>`).join('')}<th></th></tr></thead>`;
   sheet.innerHTML = `${head}
     <div class="tcard">
     ${total ? `<table class="grid mlist sklist" data-testid="skill-matrix">${thead}<tbody>${rows}<tr class="nomatch" hidden><td colspan="${hs.length + 3}" class="empty">No skill matches.</td></tr></tbody></table>`

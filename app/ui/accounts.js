@@ -2,7 +2,8 @@
 
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder } from './core.js';
 import { esc, fmt, hm, when, dur, resetText, lvl, avatar, toolPill, toolIcon, meter, ic, bars, timeline } from './lib.js';
-import { tagsHtml } from './views.js';
+import { tagsHtml, stacked } from './views.js';
+import { saveFile } from './core.js';
 
 const tier = (p, id) => p.quota && p.quota.tiers.find((t) => t.id === id);
 const weekTier = (p) => tier(p, 'week') || (p.quota && p.quota.tiers.find((t) => t.id.startsWith('week')));
@@ -55,8 +56,13 @@ function rowNote(p, best, now, x = {}) {
 }
 
 /** One account in its tool's card. */
+// usage drawn into the rows: the range, each account's breakdown and day series, and the colour it has in the chart
+const au = { days: 7, by: {}, series: {}, color: {}, models: [], fold: new Set(['models']) };
+const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
+const sparkOf = (vals) => { const m = Math.max(1, ...vals); return `<div class="spark" aria-hidden="true">${vals.slice(-30).map((v, i, a) => `<i style="height:${Math.max(3, Math.round((v / m) * 100))}%" class="${i === a.length - 1 ? 'last' : ''}"></i>`).join('')}</div>`; };
 function accountRow(p, best, now, x = {}) {
   const cap = x.caps && x.caps[p.name];
+  const b = au.by[p.name], vals = au.series[p.name] || [];
   const read = p.quota && p.quota.fetched_at;
   const live = p.harness === 'claude' && p.kind === 'subscription' && p.identity.logged_in;
   const added = p.created_at ? 'Added ' + new Date(p.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
@@ -66,7 +72,9 @@ function accountRow(p, best, now, x = {}) {
       <span class="mono">${esc(emailOf(p) || p.identity.name || p.base_url || (p.identity.logged_in ? 'logged in' : 'not logged in'))}</span>
       <span class="meta">${planCell(p)}${added ? `<span>${added}</span>` : ''}${p.email_mismatch ? ' <span class="pill neg" title="Logged in as a different email than you entered">email differs</span>' : ''}</span></div>
     <div class="lims">${limits(p, now, x)}${rowNote(p, best, now, x)}</div>
-    <div class="use">${cap ? `<b>$${cap.spent.toFixed(2)}</b><small>today at list prices</small>` : `<b>${fmt(p.tokens_7d)}</b><small>tokens · 7 days</small>`}${p.running.length ? `<span class="run"><i></i>${p.running.length} open</span>` : ''}</div>
+    <div class="usp" title="${esc(au.days + ' days: ' + (vals.length ? vals.map((v) => fmt(v)).join(' · ') : 'no usage'))}">${sparkOf(vals.length ? vals : [0])}</div>
+    <div class="use" title="${b ? esc(`input ${fmt(b.input)} · output ${fmt(b.output)} · cache read ${fmt(b.cache_read)} · ${b.requests.toLocaleString()} requests · ${Math.round(b.cache_hit_rate * 100)}% from cache`) : 'no usage in this range'}"><b>${fmt(b ? b.tokens : 0)}</b><small>tokens · ${au.days} days</small>${p.running.length ? `<span class="run"><i></i>${p.running.length} open</span>` : ''}</div>
+    <div class="use cost" data-testid="cost-${esc(p.name)}">${cap ? `<b>$${cap.spent.toFixed(2)}</b><small>today, cap ${money(cap.cap)}</small>` : `<b>${money(b ? b.cost : null)}</b><small>list price</small>`}</div>
     <div class="read">${read ? `<span title="When these limits were read">${now - read < 60000 ? 'just now' : dur(now - read) + ' ago'}</span>` : ''}${live ? `<button class="iconbtn" data-act="quota-live" data-name="${esc(p.name)}" title="Read this account's limits from Anthropic now, with the login Claude Code saved" aria-label="Read limits of ${esc(p.label)} now" data-testid="live-${esc(p.name)}">${ic.refresh}</button>` : ''}</div>
     <div class="go">${p.identity.logged_in || p.kind !== 'subscription'
       ? `<button class="btn primary sm" data-act="start" data-name="${esc(p.name)}" data-testid="start-${esc(p.name)}">Start</button>`
@@ -106,7 +114,15 @@ export function findings(ps, now) {
 }
 
 view('accounts', async (sheet) => {
-  const st = await loadState();
+  const [st, u] = await Promise.all([loadState(), call('usage', { days: au.days }).catch(() => null)]);
+  if (u) {
+    au.by = Object.fromEntries(u.accounts.map((b) => [b.key, b]));
+    au.series = u.summary.by_profile || {};
+    au.models = u.models || [];
+    const order = u.accounts.map((b) => b.key);
+    au.color = Object.fromEntries(order.map((k, i) => [k, SERIES[i % SERIES.length]]));
+    au.days_list = u.summary.days;
+  }
   // the accounts of hidden tools are left out too
   const shownIds = shownTools(st).map((h) => h.id);
   const ps = st.profiles.filter((p) => shownIds.includes(p.harness)), now = st.now;
@@ -124,25 +140,40 @@ view('accounts', async (sheet) => {
   const chip = (id, label) => `<a class="${acctTool === id ? 'on' : ''}" data-act="acct-tool" data-v="${id}" data-testid="chip-${id || 'all'}">${label}</a>`;
   sheet.innerHTML = `
     <div class="trow"><div><h1>Accounts</h1><p class="find" data-testid="finding">${ps.length} ${ps.length === 1 ? 'account' : 'accounts'} across ${new Set(ps.map((p) => p.harness)).size} ${new Set(ps.map((p) => p.harness)).size === 1 ? 'tool' : 'tools'}. Each runs in its own folder with its own login, side by side.</p></div>
-      <div class="acts">${best ? `<button class="btn" data-act="start-in-folder" data-name="${esc(best.name)}" data-testid="start-best">Start in a folder…</button>` : ''}
+      <div class="acts"><span class="seg3">${[7, 14, 30].map((d) => `<a class="${d === au.days ? 'on' : ''} mono" data-act="acct-days" data-v="${d}" data-testid="u-days-${d}">${d}d</a>`).join('')}</span><button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${best ? `<button class="btn" data-act="start-in-folder" data-name="${esc(best.name)}" data-testid="start-best">Start in a folder…</button>` : ''}
       <button class="btn primary" data-act="add-account" data-testid="add-account">Add account</button></div></div>
+    ${(() => { const series = ps.filter((p) => au.series[p.name] && au.series[p.name].some((v) => v)).map((p) => ({ name: p.label, color: au.color[p.name] || SERIES[0], vals: au.series[p.name] })); const open = !au.fold.has('chart');
+      return `<section class="panel uchartp ${open ? '' : 'shut'}" data-testid="usage-panel"><div class="ph"><h2 class="gh2"><button class="fold" data-act="acct-fold" data-h="chart" aria-expanded="${open}"><span class="thead"><b>Tokens per day, by account</b><span class="muted">${au.days} days</span></span><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></h2>${open ? `<div class="ulegend">${series.map((x) => `<span><i style="background:${x.color}"></i>${esc(x.name)}</span>`).join('')}</div>` : ''}</div>
+        ${open ? (series.length ? '<div class="uchart" data-testid="usage-ledger"></div>' : '<p class="empty">No usage in this range.</p>') : ''}</section>`; })()}
     <div class="fbar"><div class="toolfilter" role="group" aria-label="Tool">${chip('', 'All')}${shownTools(st).map((h) => chip(h.id, esc(h.label))).join('')}</div>
-      <span class="muted sm">Sorted by room left${readAgo ? ' · ' + readAgo.toLowerCase() : ''}</span></div>
+      <span class="muted sm">Sorted by room left${readAgo ? ' · ' + readAgo.toLowerCase() : ''}${u ? ' · usage at API list prices' : ''}</span></div>
     <div class="acgroups" data-testid="accounts-table">${tools.map((h) => {
       const list = shown.filter((p) => p.harness === h.id).sort((a, b) => roomUsed(a) - roomUsed(b));
       const open = !folded.has(h.id), on = list.filter((p) => p.identity.logged_in).length;
       const next = list.flatMap((p) => (p.quota ? p.quota.tiers.filter((t) => t.id === 'session' && t.resets_at > now) : [])).sort((a, b) => a.resets_at - b.resets_at)[0];
       const open2 = list.reduce((a, p) => a + p.running.length, 0);
-      const meta = list.length ? `${on} logged in · ${open2 ? `<span class="acT" data-act="go-live" role="link">${open2} ${open2 === 1 ? 'console' : 'consoles'} open</span>` : '0 consoles open'}${next ? ' · next reset ' + hm(next.resets_at) : ''}` : '';
+      const tok = list.reduce((a, p) => a + (au.by[p.name] ? au.by[p.name].tokens : 0), 0), cst = list.some((p) => au.by[p.name] && au.by[p.name].cost != null) ? list.reduce((a, p) => a + ((au.by[p.name] || {}).cost || 0), 0) : null;
+      const meta = list.length ? `${on} logged in · ${open2 ? `<span class="acT" data-act="go-live" role="link">${open2} ${open2 === 1 ? 'console' : 'consoles'} open</span>` : '0 consoles open'}${next ? ' · next reset ' + hm(next.resets_at) : ''}${tok ? ` · ${fmt(tok)} tokens · ${money(cst)} · ${au.days} days` : ''}` : '';
       return `<section class="acg ${open ? '' : 'shut'}" data-testid="group-${h.id}"><header>
         <h2 class="gh2"><button class="fold" data-act="acct-fold" data-h="${h.id}" aria-expanded="${open}"><span class="thead">${toolIcon(h.id, 18)}<b>${esc(h.label)}</b>${list.length ? `<span class="muted">${list.length}</span>` : ''}</span><span class="muted sm">${meta}</span><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></h2>
 </header>
         ${!open ? '' : list.length ? list.map((p) => accountRow(p, best, now, x)).join('') : `<p class="empty">${h.installed ? (q ? 'No account matches the search.' : `No ${esc(h.label)} account yet.`) : `${esc(h.label)} is not installed on this computer.`}</p>`}</section>`;
     }).join('')}</div>
+    ${(() => { const open = !au.fold.has('models'), top = au.models[0] ? au.models[0].tokens : 1;
+      return `<section class="panel ${open ? '' : 'shut'}" data-testid="models-panel"><div class="ph"><h2 class="gh2"><button class="fold" data-act="acct-fold" data-h="models" aria-expanded="${open}"><span class="thead"><b>By model</b><span class="muted">${au.days} days</span></span><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></h2></div>
+        ${open ? (au.models.map((m) => `<div class="umodel"><span class="mono">${esc(m.key)}</span><span class="mb"><i style="width:${Math.round((m.tokens / top) * 100)}%"></i></span><b class="mono">${fmt(m.tokens)}</b><span class="mono muted">${m.cost == null ? '—' : money(m.cost)}</span></div>`).join('') || '<p class="empty">No usage yet.</p>') : ''}</section>`; })()}
 `;
+  const ch = sheet.querySelector('.uchart');
+  if (ch && au.days_list) { const series = ps.filter((p) => au.series[p.name] && au.series[p.name].some((v) => v)).map((p) => ({ name: p.label, color: au.color[p.name] || SERIES[0], vals: au.series[p.name] })); fit(ch, (w) => stacked(au.days_list, series, w)); }
+});
+const SERIES = ['var(--ac)', 'var(--iris)', '#5b6fb8', 'var(--sand)', 'var(--h3)', '#c084fc', '#94a3b8', '#f472b6'];
+action('acct-days', (el) => { au.days = +el.dataset.v; render(); });
+action('acct-csv', async () => {
+  const to = await saveFile(`Harness Manager usage ${new Date().toISOString().slice(0, 10)}.csv`, { name: 'CSV', extensions: ['csv'] });
+  if (to) attempt(() => call('usage_csv', { days: au.days, path: to }), 'Exported');
 });
 action('acct-tool', (el) => { acctTool = el.dataset.v; render(); });
-action('acct-fold', (el) => { const h = el.dataset.h; if (folded.has(h)) folded.delete(h); else folded.add(h); render(); });
+action('acct-fold', (el) => { const h = el.dataset.h, set = h === 'chart' || h === 'models' ? au.fold : folded; if (set.has(h)) set.delete(h); else set.add(h); render(); });
 
 // ---------- account detail ----------
 view('account', async (sheet, params) => {
@@ -155,7 +186,8 @@ view('account', async (sheet, params) => {
   const openTxt = p.running.length ? ` ${p.running.length} ${p.running.length === 1 ? 'console' : 'consoles'} open${p.running[0].cwd ? ' in ' + esc(p.running[0].cwd.split(/[\\/]/).pop()) : ''}.` : '';
   let body = '';
   if (tab === 'overview') {
-    const [k, x] = await Promise.all([call('account_stats', { name }).catch(() => null), call('limits_extra').catch(() => ({}))]);
+    const [k, x, u] = await Promise.all([call('account_stats', { name }).catch(() => null), call('limits_extra').catch(() => ({})), call('usage', { days: 30, profile: name }).catch(() => null)]);
+    const models = (u && u.models) || [], topModel = models[0] ? models[0].tokens : 1;
     const w = k ? k.week : null, tiers = p.quota ? p.quota.tiers : [];
     const money = (c) => (c == null ? '—' : '$' + c.toFixed(2));
     const secs = (ms) => (ms == null ? '—' : (ms / 1000).toFixed(1) + ' s');
@@ -191,6 +223,8 @@ view('account', async (sheet, params) => {
         <section class="panel"><div class="ph"><h2>Limits</h2><span class="muted sm">${p.quota && p.quota.fetched_at ? 'read ' + dur(now - p.quota.fetched_at) + ' ago' : p.caps.quota ? 'not read yet' : esc(p.harness_label) + ' has no limits to read'} · mark = level at reset at this pace</span></div>
           ${tiers.length ? tiers.map(lim).join('') : `<p class="empty">${p.kind === 'subscription' ? 'Limits show up after this account runs on this computer.' : 'API keys are billed per use and have no plan limits.'}</p>`}</section>
         <section class="panel"><div class="ph"><h2>Tokens per day, 30 days</h2><span class="muted mono sm">${k ? fmt(per.reduce((a2, v) => a2 + v, 0)) + ' · ' + money(k.cost30) + ' at list prices' : ''}</span></div>${chart || '<p class="empty">No usage yet.</p>'}</section>
+        <section class="panel" data-testid="account-models"><div class="ph"><h2>By model, 30 days</h2></div>
+          ${models.map((m) => `<div class="umodel"><span class="mono">${esc(m.key)}</span><span class="mb"><i style="width:${Math.round((m.tokens / topModel) * 100)}%"></i></span><b class="mono">${fmt(m.tokens)}</b><span class="mono muted">${m.cost == null ? '—' : money(m.cost)}</span></div>`).join('') || '<p class="empty">No usage yet.</p>'}</section>
       </div><div class="stack">
         <section class="panel"><div class="ph"><h2>Login and folder</h2></div><dl class="facts">${facts.map(([a2, b]) => `<dt>${a2}</dt><dd>${b}</dd>`).join('')}</dl>
           ${p.kind === 'subscription' ? `<button class="btn sm" data-act="login" data-name="${esc(name)}">Log in again</button>` : ''}</section>

@@ -75,7 +75,8 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
 - **Limits:** Claude limits come from the numbers Claude Code saves, and can optionally be read live with
   the saved login while it is valid. Codex limits come from its session logs. One timeline shows when every
   limit frees up, and an API-key account can have a daily spending cap.
-- **Usage:** tokens per account, day, model and project, with what they would cost at API prices, a heatmap,
+- **Usage, on Accounts:** each account's tokens per day, its tokens and cost for the last 7, 14 or 30 days
+  beside its limits, the split by model, and a CSV export; the Overview adds a heatmap,
   time to the first reply and a request log. Each account's own logs are read once and counted once.
 - **Projects:** every folder your tools ran in, with its sessions, tokens and cost at API list prices, a
   distribution of where the tokens and the cost went, and a card per project. Pin a project to the sidebar;

@@ -72,6 +72,8 @@ export const ic = {
   next: I('<path d="m9 6 6 6-6 6"/>', 16),
   caret: I('<path d="m6 9 6 6 6-6"/>', 14),
   edit: I('<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>', 15),
+  pin: I('<path d="M12 17v5M9 3h6l-1 7 3 3H7l3-3z"/>', 15),
+  tag: I('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', 15),
   eye: I('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', 15),
   download: I('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', 15),
   grid: I('<rect x="4" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.2"/>'),
