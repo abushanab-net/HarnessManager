@@ -5,7 +5,7 @@ import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openMenu
 import { esc, ic, toolIcon } from './lib.js';
 import { syncReport, headState } from './views.js';
 
-const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false };
+const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false, per: 25, page: 0 };
 const sourceOf = (s) => (s.source.startsWith('https://github.com/') ? s.source.replace('https://github.com/', '').split('/').slice(0, 2).join('/') : s.source === 'imported' ? 'Imported' : s.source === 'store' ? 'Store' : 'Local');
 const onFor = (d, name, h) => d.targets.some((t) => t.kind === 'skill' && t.item === name && t.harness === h && !t.profile);
 const canUpdate = (s) => s.source.startsWith('https://github.com/') || /^[a-zA-Z]:\\|^\//.test(s.source);
@@ -44,22 +44,31 @@ view('skills', async (sheet) => {
   const thead = `<thead><tr><th>Skill</th><th>Source</th>${hs.map((h) => `<th class="c" data-label="${esc(h.label)}" title="${esc(h.label)}: tick to link every skill shown"><label class="ti">${toolIcon(h.id, 18)}<small></small><input type="checkbox" data-act="skill-bulk" data-h="${h.id}" aria-label="Every skill shown, for ${esc(h.label)}" data-testid="skill-bulk-${h.id}"></label></th>`).join('')}<th></th></tr></thead>`;
   sheet.innerHTML = `${head}
     <div class="tcard">
-    ${total ? `<table class="grid mlist sklist" data-testid="skill-matrix">${thead}<tbody>${rows}<tr class="nomatch" hidden><td colspan="${hs.length + 3}" class="empty">No skill matches.</td></tr></tbody></table>`
+    ${total ? `<table class="grid mlist sklist" data-testid="skill-matrix">${thead}<tbody>${rows}<tr class="nomatch" hidden><td colspan="${hs.length + 3}" class="empty">No skill matches.</td></tr></tbody></table><div class="pager" id="sk-pager" data-testid="skill-pager"></div>`
     : '<p class="empty">No skills yet. Find some under Discover, install one from a folder or a GitHub link, or import a tool\'s own skills.</p>'}</div>
     ${d.unmanaged.length ? `<section class="panel unmcard"><div class="ph"><h2>Not managed <span class="mono muted sm">${d.unmanaged.length} ${d.unmanaged.length === 1 ? 'folder' : 'folders'} in the store this list did not know</span></h2><button class="btn primary sm" data-act="skill-adopt" data-testid="skill-adopt-all">Manage all</button></div>
       <table class="grid sklist"><tbody>${unm}</tbody></table></section>` : ''}`;
   const find = document.getElementById('find'), src = document.getElementById('sk-filter'), table = sheet.querySelector('.sklist');
-  const filter = () => {
+  // hidden: left out by the search or the source filter (so the header tick skips them); paged: on another page
+  const filter = (reset = true) => {
     const t = find.value.trim().toLowerCase();
-    let n = 0;
-    sheet.querySelectorAll('tr[data-search]').forEach((tr) => { tr.hidden = (t && !tr.dataset.search.includes(t)) || (sk.source && tr.dataset.source !== sk.source); if (!tr.hidden) n++; });
+    if (reset) sk.page = 0;
+    const match = [...sheet.querySelectorAll('table.sklist tbody tr[data-search]')].filter((tr) => { tr.hidden = (t && !tr.dataset.search.includes(t)) || (sk.source && tr.dataset.source !== sk.source); return !tr.hidden; });
+    const pages = Math.max(1, Math.ceil(match.length / sk.per));
+    if (sk.page >= pages) sk.page = pages - 1;
+    match.forEach((tr, i) => tr.classList.toggle('paged', i < sk.page * sk.per || i >= (sk.page + 1) * sk.per));
+    sheet.querySelectorAll('.unmcard tr[data-search]').forEach((tr) => { tr.hidden = (t && !tr.dataset.search.includes(t)) || (sk.source && tr.dataset.source !== sk.source); });
     const nm = sheet.querySelector('tr.nomatch');
-    if (nm) nm.hidden = n > 0;
+    if (nm) nm.hidden = match.length > 0;
+    const pager = document.getElementById('sk-pager');
+    if (pager) pager.innerHTML = match.length > 25 ? `<button class="btn sm" data-act="sk-page" data-v="${Math.max(0, sk.page - 1)}" ${sk.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === sk.page ? 'on' : ''}" data-act="sk-page" data-v="${i}" data-testid="sk-page-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="sk-page" data-v="${Math.min(pages - 1, sk.page + 1)}" ${sk.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
+      <span class="help">${sk.page * sk.per + 1}–${Math.min(match.length, (sk.page + 1) * sk.per)} of ${match.length}</span><span class="seg3 mono">${[25, 50, 100].map((n) => `<a class="${sk.per === n ? 'on' : ''}" data-act="sk-per" data-v="${n}" data-testid="sk-per-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>` : '';
     if (table) headState(table);
   };
   S.pageFind = filter;
+  sk.refilter = filter;
   src.onchange = () => { sk.source = src.value; filter(); };
-  filter();
+  filter(false);
 });
 
 async function discover(sheet, head, d, hs) {
@@ -102,6 +111,8 @@ action('skill-bulk', async (el) => {
   syncReport(rep);
 });
 action('sk-tab', (el) => { sk.tab = el.dataset.v; render(); });
+action('sk-page', (el) => { sk.page = +el.dataset.v; if (sk.refilter) sk.refilter(false); });
+action('sk-per', (el) => { sk.per = +el.dataset.v; sk.page = 0; if (sk.refilter) sk.refilter(false); });
 action('disc-refresh', () => {
   sk.disc = null; sk.loading = true; render();
   attempt(() => call('discover', { refresh: true })).then((r) => { sk.disc = r || []; sk.loading = false; render(); });

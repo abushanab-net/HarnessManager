@@ -367,6 +367,31 @@ pub fn delete_skill_files(ctx: &Ctx, name: &str) -> Result<()> {
 /// One store all harnesses link to.
 pub fn skill_store(ctx: &Ctx) -> PathBuf { ctx.home.join(".agents").join("skills") }
 
+/// A tool's own copy of a skill (a real folder where the store's link should be) is moved into `.hrm-backup`
+/// beside it, so the next sync links the store's copy. Only skills ticked for that tool, and only the names
+/// given (every ticked skill when none). Returns "<folder>: <name>" for each copy moved.
+pub fn takeover_skills(ctx: &Ctx, reg: &Registry, names: &[String]) -> Result<Vec<String>> {
+    let store = skill_store(ctx);
+    let mut done = vec![];
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    for p in &reg.profiles {
+        let Some(dir) = harness::of(p).item_paths(ctx, p).skills else { continue };
+        if (p.harness == "claude" && !p.main && crate::shared::is_link(&dir)) || !seen.insert(dir.clone()) { continue; }
+        let applies = |t: &&Target| t.kind == "skill" && t.harness == p.harness && t.profile.as_deref().map(|x| x == p.name).unwrap_or(true);
+        for s in reg.skills.iter().filter(|s| (names.is_empty() || names.contains(&s.name)) && reg.targets.iter().any(|t| applies(&t) && t.item == s.name)) {
+            let dst = dir.join(&s.name);
+            if !dst.exists() || crate::shared::is_link(&dst) || !store.join(&s.name).is_dir() { continue; }
+            let backup = dir.join(".hrm-backup");
+            std::fs::create_dir_all(&backup)?;
+            let mut target = backup.join(&s.name);
+            if target.exists() { target = backup.join(format!("{}-{}", s.name, crate::util::now_ms())); }
+            std::fs::rename(&dst, &target).with_context(|| format!("move {} aside", dst.display()))?;
+            done.push(format!("{}: {}", dir.display(), s.name));
+        }
+    }
+    Ok(done)
+}
+
 fn sync_skills_dir(ctx: &Ctx, dir: &Path, wanted: &[&Skill], rep: &mut SyncReport) -> Result<()> {
     let target = dir.display().to_string();
     let owned: BTreeSet<String> = ctx.db.ledger(&target, "skill")?.into_iter().collect();

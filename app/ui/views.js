@@ -1,6 +1,6 @@
 // Sessions, the reading view, usage, routing, MCP servers, skills, prompts, settings and the CLI reference.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme, drawPins } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme, drawPins, notice } from './core.js';
 import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
@@ -525,7 +525,13 @@ export function syncReport(rep, item) {
   const mine = (l) => (l || []).filter((x) => !item || x.endsWith(': ' + item) || x.includes('skill ' + item + ' '));
   const n = mine(rep.written).length, c = mine(rep.conflicts), s = mine(rep.skipped);
   const copies = c.filter((x) => /\\\.claude-[^\\]+\\skills: /.test(x)).length;
-  if (c.length) toast(`${item || 'Some items'} not linked into ${c.length} ${c.length === 1 ? 'folder' : 'folders'} that already ${c.length === 1 ? 'has' : 'have'} its own copy, so ${c.length === 1 ? 'it was' : 'they were'} left alone: ${c[0].replace(/: [^:]*$/, '')}${c.length > 1 ? ' and more' : ''}.${copies ? ' Settings > Link copies to the main profile fixes the Claude accounts\' old copies.' : ''}`, true);
+  // a skill's own folder in a tool (not a link): Replace moves it to .hrm-backup there and links the store's copy
+  const skills = c.filter((x) => !/\.json: /.test(x)), names = [...new Set(skills.map((x) => x.replace(/^.*: /, '')))];
+  if (c.length) {
+    const msg = `${item || 'Some items'} not linked into ${c.length} ${c.length === 1 ? 'folder' : 'folders'} that already ${c.length === 1 ? 'has' : 'have'} its own copy, so ${c.length === 1 ? 'it was' : 'they were'} left alone: ${c[0].replace(/: [^:]*$/, '')}${c.length > 1 ? ' and more' : ''}.${copies ? ' Settings > Link copies to the main profile fixes the Claude accounts\' old copies.' : ''}`;
+    toast(msg, true);
+    if (skills.length) notice(msg + ' Replace moves each copy into .hrm-backup in that folder and links the shared one instead.', { act: 'skill-takeover', label: `Replace ${skills.length === 1 ? 'the copy' : 'the ' + skills.length + ' copies'} with links`, data: { names: JSON.stringify(names) } });
+  }
   else if (s.length) toast(`Skipped: ${s[0]}`, true);
   else toast(n ? `Written to ${n} ${n === 1 ? 'place' : 'places'}` : 'Saved');
 }
@@ -557,6 +563,15 @@ action('toggle-target', async (el) => {
   const row = el.closest('tr'), off = row.querySelector('.tag.off'), any = row.querySelector('input[type=checkbox]:checked');
   if (off && any) off.remove();
   else if (!off && !any && row.querySelector('.mn')) row.querySelector('.mn').insertAdjacentHTML('beforeend', '<span class="tag off" title="Not written to any tool">Off</span>');
+});
+action('skill-takeover', async (el) => {
+  const names = JSON.parse(el.dataset.names || '[]');
+  if (!(await confirmDialog('Replace the tools\' copies with links?', `The ${names.length === 1 ? 'copy' : 'copies'} of <b>${esc(names.join(', '))}</b> in the tools' own skill folders ${names.length === 1 ? 'moves' : 'move'} into <span class="mono">.hrm-backup</span> beside ${names.length === 1 ? 'it' : 'them'}, and the shared ${names.length === 1 ? 'copy is' : 'copies are'} linked there instead. Nothing is deleted.`, 'Replace', false))) return;
+  document.getElementById('notice').className = 'off';
+  const r = await mutate(() => call('skill_takeover', { names }));
+  if (!r) return;
+  toast(r.moved.length ? `Replaced ${r.moved.length} ${r.moved.length === 1 ? 'copy' : 'copies'}; the originals are in .hrm-backup` : 'Nothing to replace: no copy stood where a link should be');
+  syncReport(r.sync);
 });
 action('item-remove', async (el) => {
   if (await confirmDialog('Remove ' + el.dataset.name, `Remove <b>${esc(el.dataset.name)}</b> from every tool Harness Manager wrote it into?`, 'Remove')) syncReport(await mutate(() => call('item_remove', { kind: el.dataset.kind, name: el.dataset.name })));

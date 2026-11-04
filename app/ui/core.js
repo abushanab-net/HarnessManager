@@ -94,10 +94,14 @@ export async function attempt(fn, okMsg) {
 }
 
 /** A failure that stays on screen until dismissed, unlike a toast; the next failure replaces it. */
-export function notice(msg) {
+export function notice(msg, act) {
   const el = document.getElementById('notice');
   if (!el) return;
-  document.getElementById('notice-text').textContent = msg;
+  const t = document.getElementById('notice-text');
+  t.textContent = msg;
+  // an offer beside the words: what to do about it, as a button with its own action
+  el.querySelector('.btn')?.remove();
+  if (act) t.insertAdjacentHTML('afterend', `<button class="btn sm" data-act="${act.act}" ${Object.entries(act.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} data-testid="notice-act">${esc(act.label)}</button>`);
   el.className = '';
 }
 
