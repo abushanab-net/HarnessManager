@@ -61,7 +61,7 @@ fn sync_soft(ctx: &Ctx) -> Value {
 
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv"];
 
@@ -187,8 +187,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"overview": service::overview(ctx, days, h)?, "requests": {"total": total, "rows": rows},
                    "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h)?})
         }
-        // the last five minutes of traffic, for the routes drawer and the tokens per second beside it in the sidebar
-        "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
             let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
             let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;

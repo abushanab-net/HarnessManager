@@ -1,5 +1,5 @@
-// Overview: the whole setup at a glance. Key numbers against the period before, every limit on a seven-day line,
-// the activity grid, and the latest replies or the request log. Live routes (WebGL) open in a drawer from the sidebar.
+// Overview: the whole setup at a glance. Key numbers against the period before, live routes drawn with WebGL, every
+// limit on a seven-day line, the activity grid, and the latest replies or the request log.
 
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill, ic } from './lib.js';
@@ -294,46 +294,6 @@ function limitsPanel(burn, ps, now) {
     ${rows ? `<div class="limax">${days.map((d, i) => `<span>${esc(d)}${i ? '' : ' now'}</span>`).join('')}</div><div class="limg">${rows}</div>` : '<p class="empty">Limits show once an account with a plan has run on this computer.</p>'}</section>`;
 }
 
-// ---------- the routes drawer ----------
-/** The tokens per second of the last five minutes, beside Live routes in the sidebar. */
-export function setTps(d) {
-  const el = document.getElementById('n-tps');
-  if (!el || !d) return;
-  const tps = Object.values(d.live.accounts).reduce((a, x) => a + x.tokens, 0) / (d.live.window_ms / 1000);
-  el.textContent = tps >= 1 ? `${Math.round(tps)} tok/s` : '';
-}
-export function closeRoutes() {
-  const root = document.getElementById('routes-drawer');
-  if (!root || !root.innerHTML) return;
-  cancelAnimationFrame(topoRaf);
-  root.innerHTML = '';
-  document.getElementById('nav-routes').classList.remove('on');
-}
-/** Live routes: the drawer beside the sidebar, over whatever page is open; the entry again, Escape or a click outside closes it. */
-export async function openRoutes() {
-  const root = document.getElementById('routes-drawer');
-  if (root.innerHTML) return closeRoutes();
-  const [state, d] = await Promise.all([loadState(), call('live')]);
-  setTps(d);
-  // the tools' versions on the cards, read once (each tool is asked), then the drawer is drawn again
-  if (!S.appVersions) {
-    S.appVersions = {};
-    call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); if (root.innerHTML) { closeRoutes(); openRoutes(); } }).catch(() => {});
-  }
-  const topo = topology(state, d);
-  root.innerHTML = `<div class="dimA" data-act="routes-close"></div><aside class="drawer" role="dialog" aria-label="Live routes" data-testid="routes-drawer">
-    <div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><button class="iconbtn" data-act="routes-close" aria-label="Close" data-testid="routes-close">${ic.x}</button></div>
-    <p class="muted mono sm">particles = tokens per second over the last 5 minutes</p>
-    ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
-    <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span><span>Click a card to open it</span></div></aside>`;
-  document.getElementById('nav-routes').classList.add('on');
-  const host = root.querySelector('.topo');
-  if (host) startTopo(host, topo.edges, !state.settings.moving_routes);
-}
-action('routes-open', openRoutes);
-action('routes-close', closeRoutes);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeRoutes(); });
-
 // ---------- the page ----------
 view('home', async (sheet) => {
   sheet.className = 'sheet';
@@ -349,6 +309,12 @@ view('home', async (sheet) => {
   const burn = burnRows(ps, k), risks = burn.filter((b) => b.out).sort((a, b) => a.out - b.out);
   const tools = state.harnesses.filter((h) => shown.some((x) => x.id === h.id));
   const logged = ps.filter((p) => p.identity.logged_in).length, open = ps.reduce((a, p) => a + p.running.length, 0);
+  // the tools' versions, read once (each tool is asked for its version), then the cards are drawn again
+  if (!S.appVersions) {
+    S.appVersions = {};
+    call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); if (S.route.view === 'home') render(); }).catch(() => {});
+  }
+  const topo = topology(state, k);
   sheet.innerHTML = `
     <div class="trow ovhead"><div>
         <div class="live"><i></i>Live · ${esc(state.computer || 'this computer')} · ${ps.length} accounts · ${logged} logged in · ${open ? `<a href="#sessions?live=1" class="acT" data-testid="home-live">${open} ${open === 1 ? 'console' : 'consoles'} open</a>` : '0 consoles open'} · router :${state.router.port} ${state.router.running ? 'running' : 'stopped'}</div>
@@ -359,6 +325,9 @@ view('home', async (sheet) => {
         <span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${r}</a>`).join('')}</span>
         ${best ? `<button class="btn primary" data-act="start" data-name="${esc(best.name)}" data-testid="start-best">${ic.play} Start ${esc(best.label)}</button>` : ''}</div></div>
     ${kpis(k, ps, risks)}
+    <section class="panel ovroutes"><div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><span class="muted mono sm">particles = tokens per second, last 5 minutes, updated each minute</span></div>
+      ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
+      <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span><span>Click a card to open it</span></div></section>
     ${limitsPanel(burn, ps, now)}
     <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2><span class="muted mono sm">daily ${st.metric === 'cost' ? 'cost' : st.metric}</span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
     <section class="panel" style="padding-bottom:6px"><div class="ph"><h2>${st.log ? 'Request log' : 'Latest replies'} <span class="muted mono sm">${d.requests.total.toLocaleString()}</span></h2>
@@ -367,6 +336,8 @@ view('home', async (sheet) => {
       <div class="tscroll" id="home-table">${requestTable(st.rows)}</div>
       ${st.rows.length < st.total ? '<div style="padding:10px 0"><button class="btn outline sm" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}` : latestTable(st.rows)}</section>`;
   fit(sheet.querySelector('.hmwrap'), (w) => heatmap(o.heatmap, st.metric, w));
+  const host = sheet.querySelector('.topo');
+  if (host) startTopo(host, topo.edges, !s.moving_routes);
 });
 
 action('home-metric', (el) => { st.metric = el.dataset.v; render(); });

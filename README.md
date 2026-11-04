@@ -61,8 +61,7 @@ signed by the release key.
 1. **Start Harness Manager.** It adds a main account for each tool it finds installed.
 2. **Accounts → Add account:** name it, pick the tool and sign in. Claude accounts sign in inside the app.
 3. **Start** opens a terminal as that account. **Start in a folder** picks a project first.
-4. **Overview** shows every limit on one seven-day line and which account has the most room; **Live routes** in the
-   sidebar opens the map of accounts, tools and providers over any page.
+4. **Overview** shows the live routes, every limit on one seven-day line, and which account has the most room.
 5. **MCP servers**, **Skills** and **System prompts:** add something once and tick the tools it should reach.
 
 Press `Ctrl K` to find an account, session or setting. The **?** button replays the page's tour.

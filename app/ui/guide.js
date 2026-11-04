@@ -13,7 +13,7 @@ const TOURS = {
     ['aside.side nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
     ['.ovkpis', 'Key numbers', 'Usage of every account against the period before, read from each tool\'s own logs on this computer; nothing is sent anywhere. Cost is what the tokens would cost at API list prices: subscriptions are not billed per token.'],
     ['.ovhead .acts', 'Tool and period', 'Show one tool or all of them, for the last 24 hours, 7 days or 30 days.'],
-    ['[data-testid=nav-routes]', 'Live routes', 'Each account, the tool it runs and where its requests go. Pulses show the tokens of the last five minutes; red is a paused provider or an account not logged in.'],
+    ['[data-testid=routes]', 'Live routes', 'Each account, the tool it runs and where its requests go. Pulses show the tokens of the last five minutes; red is a paused provider or an account not logged in.'],
     ['[data-testid=limits]', 'Limits', 'Every open limit on a seven-day line, tightest first: the bar runs to its reset, the fill is what is used, amber from where it runs out at this pace.'],
     ['[data-testid=request-log]', 'Every model call', 'Newest first, with its account, model, tokens, cost and reply timing.'],
     ['[data-nav=home] .count', 'Today', 'Today\'s usage at API prices, always in view.'],

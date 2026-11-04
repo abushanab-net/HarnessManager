@@ -229,8 +229,6 @@ try {
     await click('[data-testid=tool-all]');
     // the other sections, each from real data
     await $('[data-testid=kpi-risk]');
-    // Live routes: a drawer from the sidebar, over the page
-    await click('[data-testid=nav-routes]');
     await $('[data-testid=routes]');
     const topo = await exec(`const t = document.querySelector('[data-testid=routes]');
       return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), gl: !!t.querySelector('canvas').getContext('webgl'), w: t.querySelector('canvas').width };`);
@@ -240,9 +238,8 @@ try {
     const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] [data-node]')].map((n) => n.getBoundingClientRect());
       return r.filter((a, i) => r.some((b, j) => j !== i && Math.abs(a.left - b.left) < 2 && a.top < b.top && a.bottom > b.top + 0.5)).length;`);
     assert.equal(overlaps, 0, 'route cards do not overlap');
+    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
     await shot('00b-overview-routes');
-    await click('[data-testid=routes-close]');
-    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=routes]')")), 'the drawer closed');
     await hasText('[data-testid=limits]', 'codex-main');
     await hasText('[data-testid=limits]', '79% left');
     await hasText('[data-testid=activity]', 'Activity, 53 weeks');
@@ -720,7 +717,7 @@ try {
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Limits', 'Activity, 53 weeks', 'Latest replies'],
+      '#home': ['Overview', 'Live routes', 'Limits', 'Activity, 53 weeks', 'Latest replies'],
       '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'By model'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
@@ -1042,11 +1039,8 @@ description: Bulk skill ${i}
     await $('[data-testid=limits]');
     await sleep(600);
     await shot('17c-dark-overview');
-    await click('[data-testid=nav-routes]');
-    await $('[data-testid=routes]');
-    await sleep(400);
+    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
     await shot('17d-dark-overview-routes');
-    await click('[data-testid=routes-close]');
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
