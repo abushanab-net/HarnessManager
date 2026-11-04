@@ -43,10 +43,15 @@ fn sync_items(ctx: &Ctx) -> Result<Value> {
     Ok(serde_json::to_value(items::sync(ctx, &reg)?)?)
 }
 
+/// The sync report, or `{"error": ...}`: after a change is saved, a link that fails must not undo the answer.
+fn sync_soft(ctx: &Ctx) -> Value {
+    sync_items(ctx).unwrap_or_else(|e| json!({"error": format!("{e:#}")}))
+}
+
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "transcript", "file_stamp", "resume",
-    "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
@@ -209,6 +214,26 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "project_alias" => { service::alias_project(ctx, &s(a, "key")?, opt(a, "name"), opt(a, "merge_into"))?; json!(true) }
+        "projects" => json!(service::projects(ctx, a["days"].as_i64())?),
+        // tags: free text on sessions ("session", key profile/id) and projects ("project", the project key)
+        "tag_set" => {
+            let tags: Vec<String> = a["tags"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+            ctx.db.tag_set(&s(a, "kind")?, &s(a, "key")?, &tags)?;
+            json!(true)
+        }
+        "tag_list" => json!(ctx.db.tag_list()?.into_iter().map(|(t, s, p)| json!({"tag": t, "sessions": s, "projects": p})).collect::<Vec<_>>()),
+        "tag_rename" => { ctx.db.tag_rename(&s(a, "from")?, a["to"].as_str().unwrap_or("").trim())?; json!(true) }
+        // pin or unpin a project in the sidebar
+        "project_pin" => {
+            let key = s(a, "key")?;
+            let mut fresh = Ctx::open_at(&ctx.data, &ctx.home)?;
+            fresh.settings.pinned_projects.retain(|k| k != &key);
+            if a["on"] == true { fresh.settings.pinned_projects.push(key); }
+            fresh.save_settings()?;
+            *state.ctx.lock().unwrap() = Arc::new(fresh);
+            *state.settings_mtime.lock().unwrap() = None;
+            json!(true)
+        }
 
         "items" => {
             let reg = ctx.registry()?;
@@ -244,6 +269,16 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "target" => {
             let mut reg = ctx.registry()?;
             items::set_target(&mut reg, &s(a, "kind")?, &s(a, "item")?, &s(a, "harness")?, opt(a, "profile").as_deref(), a["on"] == true)?;
+            ctx.save_registry(&reg)?;
+            sync_items(ctx)?
+        }
+        // a column's header tick: every listed item on or off for one tool, written once
+        "target_bulk" => {
+            let mut reg = ctx.registry()?;
+            let (kind, h) = (s(a, "kind")?, s(a, "harness")?);
+            for it in a["items"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
+                items::set_target(&mut reg, &kind, it, &h, None, a["on"] == true)?;
+            }
             ctx.save_registry(&reg)?;
             sync_items(ctx)?
         }
@@ -292,8 +327,9 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                 items::set_target(&mut reg, "skill", &sk.name, h, None, true)?;
             }
             ctx.save_registry(&reg)?;
-            sync_items(ctx)?;
-            json!(sk)
+            let mut v = serde_json::to_value(&sk)?;
+            v["sync"] = sync_soft(ctx);
+            v
         }
         // the skills in each Discover repository; a day's cache unless asked to refresh
         "discover" => {
@@ -364,14 +400,15 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(hrm_core::launch::autostart::get().is_some())
         }
         "app_update" => json!(hrm_core::apps::update(&s(a, "id")?)?),
+        "app_install" => json!(hrm_core::apps::install(&s(a, "id")?, &s(a, "method")?)?),
+        "app_remove_copy" => json!(hrm_core::apps::remove_copy(&s(a, "id")?, &s(a, "path")?)?),
         // skill folders in the store that the list does not have: added, with the ticks their links already show
         "skill_adopt" => {
             let mut reg = ctx.registry()?;
             let names: Vec<String> = a["names"].as_array().map(|x| x.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
             let done = items::adopt_skills(ctx, &mut reg, &names)?;
             ctx.save_registry(&reg)?;
-            sync_items(ctx)?;
-            json!(done)
+            json!({"adopted": done, "sync": sync_soft(ctx)})
         }
         "skill_import" => {
             let mut reg = ctx.registry()?;

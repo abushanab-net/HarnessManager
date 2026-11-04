@@ -246,6 +246,100 @@ textarea.input { height: auto; min-height: 120px; padding: 8px 10px; font-family
 .menu a.danger { color: var(--neg); }
 .menu a.danger { color: var(--neg); }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--on-ink); padding: 9px 16px; border-radius: 8px; z-index: 70; max-width: 80vw; }
+/* a failure that stays until dismissed, under the top bar */
+#notice { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: var(--neg-bg, var(--del)); color: var(--negT); border: 1px solid var(--neg-b); padding: 8px 8px 8px 16px; border-radius: 10px; z-index: 69; max-width: min(900px, 80vw); font-size: 13px; }
+#notice.off { display: none; }
+#notice .iconbtn { width: 28px; height: 28px; color: inherit; }
+/* the live strip in the top bar: a pulsing dot and the count, a link to what runs now */
+.livestrip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 8px; border-radius: 999px; background: var(--ac-soft); border: 1px solid var(--ac-b); color: var(--acT); font: 500 12px var(--sans); text-decoration: none; white-space: nowrap; }
+.livestrip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ac); }
+@media (prefers-reduced-motion: no-preference) { .livestrip::before { animation: livepulse 2s ease-in-out infinite; } }
+@keyframes livepulse { 50% { opacity: .35; } }
+nav.nav .count.live:not(:empty) { cursor: pointer; }
+nav.nav .count.live:not(:empty):hover { text-decoration: underline; }
+/* Sessions: the running group, filter chips, and a long group's "show all" */
+.grp.livegrp .gh { background: var(--ac-soft); border-color: var(--ac-b); border-radius: 12px 12px 0 0; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border-radius: 999px; font: 500 12px var(--sans); border: 1px solid var(--b); color: var(--t2); background: var(--s); cursor: pointer; text-decoration: none; }
+.chip.on { background: var(--act); border-color: var(--ac-b); color: var(--t); }
+.srow.more { min-height: 40px; grid-template-columns: 12px 1fr; }
+/* Skills: a header tick per tool, as MCP servers has */
+.sklist th.c .ti { cursor: pointer; }
+.sklist th.c .ti input { width: 16px; height: 16px; accent-color: var(--ac); cursor: pointer; margin: 2px 0 0; }
+.dcfor { margin-top: 10px; align-items: center; gap: 8px; }
+/* the pinned projects under Projects in the sidebar */
+nav.nav a.sub { height: 30px; padding-left: 30px; font-size: 13px; font-weight: 400; gap: 7px; }
+nav.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dot); flex: none; }
+nav.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+nav.nav a.sub span:not(.count) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Sessions: the project rail beside the list, and a project's numbers in its header */
+.swrap { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 24px; align-items: start; }
+.swrap .smain { min-width: 0; }
+.swrap .smain .sbar { margin-top: 0; }
+.rail { padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; }
+.rail .sec { font: 600 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 10px 10px 4px; }
+.rail a { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 9px; color: var(--t2); text-decoration: none; min-width: 0; cursor: pointer; }
+.rail a:hover { background: var(--hover); }
+.rail a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.rail a > span:not(.cnt) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); flex: none; }
+.rail a .cnt.live { color: var(--acT); font-weight: 600; }
+.rail a .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dot); flex: none; }
+.rail a .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.rail a.all { margin-top: 8px; font-size: 12.5px; }
+.pstats { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; font: 12.5px var(--mono); color: var(--m); }
+.pstats b { color: var(--t); font-family: var(--sans); font-size: 14px; font-weight: 600; margin-right: 4px; }
+/* beside the rail the rows have less room: the title keeps what the fixed columns leave */
+.swrap .srow { grid-template-columns: 12px minmax(0, 1fr) auto auto auto auto auto; gap: 12px; }
+.swrap .srow .acct { max-width: 120px; }
+.srow .t > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.srow .t > span .tags { flex: none; }
+@media (max-width: 1100px) { .swrap { grid-template-columns: 1fr; } .rail { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; } .rail .sec { width: 100%; padding-top: 6px; } .rail a { height: 28px; } }
+/* Projects: the distribution and a card per project */
+.stackbar { display: flex; height: 16px; border-radius: 6px; overflow: hidden; gap: 1px; margin: 10px 0 12px; background: var(--track); }
+.stackbar i { display: block; height: 100%; min-width: 2px; }
+.drow { display: grid; grid-template-columns: 12px minmax(120px, 180px) minmax(0, 1fr) 90px 90px 90px 70px; gap: 10px; align-items: center; font-size: 13px; padding: 5px 0; }
+.drow .sw { width: 10px; height: 10px; border-radius: 3px; }
+.drow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t); text-decoration: none; font-weight: 500; }
+.drow .bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.drow .bar i { display: block; height: 100%; background: var(--ac-b); }
+.drow .num { text-align: right; font-size: 12px; }
+.drow .m { color: var(--m); text-align: right; font-size: 11.5px; }
+.pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 20px; }
+.pcard { margin-top: 0; display: flex; flex-direction: column; gap: 6px; }
+.pcard .ph { align-items: center; }
+.pcard .pname { color: var(--t); text-decoration: none; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard .pname:hover { color: var(--acT); }
+.pcard .ph .iconbtn.sq { width: 30px; height: 30px; margin-left: auto; }
+.pcard .path { font-size: 11.5px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .spark { height: 28px; display: flex; align-items: flex-end; gap: 2px; }
+.pcard .spark i { flex: 1; background: var(--ac-b); border-radius: 1px 1px 0 0; display: block; min-height: 1px; }
+.pcard .spark i.last { background: var(--ac); }
+.pcard .cost b { font-size: 18px; font-family: var(--mono); }
+.pcard .cost small { font: 12px var(--mono); color: var(--m); margin-left: 6px; }
+.pcard .row { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--m); }
+.pcard.live { box-shadow: inset 3px 0 0 var(--ac); }
+/* tags: small coloured chips, six colours by age; + opens the editor */
+.tags { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; vertical-align: middle; margin-left: 6px; }
+.tagc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font: 500 11px var(--sans); text-decoration: none; border: 1px solid transparent; white-space: nowrap; }
+.tagc.c0 { background: var(--iris-bg); color: var(--irisT); }
+.tagc.c1 { background: var(--ac-soft); color: var(--acT); }
+.tagc.c2 { background: var(--warn-bg); color: var(--warnT); }
+.tagc.c3 { background: var(--del); color: var(--negT); }
+.tagc.c4 { background: var(--add); color: var(--pos); }
+.tagc.c5 { background: var(--hl); color: var(--t2); }
+.tagc.add { background: transparent; border: 1px dashed var(--ctl); color: var(--m); cursor: pointer; padding: 0 6px; }
+.tagc.add:hover { border-color: var(--ac); color: var(--acT); }
+.srow .t > span .tags { margin-left: 4px; }
+.sesshead h1 .tags { vertical-align: middle; }
+.sesshead h1 .tagc { height: 22px; font-size: 12px; }
+.smeta .tags { margin-left: 0; }
+.gname .tagc { height: 24px; font-size: 14px; padding: 0 12px; }
+.chip .tagc { margin-right: 2px; }
+.taglist { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow: auto; }
+.tagrow { display: flex; align-items: center; gap: 8px; padding: 4px 2px; cursor: pointer; }
+.tagrow input { margin: 0; accent-color: var(--ac); }
+.tagrow .sm { margin-left: auto; }
+.rail a .tagc { height: 18px; }
 #toast.err { background: var(--neg); }
 #toast.off { opacity: 0; pointer-events: none; }
 
@@ -843,6 +937,12 @@ nav.nav a .count.upd:not(:empty) { background: none; color: var(--warnT); paddin
 .chk input { accent-color: var(--btn); width: 16px; height: 16px; }
 .apgroup { margin-top: 20px; }
 .apme { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+/* a tool's second copy, under its row */
+.apr.sub { background: var(--sub); padding-top: 8px; padding-bottom: 8px; }
+.apr.sub .who .mono { font-size: 12px; }
+.bar2 { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; font-size: 13px; margin-top: 16px; background: var(--ac-soft); border: 1px solid var(--ac-b); flex-wrap: wrap; }
+.bar2.warn { background: var(--warn-bg); border-color: var(--warn-b); }
+.bar2 .btn { margin-left: auto; }
 .apme h2 { margin: 0 0 4px; }
 .apme p { margin: 0; }
 /* CLI, as drawn */

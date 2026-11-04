@@ -1,45 +1,172 @@
 // Sessions, the reading view, usage, routing, MCP servers, skills, prompts, settings and the CLI reference.
 
-import { S, call, view, go, toast, attempt, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme, drawPins } from './core.js';
 import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
 
-// ---------- sessions ----------
-const sf = { group: 'project', harness: '', profile: '', days: '7', q: '' };
+// ---------- tags ----------
+// a tag's colour follows its place in the list (oldest first), so it never changes
+const tagColor = (t) => 'c' + (Math.max(0, (S.cache.tags || []).findIndex((x) => x.tag === t)) % 6);
+/** Tag chips for a session or project: each a link to that tag's list, plus + to edit when editable. */
+export function tagsHtml(tags, kind, key, name, editable = true) {
+  // a chip has its own action, so a click on one inside a row's title does not open the session
+  return `<span class="tags">${(tags || []).map((t) => `<a class="tagc ${tagColor(t)}" href="${href('sessions', { tag: t })}" data-act="tag-go" data-tag="${esc(t)}" title="Sessions tagged ${esc(t)}">${esc(t)}</a>`).join('')}${editable ? `<button class="tagc add" data-act="tag-edit" data-kind="${kind}" data-key="${esc(key)}" data-name="${esc(name)}" data-tags="${esc(JSON.stringify(tags || []))}" title="Tags" aria-label="Tags of ${esc(name)}">+</button>` : ''}</span>`;
+}
+action('tag-go', (el) => go('sessions', { tag: el.dataset.tag }));
+action('tag-edit', async (el) => {
+  const { kind, key, name } = el.dataset;
+  const mine = new Set(JSON.parse(el.dataset.tags || '[]'));
+  const known = await attempt(() => call('tag_list')) || [];
+  S.cache.tags = known;
+  for (const t of mine) if (!known.some((k) => k.tag === t)) known.push({ tag: t, sessions: 0, projects: 0 });
+  const row = (t) => `<label class="tagrow"><input type="checkbox" value="${esc(t.tag)}" ${mine.has(t.tag) ? 'checked' : ''}> <span class="tagc ${tagColor(t.tag)}">${esc(t.tag)}</span><span class="muted mono sm">${t.sessions + t.projects || ''}</span></label>`;
+  openDialog(`${dlgHead('Tags of ' + name)}
+    <div class="df" style="grid-template-columns:1fr"><div><input class="input" id="tg-new" placeholder="Type a tag and press Enter to add it" aria-label="New tag" data-testid="tag-new"><span class="hint">Tags are yours: free text, shared across tools and accounts, never written into the tools' files.${kind === 'project' ? ' A project\'s tag reaches every session of it in filters.' : ''}</span></div></div>
+    <div class="df" style="grid-template-columns:1fr"><div class="taglist" id="tg-list" data-testid="tag-list">${known.map(row).join('') || '<span class="muted">No tags yet.</span>'}</div></div>
+    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="tg-ok" data-testid="tag-save">Save</button></span></div>`);
+  const input = document.getElementById('tg-new'), list = document.getElementById('tg-list');
+  input.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const t = input.value.trim().replace(/\s+/g, '-').toLowerCase();
+    if (!t) return;
+    const box = [...list.querySelectorAll('input')].find((i) => i.value === t);
+    if (box) box.checked = true; else { if (!known.length) list.innerHTML = ''; known.push({ tag: t, sessions: 0, projects: 0 }); list.insertAdjacentHTML('beforeend', row({ tag: t, sessions: 0, projects: 0 })); list.lastElementChild.querySelector('input').checked = true; }
+    input.value = '';
+  };
+  document.getElementById('tg-ok').onclick = async () => {
+    if (input.value.trim()) input.onkeydown({ key: 'Enter', preventDefault() {} });
+    const tags = [...list.querySelectorAll('input:checked')].map((i) => i.value);
+    closeDialog();
+    await mutate(() => call('tag_set', { kind, key, tags }), tags.length ? `Tagged ${tags.join(', ')}` : 'Tags cleared');
+  };
+});
+
+// ---------- sessions and projects ----------
+// the list's state lives in the hash (#sessions?group=date&days=30&live=1&project=<key>&q=...), so every filter is a link
+const clean = (p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== '' && v != null));
+const sq = (patch) => go('sessions', clean({ ...S.route.params, ...patch }));
+const href = (view, p) => '#' + view + (Object.keys(clean(p)).length ? '?' + new URLSearchParams(clean(p)) : '');
+const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
+const sMore = new Set();
+let railMore = false;
 
 view('sessions', async (sheet, params) => {
-  if (params.q !== undefined) sf.q = params.q;
+  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '';
   if (!S.state) await call('state').then((s) => (S.state = s));
-  const filter = { harness: sf.harness || null, profile: sf.profile || null, days: sf.days ? +sf.days : null, query: sf.q || null };
+  const filter = { harness: null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null };
   sheet.className = 'sheet';
   sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
-  const groups = await call('sessions', { filter, group: sf.group });
+  let [groups, plist, tlist] = await Promise.all([call('sessions', { filter, group }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => [])]);
+  S.cache.tags = tlist;
+  drawPins(plist);
   const all = groups.flatMap((g) => g.sessions);
   S.cache.sessionOrder = all.map((s) => ({ profile: s.profile, id: s.id }));
   const tools = [...new Set(all.map((s) => s.harness))].map((h) => TOOL[h]).join(', ').replace(/, ([^,]*)$/, ' and $1');
-  const open = all.filter((s) => s.open).length;
-  sheet.innerHTML = `
-    <div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${open ? ` <b>${open} running now</b>: open one to follow it live.` : ''}</p></div>
-      <div class="acts"><span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${sf.days ? ' · ' + sf.days + ' days' : ''} · ${groups.length} ${sf.group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
-      <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>
-    <div class="fbar sbar"><label class="search"><span>${ic.search}</span><input id="s-q" placeholder="Search titles, prompts and answers" value="${esc(sf.q)}" data-testid="sessions-search"></label>
-      <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool']].map(([k, l]) => `<a class="${sf.group === k ? 'on' : ''}" data-act="s-group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
-      <span class="seg3">${[['7', '7d'], ['30', '30d'], ['', 'All']].map(([v, l]) => `<a class="${sf.days === v ? 'on' : ''} mono" data-act="s-days" data-v="${v}" data-testid="days-${v || 'all'}">${l}</a>`).join('')}</span></div>
-    ${groups.length ? groups.map((g) => { const k = sf.group + ':' + g.key, open = !sFold.has(k); return `<div class="grp ${open ? '' : 'shut'}" data-testid="group"><div class="gh"><h2 class="gname">${esc(g.name)}</h2>${g.root && !g.remote ? `<span class="mono">${esc(g.root)}</span>` : ''}${g.remote ? `<span class="rem">${esc(g.remote)}</span>` : ''}
-      ${sf.group === 'project' ? `<button class="iconbtn" style="width:24px;height:24px" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" aria-label="Rename or merge">${ic.dots}</button>` : ''}
-      <span class="tot mono">${g.sessions.length} ${g.sessions.length === 1 ? 'session' : 'sessions'} · ${fmt(g.tokens)} tokens</span>${sf.group === 'project' && g.root ? `<button class="btn outline sm" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}<button class="fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}"><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></div>${open ? g.sessions.map(sessionRow).join('') : ''}</div>`; }).join('')
-      : '<p class="empty">No sessions match.</p>'}`;
-  const q = document.getElementById('s-q');
-  q.onkeydown = (e) => { if (e.key === 'Enter') { sf.q = q.value; render(); } };
+  // a running session sits at the top, whatever the grouping, never inside a fold
+  const running = all.filter((s) => s.open);
+  if (!live) groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => !s.open) })).filter((g) => g.sessions.length);
+  const cur = project ? plist.find((p) => p.key === project) || { key: project, name: (all[0] && all[0].project_name) || project, sessions: all.length, tokens: all.reduce((a, s) => a + s.tokens, 0), accounts: [...new Set(all.map((s) => s.profile))], live: running.length } : null;
+  const grp = (g, k, cls) => {
+    const open = !sFold.has(k), list = sMore.has(k) || g.sessions.length <= 25 ? g.sessions : g.sessions.slice(0, 20);
+    const cost = g.key && plist.find((p) => p.key === g.key && p.cost != null);
+    return `<div class="grp ${cls || ''} ${open ? '' : 'shut'}" data-testid="group"><div class="gh"><h2 class="gname">${group === 'tag' && g.key ? `<span class="tagc ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${g.root && !g.remote ? `<span class="mono">${esc(g.root)}</span>` : ''}${g.remote ? `<span class="rem">${esc(g.remote)}</span>` : ''}
+      ${group === 'project' && !cls ? `<button class="iconbtn" style="width:24px;height:24px" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${cost && cost.pinned || (plist.find((p) => p.key === g.key) || {}).pinned ? 1 : ''}" aria-label="Open, pin, rename or merge">${ic.dots}</button>` : ''}
+      <span class="tot mono">${g.sessions.length} ${g.sessions.length === 1 ? 'session' : 'sessions'} · ${fmt(g.tokens)} tokens${cost && group === 'project' ? ' · ' + money(cost.cost) : ''}</span>${group === 'project' && g.root && !cls ? `<button class="btn outline sm" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}<button class="fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}"><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></div>${open ? list.map(sessionRow).join('') + (list.length < g.sessions.length ? `<div class="srow more"><span></span><a class="acT" data-act="s-more" data-k="${esc(k)}" role="button" tabindex="0">Show all ${g.sessions.length} sessions</a></div>` : '') : ''}</div>`;
+  };
+  // the rail: what runs now, every project, the pinned ones, the recent ones, and the tags
+  const keep = clean({ group: params.group, days: params.days });
+  const tagItem = (t) => `<a class="${tag === t.tag ? 'on' : ''}" href="${href('sessions', { ...keep, tag: t.tag })}" data-testid="rail-tag-${esc(t.tag)}"><span class="tagc ${tagColor(t.tag)}">${esc(t.tag)}</span><span class="cnt">${t.sessions + t.projects}</span></a>`;
+  const item = (p) => `<a class="${project === p.key ? 'on' : ''}" href="${href('sessions', { ...keep, project: p.key })}" data-testid="rail-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="cnt ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions}</span></a>`;
+  const pinned = plist.filter((p) => p.pinned), rest = plist.filter((p) => !p.pinned);
+  const rail = `<aside class="panel rail" data-testid="rail">
+      <a class="${live ? 'on' : ''}" href="${href('sessions', { ...keep, live: '1' })}" data-testid="rail-live"><i class="dot live"></i><span>Live now</span><span class="cnt live">${running.length || ''}</span></a>
+      <a class="${!live && !project ? 'on' : ''}" href="${href('sessions', keep)}" data-testid="rail-all"><i class="dot"></i><span>All projects</span><span class="cnt">${plist.reduce((a, p) => a + p.sessions, 0)}</span></a>
+      ${pinned.length ? `<div class="sec">Pinned</div>${pinned.map(item).join('')}` : ''}
+      <div class="sec">${pinned.length ? 'Recent' : 'Projects'}</div>${(railMore ? rest : rest.slice(0, 8)).map(item).join('')}${rest.length > 8 && !railMore ? `<a data-act="rail-more" role="button" tabindex="0"><span class="muted">${rest.length - 8} more…</span></a>` : ''}
+      <a href="#projects" class="all"><span class="acT">Every project, with costs →</span></a>
+      ${tlist.length ? `<div class="sec">Tags</div>${tlist.map(tagItem).join('')}` : ''}</aside>`;
+  const head = cur
+    ? `<div class="trow sesshead"><div><a href="#projects" class="crumb acT">← Projects</a><h1 data-testid="project-title">${esc(cur.name)} ${tagsHtml(cur.tags, 'project', cur.key, cur.name)}</h1><p class="find mono">${esc(cur.remote || cur.root || '')}</p>
+        <div class="pstats" data-testid="project-stats"><span><b>${money(cur.cost)}</b> at list prices</span><span><b>${fmt(cur.tokens)}</b> tokens</span><span><b>${cur.sessions}</b> ${cur.sessions === 1 ? 'session' : 'sessions'}</span><span><b>${(cur.accounts || []).length}</b> ${(cur.accounts || []).length === 1 ? 'account' : 'accounts'}</span>${cur.live ? `<span class="acT"><b>${cur.live}</b> running</span>` : ''}</div></div>
+      <div class="acts"><button class="iconbtn sq" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge">${ic.dots}</button>
+        ${cur.root ? `<button class="btn primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}</div></div>`
+    : `<div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${running.length ? ` <b>${running.length} running now</b>: open one to follow it live.` : ''}</p></div>
+      <div class="acts"><span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
+      <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>`;
+  sheet.innerHTML = `${head}
+    <div class="swrap">${rail}<div class="smain">
+    <div class="fbar sbar">${live ? `<a class="chip on" data-act="s-set" data-k="live" data-v="" role="button" tabindex="0" data-testid="chip-live">Running now ✕</a>` : ''}${tag ? `<a class="chip on" data-act="s-set" data-k="tag" data-v="" role="button" tabindex="0" data-testid="chip-tag"><span class="tagc ${tagColor(tag)}">${esc(tag)}</span> ✕</a>` : ''}${q ? `<a class="chip on" data-act="s-set" data-k="q" data-v="" role="button" tabindex="0">“${esc(q)}” ✕</a>` : ''}
+      <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')).map(([k, l]) => `<a class="${group === k ? 'on' : ''}" data-act="s-set" data-k="group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
+      <span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="s-set" data-k="days" data-v="${v}" data-testid="days-${v}">${l}</a>`).join('')}</span>
+      <span class="muted sm">Search above narrows this list</span></div>
+    ${running.length && !live ? grp({ name: 'Running now', sessions: running, tokens: running.reduce((a, s) => a + s.tokens, 0) }, 'live', 'livegrp') : ''}
+    ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length ? '' : '<p class="empty">No sessions match.</p>'}</div></div>`;
+  // the top bar's search narrows the rows on the page; a group with no row left folds away
+  const find = document.getElementById('find');
+  const narrow = (v) => {
+    const t = (v || '').trim().toLowerCase();
+    sheet.querySelectorAll('.srow[data-search]').forEach((r) => { r.hidden = !!t && !r.dataset.search.includes(t); });
+    sheet.querySelectorAll('.grp').forEach((g) => { g.hidden = !!t && !g.querySelector('.srow[data-search]:not([hidden])'); });
+  };
+  S.pageFind = narrow;
+  narrow(find.value);
 });
-action('s-group', (el) => { sf.group = el.dataset.v; render(); });
+action('s-set', (el) => sq({ [el.dataset.k]: el.dataset.v }));
+action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
+action('rail-more', () => { railMore = true; render(); });
+action('go-live', () => go('sessions', { live: '1' }));
+action('project-pin', (el) => mutate(() => call('project_pin', { key: el.dataset.key, on: el.dataset.on === '1' }), el.dataset.on === '1' ? 'Pinned to the sidebar' : 'Unpinned'));
+
+// ---------- projects: every project with its tokens, cost, sessions and activity ----------
+const SH = ['var(--ac)', 'var(--h3)', 'var(--h2)', 'var(--h1)', 'var(--iris)', 'var(--sand)'];
+view('projects', async (sheet, params) => {
+  const days = params.days || '7', sort = params.sort || 'active', metric = params.metric || 'tokens';
+  sheet.className = 'sheet';
+  sheet.innerHTML = `<h1>Projects</h1><p class="find">Reading projects…</p>`;
+  const [list, tlist] = await Promise.all([call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => [])]);
+  S.cache.tags = tlist;
+  drawPins(list);
+  const tokens = list.reduce((a, p) => a + p.tokens, 0), sessions = list.reduce((a, p) => a + p.sessions, 0), live = list.reduce((a, p) => a + p.live, 0);
+  const priced = list.filter((p) => p.cost != null), cost = priced.length ? priced.reduce((a, p) => a + p.cost, 0) : null;
+  const nDays = days === 'all' ? Math.max(1, ...list.map((p) => p.series.length)) : +days;
+  const busiest = [...list].sort((a, b) => b.tokens - a.tokens)[0];
+  const val = (p) => (metric === 'cost' ? p.cost || 0 : metric === 'sessions' ? p.sessions : p.tokens);
+  const total = list.reduce((a, p) => a + val(p), 0) || 1;
+  const top = [...list].sort((a, b) => val(b) - val(a)), head5 = top.slice(0, 5), others = top.slice(5);
+  const otherVal = others.reduce((a, p) => a + val(p), 0);
+  const show = (p) => (metric === 'cost' ? money(p.cost) : metric === 'sessions' ? p.sessions : fmt(p.tokens));
+  const sorted = [...list].sort((a, b) => sort === 'cost' ? (b.cost || 0) - (a.cost || 0) : sort === 'tokens' ? b.tokens - a.tokens : sort === 'name' ? a.name.localeCompare(b.name) : b.last_active_at - a.last_active_at);
+  const spark = (s) => { const m = Math.max(1, ...s); return `<div class="spark" aria-hidden="true">${s.slice(-14).map((v, i, arr) => `<i style="height:${Math.round((v / m) * 100)}%" class="${i === arr.length - 1 ? 'last' : ''}"></i>`).join('')}</div>`; };
+  const card = (p) => `<div class="panel pcard ${p.live ? 'live' : ''}" data-testid="pcard-${esc(p.key)}"><div class="ph"><a class="pname" href="${href('sessions', { project: p.key })}" data-testid="pcard-open-${esc(p.key)}"><b>${esc(p.name)}</b></a>${tagsHtml(p.tags, 'project', p.key, p.name)}${p.pinned ? '<span class="pill mono">pinned</span>' : ''}<button class="iconbtn sq" data-act="project-menu" data-key="${esc(p.key)}" data-name="${esc(p.name)}" data-root="${esc(p.root)}" data-pinned="${p.pinned ? 1 : ''}" aria-label="More for ${esc(p.name)}">${ic.dots}</button></div>
+      <span class="path mono" title="${esc(p.remote || p.root)}">${esc(p.remote || p.root)}</span>${spark(p.series)}
+      <div class="cost"><b>${money(p.cost)}</b><small>${fmt(p.tokens)} tokens${p.cost != null && p.priced_share < 0.95 ? ' · ' + Math.round(p.priced_share * 100) + '% priced' : ''}</small></div>
+      <div class="row mono"><span>${p.sessions} ${p.sessions === 1 ? 'session' : 'sessions'} · ${p.accounts.length} ${p.accounts.length === 1 ? 'account' : 'accounts'}</span><span class="${p.live ? 'acT' : ''}">${p.live ? p.live + ' live' : esc(when(p.last_active_at))}</span></div></div>`;
+  sheet.innerHTML = `<div class="trow"><div><h1>Projects</h1><p class="find">${list.length} ${list.length === 1 ? 'project' : 'projects'} ran in ${days === 'all' ? 'all time' : 'the last ' + days + ' days'}. A project is a folder your tools ran in; open, pin, rename or merge it from its card. Cost is at API list prices.</p></div>
+      <div class="acts"><span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="p-set" data-k="days" data-v="${v}" data-testid="pdays-${v}">${l}</a>`).join('')}</span>
+        <span class="seg3">${[['active', 'Active'], ['cost', 'Cost'], ['tokens', 'Tokens'], ['name', 'Name']].map(([v, l]) => `<a class="${sort === v ? 'on' : ''}" data-act="p-set" data-k="sort" data-v="${v}" data-testid="psort-${v}">${l}</a>`).join('')}</span></div></div>
+    <section class="ovkpis acctk" data-testid="project-tiles">
+      <div class="ovk"><div class="kl"><span>Tokens · ${days === 'all' ? 'all time' : days + ' days'}</span></div><strong>${fmt(tokens)}</strong><div class="kn">${sessions} ${sessions === 1 ? 'session' : 'sessions'}</div></div>
+      <div class="ovk"><div class="kl"><span>At list prices</span></div><strong>${money(cost)}</strong><div class="kn">${cost != null ? money(cost / nDays) + ' a day' : 'no priced model yet'}</div></div>
+      <div class="ovk"><div class="kl"><span>Projects</span></div><strong>${list.length}</strong><div class="kn">${[...new Set(list.flatMap((p) => p.accounts))].length} accounts</div></div>
+      <div class="ovk ${live ? 'click' : ''}" ${live ? 'data-href="#sessions?live=1"' : ''}><div class="kl"><span>Running now</span></div><strong class="${live ? 'acT' : ''}">${live}</strong><div class="kn">${live ? esc(list.filter((p) => p.live).map((p) => p.name).join(', ')) : 'nothing running'}</div></div>
+      <div class="ovk"><div class="kl"><span>Busiest</span></div><strong style="font-size:20px">${busiest ? esc(busiest.name) : '—'}</strong><div class="kn">${busiest && tokens ? Math.round((busiest.tokens / tokens) * 100) + '% of tokens' + (busiest.cost != null && cost ? ' · ' + Math.round((busiest.cost / cost) * 100) + '% of cost' : '') : ''}</div></div></section>
+    ${list.length ? `<section class="panel" data-testid="project-dist"><div class="ph"><h2>Where the tokens and the cost went</h2><span class="seg3">${[['tokens', 'Tokens'], ['cost', 'Cost'], ['sessions', 'Sessions']].map(([v, l]) => `<a class="${metric === v ? 'on' : ''}" data-act="p-set" data-k="metric" data-v="${v}" data-testid="pmetric-${v}">${l}</a>`).join('')}</span></div>
+      <div class="stackbar" aria-hidden="true">${head5.map((p, i) => `<i style="width:${(val(p) / total) * 100}%;background:${SH[i]}" title="${esc(p.name)}"></i>`).join('')}${otherVal ? `<i style="width:${(otherVal / total) * 100}%;background:var(--track)"></i>` : ''}</div>
+      ${head5.map((p, i) => `<div class="drow"><span class="sw" style="background:${SH[i]}"></span><a class="nm" href="${href('sessions', { project: p.key })}">${esc(p.name)}</a><div class="bar"><i style="width:${(val(p) / total) * 100}%"></i></div><span class="num mono">${show(p)}</span><span class="num mono">${fmt(p.tokens)}</span><span class="num mono">${money(p.cost)}</span><span class="m mono">${p.sessions} sess</span></div>`).join('')}
+      ${others.length ? `<div class="drow"><span class="sw" style="background:var(--track)"></span><span class="nm muted">${others.length} other ${others.length === 1 ? 'project' : 'projects'}</span><div class="bar"><i style="width:${(otherVal / total) * 100}%;background:var(--track)"></i></div><span class="num mono">${metric === 'cost' ? money(others.some((p) => p.cost != null) ? others.reduce((a, p) => a + (p.cost || 0), 0) : null) : metric === 'sessions' ? otherVal : fmt(otherVal)}</span><span class="num mono">${fmt(others.reduce((a, p) => a + p.tokens, 0))}</span><span class="num mono">${money(others.some((p) => p.cost != null) ? others.reduce((a, p) => a + (p.cost || 0), 0) : null)}</span><span class="m mono">${others.reduce((a, p) => a + p.sessions, 0)} sess</span></div>` : ''}</section>
+    <div class="pcards" data-testid="project-cards">${sorted.map(card).join('')}</div>` : '<p class="empty">No sessions in this range yet.</p>'}`;
+});
+action('p-set', (el) => go('projects', clean({ ...S.route.params, [el.dataset.k]: el.dataset.v })));
 action('project-menu', (el) => openMenu(el, [
+  ...(S.route.view !== 'sessions' || S.route.params.project !== el.dataset.key ? [{ label: 'Open its sessions', run: () => go('sessions', { project: el.dataset.key }) }] : []),
+  { label: el.dataset.pinned ? 'Unpin from the sidebar' : 'Pin to the sidebar', run: () => mutate(() => call('project_pin', { key: el.dataset.key, on: !el.dataset.pinned }), el.dataset.pinned ? 'Unpinned' : 'Pinned to the sidebar') },
   { label: 'Rename project', run: () => projectDialog(el.dataset.key, el.dataset.name, 'rename') },
   { label: 'Merge into another project', run: () => projectDialog(el.dataset.key, el.dataset.name, 'merge') },
-  { label: 'Reset name', run: () => attempt(() => call('project_alias', { key: el.dataset.key }), 'Reset').then(render) },
+  { label: 'Reset name', run: () => mutate(() => call('project_alias', { key: el.dataset.key }), 'Reset') },
 ]));
 function projectDialog(key, name, mode) {
   openDialog(`${dlgHead(mode === 'rename' ? 'Rename project' : 'Merge project')}
@@ -48,7 +175,7 @@ function projectDialog(key, name, mode) {
     <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="pj-ok">Save</button></span></div>`);
   document.getElementById('pj-ok').onclick = async () => {
     const v = document.getElementById('pj-v').value.trim();
-    if (await attempt(() => call('project_alias', mode === 'rename' ? { key, name: v } : { key, merge_into: v }), 'Saved')) { closeDialog(); render(); }
+    if (await attempt(() => call('project_alias', mode === 'rename' ? { key, name: v } : { key, merge_into: v }), 'Saved')) { closeDialog(); changed(); }
   };
 }
 
@@ -63,7 +190,8 @@ view('session', async (sheet, params) => {
   sheet.className = 'sheet';
   // a redraw of the shown session (live update, unfolding a step) keeps it on screen until the new one is ready
   if (rv.sessionKey !== params.profile + '/' + params.id || !sheet.querySelector('#chat')) sheet.innerHTML = '<p class="muted">Opening the session…</p>';
-  const [t, ss] = await Promise.all([call('transcript', { profile: params.profile, id: params.id }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null)]);
+  const [t, ss, tl] = await Promise.all([call('transcript', { profile: params.profile, id: params.id }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null), S.cache.tags ? null : call('tag_list').catch(() => [])]);
+  if (tl) S.cache.tags = tl;
   if (rv.sessionKey !== params.profile + '/' + params.id) { rv.sessionKey = params.profile + '/' + params.id; rv.open = new Set(); rv.more = new Set(); rv.follow = false; rv.top = 0; rv.fresh = true; }
   const m = t.meta;
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
@@ -104,7 +232,7 @@ view('session', async (sheet, params) => {
   const body = rv.mode === 'all' ? chatAll : run(picked, 'flat', 30, 10) || `<p class="empty">${rv.mode === 'changes' ? 'This session changed no files.' : 'Nothing failed.'}</p>`;
   sheet.innerHTML = `
     <div class="trow sesh"><div><a href="#sessions" class="crumb acT">← Sessions · ${esc(project)}</a><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1>
-        <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
+        <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
           <span>started ${esc(when(m.started_at))} · ${m.prompts} ${m.prompts === 1 ? 'turn' : 'turns'}</span><span class="mono">${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · $' + ss.cost.toFixed(2) : ''}</span></div></div>
       <div class="acts"><button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>
         <span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button>` : ''}</span>
@@ -157,7 +285,7 @@ action('terminal-menu', (el) => openMenu(el, [
   { label: 'Open sessions in Windows Terminal', run: () => setTerminal('wt') },
   { label: 'Open sessions in a console window', run: () => setTerminal('console') },
 ]));
-async function setTerminal(v) { if (await attempt(() => call('settings_set', { key: 'terminal', value: v }), 'Saved')) { S.state = await call('state'); render(); } }
+const setTerminal = (v) => mutate(() => call('settings_set', { key: 'terminal', value: v }), 'Saved');
 action('session-menu', (el) => openMenu(el, [{ label: 'Open the log file folder', run: () => call('open_folder', { path: el.dataset.path.replace(/[\\/][^\\/]*$/, '') }) }]));
 action('export-md', async (el) => {
   const path = await saveFile(`${(S.cache.transcript.meta.title || 'session').replace(/[^\w -]+/g, '').slice(0, 60)}.md`);
@@ -166,7 +294,6 @@ action('export-md', async (el) => {
 
 // session groups folded shut, by grouping and group
 const sFold = new Set();
-action('s-days', (el) => { sf.days = el.dataset.v; render(); });
 action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); render(); });
 
 // ---------- usage ----------
@@ -263,8 +390,8 @@ view('routing', async (sheet) => {
     <section class="panel"><div class="ph"><h2>Recent requests through the router</h2></div>
     ${r.log.length ? `<table class="grid"><thead><tr><th>Time</th><th>Account</th><th>Route → provider</th><th>Model</th><th>Status</th><th class="num">First chunk</th><th class="num">Time</th><th class="num">Tokens</th></tr></thead><tbody>${r.log.map((l) => `<tr><td class="mono">${esc(hm(l.ts))}</td><td>${esc(acctName(l.profile))}</td><td class="mono">${esc(l.route)} → ${esc(pname(l.provider))}</td><td class="mono">${esc(l.model)}</td><td class="mono ${l.status === 200 ? 'acT' : 'negT'}">${l.status || 'failed'}</td><td class="num">${secs(l.first_ms)}</td><td class="num">${secs(l.ms)}</td><td class="num">${l.input + l.output ? fmt(l.input + l.output) : '—'}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No requests yet.</p>'}</section>`;
 });
-action('router-start', () => attempt(() => call('router_start'), 'Router started').then(render));
-action('router-stop', () => attempt(() => call('router_stop'), 'Router stopped').then(render));
+action('router-start', () => mutate(() => call('router_start'), 'Router started'));
+action('router-stop', () => mutate(() => call('router_stop'), 'Router stopped'));
 action('provider-add', () => {
   openDialog(`${dlgHead('Add provider')}
     <div class="df"><label for="pv-id">Id</label><div><input class="input" id="pv-id" placeholder="openrouter" data-testid="pv-id"></div></div>
@@ -276,10 +403,10 @@ action('provider-add', () => {
     <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="pv-ok" data-testid="pv-save">Add provider</button></span></div>`);
   document.getElementById('pv-ok').onclick = async () => {
     const g = (id) => document.getElementById(id).value.trim();
-    if (await attempt(() => call('provider_add', { id: g('pv-id'), name: g('pv-name'), format: g('pv-format'), base_url: g('pv-url'), models: g('pv-models'), key: g('pv-key') }), 'Provider added')) { closeDialog(); render(); }
+    if (await attempt(() => call('provider_add', { id: g('pv-id'), name: g('pv-name'), format: g('pv-format'), base_url: g('pv-url'), models: g('pv-models'), key: g('pv-key') }), 'Provider added')) { closeDialog(); changed(); }
   };
 });
-action('provider-remove', async (el) => { if (await confirmDialog('Remove provider', `Remove <b>${esc(el.dataset.id)}</b> and its saved key?`, 'Remove')) attempt(() => call('provider_remove', { id: el.dataset.id }), 'Removed').then(render); });
+action('provider-remove', async (el) => { if (await confirmDialog('Remove provider', `Remove <b>${esc(el.dataset.id)}</b> and its saved key?`, 'Remove')) mutate(() => call('provider_remove', { id: el.dataset.id }), 'Removed'); });
 action('route-add', async () => {
   const r = await call('routing');
   openDialog(`${dlgHead('Add route')}
@@ -289,14 +416,15 @@ action('route-add', async () => {
     <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="rt-ok" data-testid="rt-save">Add route</button></span></div>`);
   document.getElementById('rt-ok').onclick = async () => {
     const providers = [...document.querySelectorAll('.rt-p:checked')].map((c) => c.value);
-    if (await attempt(() => call('route_add', { id: document.getElementById('rt-id').value.trim(), mode: document.getElementById('rt-mode').value, providers }), 'Route added')) { closeDialog(); render(); }
+    if (await attempt(() => call('route_add', { id: document.getElementById('rt-id').value.trim(), mode: document.getElementById('rt-mode').value, providers }), 'Route added')) { closeDialog(); changed(); }
   };
 });
-action('route-remove', async (el) => { if (await confirmDialog('Remove route', `Remove route <b>${esc(el.dataset.id)}</b>?`, 'Remove')) attempt(() => call('route_remove', { id: el.dataset.id }), 'Removed').then(render); });
+action('route-remove', async (el) => { if (await confirmDialog('Remove route', `Remove route <b>${esc(el.dataset.id)}</b>?`, 'Remove')) mutate(() => call('route_remove', { id: el.dataset.id }), 'Removed'); });
 
 // ---------- MCP servers and skills ----------
 export function syncReport(rep, item) {
   if (!rep) return;
+  if (rep.error) return toast('Saved, but writing into the tools failed: ' + rep.error, true);
   // entries read "<folder>: <name>"; with an item, only its own
   const mine = (l) => (l || []).filter((x) => !item || x.endsWith(': ' + item) || x.includes('skill ' + item + ' '));
   const n = mine(rep.written).length, c = mine(rep.conflicts), s = mine(rep.skipped);
@@ -306,6 +434,19 @@ export function syncReport(rep, item) {
   else toast(n ? `Written to ${n} ${n === 1 ? 'place' : 'places'}` : 'Saved');
 }
 
+/** A tool column's header tick and count, from the rows shown: all, some (shown indeterminate) or none. */
+export function headState(table) {
+  if (!table || !table.tHead) return;
+  for (const th of table.tHead.rows[0].cells) {
+    const head = th.querySelector('input[type=checkbox]');
+    if (!head) continue;
+    const boxes = [...table.querySelectorAll(`tbody tr:not([hidden]) input[data-h="${head.dataset.h}"]`)], on = boxes.filter((b) => b.checked).length;
+    head.checked = boxes.length > 0 && on === boxes.length;
+    head.indeterminate = on > 0 && on < boxes.length;
+    const small = th.querySelector('small');
+    if (small) small.textContent = boxes.length ? `${on} of ${boxes.length}` : '';
+  }
+}
 action('toggle-target', async (el) => {
   const rep = await attempt(() => call('target', { kind: el.dataset.kind, item: el.dataset.item, harness: el.dataset.h, on: el.checked }));
   if (rep === undefined) { el.checked = !el.checked; return; }
@@ -314,6 +455,7 @@ action('toggle-target', async (el) => {
   // (the skills list has no header row: its tools are chips)
   const table = el.closest('table'), small = table && table.tHead && table.tHead.rows[0].cells[el.closest('td').cellIndex]?.querySelector('small');
   if (small) small.textContent = table.querySelectorAll(`input[data-h="${el.dataset.h}"]:checked`).length;
+  if (table && table.classList.contains('sklist')) headState(table);
   const th = table && table.tHead && table.tHead.rows[0].cells[el.closest('td').cellIndex];
   if (th && th.dataset.label) th.title = `${th.dataset.label}: ${table.querySelectorAll(`input[data-h="${el.dataset.h}"]:checked`).length} servers`;
   const row = el.closest('tr'), off = row.querySelector('.tag.off'), any = row.querySelector('input[type=checkbox]:checked');
@@ -321,7 +463,7 @@ action('toggle-target', async (el) => {
   else if (!off && !any && row.querySelector('.mn')) row.querySelector('.mn').insertAdjacentHTML('beforeend', '<span class="tag off" title="Not written to any tool">Off</span>');
 });
 action('item-remove', async (el) => {
-  if (await confirmDialog('Remove ' + el.dataset.name, `Remove <b>${esc(el.dataset.name)}</b> from every tool Harness Manager wrote it into?`, 'Remove')) attempt(() => call('item_remove', { kind: el.dataset.kind, name: el.dataset.name })).then((rep) => { syncReport(rep); render(); });
+  if (await confirmDialog('Remove ' + el.dataset.name, `Remove <b>${esc(el.dataset.name)}</b> from every tool Harness Manager wrote it into?`, 'Remove')) syncReport(await mutate(() => call('item_remove', { kind: el.dataset.kind, name: el.dataset.name })));
 });
 action('import-from', async (el) => {
   const hs = shownTools(S.state || await call('state')).filter((h) => (el.dataset.kind === 'mcp' ? h.caps.mcp : h.caps.skills));
@@ -335,7 +477,7 @@ action('import-from', async (el) => {
       const added = Array.isArray(r) ? r : r.added, kept = r.kept || [];
       closeDialog();
       toast(`Imported ${added.length}: ${added.join(', ') || 'nothing new'}${kept.length ? '. Kept your own ' + kept.join(', ') + ': a different one is installed' : ''}`);
-      render();
+      changed();
     }
   };
 });
@@ -347,7 +489,7 @@ action('skill-install', () => {
   document.getElementById('sk-pick').onclick = async () => { const p = await pickFolder(); if (p) document.getElementById('sk-src').value = p; };
   document.getElementById('sk-ok').onclick = async () => {
     const r = await attempt(() => call('skill_install', { source: document.getElementById('sk-src').value.trim(), name: document.getElementById('sk-name').value.trim() }));
-    if (r) { closeDialog(); toast(`Installed ${r.name}; tick the tools it should be in`); render(); }
+    if (r) { closeDialog(); toast(`Installed ${r.name}; tick the tools it should be in`); syncReport(r.sync, r.name); changed(); }
   };
 });
 // ---------- prompts ----------
@@ -363,7 +505,7 @@ view('prompts', async (sheet) => {
   const tool = (hs.find((h) => h.id === promptTool) || { label: promptTool }).label;
   const first = (b) => (b || '').split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || 'Empty';
   const where = live ? `Writes to <span class="mono">${esc(live.path)}</span> · every ${esc(tool)} account follows it` : `No profile of ${esc(tool)} yet`;
-  sheet.innerHTML = `<div class="trow"><div><h1>Prompts</h1><p class="find">A library of instructions per tool. Enabling one writes it into the tool's prompt file; what the file held before is saved here first, so nothing is lost.</p></div>
+  sheet.innerHTML = `<div class="trow"><div><h1>System prompts</h1><p class="find">The instructions each tool reads when it starts: CLAUDE.md for Claude Code, AGENTS.md for Codex and OpenCode, GEMINI.md for Antigravity. Keep several here and choose which one is in the file; what the file held before is saved first, so nothing is lost.</p></div>
       <div class="acts"><button class="btn primary" data-act="prompt-new" data-testid="prompt-new">New prompt</button></div></div>
     <div class="tabs2">${hs.map((h) => `<a class="${h.id === promptTool ? 'on' : ''}" data-act="prompt-tool" data-v="${h.id}">${esc(h.label)} · ${FILE[h.id] || 'prompt'}</a>`).join('')}</div>
     <div class="pgrid"><div class="plist">
@@ -382,10 +524,10 @@ view('prompts', async (sheet) => {
 });
 action('prompt-tool', (el) => { promptTool = el.dataset.v; promptSel = null; render(); });
 action('prompt-sel', (el) => { promptSel = el.dataset.id || null; render(); });
-action('prompt-new', async () => { const id = await attempt(() => call('prompt_add', { harness: promptTool, title: 'New prompt', body: '' })); if (id) { promptSel = id; render(); } });
-action('prompt-save', (el) => attempt(() => call('prompt_save', { id: el.dataset.id, title: document.getElementById('pr-title').value, body: document.getElementById('pr-body').value }), 'Saved').then(render));
-action('prompt-enable', async (el) => { if (!(await attempt(() => call('prompt_save', { id: el.dataset.id, title: document.getElementById('pr-title').value, body: document.getElementById('pr-body').value })))) return; attempt(() => call('prompt_enable', { id: el.dataset.id }), 'Written to the prompt file').then(render); });
-action('prompt-delete', async (el) => { if (await confirmDialog('Delete prompt', 'Delete this prompt from the library? The prompt file is not changed.', 'Delete')) { if (await attempt(() => call('prompt_delete', { id: el.dataset.id }))) { promptSel = null; render(); } } });
+action('prompt-new', async () => { const id = await attempt(() => call('prompt_add', { harness: promptTool, title: 'New prompt', body: '' })); if (id) promptSel = id; changed(); });
+action('prompt-save', (el) => mutate(() => call('prompt_save', { id: el.dataset.id, title: document.getElementById('pr-title').value, body: document.getElementById('pr-body').value }), 'Saved'));
+action('prompt-enable', async (el) => { if (!(await attempt(() => call('prompt_save', { id: el.dataset.id, title: document.getElementById('pr-title').value, body: document.getElementById('pr-body').value })))) return; mutate(() => call('prompt_enable', { id: el.dataset.id }), 'Written to the prompt file'); });
+action('prompt-delete', async (el) => { if (await confirmDialog('Delete prompt', 'Delete this prompt from the library? The prompt file is not changed.', 'Delete')) { if (await attempt(() => call('prompt_delete', { id: el.dataset.id }))) promptSel = null; changed(); } });
 
 // ---------- settings ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
@@ -418,7 +560,7 @@ view('settings', async (sheet) => {
     <h5 class="sh5">Updates</h5>
     ${row('Harness Manager', '', selfUpd && selfUpd.version ? `Version <b>${esc(selfUpd.version)}</b> is available; you have ${esc(st.version)}.${selfUpd.notes ? ' ' + esc(selfUpd.notes) : ''}` : `Version ${esc(st.version)}. New versions are looked for at launch and once a day.`,
       selfUpd && selfUpd.version ? '<button class="btn primary" data-act="self-install" data-testid="self-install">Update and restart</button>' : '<button class="btn outline" data-act="self-check" data-testid="self-check">Check for updates</button>')}
-    ${row('New versions of your tools', info('upd', 'Asks npm for the newest Claude Code, Codex and OpenCode when Harness Manager starts; Apps in the sidebar shows how many have one.<br><b>Default: off.</b> Apps &gt; Check for updates looks at any time.'), 'Look for newer versions of the tools when the app starts.', sw('check_updates_at_launch', s.check_updates_at_launch, 'Check at launch', 'st-updcheck'))}
+    ${row('New versions of your tools', info('upd', 'Asks each vendor for the newest Claude Code, Codex, OpenCode and Antigravity CLI when Harness Manager starts; Apps in the sidebar shows how many have one.<br><b>Default: off.</b> Apps &gt; Check for updates looks at any time.'), 'Look for newer versions of the tools when the app starts.', sw('check_updates_at_launch', s.check_updates_at_launch, 'Check at launch', 'st-updcheck'))}
     <h5 class="sh5">Usage and limits</h5>
     ${row('Refresh', info('refresh', 'How often, in minutes, Harness Manager reads new usage from the tools\' logs and the cached limits, in the background.<br><b>Default: 5.</b> A smaller number updates sooner but reads the logs more often. <b>Sync now</b> on Home reads them at once whatever this is.'), 'How often usage and limits are read in the background.', seg('refresh_minutes', String(s.refresh_minutes), [['1', '1 min'], ['5', '5 min'], ['15', '15 min']], 'st-refresh'))}
     ${row('Live Claude limits', info('live', '<b>Off (the default):</b> limits are what Claude Code last saved, so they are as fresh as the account\'s last run; a window whose reset time has passed shows as empty.<br><b>On:</b> when those numbers are more than 10 minutes old, Harness Manager asks Anthropic for current ones with the login Claude Code saved, while it is valid. It never refreshes or copies that login.'), 'Off: limits are what Claude Code last wrote. On: Harness Manager also asks Anthropic, with the login Claude Code saved on this computer while it is valid. It never refreshes or copies that login.', `<label class="switch"><input type="checkbox" id="st-live" data-act="live-now" ${st.live_quota ? 'checked' : ''} data-testid="st-live"> Ask Anthropic for current limits</label>`)}
@@ -471,14 +613,14 @@ async function drawBackups(s) {
 const restored = (r) => {
   const sk = r.restored.skills.length;
   toast(`Restored${sk ? `, with ${sk} skill ${sk === 1 ? 'folder' : 'folders'} put back` : ''}. The state before is kept as a backup named Before restore.`);
-  S.state = null; render();
+  changed();
 };
-action('backup-now', async () => { if (await attempt(() => call('backup_create', { label: 'Manual' }), 'Backed up')) render(); });
-action('backup-delete', async (el) => { if (await confirmDialog('Delete backup', 'Delete this backup? It cannot be undone.', 'Delete')) attempt(() => call('backup_delete', { name: el.dataset.name })).then(render); });
+action('backup-now', () => mutate(() => call('backup_create', { label: 'Manual' }), 'Backed up'));
+action('backup-delete', async (el) => { if (await confirmDialog('Delete backup', 'Delete this backup? It cannot be undone.', 'Delete')) mutate(() => call('backup_delete', { name: el.dataset.name })); });
 action('backup-rename', (el) => {
   openDialog(`${dlgHead('Rename backup')}<div class="df"><label for="bk-l">Label</label><div><input class="input" id="bk-l" value="${esc(el.dataset.label)}" maxlength="60"></div></div>
     <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="bk-ok">Rename</button></span></div>`);
-  document.getElementById('bk-ok').onclick = async () => { if (await attempt(() => call('backup_rename', { name: el.dataset.name, label: document.getElementById('bk-l').value }))) { closeDialog(); render(); } };
+  document.getElementById('bk-ok').onclick = async () => { if (await attempt(() => call('backup_rename', { name: el.dataset.name, label: document.getElementById('bk-l').value }))) { closeDialog(); changed(); } };
 });
 action('backup-restore', async (el) => {
   if (!(await confirmDialog('Restore this backup?', 'The account list, settings and what Harness Manager wrote into each tool go back to this backup, and skill folders missing from the store come back. The state now is kept as a backup first. API keys and logins are not touched.', 'Restore', false))) return;
@@ -517,12 +659,11 @@ action('set-now', async (el) => {
   // a switch's state, a segment's value, or a dropdown's choice (numbers as numbers)
   const raw = el.tagName === 'SELECT' ? el.value : el.dataset.v;
   const value = raw === undefined ? el.checked : /^\d+$/.test(raw) ? +raw : raw;
-  if (await attempt(() => call('settings_set', { key: el.dataset.key, value }), 'Saved')) { S.state = null; render(); }
-  else if (el.type === 'checkbox') el.checked = !el.checked;
+  if (await mutate(() => call('settings_set', { key: el.dataset.key, value }), 'Saved') === undefined && el.type === 'checkbox') el.checked = !el.checked;
 });
-action('live-now', async (el) => { if (!(await attempt(() => call('live_quota_set', { on: el.checked }), 'Saved'))) el.checked = !el.checked; });
+action('live-now', async (el) => { if (!(await mutate(() => call('live_quota_set', { on: el.checked }), 'Saved'))) el.checked = !el.checked; });
 action('autostart', async (el) => {
-  const on = await attempt(() => call('autostart_set', { on: el.checked }));
+  const on = await mutate(() => call('autostart_set', { on: el.checked }));
   if (on === undefined) { el.checked = !el.checked; return; }
   toast(on ? 'Harness Manager starts in the tray when you sign in' : 'It no longer starts at sign-in');
 });
@@ -530,11 +671,11 @@ action('guides-reset', () => { resetGuides(); toast('Each page will show its tou
 // a typed setting (the port, the account list's place): saved by the button beside it
 action('set-field', async (el) => {
   const raw = document.getElementById(el.dataset.from).value.trim(), value = el.dataset.key === 'router_port' ? +raw : raw;
-  if (await attempt(() => call('settings_set', { key: el.dataset.key, value }), 'Saved')) { S.state = null; render(); }
+  mutate(() => call('settings_set', { key: el.dataset.key, value }), 'Saved');
 });
-action('import-ps', async () => { const r = await attempt(() => call('import_ps', {})); if (r) { toast(`Imported ${r.accounts.length} accounts and ${r.keys.length} keys${r.skipped.length ? '; skipped ' + r.skipped.length : ''}`); } });
-action('detect', async () => { const r = await attempt(() => call('detect', {})); if (r) toast(r.main_profiles.length ? `Added ${r.main_profiles.join(', ')}` : 'No new tools found'); });
-action('relink', async () => { const r = await attempt(() => call('sync', { relink: true })); if (r) toast(r.relinked.length ? `Linked: ${r.relinked.join('; ')}` : 'Nothing to link; accounts are in step'); });
+action('import-ps', async () => { const r = await mutate(() => call('import_ps', {})); if (r) { toast(`Imported ${r.accounts.length} accounts and ${r.keys.length} keys${r.skipped.length ? '; skipped ' + r.skipped.length : ''}`); } });
+action('detect', async () => { const r = await mutate(() => call('detect', {})); if (r) toast(r.main_profiles.length ? `Added ${r.main_profiles.join(', ')}` : 'No new tools found'); });
+action('relink', async () => { const r = await mutate(() => call('sync', { relink: true })); if (r) toast(r.relinked.length ? `Linked: ${r.relinked.join('; ')}` : 'Nothing to link; accounts are in step'); });
 
 // ---------- CLI reference ----------
 const CLI = [
@@ -542,7 +683,7 @@ const CLI = [
     ['login', 'Log an account in'], ['remove', 'Remove an account; --delete-home also deletes its folder'], ['key', 'API keys, kept in Windows Credential Manager']]],
   ['Run', [['run', 'Run the tool as an account in this console'], ['start', 'Open a new terminal running the account'], ['resume', 'Reopen a session in its own account'], ['open', 'Open the desktop app']]],
   ['Usage and limits', [['usage', 'Token usage per account and day'], ['overview', 'Cost at list prices, requests, tokens, cache hits'], ['requests', 'Every model reply, newest first'], ['quota', 'Limits of one account; --live asks Anthropic now']]],
-  ['Sessions and projects', [['sessions', 'Sessions of every tool, grouped by project, date, account or tool'], ['session', 'Print one session as a transcript'], ['projects', 'List, rename or merge projects']]],
+  ['Sessions and projects', [['sessions', 'Sessions of every tool, grouped by project, date, account, tool or tag; --open, --project, --tag'], ['session', 'Print one session as a transcript'], ['projects', 'List projects with tokens and cost, rename or merge them'], ['tag', 'Tag a session or a project'], ['tags', 'Every tag with its counts']]],
   ['Shared setup', [['sync', 'Bring every account in step'], ['mcp', 'MCP servers shared across tools'], ['skills', 'Skills shared across tools'], ['prompts', 'Prompt files per tool']]],
   ['Routing and setup', [['provider', 'Router providers: endpoints and keys'], ['route', 'Failover or aggregate routes'], ['router', 'Start, stop or check the local router'], ['settings', 'Read or change settings'],
     ['init', 'Find installed tools and add their main profiles'], ['import', 'Import from the old claude-accounts.ps1 launcher']]],
