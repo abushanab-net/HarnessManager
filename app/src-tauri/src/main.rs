@@ -185,7 +185,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "usage" => {
             let days = a["days"].as_i64().unwrap_or(7);
             json!({"summary": service::usage_summary(ctx, days, a["profile"].as_str())?, "route_log": ctx.db.route_log(30)?,
-                   "accounts": service::breakdown(ctx, "profile", Some(days), None)?, "models": service::breakdown(ctx, "model", Some(days), None)?})
+                   "accounts": service::breakdown(ctx, "profile", Some(days), None)?, "models": service::breakdown_of(ctx, "model", Some(days), None, a["profile"].as_str())?})
         }
         // Usage > Export CSV: one line per account, to the file the user picked
         "usage_csv" => {

@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects page variations</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Accounts + Usage merge */
+.acg { background: var(--s); border: 1px solid var(--b); border-radius: 12px; overflow: hidden; }
+.acg > header { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--b); background: var(--g); font-size: 13px; }
+.acg > header b { font-size: 13.5px; }
+.acg > header .tot { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.acg > header .ti { width: 16px; height: 16px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font: 600 9px var(--mono); }
+.acr { display: grid; grid-template-columns: 30px minmax(150px, 1.1fr) minmax(200px, 1.5fr) 110px 110px auto; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--ru); cursor: pointer; min-width: 0; }
+.acr:first-of-type { border-top: 0; }
+.acr:hover { background: var(--hover); }
+.acr .av { width: 30px; height: 30px; border-radius: 50%; background: var(--act); display: inline-flex; align-items: center; justify-content: center; font: 600 10px var(--mono); }
+.acr .who { min-width: 0; display: grid; gap: 1px; }
+.acr .who b { font-size: 13px; }
+.acr .who .mono { font-size: 11px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acr .pl { display: inline-block; font: 500 10.5px var(--mono); padding: 1px 7px; border-radius: 999px; background: var(--ac-soft); color: var(--acT); }
+.acr .pl.off { background: var(--neg-bg); color: var(--neg); }
+.acr .lims { display: grid; gap: 4px; font-size: 11px; min-width: 0; }
+.acr .l1 { display: grid; grid-template-columns: 80px minmax(40px, 1fr) 56px; gap: 8px; align-items: center; }
+.acr .l1 .bar2 { height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.acr .l1 .bar2 i { display: block; height: 100%; background: var(--ac); }
+.acr .l1 .lp { font: 11px var(--mono); color: var(--acT); text-align: right; }
+.acr .use { text-align: right; font: 11px var(--mono); color: var(--m); }
+.acr .use b { display: block; font: 600 15px var(--mono); color: var(--t); }
+.acr .usp .spark { height: 24px; }
+.acr .go { display: flex; gap: 4px; justify-content: flex-end; }
+.tabs2 { display: flex; gap: 20px; border-bottom: 1px solid var(--ru); }
+.tabs2 a { padding: 6px 0; color: var(--m); cursor: pointer; text-decoration: none; font-size: 13px; }
+.tabs2 a.on { color: var(--t); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ac); }
+.ulegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--t2); }
+.ulegend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.uchart { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding-top: 4px; }
+.uchart .day { flex: 1; display: flex; flex-direction: column-reverse; gap: 1px; height: 100%; justify-content: flex-start; }
+.uchart .day i { display: block; width: 100%; border-radius: 2px; }
+.uchart .day small { font: 10px var(--mono); color: var(--m); text-align: center; margin-top: 2px; }
+table.led { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.led th { text-align: left; font-weight: 500; color: var(--m); font-size: 11px; padding: 6px 8px; border-bottom: 1px solid var(--b); }
+table.led td { padding: 7px 8px; border-bottom: 1px solid var(--ru); }
+table.led .num, table.led th.num { text-align: right; font-family: var(--mono); }
+.umodel { display: grid; grid-template-columns: 180px minmax(0, 1fr) 70px 70px; gap: 10px; align-items: center; font-size: 12px; padding: 3px 0; }
+.umodel .mb { height: 7px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.umodel .mb i { display: block; height: 100%; background: var(--h3); }
+.umodel .num { text-align: right; font-family: var(--mono); }
+.fold { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.fold .chev { margin-left: auto; color: var(--m); }
+.alist { display: flex; flex-direction: column; gap: 2px; }
+.alist a { display: grid; grid-template-columns: 26px minmax(0, 1fr) 70px; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 9px; color: var(--t); text-decoration: none; cursor: pointer; min-width: 0; }
+.alist a:hover { background: var(--hover); }
+.alist a.on { background: var(--act); }
+.alist a .av { width: 26px; height: 26px; border-radius: 50%; background: var(--s); border: 1px solid var(--b); display: inline-flex; align-items: center; justify-content: center; font: 600 9px var(--mono); }
+.alist a .nm { min-width: 0; }
+.alist a .nm b { display: block; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alist a .nm small { display: block; font: 10.5px var(--mono); color: var(--m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alist a .t7 { font: 11px var(--mono); color: var(--m); text-align: right; }
+.alist .sec { font: 600 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 8px 8px 3px; }
+
+/* Plan: the app's own palette and type; three working mock windows of the Projects page, fed from one data set,
+   so the behaviours (pin, rename, tag, open, page, live KPI refresh) can be tried, not just read about. */
+:root {
+  --g: #f5f7fa; --side: #edf0f6; --s: #ffffff; --act: #e3f1f2; --b: #dde3ec; --ru: #eef2f7; --ctl: #d3dae5; --hover: #f3f6fa; --track: #eef2f7;
+  --t: #0f172a; --m: #56607a; --t2: #38415a; --ac: #0f6e7a; --acT: #0f6e7a; --ac-soft: #e3f1f2; --ac-b: #bcdfe1; --btn-fg: #fff;
+  --warn: #d97706; --warn-bg: #fef3c7; --neg: #dc2626; --neg-bg: #fee2e2; --pos: #16a34a; --iris: #6d5bd0; --iris-bg: #efecfb; --sand: #c8a45a;
+  --h1: #cfeaec; --h2: #93cdd1; --h3: #2a8f99; --hl: #fef3c7;
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --g: #0a0f13; --side: #0c1216; --s: #10171c; --act: #1f3a44; --b: #1f2b34; --ru: #1b262e; --ctl: #22303a; --hover: #131c22; --track: #1b262e;
+  --t: #e6edf1; --m: #93a4ae; --t2: #a9b8c1; --ac: #36c8c5; --acT: #65dbd8; --ac-soft: #0f3a3e; --ac-b: #1f6e78; --btn-fg: #04282a;
+  --warn: #f59e0b; --warn-bg: #3a2a0c; --neg: #f87171; --neg-bg: #3b1418; --pos: #22c55e; --iris: #9d8ff0; --iris-bg: #221d42; --h1: #173f4b; --h2: #176068; --h3: #1f8f95; --hl: #5a4a0e; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --g: #0a0f13; --side: #0c1216; --s: #10171c; --act: #1f3a44; --b: #1f2b34; --ru: #1b262e; --ctl: #22303a; --hover: #131c22; --track: #1b262e;
+  --t: #e6edf1; --m: #93a4ae; --t2: #a9b8c1; --ac: #36c8c5; --acT: #65dbd8; --ac-soft: #0f3a3e; --ac-b: #1f6e78; --btn-fg: #04282a;
+  --warn: #f59e0b; --warn-bg: #3a2a0c; --neg: #f87171; --neg-bg: #3b1418; --pos: #22c55e; --iris: #9d8ff0; --iris-bg: #221d42; --h1: #173f4b; --h2: #176068; --h3: #1f8f95; --hl: #5a4a0e; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--g); color: var(--t); font: 15px/1.55 var(--sans); font-variant-numeric: tabular-nums; }
+main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 80px; }
+h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; text-wrap: balance; }
+h2 { font-size: 21px; margin: 44px 0 10px; padding-top: 18px; border-top: 1px solid var(--b); }
+h3 { font-size: 16px; margin: 22px 0 8px; }
+p, li { max-width: 76ch; }
+.lead { color: var(--m); font-size: 16px; margin: 0 0 14px; }
+code { font-family: var(--mono); font-size: 12.5px; background: var(--ru); padding: 1px 5px; border-radius: 4px; }
+a { color: var(--ac); }
+.pill { display: inline-block; font: 500 11px/18px var(--mono); padding: 0 7px; border-radius: 999px; background: var(--ac-soft); color: var(--ac); white-space: nowrap; }
+.pill.n { background: var(--iris-bg); color: var(--iris); }
+table.list { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0 16px; }
+table.list th { text-align: left; font-weight: 600; color: var(--m); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding: 8px 10px; border-bottom: 1px solid var(--b); }
+table.list td { padding: 9px 10px; border-bottom: 1px solid var(--ru); vertical-align: top; }
+table.list td:first-child { white-space: nowrap; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+.toc a { font-size: 13px; padding: 4px 10px; border: 1px solid var(--b); border-radius: 999px; text-decoration: none; background: var(--s); color: var(--t2); }
+.note { background: var(--s); border: 1px solid var(--b); border-left: 3px solid var(--ac); border-radius: 8px; padding: 12px 16px; margin: 14px 0; }
+.note b { color: var(--ac); }
+.pros { font-size: 13.5px; margin: 6px 0 0; padding-left: 18px; }
+.pros .y::marker { color: var(--pos); } .pros .n::marker { color: var(--neg); }
+.twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+.card { background: var(--s); border: 1px solid var(--b); border-radius: 10px; padding: 12px 16px; font-size: 13.5px; }
+.card h4 { margin: 0 0 6px; font-size: 14px; }
+kbd { font: 500 11px var(--mono); border: 1px solid var(--b); border-radius: 4px; padding: 1px 5px; background: var(--ru); color: var(--m); }
+.fb { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--ru); font-size: 14px; }
+.fb .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; }
+.fb .opts { color: var(--m); font-size: 13px; }
+
+/* ---- the mock window ---- */
+.mock { margin: 14px 0 6px; border: 1px solid var(--b); border-radius: 12px; overflow: hidden; background: var(--g); font-size: 12.5px; line-height: 1.4; }
+.mock .cap { font-size: 12px; color: var(--m); padding: 6px 12px; background: var(--s); border-bottom: 1px solid var(--b); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.mock .cap b { color: var(--t); }
+.win { display: grid; grid-template-columns: 186px minmax(0, 1fr); min-height: 520px; }
+.side { background: var(--side); padding: 8px; border-right: 1px solid var(--b); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px; font-weight: 600; font-size: 12.5px; }
+.brand i { width: 20px; height: 20px; border-radius: 6px; background: linear-gradient(135deg, var(--ac), var(--iris)); flex: none; }
+.nav a { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-radius: 7px; color: var(--t2); text-decoration: none; white-space: nowrap; overflow: hidden; }
+.nav a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.nav a .ic { width: 13px; height: 13px; border-radius: 3px; background: var(--m); opacity: .5; flex: none; }
+.nav a .cnt { margin-left: auto; font: 11px var(--mono); color: var(--m); }
+.nav a .cnt.live { color: var(--ac); font-weight: 600; }
+.nav a.sub { padding-left: 24px; height: 24px; font-size: 12px; }
+.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--b); flex: none; }
+.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); }
+.nav a.sub.in { animation: slidein .25s ease-out; }
+@keyframes slidein { from { opacity: 0; transform: translateX(-6px); } }
+.body { display: flex; flex-direction: column; min-width: 0; }
+.top { height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--b); }
+.top .search { flex: 0 1 280px; height: 26px; border: 1px solid var(--b); border-radius: 7px; background: var(--s); display: flex; align-items: center; padding: 0 8px; color: var(--m); gap: 6px; font-size: 12px; }
+.top .right { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--m); font: 11px var(--mono); }
+.livestrip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 6px; border-radius: 999px; background: var(--ac-soft); border: 1px solid var(--ac-b); color: var(--ac); font: 500 11px var(--sans); }
+.livestrip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ac); }
+.sheet { padding: 14px 18px 18px; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.sheet h1 { font-size: 20px; margin: 0 0 2px; }
+.sheet .find { color: var(--m); margin: 0; font-size: 12.5px; max-width: 70ch; }
+.trow { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--b); background: var(--s); font: 500 12px var(--sans); white-space: nowrap; color: var(--t); cursor: pointer; }
+.btn.primary { background: var(--ac); color: var(--btn-fg); border-color: var(--ac); }
+.btn.sm { height: 22px; font-size: 11.5px; padding: 0 8px; }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--m); }
+.seg { display: inline-flex; border: 1px solid var(--b); border-radius: 7px; overflow: hidden; background: var(--s); }
+.seg a { padding: 3px 9px; font-size: 12px; color: var(--t2); border-right: 1px solid var(--b); cursor: pointer; }
+.seg a:last-child { border-right: 0; }
+.seg a.on { background: var(--act); color: var(--t); font-weight: 500; }
+.panel { background: var(--s); border: 1px solid var(--b); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.ph { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 6px; }
+.ph b { font-size: 13.5px; }
+/* KPI tiles that update in place */
+.kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.kpi { background: var(--s); border: 1px solid var(--b); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+.kpi .l { font-size: 11px; color: var(--m); }
+.kpi strong { display: block; font: 600 20px var(--mono); line-height: 1.25; margin: 2px 0; transition: background .2s; border-radius: 4px; }
+.kpi strong.flash { background: var(--hl); }
+.kpi .n { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi.live strong { color: var(--ac); }
+/* the distribution: aligned columns, a bar that fills its column */
+.dist .stack { display: flex; height: 14px; border-radius: 5px; overflow: hidden; gap: 1px; margin: 6px 0 10px; background: var(--track); }
+.dist .stack i { display: block; height: 100%; min-width: 2px; }
+.drow { display: grid; grid-template-columns: 12px 150px minmax(0, 1fr) 84px 84px 84px 64px; gap: 10px; align-items: center; font-size: 12.5px; padding: 4px 0; }
+.drow.head { color: var(--m); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--ru); padding-bottom: 6px; }
+.drow .sw { width: 10px; height: 10px; border-radius: 3px; }
+.drow .nm { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--t); text-decoration: none; }
+.drow .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.drow .track i { display: block; height: 100%; background: var(--ac-b); }
+.drow .num { text-align: right; font: 12px var(--mono); }
+.drow .num.on { font-weight: 600; color: var(--t); }
+.drow .m { color: var(--m); text-align: right; font: 11px var(--mono); }
+.drow:hover .nm { color: var(--acT); }
+/* small controls shared by the variations */
+.ib { width: 24px; height: 24px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: var(--m); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; flex: none; }
+.ib:hover { background: var(--hover); border-color: var(--b); color: var(--t); }
+.ib svg { width: 14px; height: 14px; }
+.ib.pinned { color: var(--acT); }
+.ib.pinned svg { fill: var(--acT); }
+.tagsx { display: inline-flex; gap: 4px; align-items: center; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+.tagc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font: 500 11px var(--sans); white-space: nowrap; }
+.tagc.c0 { background: var(--iris-bg); color: var(--iris); } .tagc.c1 { background: var(--ac-soft); color: var(--acT); } .tagc.c2 { background: var(--warn-bg); color: var(--warn); }
+.name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name input { font: 600 14px var(--sans); color: var(--t); border: 1px solid var(--ac); border-radius: 6px; padding: 1px 6px; width: 100%; outline: none; background: var(--s); }
+.spark { height: 34px; display: flex; align-items: flex-end; gap: 2px; width: 100%; }
+.spark i { flex: 1 1 0; min-width: 2px; min-height: 1px; background: var(--ac-b); border-radius: 1px 1px 0 0; display: block; }
+.spark i.last { background: var(--ac); }
+.area { width: 100%; height: 44px; display: block; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--m); }
+.pager .btn.sm.on { background: var(--act); border-color: var(--ac-b); color: var(--t); }
+.toast { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--t); color: var(--g); padding: 7px 14px; border-radius: 8px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: 1; }
+.body { position: relative; }
+.help { font-size: 11.5px; color: var(--m); margin-left: auto; }
+/* A: cards */
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.pc { background: var(--s); border: 1px solid var(--b); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; position: relative; }
+.pc:hover { border-color: var(--ac-b); box-shadow: 0 2px 10px rgba(15,23,42,.06); }
+.pc.live { box-shadow: inset 3px 0 0 var(--ac); }
+.pc .hd { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.pc .hd .name { flex: 1; }
+.pc .hd .ib.edit { opacity: 0; }
+.pc:hover .hd .ib.edit, .pc:focus-within .hd .ib.edit { opacity: 1; }
+.pc .path { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc .cost { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.pc .cost b { font: 600 17px var(--mono); }
+.pc .cost small { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc .row { display: flex; justify-content: space-between; gap: 8px; font: 11px var(--mono); color: var(--m); }
+.pc .row .lv { color: var(--acT); font-weight: 600; }
+.pc .tl { display: flex; align-items: center; gap: 4px; min-width: 0; height: 22px; }
+/* B: table */
+table.pt { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.pt th { text-align: left; color: var(--m); font-weight: 500; font-size: 11.5px; padding: 6px 8px; border-bottom: 1px solid var(--b); white-space: nowrap; cursor: pointer; }
+table.pt th.num, table.pt td.num { text-align: right; font-family: var(--mono); }
+table.pt th.on { color: var(--t); font-weight: 600; }
+table.pt th.on::after { content: " ↓"; }
+table.pt td { padding: 7px 8px; border-bottom: 1px solid var(--ru); vertical-align: middle; }
+table.pt tr.r { cursor: pointer; }
+table.pt tr.r:hover td { background: var(--hover); }
+table.pt tr.r.live td:first-child { box-shadow: inset 3px 0 0 var(--ac); }
+table.pt td .hd { display: flex; align-items: center; gap: 4px; min-width: 0; }
+table.pt td .path { font: 10.5px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+table.pt .spark { height: 22px; width: 110px; }
+table.pt td .ib.edit { opacity: 0; }
+table.pt tr:hover td .ib.edit { opacity: 1; }
+table.pt .lv { color: var(--acT); font-weight: 600; }
+/* C: wide row-cards */
+.rows { display: flex; flex-direction: column; gap: 8px; }
+.rc { background: var(--s); border: 1px solid var(--b); border-radius: 12px; padding: 10px 14px; display: grid; grid-template-columns: minmax(180px, 1.2fr) minmax(0, 2fr) 110px 150px auto; gap: 14px; align-items: center; cursor: pointer; min-width: 0; }
+.rc:hover { border-color: var(--ac-b); box-shadow: 0 2px 10px rgba(15,23,42,.06); }
+.rc.live { box-shadow: inset 3px 0 0 var(--ac); }
+.rc .who { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rc .who .hd { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.rc .who .path { font: 11px var(--mono); color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rc .num { font: 600 15px var(--mono); text-align: right; }
+.rc .num small { display: block; font: 11px var(--mono); color: var(--m); font-weight: 400; }
+.rc .meta { font: 11px var(--mono); color: var(--m); text-align: right; }
+.rc .meta .lv { color: var(--acT); font-weight: 600; }
+.rc .acts { display: flex; gap: 2px; }
+.rc .hd .ib.edit { opacity: 0; }
+.rc:hover .hd .ib.edit { opacity: 1; }
+@media (max-width: 900px) { .win { grid-template-columns: 1fr; } .side { display: none; } .kpis { grid-template-columns: 1fr 1fr; } .cards { grid-template-columns: 1fr 1fr; } .rc { grid-template-columns: 1fr; } .drow { grid-template-columns: 12px 1fr 70px; } .drow > :nth-child(n+4) { display: none; } }
+/* the feedback form */
+.cbox { margin: 10px 0 4px; }
+.cbox label { display: block; font-size: 12.5px; color: var(--m); margin-bottom: 4px; }
+.cbox textarea, #out { width: 100%; font: 13px/1.45 var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.cbox textarea:focus, #out:focus { outline: 2px solid var(--ac); outline-offset: 1px; }
+.q { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--ru); }
+.q .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; height: 22px; }
+.q .qt { font-size: 14px; margin-bottom: 6px; }
+.q .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.q .opts label { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--b); border-radius: 999px; background: var(--s); font-size: 13px; cursor: pointer; }
+.q .opts label:has(input:checked) { background: var(--act); border-color: var(--ac-b); font-weight: 500; }
+.q .opts input { margin: 0; accent-color: var(--ac); }
+.q .other { margin-top: 6px; }
+.q .other input { width: 100%; max-width: 520px; font: 13px var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 6px 10px; }
+.fbar2 { display: flex; gap: 8px; align-items: center; margin: 14px 0 8px; }
+#out { font-family: var(--mono); font-size: 12px; }
+#copied { color: var(--acT); }
+</style>
+</head>
+<body>
+<main>
+<h1>Projects page: three variations</h1>
+<p class="lead">Working mockups, not screenshots: pin, rename, tag, open, page and the live KPI refresh all behave as they would in the app. Each variation uses your real numbers from today. Nothing is applied in the app yet; your comments on the <a href="#feedback">sheet</a> at the end decide what is built.</p>
+<div class="note" id="built"><b>Built from your answers (4 November 2026, uncommitted on develop):</b> the common fixes; <b>C · Row cards</b> as the Projects layout with a page size of 10, 25 or 50; pin, rename (pencil and double-click, on the Projects page and in a project's Sessions header), tag icon with count, click-to-open, the chart tabs, the sort, the pager and the background refresh all in place; the project view without the rail, with its accounts and tags as chips and the panel about the project only when it spans several folders or accounts; System prompts tabs with the file as the tooltip; the Skills header with the tools' icons; <b>D2</b> Accounts + Usage with input, output and cache read in the tokens tooltip and the CSV; By model on the account page. The feedback form below is kept for the next round.</div>
+<div class="toc"><a href="#common">What every variation fixes</a><a href="#a">A · Cards</a><a href="#b">B · Table</a><a href="#c">C · Row cards</a><a href="#project">The project view</a><a href="#prompts">System prompts tabs</a><a href="#skills">Skills header</a><a href="#accounts">Accounts + Usage</a><a href="#feedback">Feedback sheet</a></div>
+
+<h2 id="common">What every variation fixes</h2>
+<table class="list">
+<thead><tr><th>#</th><th>You saw</th><th>Cause</th><th>Fix, in all three</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Alignment off: upper-case names and paths on the running projects, numbers run together ("1 ACCOUNT1 LIVE"), the distribution's name column floating.</td><td>Two class names collided with the app's own styles: <code>.live</code> (the Overview's upper-case status line) and <code>.bar</code> (the accounts' limit meter). The grid also repeated the chosen metric as a second column.</td><td>Own class names (<code>.pc.running</code>, <code>.track</code>); the distribution gets a header row, left-aligned names, the chosen metric shown bold in its own column instead of twice, and a bar that fills its column.</td></tr>
+<tr><td>2</td><td>37 cards in one scroll; the sparkline narrower than the card.</td><td>No paging; the 7-day series has 7 bars, which were drawn at their content width.</td><td>Pages of 12 (A), 25 (B) or 10 (C) with a pager; the chart stretches to the card width whatever the day count.</td></tr>
+<tr><td>3, 9</td><td>Pinning redraws the whole page; the KPI tiles redraw with it, and on every background refresh.</td><td>Every change went through the shared "redraw the page" helper.</td><td>Pin toggles the icon and the sidebar entry in place, nothing else moves. The five tiles update their numbers in place on the five-minute refresh, with a short highlight on a number that changed (try <b>Simulate a refresh</b> below).</td></tr>
+<tr><td>4</td><td>Pin hidden in the ⋯ menu.</td><td></td><td>A pin icon on every card or row: outlined, filled when pinned, a tooltip says which.</td></tr>
+<tr><td>6</td><td>The + for tags is unclear and wraps to a second line.</td><td>A dashed "+" with no meaning of its own, placed inside a wrapping line.</td><td>A tag icon with the count beside the chips, on one line that never wraps: extra chips become "+2" with a tooltip.</td></tr>
+<tr><td>7</td><td>Rename buried in the menu.</td><td></td><td>A pencil beside the name on hover, and a double-click on the name: the name becomes a field, <kbd>Enter</kbd> saves, <kbd>Esc</kbd> cancels, the sidebar pin and the Sessions header follow.</td></tr>
+<tr><td>8</td><td>Opening a project takes a click on the name or the menu.</td><td></td><td>The whole card or row opens the project's sessions; the icons act on their own and do not open it. <kbd>Enter</kbd> on a focused card opens it too.</td></tr>
+<tr><td>10</td><td>Tokens / Cost / Sessions above the distribution reload the whole page.</td><td>The choice was written to the hash, which redraws the page.</td><td>The choice redraws only the distribution panel, in place, and is remembered for the page (try it below). Same for the sort and the range: only the list under them redraws.</td></tr>
+<tr><td>11</td><td>A project's sessions page shows the rail of every other project.</td><td>One Sessions page served both views.</td><td>A project view has no project rail. Two options are mocked under <a href="#project">The project view</a>: the list full width with the project's own filters in the bar, or a narrow panel about this project only.</td></tr>
+<tr><td>13</td><td>Skills: the new header row (tool names, "242 of 251", a tick) does not follow the design: text where the other pages show the tool's icon, its own spacing, and the ticks not aligned with the rows.</td><td>The header was added without the table's header rules.</td><td>The header follows the MCP page: the tool's icon, the count in small type under it, then the tick, with the table's 12 px header padding and the column width the rows use, so icons, counts and ticks line up down the column. Mocked under <a href="#skills">Skills header</a>.</td></tr>
+<tr><td>12</td><td>System prompts: the tabs read "Claude Code · CLAUDE.md", "Codex · AGENTS.md" and so on.</td><td></td><td>The tabs carry the tool name only; the file name is the tab's tooltip and shows under the editor's title ("Writes to C:\Users\…\CLAUDE.md"), where it already is. Mocked under <a href="#prompts">System prompts tabs</a>, with an alternative that keeps a small ⓘ.</td></tr>
+</tbody>
+</table>
+<p>The distribution panel below is the common part, shown once; it sits above the projects in every variation.</p>
+<div class="mock"><div class="cap"><b>Common · KPI tiles that refresh in place, and the distribution with aligned columns</b><button class="btn sm" id="sim">Simulate a background refresh</button></div>
+<div style="padding:14px;background:var(--g);display:flex;flex-direction:column;gap:12px" id="common"></div></div>
+
+<h2 id="a">Variation A · Cards, 12 a page</h2>
+<p>The current layout kept, with the eight fixes. Four cards a row, a pager underneath, the chart across the whole card, the pin and tag icons in the card head, the pencil on hover, and the whole card opens the project. Best when you recognise projects by their shape of activity.</p>
+<div class="mock"><div class="cap"><b>A · Cards</b><span>try: hover a card, click the pin, double-click a name, click the card</span></div><div class="win" id="va"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">Closest to what you have; the fixes are surgical.</li><li class="y">The sparkline is the biggest element: activity is the first thing you see.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">Twelve projects a page: Bunyan and the rest need three pages at 37.</li><li class="n">Cost and sessions are not in columns, so projects are harder to compare than in B.</li></ul></div></div><div class="cbox"><label for="c-A">Your comments on Variation A · Cards</label><textarea id="c-A" data-comment="A" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+
+<h2 id="b">Variation B · Table, 25 a page</h2>
+<p>One row per project with sortable columns: name, activity, sessions, tokens, cost, accounts, last active. Dense enough that 37 projects fit on two pages; the icons sit at the right of the row and show on hover; the row opens the project. Best when you compare projects by their numbers.</p>
+<div class="mock"><div class="cap"><b>B · Table</b><span>try: click a column header to sort, hover a row, click the pin, double-click a name, click the row</span></div><div class="win" id="vb"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">Everything comparable in columns; sorting by any of them.</li><li class="y">Most projects per page; the pager is rarely needed.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">The chart is a small cell; less of a picture of each project.</li><li class="n">Looks like Usage by account; less of its own page.</li></ul></div></div><div class="cbox"><label for="c-B">Your comments on Variation B · Table</label><textarea id="c-B" data-comment="B" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+
+<h2 id="c">Variation C · Row cards, 10 a page</h2>
+<p>A wide card per project: name and path on the left, a full-width area chart of its activity in the middle, cost and tokens, then sessions, accounts and last active, and the icons at the right. The chart gets the most room of the three. Best when the trend of each project matters more than density.</p>
+<div class="mock"><div class="cap"><b>C · Row cards</b><span>try: hover a row, click the pin, double-click a name, click the row</span></div><div class="win" id="vc"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">A real chart per project, wide enough to read.</li><li class="y">Numbers still line up down the page, so projects compare.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">Ten a page: four pages at 37 projects.</li><li class="n">Tall rows; the first screen shows about six projects.</li></ul></div></div><div class="cbox"><label for="c-C">Your comments on Variation C · Row cards</label><textarea id="c-C" data-comment="C" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+
+<h2 id="project">The project view: no rail of other projects</h2>
+<p>Opened from a card, a row, a pin or the live strip. The header carries the project's numbers, tags and the rename pencil; the list below is the project's sessions only. Two options for the space the rail used to take.</p>
+<h3>Option 1 · Full width, the project's filters in the bar</h3>
+<div class="mock"><div class="cap"><b>Project view · full width</b><span>the bar holds this project's accounts, tools and tags as chips; the list takes the whole width</span></div><div class="win" id="pv1"></div></div>
+<h3>Option 2 · A narrow panel about this project</h3>
+<p>The same header and list, with a 220 px panel on the left that holds only what belongs to this project: its running sessions, its accounts with their share, its tags, its folders (worktrees and sub-folders that resolved to it), and a 30-day chart. Useful for a project like Bunyan with 115 sessions in several folders; redundant for a project with three.</p>
+<div class="mock"><div class="cap"><b>Project view · with a panel about the project</b></div><div class="win" id="pv2"></div></div>
+
+<div class="cbox"><label for="c-project">Your comments on the project view (option 1 or 2)</label><textarea id="c-project" data-comment="project" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+<h2 id="prompts">System prompts tabs</h2>
+<p>Two ways to shorten the tabs. In both, the file's full path stays under the editor's title, where it is today.</p>
+<div class="twocol">
+<div class="card"><h4>Tool name only, file name as the tooltip</h4><div style="display:flex;gap:22px;border-bottom:1px solid var(--ru);margin-top:8px"><span style="padding:8px 0;font-weight:600;box-shadow:inset 0 -2px 0 var(--ac);cursor:help" title="CLAUDE.md">Claude Code</span><span style="padding:8px 0;color:var(--m);cursor:help" title="AGENTS.md">Codex</span><span style="padding:8px 0;color:var(--m);cursor:help" title="AGENTS.md">OpenCode</span><span style="padding:8px 0;color:var(--m);cursor:help" title="GEMINI.md">Antigravity</span></div><p style="margin:8px 0 0;font-size:12.5px;color:var(--m)">Hover a tab for its file. Cleanest; the file name is one hover away and always printed under the editor's title.</p></div>
+<div class="card"><h4>Tool name with a small file marker</h4><div style="display:flex;gap:22px;border-bottom:1px solid var(--ru);margin-top:8px"><span style="padding:8px 0;font-weight:600;box-shadow:inset 0 -2px 0 var(--ac)">Claude Code <span style="font:10.5px var(--mono);color:var(--m);border:1px solid var(--b);border-radius:4px;padding:0 4px;cursor:help" title="CLAUDE.md">.md</span></span><span style="padding:8px 0;color:var(--m)">Codex <span style="font:10.5px var(--mono);color:var(--m);border:1px solid var(--b);border-radius:4px;padding:0 4px;cursor:help" title="AGENTS.md">.md</span></span><span style="padding:8px 0;color:var(--m)">OpenCode <span style="font:10.5px var(--mono);color:var(--m);border:1px solid var(--b);border-radius:4px;padding:0 4px;cursor:help" title="AGENTS.md">.md</span></span><span style="padding:8px 0;color:var(--m)">Antigravity <span style="font:10.5px var(--mono);color:var(--m);border:1px solid var(--b);border-radius:4px;padding:0 4px;cursor:help" title="GEMINI.md">.md</span></span></div><p style="margin:8px 0 0;font-size:12.5px;color:var(--m)">A marker says there is a file behind each tab; its tooltip names it. One more thing on the line, for people who would not think to hover.</p></div>
+</div>
+
+<div class="cbox"><label for="c-prompts">Your comments on the System prompts tabs</label><textarea id="c-prompts" data-comment="prompts" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+<h2 id="skills">Skills header, as the design draws tables</h2>
+<p>The same header as MCP servers: the tool's icon (the one Accounts and the rail use), the count under it in small type, and the column tick under that. Header padding 12 px, the tick column 54 px wide like the rows' ticks, the Source column right before it. The tick is indeterminate (a dash) when some are linked, filled when all are, empty when none.</p>
+<div class="mock"><div class="cap"><b>Skills · header row</b><span>hover a header for its tooltip</span></div>
+<div id="skh"></div>
+<div class="cbox"><label for="c-skills">Your comments on the Skills header</label><textarea id="c-skills" data-comment="skills" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+<h2 id="accounts">Accounts + Usage by account, merged</h2>
+<p>Usage by account leaves the sidebar. What it held moves into Accounts: the stacked chart of tokens per day by account, the ledger (tokens, input, output, cache read, requests, list price), the By model bars, the 7 / 14 / 30 day range and Export CSV. Three ways to lay that out, with your real accounts and their 7-day tokens (costs here are illustrative).</p>
+<table class="list"><thead><tr><th>What</th><th>D1 · Tabs</th><th>D2 · One page</th><th>D3 · List and pane</th></tr></thead><tbody>
+<tr><td>Tokens per day chart</td><td>Usage tab, top</td><td>A folding panel above the tool groups, open by default</td><td>The right pane, for every account or the chosen one</td></tr>
+<tr><td>Ledger table</td><td>Usage tab</td><td>Columns in each account row, with a sparkline</td><td>The right pane, under the chart</td></tr>
+<tr><td>By model</td><td>Usage tab, bottom</td><td>A folded panel at the bottom</td><td>The right pane, for the chosen account</td></tr>
+<tr><td>7 / 14 / 30 days and Export CSV</td><td>The Usage tab's header</td><td>The page header; the range also sets "tokens · 7 days" on the rows</td><td>The pane's header</td></tr>
+<tr><td>Limits, Start, Log in, the ⋯ menu</td><td>Accounts tab, as today</td><td>As today, in the same rows</td><td>Limits as a small bar in the list; Start and ⋯ in the pane's header</td></tr>
+<tr><td>Account detail page</td><td colspan="3">Stays: its Overview, Sessions, Projects and Profile settings tabs are unchanged; clicking an account still opens it</td></tr>
+</tbody></table>
+
+<h3>D1 · Tabs on Accounts</h3>
+<p>Accounts gets a tab row: <b>Accounts</b> is today's page, <b>Usage</b> is today's Usage by account page. The smallest change; nothing on either tab moves.</p>
+<div class="mock"><div class="cap"><b>D1 · Tabs</b><span>try: the tabs, the 7 / 14 / 30 range on the Usage tab (redraws the panels in place)</span></div><div class="win" id="d1"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">One entry fewer in the sidebar, nothing to relearn.</li><li class="y">Both tabs keep their room: the ledger stays a full table.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">Usage is still a separate screen, one click further than today.</li><li class="n">The account rows still show only "tokens · 7 days": no cost beside the limits.</li></ul></div></div><div class="cbox"><label for="c-D1">Your comments on D1 · Tabs</label><textarea id="c-D1" data-comment="D1" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+
+<h3>D2 · One page: usage in the rows, the chart above the groups</h3>
+<p>Each account row gains a sparkline, its cost and its requests for the range; each tool group header totals them. The chart of tokens per day folds above the groups; By model folds below. The range and Export CSV sit in the page header. One screen answers both "which account has room" and "what did each cost".</p>
+<div class="mock"><div class="cap"><b>D2 · One page</b><span>try: the range (rows, headers and chart redraw in place), fold the chart and By model</span></div><div class="win" id="d2"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">Room and cost side by side, per account, where you choose which one to start.</li><li class="y">No second screen; the chart is there when wanted and folds away.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">Wider rows: input, output and cache read move into a tooltip on the tokens, not columns.</li><li class="n">A longer page when every tool has several accounts.</li></ul></div></div><div class="cbox"><label for="c-D2">Your comments on D2 · One page</label><textarea id="c-D2" data-comment="D2" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+
+<h3>D3 · List on the left, usage on the right</h3>
+<p>A compact account list on the left (name, plan, the tightest limit as a bar, 7-day tokens), grouped by tool. The right pane shows <b>All accounts</b> (the stacked chart, the ledger, By model) or, when an account is chosen, that account's own chart, its models and its numbers, with Start, Log in and the ⋯ menu in the pane's header. Clicking the name opens the account page as today.</p>
+<div class="mock"><div class="cap"><b>D3 · List and pane</b><span>try: pick an account on the left, then All accounts</span></div><div class="win" id="d3"></div></div>
+<div class="twocol"><div class="card"><h4>Why it works</h4><ul class="pros"><li class="y">Usage per account at one click without leaving the page; the whole-fleet view one click back.</li><li class="y">Scales to many accounts: the list is compact.</li></ul></div><div class="card"><h4>Costs</h4><ul class="pros"><li class="n">The limits lose their room: one bar per account instead of every tier.</li><li class="n">The biggest change of the three; the first-run tour and the tests follow.</li></ul></div></div><div class="cbox"><label for="c-D3">Your comments on D3 · List and pane</label><textarea id="c-D3" data-comment="D3" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+<div class="note"><b>Recommendation for this merge:</b> D2. Accounts is the page you open to pick where to work next, and cost beside room is the number that decides it. D1 is the fallback if the wider rows feel crowded on your screens; D3 only if the account count grows past ten.</div>
+
+<div class="cbox"><label for="c-common">Your comments on the common fixes (alignment, paging, pin, tags, rename, open, in-place refresh)</label><textarea id="c-common" data-comment="common" rows="2" placeholder="What to keep, change or drop…"></textarea></div>
+<div class="note"><b>Recommendation:</b> B as the default view with a grid/list toggle that gives A, remembered in the hash. B answers "which project costs what" at a glance, A answers "what has been busy", and the toggle is a day's work on top of either. C is the one to pick only if the trend line per project matters to you more than density.</div>
+
+<h2 id="feedback">Feedback sheet</h2>
+<p>Pick an answer for each question, add what you like in the boxes, then press <b>Copy my answers</b> and paste the text into the chat. Your draft stays in this browser until you clear it.</p>
+<div id="form"></div>
+<div class="cbox"><label for="c-general">Anything else</label><textarea id="c-general" data-comment="general" rows="3" placeholder="Other requests, priorities, things I missed…"></textarea></div>
+<div class="fbar2"><button class="btn primary" id="copy">Copy my answers</button><button class="btn" id="clear">Clear the draft</button><span id="copied" class="help"></span></div>
+<textarea id="out" rows="10" readonly aria-label="Your answers as text" placeholder="Your answers appear here after Copy, in case the clipboard is refused: select and copy them by hand."></textarea>
+<script>
+// ---- your real numbers (today, 7 days) ----
+const P = [
+  { k: 'github.com/abushanab-net/bunyan', n: 'Bunyan', p: 'github.com/abushanab-net/bunyan', c: 1311.70, t: 7.23e9, s: 114, a: 2, live: 1, last: 'Today 19:47', tags: ['release', 'client-x', 'audit'], sp: [40, 55, 48, 70, 62, 90, 100] },
+  { k: 'sanduq', n: 'sanduq', p: 'github.com/samykabu/sanduq', c: 534.77, t: 6.22e6, s: 3, a: 2, live: 0, last: 'Sat, Oct 31', tags: [], sp: [60, 30, 20, 0, 0, 0, 0] },
+  { k: 'reprepo', n: 'RepRepo', p: 'github.com/abushanab-net/reprepo', c: 511.70, t: 1.14e6, s: 1, a: 1, live: 0, last: 'Sun, Nov 1, 03:53', tags: [], sp: [80, 10, 50, 40, 0, 0, 0] },
+  { k: 'pms', n: 'PropertyManagment', p: 'ummalqura.visualstudio.com/pms2/_git/propertymanagment', c: 99.80, t: 581.94e6, s: 14, a: 1, live: 0, last: 'Yesterday 15:40', tags: ['client-x'], sp: [30, 50, 40, 20, 70, 0, 0] },
+  { k: 'sabus', n: 'sabus', p: 'C:\\Users\\sabus', c: 75.62, t: 86.48e6, s: 13, a: 3, live: 1, last: 'Today 17:10', tags: [], sp: [10, 90, 5, 5, 60, 5, 20] },
+  { k: 'hm', n: 'HarnessManager', p: 'github.com/abushanab-net/harnessmanager', c: 32.80, t: 256.4e6, s: 1, a: 1, live: 1, last: 'Today 19:22', tags: ['release'], sp: [0, 0, 0, 0, 0, 20, 100] },
+  { k: 'admin', n: 'AdminPortal', p: 'github.com/teksagit/adminportal', c: 16.30, t: 147.4e6, s: 3, a: 1, live: 1, last: 'Today 18:02', tags: [], sp: [0, 0, 0, 40, 80, 60, 30] },
+  { k: 'drive', n: 'D:\\', p: 'D:\\', c: 7.44, t: 107.8e3, s: 2, a: 1, live: 0, last: 'Today 05:40', tags: [], sp: [0, 0, 0, 0, 50, 0, 0] },
+  { k: 'audit', n: 'Sanduq-Workflow-Audit-20261104', p: 'D:\\Projects\\Bunyan\\Instance_2\\Sanduq-Workflow-Audit-20261104', c: 5.28, t: 26.5e3, s: 1, a: 1, live: 0, last: 'Today 17:41', tags: ['audit'], sp: [0, 0, 0, 0, 0, 0, 100] },
+  { k: 't1', n: 'T-0001-claude', p: 'D:\\Projects\\abushanab-net\\Diwan\\.worktrees\\T-0001', c: 4.29, t: 16.17e6, s: 7, a: 1, live: 0, last: 'Sat, Oct 31', tags: [], sp: [0, 0, 60, 0, 0, 0, 0] },
+  { k: 'fr', n: 'feature-run', p: 'C:\\Users\\sabus\\AppData\\Local\\Temp\\claude\\x', c: 0.00, t: 349.2e3, s: 1, a: 1, live: 0, last: 'Fri, Oct 30', tags: [], sp: [0, 70, 0, 0, 0, 0, 0] },
+  { k: 'nt', n: 'no-trigger', p: 'C:\\Users\\sabus\\AppData\\Local\\Temp\\claude\\y', c: 0.18, t: 438, s: 1, a: 1, live: 0, last: 'Fri, Oct 30', tags: [], sp: [0, 30, 0, 0, 0, 0, 0] },
+  { k: 'diwan', n: 'Diwan', p: 'github.com/abushanab-net/diwan', c: 22.10, t: 9.8e6, s: 4, a: 1, live: 0, last: 'Mon, Nov 2', tags: [], sp: [20, 20, 60, 10, 0, 0, 0] },
+  { k: 'athar', n: 'Athar', p: 'github.com/abushanab-net/athar', c: 18.40, t: 7.1e6, s: 6, a: 1, live: 0, last: 'Tue, Nov 3', tags: [], sp: [0, 10, 40, 30, 50, 0, 0] },
+];
+for (let i = 15; i <= 37; i++) P.push({ k: 'p' + i, n: 'project-' + i, p: 'D:\\Projects\\misc\\project-' + i, c: Math.round(Math.random() * 400) / 100, t: Math.round(Math.random() * 2e6), s: 1 + (i % 3), a: 1, live: 0, last: 'Oct ' + (28 - (i % 9)), tags: [], sp: Array.from({ length: 7 }, () => Math.round(Math.random() * 60)) });
+const pins = new Set(['github.com/abushanab-net/bunyan']);
+const fmt = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+const money = (c) => '$' + c.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ICON = {claude: 'data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHRpdGxlPkNsYXVkZSBDb2RlPC90aXRsZT48cGF0aCBjbGlwLXJ1bGU9ImV2ZW5vZGQiIGQ9Ik0yMC45OTggMTAuOTQ5SDI0djMuMTAyaC0zdjMuMDI4aC0xLjQ4N1YyMEgxOHYtMi45MjFoLTEuNDg3VjIwSDE1di0yLjkyMUg5VjIwSDcuNDg4di0yLjkyMUg2VjIwSDQuNDg3di0yLjkyMUgzVjE0LjA1SDBWMTAuOTVoM1Y1aDE3Ljk5OHY1Ljk0OXpNNiAxMC45NDloMS40ODhWOC4xMDJINnYyLjg0N3ptMTAuNTEgMEgxOFY4LjEwMmgtMS40OXYyLjg0N3oiIGZpbGw9IiNEOTc3NTciIGZpbGwtcnVsZT0iZXZlbm9kZCI+PC9wYXRoPjwvc3ZnPg==', codex: 'data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHRpdGxlPkNvZGV4PC90aXRsZT48cGF0aCBkPSJNMTkuNTAzIDBINC40OTZBNC40OTYgNC40OTYgMCAwMDAgNC40OTZ2MTUuMDA3QTQuNDk2IDQuNDk2IDAgMDA0LjQ5NiAyNGgxNS4wMDdBNC40OTYgNC40OTYgMCAwMDI0IDE5LjUwM1Y0LjQ5NkE0LjQ5NiA0LjQ5NiAwIDAwMTkuNTAzIDB6IiBmaWxsPSIjZmZmIj48L3BhdGg+PHBhdGggZD0iTTkuMDY0IDMuMzQ0YTQuNTc4IDQuNTc4IDAgMDEyLjI4NS0uMzEyYzEgLjExNSAxLjg5MS41NCAyLjY3MyAxLjI3NS4wMS4wMS4wMjQuMDE3LjAzNy4wMjFhLjA5LjA5IDAgMDAuMDQzIDAgNC41NSA0LjU1IDAgMDEzLjA0Ni4yNzVsLjA0Ny4wMjIuMTE2LjA1N2E0LjU4MSA0LjU4MSAwIDAxMi4xODggMi4zOTljLjIwOS41MS4zMTMgMS4wNDEuMzE1IDEuNTk1YTQuMjQgNC4yNCAwIDAxLS4xMzQgMS4yMjMuMTIzLjEyMyAwIDAwLjAzLjExNWMuNTk0LjYwNy45ODggMS4zMyAxLjE4MyAyLjE3LjI4OSAxLjQyNS0uMDA3IDIuNzEtLjg4NyAzLjg1NGwtLjEzNi4xNjZhNC41NDggNC41NDggMCAwMS0yLjIwMSAxLjM4OC4xMjMuMTIzIDAgMDAtLjA4MS4wNzZjLS4xOTEuNTUxLS4zODMgMS4wMjMtLjc0IDEuNDk0LS45IDEuMTg3LTIuMjIyIDEuODQ2LTMuNzExIDEuODM4LTEuMTg3LS4wMDYtMi4yMzktLjQ0LTMuMTU3LTEuMzAyYS4xMDcuMTA3IDAgMDAtLjEwNS0uMDI0Yy0uMzg4LjEyNS0uNzguMTQzLTEuMjA0LjEzOGE0LjQ0MSA0LjQ0MSAwIDAxLTEuOTQ1LS40NjYgNC41NDQgNC41NDQgMCAwMS0xLjYxLTEuMzM1Yy0uMTUyLS4yMDItLjMwMy0uMzkyLS40MTQtLjYxN2E1LjgxIDUuODEgMCAwMS0uMzctLjk2MSA0LjU4MiA0LjU4MiAwIDAxLS4wMTQtMi4yOTguMTI0LjEyNCAwIDAwLjAwNi0uMDU2LjA4NS4wODUgMCAwMC0uMDI3LS4wNDggNC40NjcgNC40NjcgMCAwMS0xLjAzNC0xLjY1MSAzLjg5NiAzLjg5NiAwIDAxLS4yNTEtMS4xOTIgNS4xODkgNS4xODkgMCAwMS4xNDEtMS42Yy4zMzctMS4xMTIuOTgyLTEuOTg1IDEuOTMzLTIuNjE4LjIxMi0uMTQxLjQxMy0uMjUxLjYwMS0uMzMuMjE1LS4wODkuNDMtLjE2NC42NDYtLjIyN2EuMDk4LjA5OCAwIDAwLjA2NS0uMDY2IDQuNTEgNC41MSAwIDAxLjgyOS0xLjYxNSA0LjUzNSA0LjUzNSAwIDAxMS44MzctMS4zODh6bTMuNDgyIDEwLjU2NWEuNjM3LjYzNyAwIDAwMCAxLjI3MmgzLjYzNmEuNjM3LjYzNyAwIDEwMC0xLjI3MmgtMy42MzZ6TTguNDYyIDkuMjNhLjYzNy42MzcgMCAwMC0xLjEwNi42MzFsMS4yNzIgMi4yMjQtMS4yNjYgMi4xMzZhLjYzNi42MzYgMCAxMDEuMDk1LjY0OWwxLjQ1NC0yLjQ1NWEuNjM2LjYzNiAwIDAwLjAwNS0uNjRMOC40NjIgOS4yM3oiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jb2RleC1fUl8wXykiPjwvcGF0aD48ZGVmcz48bGluZWFyR3JhZGllbnQgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiIGlkPSJsb2JlLWljb25zLWNvZGV4LV9SXzBfIiB4MT0iMTIiIHgyPSIxMiIgeTE9IjMiIHkyPSIyMSI+PHN0b3Agc3RvcC1jb2xvcj0iI0IxQTdGRiI+PC9zdG9wPjxzdG9wIG9mZnNldD0iLjUiIHN0b3AtY29sb3I9IiM3QTlERkYiPjwvc3RvcD48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMzOTQxRkYiPjwvc3RvcD48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48L3N2Zz4=', opencode: 'data:image/svg+xml;base64,PHN2ZyBmaWxsPSJjdXJyZW50Q29sb3IiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSIxZW0iIHN0eWxlPSJmbGV4Om5vbmU7bGluZS1oZWlnaHQ6MSIgdmlld0JveD0iMCAwIDI0IDI0IiB3aWR0aD0iMWVtIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjx0aXRsZT5vcGVuY29kZTwvdGl0bGU+PHBhdGggZD0iTTE2IDZIOHYxMmg4VjZ6bTQgMTZINFYyaDE2djIweiI+PC9wYXRoPjwvc3ZnPg==', agy: 'data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHRpdGxlPkFudGlncmF2aXR5PC90aXRsZT48bWFzayBoZWlnaHQ9IjIzIiBpZD0ibG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0wLV9SXzBfIiBtYXNrVW5pdHM9InVzZXJTcGFjZU9uVXNlIiB3aWR0aD0iMjQiIHg9IjAiIHk9IjEiPjxwYXRoIGQ9Ik0yMS43NTEgMjIuNjA3YzEuMzQgMS4wMDUgMy4zNS4zMzUgMS41MDgtMS41MDhDMTcuNzMgMTUuNzQgMTguOTA0IDEgMTIuMDM3IDEgNS4xNyAxIDYuMzQyIDE1Ljc0LjgxNSAyMS4xYy0yLjAxIDIuMDA5LjE2NyAyLjUxMSAxLjUwNyAxLjUwNiA1LjE5Mi0zLjUxNyA0Ljg1Ny05LjcxNCA5LjcxNS05LjcxNCA0Ljg1NyAwIDQuNTIyIDYuMTk3IDkuNzE0IDkuNzE1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPjwvbWFzaz48ZyBtYXNrPSJ1cmwoI2xvYmUtaWNvbnMtYW50aWdyYXZpdHktMC1fUl8wXykiPjxnIGZpbHRlcj0idXJsKCNsb2JlLWljb25zLWFudGlncmF2aXR5LTEtX1JfMF8pIj48cGF0aCBkPSJNLTEuMDE4LTMuOTkyYy0uNDA4IDMuNTkxIDIuNjg2IDYuODkgNi45MSA3LjM3IDQuMjI1LjQ4IDcuOTgtMi4wNDMgOC4zODctNS42MzMuNDA4LTMuNTktMi42ODYtNi44OS02LjkxLTcuMzctNC4yMjUtLjQ3OS03Ljk4IDIuMDQzLTguMzg3IDUuNjMzeiIgZmlsbD0iI0ZGRTQzMiI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0yLV9SXzBfKSI+PHBhdGggZD0iTTE1LjI2OSA3Ljc0N2MxLjA1OCA0LjU1NyA1LjY5MSA3LjM3NCAxMC4zNDggNi4yOTMgNC42NTctMS4wODIgNy41NzUtNS42NTMgNi41MTYtMTAuMjEtMS4wNTgtNC41NTYtNS42OTEtNy4zNzQtMTAuMzQ4LTYuMjkyLTQuNjU3IDEuMDgyLTcuNTc1IDUuNjUzLTYuNTE2IDEwLjIxeiIgZmlsbD0iI0ZDNDEzRCI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0zLV9SXzBfKSI+PHBhdGggZD0iTS0xMi40NDMgMTAuODA0YzEuMzM4IDQuNzAzIDcuMzYgNy4xMSAxMy40NTMgNS4zNzggNi4wOTItMS43MzMgOS45NDctNi45NSA4LjYxLTExLjY1MkM4LjI4Mi0uMTczIDIuMjYtMi41OC0zLjgzMy0uODQ4LTkuOTI1Ljg4NC0xMy43OCA2LjEtMTIuNDQzIDEwLjgwNHoiIGZpbGw9IiMwMEI5NUMiPjwvcGF0aD48L2c+PGcgZmlsdGVyPSJ1cmwoI2xvYmUtaWNvbnMtYW50aWdyYXZpdHktNC1fUl8wXykiPjxwYXRoIGQ9Ik0tMTIuNDQzIDEwLjgwNGMxLjMzOCA0LjcwMyA3LjM2IDcuMTEgMTMuNDUzIDUuMzc4IDYuMDkyLTEuNzMzIDkuOTQ3LTYuOTUgOC42MS0xMS42NTJDOC4yODItLjE3MyAyLjI2LTIuNTgtMy44MzMtLjg0OC05LjkyNS44ODQtMTMuNzggNi4xLTEyLjQ0MyAxMC44MDR6IiBmaWxsPSIjMDBCOTVDIj48L3BhdGg+PC9nPjxnIGZpbHRlcj0idXJsKCNsb2JlLWljb25zLWFudGlncmF2aXR5LTUtX1JfMF8pIj48cGF0aCBkPSJNLTcuNjA4IDE0LjcwM2MzLjM1MiAzLjQyNCA5LjEyNiAzLjIwOCAxMi44OTYtLjQ4MyAzLjc3LTMuNjkgNC4xMDgtOS40NTkuNzU2LTEyLjg4M0MyLjY5LTIuMDg3LTMuMDgzLTEuODcxLTYuODUzIDEuODJjLTMuNzcgMy42OS00LjEwOCA5LjQ1OC0uNzU1IDEyLjg4M3oiIGZpbGw9IiMwMEI5NUMiPjwvcGF0aD48L2c+PGcgZmlsdGVyPSJ1cmwoI2xvYmUtaWNvbnMtYW50aWdyYXZpdHktNi1fUl8wXykiPjxwYXRoIGQ9Ik05LjkzMiAyNy42MTdjMS4wNCA0LjQ4MiA1LjM4NCA3LjMwMyA5LjcgNi4zIDQuMzE2LTEuMDAyIDYuOTcxLTUuNDQ4IDUuOTMtOS45My0xLjA0LTQuNDgzLTUuMzg0LTcuMzA0LTkuNy02LjMwMS00LjMxNiAxLjAwMi02Ljk3MSA1LjQ0OC01LjkzIDkuOTN6IiBmaWxsPSIjMzE4NkZGIj48L3BhdGg+PC9nPjxnIGZpbHRlcj0idXJsKCNsb2JlLWljb25zLWFudGlncmF2aXR5LTctX1JfMF8pIj48cGF0aCBkPSJNMi41NzItOC4xODVDLjM5Mi0zLjMyOSAyLjc3OCAyLjQ3MiA3LjkgNC43NzFjNS4xMjIgMi4zIDExLjA0Mi4yMjcgMTMuMjIyLTQuNjMgMi4xOC00Ljg1NS0uMjA1LTEwLjY1Ni01LjMyNy0xMi45NTUtNS4xMjItMi4zLTExLjA0Mi0uMjI3LTEzLjIyMiA0LjYzeiIgZmlsbD0iI0ZCQkMwNCI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS04LV9SXzBfKSI+PHBhdGggZD0iTS0zLjI2NyAzOC42ODZjLTUuMjc3LTIuMDcyIDMuNzQyLTE5LjExNyA1Ljk4NC0yNC44MyAyLjI0My01LjcxMiA4LjM0LTguNjY0IDEzLjYxNi02LjU5MiA1LjI3OCAyLjA3MSAxMS41MzMgMTMuNDgyIDkuMjkgMTkuMTk1LTIuMjQyIDUuNzEzLTIzLjYxMyAxNC4yOTgtMjguODkgMTIuMjI3eiIgZmlsbD0iIzMxODZGRiI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS05LV9SXzBfKSI+PHBhdGggZD0iTTI4LjcxIDE3LjQ3MWMtMS40MTMgMS42NDktNS4xLjgwOC04LjIzNi0xLjg3OC0zLjEzNS0yLjY4Ny00LjUzMS02LjIwMS0zLjExOC03Ljg1IDEuNDEyLTEuNjQ5IDUuMS0uODA4IDguMjM1IDEuODc4czQuNTMyIDYuMiAzLjExOSA3Ljg1eiIgZmlsbD0iIzc0OUJGRiI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0xMC1fUl8wXykiPjxwYXRoIGQ9Ik0xOC4xNjMgOS4wNzdjNS44MSAzLjkzIDEyLjUwMiA0LjE5IDE0Ljk0Ni41NzcgMi40NDMtMy42MTItLjI4Ny05LjcyNy02LjA5OC0xMy42NTgtNS44MS0zLjkzMS0xMi41MDItNC4xOS0xNC45NDYtLjU3Ny0yLjQ0MyAzLjYxMi4yODcgOS43MjcgNi4wOTggMTMuNjU4eiIgZmlsbD0iI0ZDNDEzRCI+PC9wYXRoPjwvZz48ZyBmaWx0ZXI9InVybCgjbG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0xMS1fUl8wXykiPjxwYXRoIGQ9Ik0tLjkxNSAyLjY4NGMtMS40NCAzLjQ3My0uOTcgNi45NjcgMS4wNSA3LjgwNCAyLjAyLjgzNyA0LjgyNC0xLjMgNi4yNjQtNC43NzIgMS40NC0zLjQ3My45Ny02Ljk2Ny0xLjA1LTcuODA0LTIuMDItLjgzNy00LjgyNCAxLjMtNi4yNjQgNC43NzJ6IiBmaWxsPSIjRkZFRTQ4Ij48L3BhdGg+PC9nPjwvZz48ZGVmcz48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjE3LjU4NyIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktMS1fUl8wXyIgd2lkdGg9IjE5LjgzOCIgeD0iLTMuMjg4IiB5PSItMTEuOTE3Ij48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSIxLjExNyI+PC9mZUdhdXNzaWFuQmx1cj48L2ZpbHRlcj48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjM4LjU2NSIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktMi1fUl8wXyIgd2lkdGg9IjM4LjkiIHg9IjQuMjUxIiB5PSItMTMuNDkzIj48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSI1LjQiPjwvZmVHYXVzc2lhbkJsdXI+PC9maWx0ZXI+PGZpbHRlciBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaGVpZ2h0PSIzNi41MTciIGlkPSJsb2JlLWljb25zLWFudGlncmF2aXR5LTMtX1JfMF8iIHdpZHRoPSI0MC45NTUiIHg9Ii0yMS44ODkiIHk9Ii0xMC41OTIiPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ij48L2ZlRmxvb2Q+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIj48L2ZlQmxlbmQ+PGZlR2F1c3NpYW5CbHVyIHJlc3VsdD0iZWZmZWN0MV9mb3JlZ3JvdW5kQmx1cl85NzdfMTE1IiBzdGREZXZpYXRpb249IjQuNTkxIj48L2ZlR2F1c3NpYW5CbHVyPjwvZmlsdGVyPjxmaWx0ZXIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGhlaWdodD0iMzYuNTE3IiBpZD0ibG9iZS1pY29ucy1hbnRpZ3Jhdml0eS00LV9SXzBfIiB3aWR0aD0iNDAuOTU1IiB4PSItMjEuODg5IiB5PSItMTAuNTkyIj48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSI0LjU5MSI+PC9mZUdhdXNzaWFuQmx1cj48L2ZpbHRlcj48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjM2LjU5NSIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktNS1fUl8wXyIgd2lkdGg9IjM2LjYzMiIgeD0iLTE5LjA5OSIgeT0iLTEwLjI3OCI+PGZlRmxvb2QgZmxvb2Qtb3BhY2l0eT0iMCIgcmVzdWx0PSJCYWNrZ3JvdW5kSW1hZ2VGaXgiPjwvZmVGbG9vZD48ZmVCbGVuZCBpbj0iU291cmNlR3JhcGhpYyIgaW4yPSJCYWNrZ3JvdW5kSW1hZ2VGaXgiIHJlc3VsdD0ic2hhcGUiPjwvZmVCbGVuZD48ZmVHYXVzc2lhbkJsdXIgcmVzdWx0PSJlZmZlY3QxX2ZvcmVncm91bmRCbHVyXzk3N18xMTUiIHN0ZERldmlhdGlvbj0iNC41OTEiPjwvZmVHYXVzc2lhbkJsdXI+PC9maWx0ZXI+PGZpbHRlciBjb2xvci1pbnRlcnBvbGF0aW9uLWZpbHRlcnM9InNSR0IiIGZpbHRlclVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaGVpZ2h0PSIzNC4wODciIGlkPSJsb2JlLWljb25zLWFudGlncmF2aXR5LTYtX1JfMF8iIHdpZHRoPSIzMy41MzMiIHg9Ii45ODEiIHk9IjguNzU4Ij48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSI0LjM2MyI+PC9mZUdhdXNzaWFuQmx1cj48L2ZpbHRlcj48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjM1LjI3NiIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktNy1fUl8wXyIgd2lkdGg9IjM1Ljk3OCIgeD0iLTYuMTQzIiB5PSItMjEuNjU5Ij48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSIzLjk1NCI+PC9mZUdhdXNzaWFuQmx1cj48L2ZpbHRlcj48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjQ2LjUyMyIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktOC1fUl8wXyIgd2lkdGg9IjQ1LjExNCIgeD0iLTExLjk2IiB5PSItLjQ2Ij48ZmVGbG9vZCBmbG9vZC1vcGFjaXR5PSIwIiByZXN1bHQ9IkJhY2tncm91bmRJbWFnZUZpeCI+PC9mZUZsb29kPjxmZUJsZW5kIGluPSJTb3VyY2VHcmFwaGljIiBpbjI9IkJhY2tncm91bmRJbWFnZUZpeCIgcmVzdWx0PSJzaGFwZSI+PC9mZUJsZW5kPjxmZUdhdXNzaWFuQmx1ciByZXN1bHQ9ImVmZmVjdDFfZm9yZWdyb3VuZEJsdXJfOTc3XzExNSIgc3RkRGV2aWF0aW9uPSIzLjUzMSI+PC9mZUdhdXNzaWFuQmx1cj48L2ZpbHRlcj48ZmlsdGVyIGNvbG9yLWludGVycG9sYXRpb24tZmlsdGVycz0ic1JHQiIgZmlsdGVyVW5pdHM9InVzZXJTcGFjZU9uVXNlIiBoZWlnaHQ9IjI0LjA1NCIgaWQ9ImxvYmUtaWNvbnMtYW50aWdyYXZpdHktOS1fUl8wXyIgd2lkdGg9IjI1LjA5NCIgeD0iMTAuNDg1IiB5PSIuNTgiPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ij48L2ZlRmxvb2Q+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIj48L2ZlQmxlbmQ+PGZlR2F1c3NpYW5CbHVyIHJlc3VsdD0iZWZmZWN0MV9mb3JlZ3JvdW5kQmx1cl85NzdfMTE1IiBzdGREZXZpYXRpb249IjMuMTU5Ij48L2ZlR2F1c3NpYW5CbHVyPjwvZmlsdGVyPjxmaWx0ZXIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGhlaWdodD0iMzAuMDA3IiBpZD0ibG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0xMC1fUl8wXyIgd2lkdGg9IjMzLjUwOCIgeD0iNS44MzMiIHk9Ii0xMi40NjciPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ij48L2ZlRmxvb2Q+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIj48L2ZlQmxlbmQ+PGZlR2F1c3NpYW5CbHVyIHJlc3VsdD0iZWZmZWN0MV9mb3JlZ3JvdW5kQmx1cl85NzdfMTE1IiBzdGREZXZpYXRpb249IjIuNjY5Ij48L2ZlR2F1c3NpYW5CbHVyPjwvZmlsdGVyPjxmaWx0ZXIgY29sb3ItaW50ZXJwb2xhdGlvbi1maWx0ZXJzPSJzUkdCIiBmaWx0ZXJVbml0cz0idXNlclNwYWNlT25Vc2UiIGhlaWdodD0iMjYuMTUxIiBpZD0ibG9iZS1pY29ucy1hbnRpZ3Jhdml0eS0xMS1fUl8wXyIgd2lkdGg9IjIyLjE5NCIgeD0iLTguMzU1IiB5PSItOC44NzYiPjxmZUZsb29kIGZsb29kLW9wYWNpdHk9IjAiIHJlc3VsdD0iQmFja2dyb3VuZEltYWdlRml4Ij48L2ZlRmxvb2Q+PGZlQmxlbmQgaW49IlNvdXJjZUdyYXBoaWMiIGluMj0iQmFja2dyb3VuZEltYWdlRml4IiByZXN1bHQ9InNoYXBlIj48L2ZlQmxlbmQ+PGZlR2F1c3NpYW5CbHVyIHJlc3VsdD0iZWZmZWN0MV9mb3JlZ3JvdW5kQmx1cl85NzdfMTE1IiBzdGREZXZpYXRpb249IjMuMzAzIj48L2ZlR2F1c3NpYW5CbHVyPjwvZmlsdGVyPjwvZGVmcz48L3N2Zz4='};
+const ticon = (h, sz = 16) => `<img src="${ICON[h]}" width="${sz}" height="${sz}" alt="" style="flex:none;vertical-align:middle">`;
+const I = {
+  pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5M9 3h6l-1 7 3 3H7l3-3z"/></svg>',
+  tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+  dots: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>',
+};
+const tagColor = (t) => 'c' + (['release', 'client-x', 'audit'].indexOf(t) % 3);
+const tagsHtml = (p) => { const n = p.tags.length, shown = p.tags.slice(0, 2); return `<button class="ib" title="${n ? n + (n === 1 ? ' tag' : ' tags') + ': ' + esc(p.tags.join(', ')) : 'Add a tag'}" data-stop>${I.tag}</button><span class="tagsx">${shown.map((t) => `<span class="tagc ${tagColor(t)}">${esc(t)}</span>`).join('')}${n > 2 ? `<span class="tagc" style="background:var(--track);color:var(--m)" title="${esc(p.tags.slice(2).join(', '))}">+${n - 2}</span>` : ''}</span>`; };
+const pinBtn = (p) => `<button class="ib pin ${pins.has(p.k) ? 'pinned' : ''}" data-stop data-pin="${esc(p.k)}" title="${pins.has(p.k) ? 'Pinned to the sidebar: click to unpin' : 'Pin to the sidebar'}">${I.pin}</button>`;
+const editBtn = (p) => `<button class="ib edit" data-stop data-edit="${esc(p.k)}" title="Rename (or double-click the name)">${I.edit}</button>`;
+const nameEl = (p) => `<span class="name" data-name="${esc(p.k)}" title="Double-click to rename">${esc(p.n)}</span>`;
+const spark = (p) => `<div class="spark" aria-hidden="true">${p.sp.map((v, i, a) => `<i style="height:${Math.max(3, v)}%" class="${i === a.length - 1 ? 'last' : ''}"></i>`).join('')}</div>`;
+const area = (p) => { const w = 300, h = 44, m = Math.max(1, ...p.sp); const pts = p.sp.map((v, i) => [i * (w / (p.sp.length - 1)), h - 4 - (v / m) * (h - 8)]); const d = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ' ' + q[1].toFixed(1)).join(' '); return `<svg class="area" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="${d} L${w} ${h} L0 ${h}Z" fill="var(--ac-soft)"/><path d="${d}" fill="none" stroke="var(--ac)" stroke-width="1.5" vector-effect="non-scaling-stroke"/><circle cx="${w}" cy="${pts[pts.length - 1][1].toFixed(1)}" r="2.5" fill="var(--ac)"/></svg>`; };
+
+function sidebar(id) {
+  return `<aside class="side"><div class="brand"><i></i><div>Harness Manager</div></div><div class="nav">
+    <a><span class="ic"></span>Overview<span class="cnt">$4.12</span></a><a><span class="ic"></span>Accounts<span class="cnt">9</span></a>
+    <a class="on"><span class="ic"></span>Projects<span class="cnt">37</span></a><div id="${id}-pins"></div>
+    <a><span class="ic"></span>Sessions<span class="cnt live">4 live</span></a><a><span class="ic"></span>Usage by account</a><a><span class="ic"></span>API keys &amp; routing</a>
+    <a style="margin-top:8px"><span class="ic"></span>MCP servers</a><a><span class="ic"></span>Skills</a><a><span class="ic"></span>System prompts</a><a><span class="ic"></span>Apps</a></div></aside>`;
+}
+function drawPins() {
+  document.querySelectorAll('[id$="-pins"]').forEach((el) => {
+    el.innerHTML = [...pins].slice(0, 5).map((k) => { const p = P.find((x) => x.k === k); return `<a class="sub in" title="${esc(p.p)}"><i class="dot ${p.live ? 'live' : ''}"></i><span style="overflow:hidden;text-overflow:ellipsis">${esc(p.n)}</span><span class="cnt ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.s}</span></a>`; }).join('');
+  });
+}
+function toast(root, msg) { let t = root.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; root.appendChild(t); } t.textContent = msg; t.classList.add('show'); clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 1800); }
+const head = (title, extra) => `<div class="top"><div class="search">Find a project, account, session or setting</div><div class="right"><span class="livestrip">4 live</span><span>Limits read just now · usage just now</span></div></div>
+  <div class="sheet"><div class="trow"><div><h1>Projects</h1><p class="find">37 projects ran in the last 7 days. Click one to open its sessions; pin, tag or rename it from its icons. Cost is at API list prices.</p></div>
+  <div style="display:flex;gap:8px;align-items:center"><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span>${extra || ''}</div></div>`;
+// shared behaviour: pin in place, rename inline, open on click, icons stop the click
+function wire(root, rerender) {
+  root.addEventListener('click', (e) => {
+    const stop = e.target.closest('[data-stop]');
+    if (stop) {
+      e.stopPropagation();
+      if (stop.dataset.pin) { const k = stop.dataset.pin; if (pins.has(k)) pins.delete(k); else pins.add(k); root.querySelectorAll(`[data-pin="${CSS.escape(k)}"]`).forEach((b) => { b.classList.toggle('pinned', pins.has(k)); b.title = pins.has(k) ? 'Pinned to the sidebar: click to unpin' : 'Pin to the sidebar'; }); drawPins(); toast(root, pins.has(k) ? 'Pinned to the sidebar' : 'Unpinned'); return; }
+      if (stop.dataset.edit) { rename(root, stop.dataset.edit); return; }
+      if (stop.dataset.page !== undefined) { rerender(+stop.dataset.page); return; }
+      if (stop.dataset.sort) { rerender(0, stop.dataset.sort); return; }
+      return;
+    }
+    const card = e.target.closest('[data-open]');
+    if (card && !root.querySelector('.name input')) toast(root, 'Opens #sessions?project=' + card.dataset.open);
+  });
+  root.addEventListener('dblclick', (e) => { const n = e.target.closest('[data-name]'); if (n) { e.stopPropagation(); rename(root, n.dataset.name); } });
+  root.addEventListener('keydown', (e) => { const card = e.target.closest('[data-open]'); if (card && e.key === 'Enter' && e.target === card) toast(root, 'Opens #sessions?project=' + card.dataset.open); });
+}
+function rename(root, k) {
+  const p = k === 'pv-bunyan' ? P[0] : P.find((x) => x.k === k), el = root.querySelector(`[data-name="${CSS.escape(k)}"]`);
+  if (!el || el.querySelector('input')) return;
+  const old = p.n;
+  el.innerHTML = `<input value="${esc(old)}" aria-label="Project name">`;
+  const inp = el.querySelector('input');
+  inp.focus(); inp.select();
+  inp.addEventListener('click', (e) => e.stopPropagation());
+  const done = (save) => { if (save && inp.value.trim()) p.n = inp.value.trim(); el.textContent = p.n; drawPins(); if (save && p.n !== old) toast(root, `Renamed to ${p.n}; the sidebar and Sessions follow`); };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(true); } if (e.key === 'Escape') { e.preventDefault(); done(false); } });
+  inp.addEventListener('blur', () => done(true));
+}
+const pager = (page, pages, per, total) => `<div class="pager"><button class="btn sm" data-stop data-page="${Math.max(0, page - 1)}" ${page === 0 ? 'disabled' : ''}>‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === page ? 'on' : ''}" data-stop data-page="${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-stop data-page="${Math.min(pages - 1, page + 1)}" ${page === pages - 1 ? 'disabled' : ''}>›</button><span class="help">${page * per + 1}–${Math.min(total, (page + 1) * per)} of ${total}</span></div>`;
+
+// ---- common: KPI tiles that refresh in place, and the distribution ----
+let metric = 'c';
+const K = { tokens: 7.94e9, sessions: 245, cost: 2674.57, days: 7, projects: 37, accounts: 3, live: 4, busy: 'Bunyan', bt: 91, bc: 49 };
+function drawCommon() {
+  const el = document.getElementById('common');
+  el.innerHTML = `<div class="kpis">
+    <div class="kpi"><div class="l">Tokens · 7 days</div><strong id="k-tokens">${fmt(K.tokens)}</strong><div class="n" id="k-sessions">${K.sessions} sessions</div></div>
+    <div class="kpi"><div class="l">At list prices</div><strong id="k-cost">${money(K.cost)}</strong><div class="n" id="k-day">${money(K.cost / K.days)} a day</div></div>
+    <div class="kpi"><div class="l">Projects</div><strong>${K.projects}</strong><div class="n">${K.accounts} accounts</div></div>
+    <div class="kpi live"><div class="l">Running now</div><strong id="k-live">${K.live}</strong><div class="n" title="Bunyan, HarnessManager, AdminPortal, sabus">Bunyan, HarnessManager, AdminPortal, sabus</div></div>
+    <div class="kpi"><div class="l">Busiest</div><strong style="font-size:17px">${K.busy}</strong><div class="n">${K.bt}% of tokens · ${K.bc}% of cost</div></div></div><div id="dist-holder"></div>`;
+  drawDist();
+}
+// the metric tabs redraw this panel only: the tiles above and the cards below stay where they are
+function drawDist() {
+  const v = (p) => p[metric], lbl = { t: 'tokens', c: 'cost', s: 'sessions' }[metric];
+  const sorted = [...P].sort((a, b) => v(b) - v(a)), top = sorted.slice(0, 5), rest = sorted.slice(5), total = P.reduce((a, p) => a + v(p), 0), oc = rest.reduce((a, p) => a + v(p), 0);
+  const SH = ['var(--ac)', 'var(--h3)', 'var(--h2)', 'var(--h1)', 'var(--iris)'];
+  const on = (k) => (metric === k ? 'on' : '');
+  document.getElementById('dist-holder').innerHTML = `<section class="panel dist" id="dist"><div class="ph"><b>Where the tokens and the cost went</b><span class="seg" id="dseg">${[['t', 'Tokens'], ['c', 'Cost'], ['s', 'Sessions']].map(([k, l]) => `<a class="${on(k)}" data-metric="${k}">${l}</a>`).join('')}</span></div>
+      <div class="stack">${top.map((p, i) => `<i style="width:${(v(p) / total) * 100}%;background:${SH[i]}" title="${esc(p.n)}"></i>`).join('')}<i style="width:${(oc / total) * 100}%;background:var(--ctl)"></i></div>
+      <div class="drow head"><span></span><span>Project</span><span>Share of ${lbl}</span><span class="num ${on('c')}">Cost</span><span class="num ${on('t')}">Tokens</span><span class="num ${on('s')}">Sessions</span><span class="m">Share</span></div>
+      ${top.map((p, i) => `<div class="drow"><span class="sw" style="background:${SH[i]}"></span><a class="nm" href="#" onclick="return false">${esc(p.n)}</a><div class="track"><i style="width:${(v(p) / total) * 100}%"></i></div><span class="num ${on('c')}">${money(p.c)}</span><span class="num ${on('t')}">${fmt(p.t)}</span><span class="num ${on('s')}">${p.s}</span><span class="m">${Math.round((v(p) / total) * 100)}%</span></div>`).join('')}
+      <div class="drow"><span class="sw" style="background:var(--ctl)"></span><span class="nm" style="color:var(--m);font-weight:400">${rest.length} other projects</span><div class="track"><i style="width:${(oc / total) * 100}%;background:var(--ctl)"></i></div><span class="num ${on('c')}">${money(rest.reduce((a, p) => a + p.c, 0))}</span><span class="num ${on('t')}">${fmt(rest.reduce((a, p) => a + p.t, 0))}</span><span class="num ${on('s')}">${rest.reduce((a, p) => a + p.s, 0)}</span><span class="m">${Math.round((oc / total) * 100)}%</span></div></section>`;
+  document.getElementById('dseg').onclick = (e) => { const a = e.target.closest('[data-metric]'); if (a) { metric = a.dataset.metric; drawDist(); } };
+}
+drawCommon();
+document.getElementById('sim').onclick = () => {
+  // what the five-minute import does: new rows arrive, the tiles that changed update where they are and flash once
+  K.tokens += 12.4e6; K.sessions += 1; K.cost += 3.19;
+  const set = (id, v) => { const e = document.getElementById(id); if (e.textContent !== v) { e.textContent = v; e.classList.add('flash'); setTimeout(() => e.classList.remove('flash'), 900); } };
+  set('k-tokens', fmt(K.tokens)); set('k-sessions', K.sessions + ' sessions'); set('k-cost', money(K.cost)); set('k-day', money(K.cost / K.days) + ' a day'); set('k-live', String(K.live));
+};
+
+// ---- the project view: Bunyan opened, no rail of other projects ----
+(function () {
+  const b = P[0];
+  const sideP = `<aside class="side"><div class="brand"><i></i><div>Harness Manager</div></div><div class="nav"><a><span class="ic"></span>Overview</a><a><span class="ic"></span>Accounts<span class="cnt">9</span></a><a><span class="ic"></span>Projects<span class="cnt">37</span></a><a class="sub on"><i class="dot live"></i><span>Bunyan</span><span class="cnt live">1 live</span></a><a class="sub"><i class="dot live"></i><span>AdminPortal</span><span class="cnt live">1 live</span></a><a><span class="ic"></span>Sessions<span class="cnt live">4 live</span></a><a><span class="ic"></span>Usage by account</a><a><span class="ic"></span>API keys &amp; routing</a></div></aside>`;
+  const topP = `<div class="top"><div class="search">Search titles, prompts and answers in Bunyan</div><div class="right"><span class="livestrip">4 live</span><span>Limits read just now</span></div></div>`;
+  const hdr = `<div class="trow"><div><a href="#" onclick="return false" style="font-size:12px;text-decoration:none">← Projects</a><div style="display:flex;align-items:center;gap:6px;min-width:0"><h1 style="margin:0"><span class="name" data-name="pv-bunyan" title="Double-click to rename" style="font-size:20px">Bunyan</span></h1><button class="ib edit" style="opacity:1" data-stop data-edit="pv-bunyan" title="Rename (or double-click the name)">${I.edit}</button>${pinBtn(b)}<button class="ib" data-stop title="3 tags: release, client-x, audit">${I.tag}</button><span class="tagsx"><span class="tagc c0">release</span><span class="tagc c1">client-x</span><span class="tagc" style="background:var(--track);color:var(--m)" title="audit">+1</span></span></div><p class="find" style="font-family:var(--mono);font-size:11px">github.com/abushanab-net/bunyan · D:\\Projects\\Bunyan\\Instance_2\\Bunyan</p>
+    <div style="display:flex;gap:16px;font:12px var(--mono);color:var(--m);margin-top:6px;flex-wrap:wrap"><span><b style="color:var(--t);font-family:var(--sans)">$1,314.40</b> at list prices</span><span><b style="color:var(--t);font-family:var(--sans)">7.24B</b> tokens</span><span><b style="color:var(--t);font-family:var(--sans)">115</b> sessions</span><span><b style="color:var(--t);font-family:var(--sans)">2</b> accounts</span><span style="color:var(--acT)"><b style="color:var(--acT);font-family:var(--sans)">1</b> running</span></div></div>
+    <div style="display:flex;gap:8px"><button class="btn" title="Merge, reset name, open folder">${I.dots}</button><button class="btn primary">${I.play} New session</button></div></div>`;
+  const row = (t, m, k, w, live) => `<div style="display:grid;grid-template-columns:10px minmax(0,1fr) auto auto auto auto;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--ru)"><i style="width:7px;height:7px;border-radius:50%;background:${live ? 'var(--ac);box-shadow:0 0 0 3px var(--ac-soft)' : 'var(--b)'}"></i><div style="min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t}</b><span style="font:11px var(--mono);color:var(--m)">${m} · Instance_2\\Bunyan</span></div><span>codex-main</span><span class="tagc c1">Codex</span><span style="font:11px var(--mono)">${k}</span>${live ? '<button class="btn sm">Follow</button>' : `<span style="font:11px var(--mono);color:var(--m)">Today ${w}</span>`}</div>`;
+  const list = `<section class="panel" style="padding:0"><div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--ac-soft);border-bottom:1px solid var(--ac-b);border-radius:12px 12px 0 0"><b>Running now</b><span style="margin-left:auto;font:11px var(--mono);color:var(--m)">1 session · 1.26B tokens</span></div>${row('Start the Sanduq Workflow for abushanab-net/Bunyan#1061: “Desktop owner settings…”', '855 msgs', '1.26B', '', true)}</section>
+    <section class="panel" style="padding:0"><div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--b)"><b>Wednesday 4 November 2026</b><span style="margin-left:auto;font:11px var(--mono);color:var(--m)">16 sessions · 1.97B tokens · $359.10</span></div>${row('Sub-agent Euler · worker', '12 msgs', '1.92M', '20:13')}${row('Sub-agent Euclid · worker', '7 msgs', '288.3k', '20:13')}${row('Sub-agent Darwin · default', '7 msgs', '1.30M', '20:12')}${row('Fix the desktop owner settings dialog', '11 msgs', '9.10M', '17:47')}<div style="padding:8px 12px;text-align:center"><a href="#" onclick="return false" style="font-size:12px">Show all 16 sessions</a></div></section>`;
+  const bar1 = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="seg"><a class="on">Date</a><a>Account</a><a>Tool</a><a>Tag</a></span><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span><span style="color:var(--m);font-size:11.5px">Accounts</span><span class="seg"><a class="on">All</a><a>codex-main</a><a>claude-work</a></span><span style="color:var(--m);font-size:11.5px">Tags</span><span class="seg"><a class="on">All</a><a>release</a><a>client-x</a><a>audit</a></span></div>`;
+  const r1 = document.getElementById('pv1');
+  r1.innerHTML = sideP + `<div class="body">${topP}<div class="sheet">${hdr}${bar1}${list}</div></div>`;
+  wire(r1, () => {});
+  const sec = (t, body) => `<div><div style="font:600 10.5px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--m);margin-bottom:4px">${t}</div>${body}</div>`;
+  const panel = `<aside class="panel" style="display:flex;flex-direction:column;gap:10px;font-size:12px">
+    ${sec('This project', `<div style="display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-family:var(--mono);font-size:11.5px"><b>$1,314.40</b><span style="color:var(--m)">at list prices</span><b>7.24B</b><span style="color:var(--m)">tokens</span><b>115</b><span style="color:var(--m)">sessions</span></div>`)}
+    ${sec('30 days', area({ sp: [10, 20, 15, 40, 35, 60, 55, 80, 70, 90, 100, 85, 95, 100] }))}
+    ${sec('Running', `<a href="#" onclick="return false" style="display:flex;gap:6px;align-items:center;text-decoration:none;color:var(--t);min-width:0"><i style="width:7px;height:7px;border-radius:50%;background:var(--ac);box-shadow:0 0 0 2px var(--ac-soft);flex:none"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Start the Sanduq Workflow…</span></a>`)}
+    ${sec('Accounts', `<div style="display:flex;justify-content:space-between"><span>codex-main</span><span style="font:11px var(--mono);color:var(--m)">98 · 92%</span></div><div style="display:flex;justify-content:space-between"><span>claude-work</span><span style="font:11px var(--mono);color:var(--m)">17 · 8%</span></div>`)}
+    ${sec('Tags', `<div class="tagsx" style="flex-wrap:wrap"><span class="tagc c0">release</span><span class="tagc c1">client-x</span><span class="tagc c2">audit</span><button class="ib" title="Edit tags">${I.tag}</button></div>`)}
+    ${sec('Folders', `<div style="font:10.5px var(--mono);color:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">D:\\Projects\\Bunyan\\Instance_2\\Bunyan</div><div style="font:10.5px var(--mono);color:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">D:\\Projects\\Bunyan\\Instance_1\\Bunyan</div>`)}</aside>`;
+  const r2 = document.getElementById('pv2');
+  r2.innerHTML = sideP + `<div class="body">${topP}<div class="sheet">${hdr}<div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:12px;align-items:start">${panel}<div style="display:flex;flex-direction:column;gap:10px;min-width:0"><div style="display:flex;gap:8px;align-items:center"><span class="seg"><a class="on">Date</a><a>Account</a><a>Tool</a><a>Tag</a></span><span class="seg"><a class="on">7d</a><a>30d</a><a>All</a></span></div>${list}</div></div></div></div>`;
+  wire(r2, () => {});
+})();
+
+// ---- Accounts + Usage: three merges from one account list ----
+const A = [
+  { n: 'codex-main', h: 'codex', plan: 'ChatGPT Pro', email: 'samykabu@gmail.com', main: true, run: 1, lims: [['Week', 26]], t7: 139.5e6, c7: 1980.40, req: 3120, sp: [12, 20, 18, 30, 28, 60, 100] },
+  { n: 'claude-main', h: 'claude', plan: 'Max 20x', email: 'samykabu@gmail.com', main: true, run: 3, lims: [['Week', 23], ['Week · Fable', 9]], t7: 16.3e6, c7: 610.20, req: 1480, sp: [30, 40, 20, 50, 45, 70, 90] },
+  { n: 'samykabu-teksa', h: 'claude', plan: 'Max 20x', email: 'samykabu@teksa.sa', run: 0, lims: [['5-hour session', 3], ['Week', 4]], t7: 0, c7: 0, req: 0, sp: [0, 0, 0, 0, 0, 0, 0] },
+  { n: 'samykabu-personal', h: 'claude', plan: 'Max 20x', email: 'samykabu@gmail.com', run: 0, lims: [['Week', 23], ['Week · Fable', 9]], t7: 0, c7: 0, req: 0, sp: [0, 0, 0, 0, 0, 0, 0] },
+  { n: 'sabushanab-resal', h: 'claude', plan: 'Max 5x', email: 'sabushanab@resal.me', run: 0, lims: [['5-hour session', 0], ['Week', 0]], t7: 0, c7: 0, req: 0, sp: [0, 0, 0, 0, 0, 0, 0] },
+  { n: 'service-account-resal', h: 'claude', plan: 'Max 5x', email: 'akusumah@resal.me', run: 0, lims: [['5-hour session', 0], ['Week', 0]], t7: 0, c7: 0, req: 0, sp: [0, 0, 0, 0, 0, 0, 0] },
+  { n: 'opencode-main', h: 'opencode', plan: 'opencode, opencode-go', email: '', main: true, run: 0, lims: [], t7: 5.8e6, c7: 84.10, req: 260, sp: [40, 10, 0, 30, 20, 0, 60] },
+  { n: 'agy-main', h: 'agy', plan: 'Google · active', email: '', main: true, run: 0, lims: [], t7: 0, c7: 0, req: 0, sp: [0, 0, 0, 0, 0, 0, 0] },
+];
+const TOOLS = [['claude', 'Claude Code', 'var(--warn-bg)', 'var(--warn)', 'C'], ['codex', 'Codex', 'var(--iris-bg)', 'var(--iris)', 'X'], ['opencode', 'OpenCode', 'var(--ac-soft)', 'var(--acT)', 'O'], ['agy', 'Antigravity', 'var(--h1)', 'var(--h3)', 'A']];
+const COL = { 'codex-main': 'var(--ac)', 'claude-main': 'var(--iris)', 'opencode-main': 'var(--h2)' };
+const DAYS = ['Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue', 'today'];
+const scale = (d) => (d === 7 ? 1 : d === 14 ? 1.9 : 3.7);
+const av = (n) => `<span class="av">${n.split(/[-_ ]/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join('')}</span>`;
+const ti = (h) => ticon(h, 16);
+const limsHtml = (a) => a.lims.length ? a.lims.map(([l, u]) => `<div class="l1"><span>${l}</span><span class="bar2"><i style="width:${u}%"></i></span><span class="lp">${100 - u}% left</span></div>`).join('') : `<span style="color:var(--m)">${a.h === 'opencode' || a.h === 'agy' ? 'No limits to read' : 'Limits not read yet'}</span>`;
+const sideA = () => `<aside class="side"><div class="brand"><i></i><div>Harness Manager</div></div><div class="nav"><a><span class="ic"></span>Overview<span class="cnt">$4.12</span></a><a class="on"><span class="ic"></span>Accounts<span class="cnt">8</span></a><a><span class="ic"></span>Projects<span class="cnt">37</span></a><a><span class="ic"></span>Sessions<span class="cnt live">4 live</span></a><a><span class="ic"></span>API keys &amp; routing</a><a style="margin-top:8px"><span class="ic"></span>MCP servers</a><a><span class="ic"></span>Skills</a><a><span class="ic"></span>System prompts</a><a><span class="ic"></span>Apps</a></div></aside>`;
+const topA = `<div class="top"><div class="search">Find an account, session or setting</div><div class="right"><span class="livestrip">4 live</span><span>Limits read 2 m ago · usage just now</span></div></div>`;
+const chartHtml = (d, only) => { const list = (only ? A.filter((a) => a.n === only) : A).filter((a) => a.t7); const m = Math.max(1, ...DAYS.map((_, i) => list.reduce((s2, a) => s2 + a.sp[i], 0))); return `<div class="ph"><b>Tokens per day${only ? '' : ', by account'} · ${d} days</b><span class="ulegend">${list.map((a) => `<span><i style="background:${COL[a.n]}"></i>${a.n}</span>`).join('')}</span></div><div class="uchart">${DAYS.map((lbl, i) => `<div class="day"><small>${lbl}</small>${list.map((a) => `<i style="height:${(a.sp[i] / m) * 100}%;background:${COL[a.n]}" title="${a.n} · ${lbl}"></i>`).join('')}</div>`).join('')}</div>`; };
+const ledgerHtml = (d) => `<div class="ph"><b>Accounts · ${d} days</b></div><table class="led"><thead><tr><th>Account</th><th>Tool</th><th class="num">Tokens</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Requests</th><th class="num">List price</th></tr></thead><tbody>${A.filter((a) => a.t7).map((a) => `<tr><td><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${COL[a.n]};margin-right:6px"></span>${a.n}</td><td>${TOOLS.find((t) => t[0] === a.h)[1]}</td><td class="num">${fmt(a.t7 * scale(d))}</td><td class="num">${fmt(a.t7 * scale(d) * 0.08)}</td><td class="num">${fmt(a.t7 * scale(d) * 0.02)}</td><td class="num">${fmt(a.t7 * scale(d) * 0.9)}</td><td class="num">${Math.round(a.req * scale(d)).toLocaleString()}</td><td class="num"><b>${money(a.c7 * scale(d))}</b></td></tr>`).join('')}</tbody></table>`;
+const modelsHtml = (d, only) => { const ms = [['gpt-6', 118e6, 1620], ['claude-opus-5-5', 12.1e6, 540], ['claude-fable-5-1', 4.2e6, 70], ['glm-5', 5.8e6, 84]].filter(([k]) => !only || (only === 'codex-main' ? k === 'gpt-6' : only === 'claude-main' ? k.startsWith('claude') : k === 'glm-5')); const top = ms[0][1]; return `<div class="ph"><b>By model · ${d} days</b></div>${ms.map(([k, t, c]) => `<div class="umodel"><span style="font-family:var(--mono)">${k}</span><span class="mb"><i style="width:${(t / top) * 100}%"></i></span><span class="num">${fmt(t * scale(d))}</span><span class="num" style="color:var(--m)">${money(c * scale(d))}</span></div>`).join('')}`; };
+const rangeSeg = (d, act) => `<span class="seg">${[7, 14, 30].map((x) => `<a class="${x === d ? 'on' : ''}" data-stop data-${act}="${x}">${x}d</a>`).join('')}</span>`;
+const groupRows = (withUsage, d) => TOOLS.map(([h, label]) => { const list = A.filter((a) => a.h === h); const tot = list.reduce((s2, a) => s2 + a.t7, 0), cost = list.reduce((s2, a) => s2 + a.c7, 0), run = list.reduce((s2, a) => s2 + a.run, 0);
+  return `<section class="acg"><header>${ti(h)}<b>${label}</b><span style="color:var(--m)">${list.length}</span><span class="tot">${list.length} logged in · ${run ? `<span style="color:var(--acT)">${run} ${run === 1 ? 'console' : 'consoles'} open</span>` : '0 consoles open'}${withUsage ? ` · ${fmt(tot * scale(d))} tokens · ${money(cost * scale(d))} · ${d} days` : ''}</span></header>
+  ${list.map((a) => `<div class="acr" style="${withUsage ? 'grid-template-columns:30px minmax(150px,1.1fr) minmax(180px,1.4fr) 120px 100px 90px auto' : ''}">${av(a.n)}<div class="who"><b>${a.n}${a.main ? ' <span style="font-weight:400;color:var(--m)">· main</span>' : ''}</b><span class="mono">${a.email || 'logged in'}</span><span><span class="pl">${a.plan}</span></span></div><div class="lims">${limsHtml(a)}</div>
+    ${withUsage ? `<div class="usp">${spark({ sp: a.sp })}</div><div class="use" title="input ${fmt(a.t7 * scale(d) * 0.08)} · output ${fmt(a.t7 * scale(d) * 0.02)} · cache read ${fmt(a.t7 * scale(d) * 0.9)} · ${Math.round(a.req * scale(d)).toLocaleString()} requests"><b>${fmt(a.t7 * scale(d))}</b>tokens · ${d} days</div><div class="use"><b>${money(a.c7 * scale(d))}</b>list price${a.run ? `<br><span style="color:var(--acT)">● ${a.run} open</span>` : ''}</div>` : `<div class="use"><b>${fmt(a.t7)}</b>tokens · 7 days${a.run ? `<br><span style="color:var(--acT)">● ${a.run} open</span>` : ''}</div><div></div>`}
+    <div class="go"><button class="btn sm primary" data-stop>Start</button><button class="ib" data-stop>${I.dots}</button></div></div>`).join('')}</section>`; }).join('');
+
+// D1: tabs
+(function () {
+  const root = document.getElementById('d1'); let tab = 'accounts', d = 7;
+  const draw = () => {
+    root.innerHTML = sideA() + `<div class="body">${topA}<div class="sheet"><div class="trow"><div><h1>Accounts</h1><p class="find">8 accounts across 4 tools. Each runs in its own folder with its own login, side by side.</p></div><div style="display:flex;gap:8px">${tab === 'usage' ? rangeSeg(d, 'd1range') + '<button class="btn">Export CSV</button>' : '<button class="btn">Start in a folder…</button><button class="btn primary">Add account</button>'}</div></div>
+      <div class="tabs2"><a class="${tab === 'accounts' ? 'on' : ''}" data-stop data-tab="accounts">Accounts</a><a class="${tab === 'usage' ? 'on' : ''}" data-stop data-tab="usage">Usage</a></div>
+      ${tab === 'accounts' ? `<div style="display:flex;gap:8px;align-items:center"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="help">Sorted by room left · limits read 2 m ago</span></div>${groupRows(false, 7)}`
+        : `<section class="panel">${chartHtml(d)}</section><section class="panel">${ledgerHtml(d)}</section><section class="panel">${modelsHtml(d)}</section>`}</div></div>`;
+  };
+  draw();
+  root.addEventListener('click', (e) => { const t = e.target.closest('[data-tab]'); if (t) { tab = t.dataset.tab; draw(); return; } const r = e.target.closest('[data-d1range]'); if (r) { d = +r.dataset.d1range; draw(); } });
+})();
+// D2: one page
+(function () {
+  const root = document.getElementById('d2'); let d = 7, chartOpen = true, modelsOpen = false;
+  const draw = () => {
+    root.innerHTML = sideA() + `<div class="body">${topA}<div class="sheet"><div class="trow"><div><h1>Accounts</h1><p class="find">8 accounts across 4 tools: their room, and what each used at API list prices. Subscriptions are not billed per token.</p></div><div style="display:flex;gap:8px">${rangeSeg(d, 'd2range')}<button class="btn">Export CSV</button><button class="btn">Start in a folder…</button><button class="btn primary">Add account</button></div></div>
+      <section class="panel"><div class="fold" data-stop data-fold="chart"><b>Tokens per day, by account · ${d} days</b><span class="chev">${chartOpen ? '▾' : '▸'}</span></div>${chartOpen ? `<div style="margin-top:6px">${chartHtml(d).replace(/<div class="ph">.*?<\/div>/, '')}</div>` : ''}</section>
+      <div style="display:flex;gap:8px;align-items:center"><span class="seg"><a class="on">All</a><a>Claude Code</a><a>Codex</a><a>OpenCode</a><a>Antigravity</a></span><span class="help">Sorted by room left · limits read 2 m ago · usage just now</span></div>
+      ${groupRows(true, d)}
+      <section class="panel"><div class="fold" data-stop data-fold="models"><b>By model · ${d} days</b><span class="chev">${modelsOpen ? '▾' : '▸'}</span></div>${modelsOpen ? `<div style="margin-top:6px">${modelsHtml(d).replace(/<div class="ph">.*?<\/div>/, '')}</div>` : ''}</section></div></div>`;
+  };
+  draw();
+  root.addEventListener('click', (e) => { const f = e.target.closest('[data-fold]'); if (f) { if (f.dataset.fold === 'chart') chartOpen = !chartOpen; else modelsOpen = !modelsOpen; draw(); return; } const r = e.target.closest('[data-d2range]'); if (r) { d = +r.dataset.d2range; draw(); } });
+})();
+// D3: list and pane
+(function () {
+  const root = document.getElementById('d3'); let sel = '', d = 7;
+  const draw = () => {
+    const a = A.find((x) => x.n === sel);
+    const list = `<aside class="panel alist" style="padding:8px"><a class="${!sel ? 'on' : ''}" data-stop data-sel=""><span class="av">∑</span><span class="nm"><b>All accounts</b><small>8 accounts · 4 tools</small></span><span class="t7">${fmt(A.reduce((s2, x) => s2 + x.t7, 0))}</span></a>
+      ${TOOLS.map(([h, label]) => `<div class="sec">${label}</div>${A.filter((x) => x.h === h).map((x) => `<a class="${sel === x.n ? 'on' : ''}" data-stop data-sel="${x.n}">${av(x.n)}<span class="nm"><b>${x.n}${x.run ? ` <span style="color:var(--acT);font:600 10px var(--mono)">● ${x.run}</span>` : ''}</b><small>${x.plan}${x.lims[0] ? ` · ${x.lims[0][0]} ${100 - x.lims[0][1]}% left` : ''}</small>${x.lims[0] ? `<span class="bar2" style="display:block;height:4px;border-radius:2px;background:var(--track);margin-top:3px;overflow:hidden"><i style="display:block;height:100%;width:${x.lims[0][1]}%;background:var(--ac)"></i></span>` : ''}</span><span class="t7">${fmt(x.t7)}</span></a>`).join('')}`).join('')}</aside>`;
+    const pane = a ? `<div style="display:flex;flex-direction:column;gap:10px;min-width:0"><div class="trow"><div><div style="display:flex;align-items:center;gap:8px">${ti(a.h)}<h1 style="margin:0;font-size:18px">${a.n}</h1><span class="pl" style="display:inline-block;font:500 10.5px var(--mono);padding:1px 7px;border-radius:999px;background:var(--ac-soft);color:var(--acT)">${a.plan}</span></div><p class="find" style="font-family:var(--mono);font-size:11px">${a.email || 'logged in'} · ${a.main ? 'main profile' : 'its own folder'}${a.run ? ` · ${a.run} ${a.run === 1 ? 'console' : 'consoles'} open` : ''}</p></div><div style="display:flex;gap:8px">${rangeSeg(d, 'd3range')}<button class="btn">Open account page</button><button class="btn primary">Start</button><button class="ib" style="border:1px solid var(--b);width:26px;height:26px">${I.dots}</button></div></div>
+        <section class="panel"><div class="ph"><b>Limits</b><span class="help">read 2 m ago</span></div><div class="lims" style="display:grid;gap:4px;font-size:11px;max-width:420px">${limsHtml(a)}</div></section>
+        <section class="panel">${a.t7 ? chartHtml(d, a.n) : '<p style="color:var(--m);margin:0">No usage in this range.</p>'}</section>
+        <div class="kpis" style="grid-template-columns:repeat(4,1fr)"><div class="kpi"><div class="l">Tokens · ${d} days</div><strong>${fmt(a.t7 * scale(d))}</strong><div class="n">${fmt(a.t7 * scale(d) * 0.9)} read from cache</div></div><div class="kpi"><div class="l">At list prices</div><strong>${money(a.c7 * scale(d))}</strong><div class="n">subscription: not billed per token</div></div><div class="kpi"><div class="l">Requests</div><strong>${Math.round(a.req * scale(d)).toLocaleString()}</strong><div class="n">input ${fmt(a.t7 * scale(d) * 0.08)} · output ${fmt(a.t7 * scale(d) * 0.02)}</div></div><div class="kpi"><div class="l">Sessions · ${d} days</div><strong>${a.t7 ? Math.round(a.req / 40 * scale(d)) : 0}</strong><div class="n">${a.run ? a.run + ' running now' : 'none running now'}</div></div></div>
+        <section class="panel">${a.t7 ? modelsHtml(d, a.n) : '<p style="color:var(--m);margin:0">No model used in this range.</p>'}</section></div>`
+      : `<div style="display:flex;flex-direction:column;gap:10px;min-width:0"><div class="trow"><div><h1 style="font-size:18px;margin:0">All accounts</h1><p class="find">Tokens from each account's own logs, priced at API list prices.</p></div><div style="display:flex;gap:8px">${rangeSeg(d, 'd3range')}<button class="btn">Export CSV</button><button class="btn primary">Add account</button></div></div><section class="panel">${chartHtml(d)}</section><section class="panel">${ledgerHtml(d)}</section><section class="panel">${modelsHtml(d)}</section></div>`;
+    root.innerHTML = sideA() + `<div class="body">${topA}<div class="sheet"><div class="trow"><div><h1>Accounts</h1><p class="find">8 accounts across 4 tools. Pick one for its room and its usage; All accounts for the whole picture.</p></div></div><div style="display:grid;grid-template-columns:250px minmax(0,1fr);gap:12px;align-items:start">${list}${pane}</div></div></div>`;
+  };
+  draw();
+  root.addEventListener('click', (e) => { const s2 = e.target.closest('[data-sel]'); if (s2) { sel = s2.dataset.sel; draw(); return; } const r = e.target.closest('[data-d3range]'); if (r) { d = +r.dataset.d3range; draw(); } });
+})();
+
+// ---- A: cards ----
+(function () {
+  const root = document.getElementById('va'); let page = 0; const per = 12;
+  const draw = (pg) => {
+    page = pg;
+    const list = [...P].sort((a, b) => b.c - a.c), pages = Math.ceil(list.length / per), shown = list.slice(page * per, page * per + per);
+    root.innerHTML = sidebar('va') + `<div class="body">${head('', '<span class="seg"><a>Active</a><a class="on">Cost</a><a>Tokens</a><a>Name</a></span>')}
+      <div class="cards">${shown.map((p) => `<div class="pc ${p.live ? 'live' : ''}" data-open="${esc(p.k)}" tabindex="0"><div class="hd">${nameEl(p)}${editBtn(p)}${pinBtn(p)}</div>
+        <span class="path" title="${esc(p.p)}">${esc(p.p)}</span>${spark(p)}
+        <div class="cost"><b>${money(p.c)}</b><small>${fmt(p.t)} tokens</small></div>
+        <div class="row"><span>${p.s} ${p.s === 1 ? 'session' : 'sessions'} · ${p.a} ${p.a === 1 ? 'account' : 'accounts'}</span><span class="${p.live ? 'lv' : ''}">${p.live ? p.live + ' live' : esc(p.last)}</span></div>
+        <div class="tl">${tagsHtml(p)}</div></div>`).join('')}</div>${pager(page, pages, per, list.length)}</div></div>`;
+    drawPins();
+  };
+  draw(0); wire(root, (pg) => draw(pg));
+})();
+
+// ---- B: table ----
+(function () {
+  const root = document.getElementById('vb'); let page = 0, sort = 'c'; const per = 25;
+  const draw = (pg, so) => {
+    page = pg; if (so) sort = so;
+    const list = [...P].sort((a, b) => sort === 'n' ? a.n.localeCompare(b.n) : sort === 'last' ? 0 : b[sort] - a[sort]), pages = Math.ceil(list.length / per), shown = list.slice(page * per, page * per + per);
+    const th = (k, l, num) => `<th class="${num ? 'num' : ''} ${sort === k ? 'on' : ''}" data-stop data-sort="${k}">${l}</th>`;
+    root.innerHTML = sidebar('vb') + `<div class="body">${head('', '<span class="seg"><a class="on" title="Table">☰</a><a title="Cards">▦</a></span>')}
+      <section class="panel" style="padding:4px 6px"><table class="pt"><thead><tr>${th('n', 'Project')}<th>Activity · 7 days</th>${th('s', 'Sessions', 1)}${th('t', 'Tokens', 1)}${th('c', 'Cost', 1)}${th('a', 'Accounts', 1)}<th>Last active</th><th>Tags</th><th></th></tr></thead>
+      <tbody>${shown.map((p) => `<tr class="r ${p.live ? 'live' : ''}" data-open="${esc(p.k)}" tabindex="0"><td><div class="hd">${nameEl(p)}${editBtn(p)}</div><div class="path" title="${esc(p.p)}">${esc(p.p)}</div></td><td>${spark(p)}</td>
+        <td class="num">${p.s}</td><td class="num">${fmt(p.t)}</td><td class="num"><b>${money(p.c)}</b></td><td class="num">${p.a}</td><td class="${p.live ? 'lv' : ''}" style="white-space:nowrap">${p.live ? p.live + ' live' : esc(p.last)}</td><td><div class="hd">${tagsHtml(p)}</div></td><td style="white-space:nowrap">${pinBtn(p)}<button class="ib" data-stop title="New session here">${I.play}</button></td></tr>`).join('')}</tbody></table></section>${pager(page, pages, per, list.length)}</div></div>`;
+    drawPins();
+  };
+  draw(0); wire(root, (pg, so) => draw(pg, so));
+})();
+
+// ---- C: row cards ----
+(function () {
+  const root = document.getElementById('vc'); let page = 0; const per = 10;
+  const draw = (pg) => {
+    page = pg;
+    const list = [...P].sort((a, b) => b.c - a.c), pages = Math.ceil(list.length / per), shown = list.slice(page * per, page * per + per);
+    root.innerHTML = sidebar('vc') + `<div class="body">${head('', '<span class="seg"><a>Active</a><a class="on">Cost</a><a>Tokens</a><a>Name</a></span>')}
+      <div class="rows">${shown.map((p) => `<div class="rc ${p.live ? 'live' : ''}" data-open="${esc(p.k)}" tabindex="0"><div class="who"><div class="hd">${nameEl(p)}${editBtn(p)}</div><span class="path" title="${esc(p.p)}">${esc(p.p)}</span><div class="hd">${tagsHtml(p)}</div></div>
+        ${area(p)}<div class="num">${money(p.c)}<small>${fmt(p.t)} tokens</small></div>
+        <div class="meta">${p.s} ${p.s === 1 ? 'session' : 'sessions'} · ${p.a} ${p.a === 1 ? 'acct' : 'accts'}<br><span class="${p.live ? 'lv' : ''}">${p.live ? p.live + ' live' : esc(p.last)}</span></div>
+        <div class="acts">${pinBtn(p)}<button class="ib" data-stop title="New session here">${I.play}</button><button class="ib" data-stop title="Merge, reset name, open folder">${I.dots}</button></div></div>`).join('')}</div>${pager(page, pages, per, list.length)}</div></div>`;
+    drawPins();
+  };
+  draw(0); wire(root, (pg) => draw(pg));
+})();
+document.getElementById('skh').innerHTML = `<div style="padding:14px 18px;background:var(--g)"><section class="panel" style="padding:0;overflow:hidden">
+<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+<thead><tr style="color:var(--m);font-size:11.5px"><th style="text-align:left;font-weight:500;padding:12px 6px 12px 20px;border-bottom:1px solid var(--b)">Skill</th><th style="text-align:left;font-weight:500;padding:12px 6px;border-bottom:1px solid var(--b)">Source</th>
+${[['claude', 'Claude Code', '242'], ['codex', 'Codex', '5'], ['opencode', 'OpenCode', '7'], ['agy', 'Antigravity', '1']].map(([g, l, n]) => `<th style="width:54px;text-align:center;padding:12px 6px;border-bottom:1px solid var(--b)" title="${l}: ${n} of 251 linked; tick to link every skill shown"><span style="display:inline-grid;justify-items:center;gap:3px"><span aria-label="${l}">${ticon(g, 18)}</span><small style="font:10.5px var(--mono);color:var(--m)">${n}</small><span style="width:16px;height:16px;border-radius:3px;border:1.5px solid var(--ac);background:var(--ac);display:inline-flex;align-items:center;justify-content:center"><i style="width:8px;height:2px;background:#fff;display:block"></i></span></span></th>`).join('')}<th style="width:54px;border-bottom:1px solid var(--b)"></th></tr></thead>
+<tbody>${[['agents-sdk', 'Build, debug, or review Cloudflare Agents SDK applications using the agents package.', 'Store', [1, 0, 0, 0]], ['archify', 'Create polished, validated architecture, workflow, sequence, data-flow, and lifecycle/state diagrams.', 'Store', [1, 1, 0, 0]], ['asc-ad-hoc-distribution', 'Prepare, publish, resume, and verify private iOS release-testing installs with asc distribute.', 'Store', [1, 0, 1, 0]]].map(([n, d, src, t]) => `<tr><td style="padding:14px 6px 14px 20px;border-top:1px solid var(--ru)"><b style="font-weight:700">${n}</b><div style="color:var(--m);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:560px">${d}</div></td><td style="padding:14px 6px;border-top:1px solid var(--ru);font:12px var(--mono);color:var(--t2)">${src}</td>${t.map((on) => `<td style="text-align:center;padding:14px 6px;border-top:1px solid var(--ru)"><span style="display:inline-block;width:16px;height:16px;border-radius:3px;border:1.5px solid ${on ? 'var(--ac)' : 'var(--ctl)'};background:${on ? 'var(--ac)' : 'transparent'};vertical-align:middle"></span></td>`).join('')}<td style="text-align:center;padding:14px 20px 14px 6px;border-top:1px solid var(--ru)"><button class="ib" style="width:30px;height:30px;border-color:var(--ctl)">${I.dots}</button></td></tr>`).join('')}</tbody></table></section>
+<p style="font-size:12px;color:var(--m);margin:8px 0 0">The icons are the app's own, the same files Accounts and the session rows use.</p></div></div>
+
+`;
+
+// ---- the feedback form: a choice per question, comments, a draft in this browser, and the answers as text ----
+const Q = [
+  ['Projects layout', ['A · Cards', 'B · Table', 'C · Row cards', 'B with an A toggle'], 'B with an A toggle'],
+  ['Page size', ['As shown (12 / 25 / 10)', 'Fewer per page', 'More per page', 'A choice on the page'], 'As shown (12 / 25 / 10)'],
+  ['Pin icon placement', ['Beside the name (shown)', 'Top-right corner of the card'], 'Beside the name (shown)'],
+  ['Rename', ['Pencil on hover and double-click (shown)', 'Double-click only', 'Pencil only'], 'Pencil on hover and double-click (shown)'],
+  ['Rename also in the Sessions header', ['Yes', 'No'], 'Yes'],
+  ['Tags on cards', ['Tag icon with count, chips, "+N" (shown)', 'Chips only, truncated', 'Icon and count only, chips in a tooltip'], 'Tag icon with count, chips, "+N" (shown)'],
+  ['Clicking a card', ['Opens its sessions (shown)', 'Opens its sessions; Ctrl-click opens the live session when one runs'], 'Opens its sessions (shown)'],
+  ['KPI refresh in place', ['With the highlight on changed numbers (shown)', 'Silently'], 'With the highlight on changed numbers (shown)'],
+  ['Distribution rows', ['Top five plus others (shown)', 'Follow the page size', 'Top ten plus others'], 'Top five plus others (shown)'],
+  ['The project view', ['Option 1 · full width, filters in the bar', 'Option 2 · a panel about the project', 'Option 1, with option 2\'s panel only for projects with several folders or accounts'], 'Option 1, with option 2\'s panel only for projects with several folders or accounts'],
+  ['The Sessions page (all projects)', ['Keep its rail as it is', 'Chips in the bar there too'], 'Keep its rail as it is'],
+  ['System prompts tabs', ['Tooltip only', 'With the small ".md" marker'], 'Tooltip only'],
+  ['Skills header', ['Icon, count, tick as shown', 'Icon and tick, no count', 'Keep the names, fix the spacing only'], 'Icon, count, tick as shown'],
+  ['Accounts + Usage', ['D1 · Tabs', 'D2 · One page', 'D3 · List and pane'], 'D2 · One page'],
+  ['In D2, input / output / cache read', ['In the tokens tooltip and the CSV', 'As columns, wider rows'], 'In the tokens tooltip and the CSV'],
+  ['By model bars on the account page too', ['Yes', 'No'], 'Yes'],
+  ['Order of work', ['Common fixes, then Projects layout, then Accounts + Usage, then the project view', 'Accounts + Usage first', 'Everything in one go'], 'Common fixes, then Projects layout, then Accounts + Usage, then the project view'],
+];
+const KEY = 'hm.variations.feedback';
+let draft = {};
+try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(draft)); } catch {} };
+document.getElementById('form').innerHTML = Q.map(([t, opts, def], i) => `<div class="q"><span class="n">${i + 1}</span><div><div class="qt">${esc(t)}</div><div class="opts">${opts.map((o) => `<label><input type="radio" name="q${i}" value="${esc(o)}" ${(draft['q' + i] || def) === o ? 'checked' : ''}> ${esc(o)}${o === def ? ' <span class="help" style="margin:0">(suggested)</span>' : ''}</label>`).join('')}<label><input type="radio" name="q${i}" value="__other" ${draft['q' + i] && !opts.includes(draft['q' + i]) ? 'checked' : ''}> Other</label></div><div class="other"><input type="text" data-other="q${i}" placeholder="Or say what you want instead" value="${draft['q' + i] && !opts.includes(draft['q' + i]) ? esc(draft['q' + i]) : ''}"></div></div></div>`).join('');
+document.querySelectorAll('[data-comment]').forEach((t) => { t.value = draft['c:' + t.dataset.comment] || ''; t.addEventListener('input', () => { draft['c:' + t.dataset.comment] = t.value; save(); }); });
+document.getElementById('form').addEventListener('change', (e) => {
+  const r = e.target.closest('input[type=radio]'); if (!r) return;
+  const i = r.name; const other = document.querySelector(`[data-other="${i}"]`);
+  draft[i] = r.value === '__other' ? (other.value || '') : r.value; save();
+});
+document.getElementById('form').addEventListener('input', (e) => {
+  const o = e.target.closest('[data-other]'); if (!o) return;
+  draft[o.dataset.other] = o.value; document.querySelector(`input[name="${o.dataset.other}"][value="__other"]`).checked = true; save();
+});
+const answers = () => {
+  const lines = ['Feedback on the Projects / Accounts variations (' + new Date().toLocaleString() + ')', ''];
+  Q.forEach(([t, opts, def], i) => { const v = draft['q' + i] || def; lines.push(`${i + 1}. ${t}: ${v}${v === def ? '' : ' (changed)'}`); });
+  const names = { common: 'Common fixes', A: 'A · Cards', B: 'B · Table', C: 'C · Row cards', project: 'The project view', prompts: 'System prompts tabs', skills: 'Skills header', D1: 'D1 · Tabs', D2: 'D2 · One page', D3: 'D3 · List and pane', general: 'Anything else' };
+  const cs = Object.entries(names).filter(([k]) => (draft['c:' + k] || '').trim()).map(([k, n]) => `- ${n}: ${draft['c:' + k].trim()}`);
+  if (cs.length) lines.push('', 'Comments:', ...cs);
+  return lines.join('\n');
+};
+document.getElementById('copy').onclick = async () => {
+  const text = answers(); document.getElementById('out').value = text;
+  try { await navigator.clipboard.writeText(text); document.getElementById('copied').textContent = 'Copied. Paste it into the chat.'; }
+  catch { document.getElementById('copied').textContent = 'The clipboard was refused here: select the text below and copy it.'; document.getElementById('out').select(); }
+};
+document.getElementById('clear').onclick = () => { draft = {}; save(); location.reload(); };
+</script>
+</main>
+</body>
+</html>

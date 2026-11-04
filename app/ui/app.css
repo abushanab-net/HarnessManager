@@ -263,8 +263,10 @@ nav.nav .count.live:not(:empty):hover { text-decoration: underline; }
 .chip.on { background: var(--act); border-color: var(--ac-b); color: var(--t); }
 .srow.more { min-height: 40px; grid-template-columns: 12px 1fr; }
 /* Skills: a header tick per tool, as MCP servers has */
-.sklist th.c .ti { cursor: pointer; }
-.sklist th.c .ti input { width: 16px; height: 16px; accent-color: var(--ac); cursor: pointer; margin: 2px 0 0; }
+.sklist th.c .ti { cursor: pointer; gap: 3px; }
+.sklist th.c .ti .ticon { width: 18px; height: 18px; }
+.sklist th.c .ti small { font: 10.5px var(--mono); color: var(--m); }
+.sklist th.c .ti input { width: 16px; height: 16px; accent-color: var(--ac); cursor: pointer; margin: 0; }
 .dcfor { margin-top: 10px; align-items: center; gap: 8px; }
 /* the pinned projects under Projects in the sidebar */
 nav.nav a.sub { height: 30px; padding-left: 30px; font-size: 13px; font-weight: 400; gap: 7px; }
@@ -293,33 +295,72 @@ nav.nav a.sub span:not(.count) { overflow: hidden; text-overflow: ellipsis; whit
 .swrap .srow .acct { max-width: 120px; }
 .srow .t > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .srow .t > span .tags { flex: none; }
+/* a project's view: the list full width, or beside a panel about the project */
+.swrap.pv { grid-template-columns: minmax(0, 1fr); }
+.swrap.pv.with { grid-template-columns: 220px minmax(0, 1fr); }
+.about { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; position: sticky; top: 0; }
+.about .sec { font: 600 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--m); padding: 8px 0 3px; }
+.about .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; }
+.about .kv span { color: var(--m); }
+.about .area { width: 100%; height: 44px; display: block; }
+.about .arun { display: flex; gap: 6px; align-items: center; color: var(--t); text-decoration: none; min-width: 0; }
+.about .arun span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.about .arun .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ac); box-shadow: 0 0 0 2px var(--ac-soft); flex: none; }
+.about .arow { display: flex; justify-content: space-between; gap: 8px; }
+.about .afold { font-size: 10.5px; color: var(--m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1100px) { .swrap { grid-template-columns: 1fr; } .rail { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; } .rail .sec { width: 100%; padding-top: 6px; } .rail a { height: 28px; } }
-/* Projects: the distribution and a card per project */
+/* Projects: the distribution and a row card per project */
 .stackbar { display: flex; height: 16px; border-radius: 6px; overflow: hidden; gap: 1px; margin: 10px 0 12px; background: var(--track); }
 .stackbar i { display: block; height: 100%; min-width: 2px; }
-.drow { display: grid; grid-template-columns: 12px minmax(120px, 180px) minmax(0, 1fr) 90px 90px 90px 70px; gap: 10px; align-items: center; font-size: 13px; padding: 5px 0; }
-.drow .sw { width: 10px; height: 10px; border-radius: 3px; }
-.drow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t); text-decoration: none; font-weight: 500; }
-.drow .bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
-.drow .bar i { display: block; height: 100%; background: var(--ac-b); }
-.drow .num { text-align: right; font-size: 12px; }
-.drow .m { color: var(--m); text-align: right; font-size: 11.5px; }
-.pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 20px; }
-.pcard { margin-top: 0; display: flex; flex-direction: column; gap: 6px; }
-.pcard .ph { align-items: center; }
-.pcard .pname { color: var(--t); text-decoration: none; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pcard .pname:hover { color: var(--acT); }
-.pcard .ph .iconbtn.sq { width: 30px; height: 30px; margin-left: auto; }
-.pcard .path { font-size: 11.5px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pcard .spark { height: 28px; display: flex; align-items: flex-end; gap: 2px; }
-.pcard .spark i { flex: 1; background: var(--ac-b); border-radius: 1px 1px 0 0; display: block; min-height: 1px; }
-.pcard .spark i.last { background: var(--ac); }
-.pcard .cost b { font-size: 18px; font-family: var(--mono); }
-.pcard .cost small { font: 12px var(--mono); color: var(--m); margin-left: 6px; }
-.pcard .row { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--m); }
-.pcard.live { box-shadow: inset 3px 0 0 var(--ac); }
+.prow { display: grid; grid-template-columns: 12px minmax(130px, 200px) minmax(0, 1fr) 96px 96px 90px 64px; gap: 10px; align-items: center; font-size: 13px; padding: 5px 0; }
+.prow.head { color: var(--m); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid var(--ru); padding-bottom: 6px; }
+.prow .sw { width: 10px; height: 10px; border-radius: 3px; }
+.prow .nm { justify-self: start; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t); text-decoration: none; font-weight: 500; max-width: 100%; }
+.prow a.nm:hover { color: var(--acT); }
+.prow .track { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+.prow .track i { display: block; height: 100%; background: var(--ac-b); }
+.prow .num { text-align: right; font: 12px var(--mono); color: var(--t2); }
+.prow .num.on { color: var(--t); font-weight: 600; }
+.prow .m { color: var(--m); text-align: right; font: 11.5px var(--mono); }
+.pcrows { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.pcrow { margin-top: 0; display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(0, 2fr) 130px 160px auto; gap: 16px; align-items: center; cursor: pointer; min-width: 0; padding: 14px 20px; }
+.pcrow:hover { border-color: var(--ac-b); box-shadow: 0 2px 10px rgba(15, 23, 42, .06); }
+.pcrow:focus-visible { outline: 2px solid var(--ac); outline-offset: 1px; }
+.pcrow.running { box-shadow: inset 3px 0 0 var(--ac); }
+.pcrow .who { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pcrow .hd { display: flex; align-items: center; gap: 4px; min-width: 0; height: 26px; }
+.pcrow .path { font-size: 11.5px; color: var(--m); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcrow .area { width: 100%; height: 44px; display: block; }
+.pcrow .num { font: 600 16px var(--mono); text-align: right; }
+.pcrow .num small { display: block; font: 11px var(--mono); color: var(--m); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcrow .meta { font: 11.5px var(--mono); color: var(--m); text-align: right; line-height: 1.5; }
+.pcrow .pacts { display: flex; gap: 2px; }
+.pcrow .hd .ib.edit { opacity: 0; }
+.pcrow:hover .hd .ib.edit, .pcrow:focus-within .hd .ib.edit { opacity: 1; }
+@media (max-width: 900px) { .pcrow { grid-template-columns: 1fr; } .pcrow .num, .pcrow .meta { text-align: left; } }
+/* small icon buttons: pin, rename, tags, new session, more */
+.ib { width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--m); display: inline-flex; align-items: center; justify-content: center; gap: 2px; cursor: pointer; padding: 0; flex: none; }
+.ib:hover { background: var(--hover); border-color: var(--b); color: var(--t); }
+.ib svg { width: 15px; height: 15px; }
+.ib.pin.on { color: var(--acT); }
+.ib.pin.on svg { fill: var(--acT); }
+.ib.tagb small { font: 500 10.5px var(--mono); }
+.ib.tagb { width: auto; padding: 0 5px; }
+/* a project's name: text that becomes a field on the pencil or a double-click */
+.pname { font-weight: 600; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pname.big { font-size: inherit; }
+.pname input { font: inherit; color: var(--t); border: 1px solid var(--ac); border-radius: 6px; padding: 1px 6px; width: 100%; max-width: 420px; outline: none; background: var(--s); }
+.sesshead h1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sesshead h1 .ib { width: 30px; height: 30px; }
+.sesshead h1 .ib svg { width: 17px; height: 17px; }
+/* a number that changed on a background refresh */
+.ovk strong.flash { animation: kflash 1s ease-out; }
+@keyframes kflash { 0%, 60% { background: var(--hl); border-radius: 4px; } 100% { background: transparent; } }
+.pager { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px; font-size: 12.5px; color: var(--m); flex-wrap: wrap; }
+.pager .btn.sm.on { background: var(--act); border-color: var(--ac-b); color: var(--t); }
+.pager .help { color: var(--m); margin: 0 6px; }
 /* tags: small coloured chips, six colours by age; + opens the editor */
-.tags { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; vertical-align: middle; margin-left: 6px; }
+.tags { display: inline-flex; gap: 4px; align-items: center; flex-wrap: nowrap; vertical-align: middle; margin-left: 6px; min-width: 0; overflow: hidden; }
 .tagc { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font: 500 11px var(--sans); text-decoration: none; border: 1px solid transparent; white-space: nowrap; }
 .tagc.c0 { background: var(--iris-bg); color: var(--irisT); }
 .tagc.c1 { background: var(--ac-soft); color: var(--acT); }
@@ -327,8 +368,7 @@ nav.nav a.sub span:not(.count) { overflow: hidden; text-overflow: ellipsis; whit
 .tagc.c3 { background: var(--del); color: var(--negT); }
 .tagc.c4 { background: var(--add); color: var(--pos); }
 .tagc.c5 { background: var(--hl); color: var(--t2); }
-.tagc.add { background: transparent; border: 1px dashed var(--ctl); color: var(--m); cursor: pointer; padding: 0 6px; }
-.tagc.add:hover { border-color: var(--ac); color: var(--acT); }
+.tagc.more { background: var(--track); color: var(--m); }
 .srow .t > span .tags { margin-left: 4px; }
 .sesshead h1 .tags { vertical-align: middle; }
 .sesshead h1 .tagc { height: 22px; font-size: 12px; }
@@ -833,7 +873,17 @@ nav.nav a .count.upd:not(:empty) { background: none; color: var(--warnT); paddin
 .ovhead .toolfilter a { width: auto; padding: 0 10px; font-size: 13px; font-weight: 500; }
 /* Accounts, as drawn */
 .av { background: var(--act); color: var(--t); border: 0; }
-.acr { grid-template-columns: 38px minmax(180px, 1.1fr) minmax(300px, 1.6fr) 120px auto auto; padding: 16px 20px; }
+.acr { grid-template-columns: 38px minmax(150px, 1fr) minmax(200px, 1.3fr) 90px 96px 90px auto auto; padding: 16px 20px; gap: 12px; }
+.acr .usp { min-width: 0; }
+.acr .usp .spark { height: 28px; display: flex; align-items: flex-end; gap: 2px; }
+.acr .usp .spark i { flex: 1 1 0; min-width: 2px; min-height: 1px; background: var(--ac-b); border-radius: 1px 1px 0 0; display: block; }
+.acr .usp .spark i.last { background: var(--ac); }
+.acr .use.cost b { font-size: 16px; }
+.uchartp .ph { align-items: flex-start; }
+.uchartp .gh2 { margin: 0; }
+.uchartp.shut .ph { margin-bottom: 0; }
+.acgroups .acg .fold .thead .muted, .uchartp .thead .muted { margin-left: 6px; font-weight: 400; }
+@media (max-width: 1280px) { .acr { grid-template-columns: 38px minmax(140px, 1fr) minmax(180px, 1.2fr) 96px 90px auto; } .acr .usp, .acr .read { display: none; } }
 .acr .av { width: 38px; height: 38px; font-size: 12px; font-family: var(--mono); }
 .acr .who b { font-weight: 600; font-size: 15px; }
 .acr .use b { font-size: 18px; font-weight: 600; }
