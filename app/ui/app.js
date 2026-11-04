@@ -4,7 +4,7 @@ import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh
 import { ic, brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
-import { setSelfUpdate } from './views.js';
+import { setSelfUpdate, refreshProjects } from './views.js';
 import './mcp.js';
 import './skills.js';
 import './apps.js';
@@ -29,7 +29,9 @@ if (ev) ev.listen('refreshed', () => {
   S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
-  if (document.getElementById('dialog-root').innerHTML) S.dirty = true; else render();
+  if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
+  else if (S.route.view === 'projects') refreshProjects(); // the tiles and rows take the new numbers where they are
+  else render();
 });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes

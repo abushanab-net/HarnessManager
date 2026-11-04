@@ -10,7 +10,7 @@ import { esc } from './lib.js';
 const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode and Antigravity on this computer in one place. This short tour shows each page the first time you open it.'],
-    ['aside.side nav', 'Every page', 'Accounts to add and start accounts, Sessions to read past work, Usage, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
+    ['aside.side nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
     ['.ovkpis', 'Key numbers', 'Usage of every account against the period before, read from each tool\'s own logs on this computer; nothing is sent anywhere. Cost is what the tokens would cost at API list prices: subscriptions are not billed per token.'],
     ['.ovhead .acts', 'Tool and period', 'Show one tool or all of them, for the last 24 hours, 7 days or 30 days.'],
     ['[data-testid=routes]', 'Live routes', 'Each account, the tool it runs and where its requests go. Pulses show the tokens of the last five minutes; red is a paused provider or an account not logged in.'],
@@ -21,7 +21,8 @@ const TOURS = {
   accounts: [
     ['[data-testid=add-account]', 'Add an account', 'Each account gets its own folder and login. Sign in once; Harness Manager keeps the accounts apart.'],
     ['.tray', 'This week', 'Totals for all accounts, and when each account\'s limits free up again.'],
-    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets.'],
+    ['[data-testid=usage-panel]', 'Tokens per day', 'Every account\'s tokens for each day of the range, priced at API list prices in the rows below. Subscriptions are not billed per token.'],
+    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets, and the row ends with the account\'s tokens and cost for the range.'],
     ['[data-testid=accounts-table] .acr .lims', 'Limits', 'Every limit of the plan: 5-hour, weekly and per model. The ↻ button beside a Claude account reads its limits from Anthropic right now.'],
     ['[data-testid=accounts-table] .go .btn', 'Start', 'Opens a terminal running the tool as this account. Log in appears instead when the account has not signed in yet.'],
     ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Log in again, open the account\'s folder, its settings, or remove it.'],
@@ -47,9 +48,6 @@ const TOURS = {
     ['[data-testid=chat]', 'Conversation', 'Your prompts on the right, the answers on the left, and every tool call (folded) where it happened: click one for its output or diff. An open session follows as its tool writes.'],
     ['[data-testid=resume]', 'Resume', 'Continues this session in a terminal, with the same account.'],
     ['[data-testid=export-md]', 'Export', 'Save the session as a Markdown file.'],
-  ],
-  usage: [
-    ['[data-testid=usage-ledger]', 'Usage by account', 'Tokens per account for each of the last seven days, with the split by model and by project below.'],
   ],
   routing: [
     ['[data-testid=provider-add]', 'Providers', 'Add OpenRouter, Ollama or another provider with its key. Keys stay in Windows Credential Manager, never in a file.'],
