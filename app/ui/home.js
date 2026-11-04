@@ -1,7 +1,7 @@
 // Overview: the whole setup at a glance. Key numbers against the period before, live routes drawn with WebGL,
 // limit burn-down and forecast, reply timing, the usage mix, events, the health of the parts, and the request log.
 
-import { S, call, view, render, attempt, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
+import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill, ic, timeline } from './lib.js';
 import { findings, limitRows } from './accounts.js';
 
@@ -352,7 +352,7 @@ view('home', async (sheet) => {
   const evTone = { ok: '', warn: 'warn', bad: 'neg' };
   sheet.innerHTML = `
     <div class="trow ovhead"><div>
-        <div class="live"><i></i>Live · ${esc(state.computer || 'this computer')} · ${ps.length} accounts · ${logged} logged in · ${open} ${open === 1 ? 'console' : 'consoles'} open · router :${state.router.port} ${state.router.running ? 'running' : 'stopped'}</div>
+        <div class="live"><i></i>Live · ${esc(state.computer || 'this computer')} · ${ps.length} accounts · ${logged} logged in · ${open ? `<a href="#sessions?live=1" class="acT" data-testid="home-live">${open} ${open === 1 ? 'console' : 'consoles'} open</a>` : '0 consoles open'} · router :${state.router.port} ${state.router.running ? 'running' : 'stopped'}</div>
         <h1>Overview</h1><p class="find" data-testid="finding">${text}${risks[0] ? ` <b class="warnT">${esc(risks[0].name)}</b> runs out of its ${esc(risks[0].win.toLowerCase())} ${when(risks[0].out)} at this pace.` : ''}</p></div>
       <div class="acts">
         <div class="toolfilter" role="group" aria-label="Tool"><a class="${!st.harness ? 'on' : ''}" data-act="home-tool" data-v="" data-testid="tool-all">All</a>
@@ -414,7 +414,7 @@ action('home-more', async (el) => {
 });
 action('home-sync', async () => {
   const r = await attempt(() => call('refresh', { live: S.state && S.state.live_quota }));
-  if (r) { S.lastSync = Date.now(); toast(refreshText(r)); render(); }
+  if (r) { S.lastSync = Date.now(); toast(refreshText(r)); changed(); }
 });
 // cards that open another page
 document.addEventListener('click', (e) => { const a = e.target.closest('[data-href]'); if (a) location.hash = a.dataset.href; });

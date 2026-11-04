@@ -1,7 +1,7 @@
 // MCP servers: one list for every tool (search, a tick per tool, edit), an add/edit page with a form or JSON,
 // and Import from apps, which reads every tool's config and says which files it read.
 
-import { S, call, view, go, toast, attempt, openDialog, dlgHead, confirmDialog, openMenu, action, render, shownTools, setNavCounts } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, openDialog, dlgHead, confirmDialog, openMenu, action, render, shownTools, setNavCounts } from './core.js';
 import { esc, ic, toolIcon, dur } from './lib.js';
 import { syncReport } from './views.js';
 
@@ -54,7 +54,7 @@ action('mcp-menu', (el) => openMenu(el, [
   } },
   { label: 'Remove…', danger: true, run: async () => {
     if (await confirmDialog('Remove ' + el.dataset.name, `Remove <b>${esc(el.dataset.name)}</b> from Harness Manager and from every tool it wrote it into?`, 'Remove')) {
-      attempt(() => call('item_remove', { kind: 'mcp', name: el.dataset.name })).then((rep) => { syncReport(rep); render(); });
+      syncReport(await mutate(() => call('item_remove', { kind: 'mcp', name: el.dataset.name })));
     }
   } },
 ]));
@@ -76,7 +76,7 @@ action('mcp-import-all', async () => {
   const n = new Set(r.flatMap((x) => x.new || [])).size;
   toast(n ? `Imported ${n} new ${n === 1 ? 'server' : 'servers'}` : 'No new MCP servers found');
   hideImport = false;
-  render();
+  changed();
 });
 action('mcp-import-hide', () => { hideImport = true; render(); });
 

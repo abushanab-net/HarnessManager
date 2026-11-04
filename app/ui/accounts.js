@@ -1,7 +1,8 @@
 // Accounts: the list with limits and the reset timeline, account detail, and Add account with sign-in.
 
-import { S, call, view, go, toast, attempt, acctName, fit, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder } from './core.js';
 import { esc, fmt, hm, when, dur, resetText, lvl, avatar, toolPill, toolIcon, meter, ic, bars, timeline } from './lib.js';
+import { tagsHtml } from './views.js';
 
 const tier = (p, id) => p.quota && p.quota.tiers.find((t) => t.id === id);
 const weekTier = (p) => tier(p, 'week') || (p.quota && p.quota.tiers.find((t) => t.id.startsWith('week')));
@@ -132,7 +133,7 @@ view('accounts', async (sheet) => {
       const open = !folded.has(h.id), on = list.filter((p) => p.identity.logged_in).length;
       const next = list.flatMap((p) => (p.quota ? p.quota.tiers.filter((t) => t.id === 'session' && t.resets_at > now) : [])).sort((a, b) => a.resets_at - b.resets_at)[0];
       const open2 = list.reduce((a, p) => a + p.running.length, 0);
-      const meta = list.length ? `${on} logged in · ${open2} ${open2 === 1 ? 'console' : 'consoles'} open${next ? ' · next reset ' + hm(next.resets_at) : ''}` : '';
+      const meta = list.length ? `${on} logged in · ${open2 ? `<span class="acT" data-act="go-live" role="link">${open2} ${open2 === 1 ? 'console' : 'consoles'} open</span>` : '0 consoles open'}${next ? ' · next reset ' + hm(next.resets_at) : ''}` : '';
       return `<section class="acg ${open ? '' : 'shut'}" data-testid="group-${h.id}"><header>
         <h2 class="gh2"><button class="fold" data-act="acct-fold" data-h="${h.id}" aria-expanded="${open}"><span class="thead">${toolIcon(h.id, 18)}<b>${esc(h.label)}</b>${list.length ? `<span class="muted">${list.length}</span>` : ''}</span><span class="muted sm">${meta}</span><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></h2>
 </header>
@@ -224,8 +225,8 @@ export function sessionRow(s) {
   // a dot (teal: open now), the title with where it ran, the account, the tool, tokens, when, and one action
   const tool = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' }[s.harness];
   const where = [`${s.messages} ${s.messages === 1 ? 'msg' : 'msgs'}`, s.cwd ? s.cwd.split(/[\\/]/).slice(-2).join('\\') : ''].filter(Boolean).join(' · ');
-  return `<div class="srow" data-testid="session-${esc(s.id)}"><i class="sdot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : 'aria-hidden="true"'}></i>
-    <div class="t" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-testid="read-${esc(s.id)}" role="button" tabindex="0"><b>${esc(s.title || 'Untitled session')}</b><span class="mono" title="${esc(s.cwd)}">${esc(where)}</span></div>
+  return `<div class="srow" data-search="${esc(((s.title || '') + ' ' + (s.cwd || '') + ' ' + acctName(s.profile) + ' ' + (tool || '')).toLowerCase())}" data-testid="session-${esc(s.id)}"><i class="sdot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : 'aria-hidden="true"'}></i>
+    <div class="t" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-testid="read-${esc(s.id)}" role="button" tabindex="0"><b>${esc(s.title || 'Untitled session')}</b><span class="mono" title="${esc(s.cwd)}">${esc(where)}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</span></div>
     <div class="acct">${esc(acctName(s.profile))}</div><div>${toolPill(s.harness, tool)}</div><div class="num mono">${fmt(s.tokens)}</div>
     <div class="when mono ${s.open ? 'live' : ''}">${s.open ? 'live' : esc(when(s.last_active_at))}</div>
     <div class="num">${s.open ? `<button class="btn outline sm" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>`
@@ -317,18 +318,16 @@ action('show-window', async (el) => { const ok = await attempt(() => call('show_
 action('open-folder', (el) => attempt(() => call('open_folder', { path: el.dataset.path })));
 action('open-session', (el) => go('session', { profile: el.dataset.profile, id: el.dataset.id }));
 action('resume', (el) => attempt(() => call('resume', { profile: el.dataset.profile, id: el.dataset.id, cwd: el.dataset.cwd }), 'Resumed in a new terminal'));
-action('sync-now', () => attempt(() => call('sync', {}), 'Accounts are in step'));
-action('save-cap', (el) => { const v = document.getElementById('pf-cap').value.trim(); attempt(() => call('set_cap', { name: el.dataset.name, cap: v === '' ? null : +v }), 'Saved').then(render); });
-action('save-email', (el) => attempt(() => call('update', { name: el.dataset.name, email: document.getElementById('pf-email').value }), 'Saved').then(render));
-action('save-label', async (el) => {
-  if (await attempt(() => call('set_label', { name: el.dataset.name, label: document.getElementById('pf-label').value }), 'Renamed')) { await loadState(); render(); }
-});
+action('sync-now', () => mutate(() => call('sync', {}), 'Accounts are in step'));
+action('save-cap', (el) => { const v = document.getElementById('pf-cap').value.trim(); mutate(() => call('set_cap', { name: el.dataset.name, cap: v === '' ? null : +v }), 'Saved'); });
+action('save-email', (el) => mutate(() => call('update', { name: el.dataset.name, email: document.getElementById('pf-email').value }), 'Saved'));
+action('save-label', (el) => mutate(() => call('set_label', { name: el.dataset.name, label: document.getElementById('pf-label').value }), 'Renamed'));
 action('save-key', (el) => {
   const key = document.getElementById('pf-key').value;
   if (!key.trim()) return toast('Paste the new key first', true);
   attempt(() => call('set_key', { name: el.dataset.name, key }), 'Key replaced').then(() => (document.getElementById('pf-key').value = ''));
 });
-action('save-endpoint', (el) => attempt(() => call('update', { name: el.dataset.name, base_url: document.getElementById('pf-url').value, model: document.getElementById('pf-model').value }), 'Saved'));
+action('save-endpoint', (el) => mutate(() => call('update', { name: el.dataset.name, base_url: document.getElementById('pf-url').value, model: document.getElementById('pf-model').value }), 'Saved'));
 /** Remove an account: from the list's or the account's ⋯ menu, or its Settings tab. */
 function removeAccount(name, main) {
   const shown = acctName(name);
@@ -341,7 +340,7 @@ function removeAccount(name, main) {
   document.getElementById('rm-ok').onclick = async () => {
     const del = !main && document.getElementById('rm-home').checked;
     closeDialog();
-    if (await attempt(() => call('remove', { name, delete_home: del }), `Removed ${shown}`)) { go('accounts'); render(); }
+    if (await attempt(() => call('remove', { name, delete_home: del }), `Removed ${shown}`)) { go('accounts'); changed(); }
   };
 }
 action('remove-account', (el) => removeAccount(el.dataset.name, el.dataset.main === '1'));
@@ -356,10 +355,10 @@ action('login', (el) => startLogin(el.dataset.name));
 // a new dialog starts from a Claude Code subscription, not from the last one's choices
 action('add-account', () => { add.harness = 'claude'; add.kind = 'subscription'; addDialog(); });
 action('add-account-for', (el) => { add.harness = el.dataset.h; add.kind = 'subscription'; addDialog(); });
-action('quota-live', async (el) => { if (await attempt(() => call('quota_live', { name: el.dataset.name }), 'Limits read')) render(); });
+action('quota-live', (el) => mutate(() => call('quota_live', { name: el.dataset.name }), 'Limits read'));
 action('refresh-now', async () => {
   const r = await attempt(() => call('refresh', { live: S.state && S.state.live_quota }));
-  if (r) { toast(refreshText(r)); render(); }
+  if (r) { toast(refreshText(r)); changed(); }
 });
 
 // ---------- add account ----------
@@ -402,8 +401,8 @@ function addDialog() {
     const created = await attempt(() => call('add', req));
     if (!created) return;
     closeDialog();
-    if (add.kind !== 'subscription') { toast(`Added ${req.name}`); return render(); }
-    render();
+    await changed();
+    if (add.kind !== 'subscription') return toast(`Added ${req.name}`);
     startLogin(req.name);
   };
 }
@@ -413,8 +412,21 @@ async function startLogin(name) {
   const p = (S.state.profiles || []).find((x) => x.name === name) || { harness: add.harness };
   if (p.harness !== 'claude') {
     if (!(await attempt(() => call('login_terminal', { name })))) return;
-    openDialog(`${dlgHead('Sign in ' + acctName(name))}<div class="df" style="grid-template-columns:1fr"><div>A terminal window opened with the sign-in. Finish it there; this account updates when you are done.</div></div>
-      <div class="dfoot"><span class="acts"><button class="btn primary" data-act="login-done" data-testid="login-done">Done</button></span></div>`);
+    // the dialog watches the account's login every 2 s and says when the terminal's sign-in has landed
+    const before = JSON.stringify(p.identity || null);
+    const body = (msg, ok) => `${dlgHead('Sign in ' + acctName(name))}<div class="df" style="grid-template-columns:1fr"><div class="${ok ? 'ok' : ''}" data-testid="login-status">${msg}</div></div>
+      <div class="dfoot"><span class="acts"><button class="btn ${ok ? 'primary' : ''}" data-act="login-done" data-testid="login-done">${ok ? 'Done' : 'Close'}</button></span></div>`;
+    let timer;
+    openDialog(body('A terminal window opened with the sign-in. Finish it there; this dialog follows along.', false), { onClose: () => clearInterval(timer) });
+    timer = setInterval(async () => {
+      const st = await call('state').catch(() => null);
+      const now = st && st.profiles.find((x) => x.name === name);
+      if (!now || JSON.stringify(now.identity) === before || !now.identity.logged_in) return;
+      clearInterval(timer);
+      S.state = st;
+      const dlg = document.querySelector('.dlg');
+      if (dlg) dlg.innerHTML = body(`Signed in${now.identity.email ? ' as ' + esc(now.identity.email) : ''}.`, true);
+    }, 2000);
     return;
   }
   const flow = await attempt(() => call('login_start', { name }));
@@ -452,4 +464,4 @@ async function startLogin(name) {
     }
   }, 1000);
 }
-action('login-done', () => { closeDialog(); render(); });
+action('login-done', () => { closeDialog(); changed(); });

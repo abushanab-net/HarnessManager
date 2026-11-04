@@ -14,13 +14,15 @@
     <nav class="nav" id="nav-main">
       <a data-nav="home" href="#home" data-testid="nav-home"><span data-icon="dash"></span>Overview<span class="count" id="today-cost"></span></a>
       <a data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span data-icon="users"></span>Accounts<span class="count" id="n-accounts"></span></a>
-      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span>Sessions<span class="count live" id="n-live"></span></a>
+      <a data-nav="projects" href="#projects" data-testid="nav-projects"><span data-icon="folder"></span>Projects<span class="count" id="n-projects"></span></a>
+      <div id="nav-pins" data-testid="nav-pins"></div>
+      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span>Sessions<span class="count live" id="n-live" data-act="go-live" role="link" title="The sessions running now" data-testid="nav-live"></span></a>
       <a data-nav="usage" href="#usage" data-testid="nav-usage"><span data-icon="chart"></span>Usage by account</a>
       <a data-nav="routing" href="#routing" data-testid="nav-routing"><span data-icon="route"></span>API keys &amp; routing</a>
       <div class="navgap"></div>
       <a data-nav="mcp" href="#mcp" data-testid="nav-mcp"><span data-icon="plug"></span>MCP servers<span class="count" id="n-mcp"></span></a>
       <a data-nav="skills" href="#skills" data-testid="nav-skills"><span data-icon="spark"></span>Skills<span class="count" id="n-skills"></span></a>
-      <a data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span data-icon="doc"></span>Prompts</a>
+      <a data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span data-icon="doc"></span>System prompts</a>
       <a data-nav="apps" href="#apps" data-testid="nav-apps"><span data-icon="grid"></span>Apps<span class="count upd" id="apps-count" title="Tools with a newer version"></span></a>
     </nav>
     <nav class="nav bottom">
@@ -30,11 +32,12 @@
   </aside>
   <header class="top">
     <label class="search"><span data-icon="search"></span><input id="find" aria-label="Find an account or session" placeholder="Find an account, session or setting" autocomplete="off" data-testid="find"><kbd>Ctrl K</kbd></label>
-    <div class="right"><span id="fresh" data-testid="fresh"></span><button class="iconbtn help" data-act="tour-start" title="Tour of this page" aria-label="Tour of this page" data-testid="tour-start">?</button><button class="iconbtn" data-act="refresh-now" title="Refresh usage and limits" aria-label="Refresh usage and limits"><span data-icon="refresh"></span></button></div>
+    <div class="right"><a id="live-strip" class="livestrip" href="#sessions?live=1" hidden data-testid="live-strip"></a><span id="fresh" data-testid="fresh"></span><button class="iconbtn help" data-act="tour-start" title="Tour of this page" aria-label="Tour of this page" data-testid="tour-start">?</button><button class="iconbtn" data-act="refresh-now" title="Refresh usage and limits" aria-label="Refresh usage and limits"><span data-icon="refresh"></span></button></div>
   </header>
   <main class="sheet" id="sheet" tabindex="-1"></main>
 </div>
 <div id="dialog-root"></div>
+<div id="notice" class="off" role="alert"><span id="notice-text"></span><button class="iconbtn" data-act="notice-close" aria-label="Dismiss" title="Dismiss">×</button></div>
 <div id="toast" class="off" role="status"></div>
 <script type="module" src="app.js"></script>
 </body>
