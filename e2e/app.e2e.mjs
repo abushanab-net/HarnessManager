@@ -886,6 +886,33 @@ try {
     await waitFor(async () => (await exec("return !document.querySelector('.unmcard [data-testid=skill-row-loose]') && !!document.querySelector('[data-testid=skill-row-loose]')")), 'managed now');
     await click('[data-testid=t-skill-loose-codex]');
     await waitFor(() => fs.existsSync(path.join(home, '.codex', 'skills', 'loose', 'SKILL.md')), 'and linked into Codex');
+    // Claude Code already has its own copy of loose: the sync leaves it alone and offers to replace it with the link
+    write(path.join(home, '.claude', 'skills', 'loose', 'SKILL.md'), 'an older copy, kept by hand');
+    await click('[data-testid=t-skill-loose-claude]');
+    await $('[data-testid=notice-act]');
+    await click('[data-testid=notice-act]');
+    await click('#confirm-ok');
+    await waitFor(() => fs.existsSync(path.join(home, '.claude', 'skills', '.hrm-backup', 'loose', 'SKILL.md')), 'the copy moved into .hrm-backup');
+    await waitFor(() => fs.lstatSync(path.join(home, '.claude', 'skills', 'loose')).isSymbolicLink(), 'and the shared copy is linked there');
+    // thirty more folders managed at once: the list pages at 25, and the search narrows across pages
+    for (let i = 0; i < 30; i++) write(path.join(home, '.agents', 'skills', `bulk-${String(i).padStart(2, '0')}`, 'SKILL.md'), `---
+name: bulk-${i}
+description: Bulk skill ${i}
+---
+`);
+    await nav('#home');
+    await nav('#skills');
+    await click('[data-testid=skill-adopt-all]');
+    await $('[data-testid=sk-page-1]');
+    assert.equal(await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length"), 25, '25 on the first page');
+    await click('[data-testid=sk-page-1]');
+    await waitFor(async () => (await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length")) < 25, 'the rest on the second page');
+    await click('[data-testid=sk-per-50]');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=sk-page-1]')")), 'one page at 50');
+    await type('[data-testid=find]', 'bulk-07');
+    await waitFor(async () => (await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length")) === 1, 'the search narrows to one');
+    await page.fill('[data-testid=find]', '');
+    await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
   });
 
   await test('skills: Discover lists the skills of each repository and installs one into the store', async () => {

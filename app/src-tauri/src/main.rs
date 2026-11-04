@@ -410,6 +410,13 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             ctx.save_registry(&reg)?;
             json!({"adopted": done, "sync": sync_soft(ctx)})
         }
+        // the tools' own copies of ticked skills go to .hrm-backup, then the sync links the store's
+        "skill_takeover" => {
+            let reg = ctx.registry()?;
+            let names: Vec<String> = a["names"].as_array().map(|x| x.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let moved = items::takeover_skills(ctx, &reg, &names)?;
+            json!({"moved": moved, "sync": sync_soft(ctx)})
+        }
         "skill_import" => {
             let mut reg = ctx.registry()?;
             let (added, kept) = items::import_skills(ctx, &mut reg, &s(a, "harness")?)?;
