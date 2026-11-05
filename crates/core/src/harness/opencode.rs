@@ -5,7 +5,7 @@
 //! shortcut: OpenCode 1.x does not know `--standalone`; add a version check if 1.x support is needed.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use rusqlite::{Connection, OpenFlags};
@@ -209,10 +209,34 @@ impl Harness for OpenCode {
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec!["--session".into(), id.into()] }
 
+    /// OpenCode imports its own export: 2.x `session import <file> --directory <folder>`, else 1.x `import <file>`.
+    fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        let mut last = String::new();
+        for v2 in [true, false] {
+            let mut c = self.launch(ctx, p, &import_args(v2, &t.path, local_root))?.command();
+            c.stdin(std::process::Stdio::null());
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); }
+            let o = c.output()?;
+            if o.status.success() {
+                return Ok(crate::transcripts::Materialized { launch_args: self.resume_args(&t.id), cwd: local_root.to_path_buf(), new_session_id: None,
+                    note: "OpenCode imported the session for this folder; the original stays as it is.".into() });
+            }
+            last = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
+        }
+        bail!("opencode could not import the session{}", if last.is_empty() { String::new() } else { format!(": {last}") })
+    }
+    fn resumes_elsewhere(&self) -> bool { true }
+
     fn item_paths(&self, ctx: &Ctx, p: &Profile) -> ItemPaths {
         let c = self.config_dir(ctx, p);
         ItemPaths { mcp: Some((c.join("opencode.json"), "opencode-json")), skills: Some(c.join("skills")), prompt: Some(c.join("AGENTS.md")) }
     }
+}
+
+/// The import command of OpenCode 2.x (`session import`, with the folder) or 1.x (`import`).
+pub fn import_args(v2: bool, file: &Path, local_root: &Path) -> Vec<String> {
+    if v2 { vec!["session".into(), "import".into(), file.display().to_string(), "--directory".into(), local_root.display().to_string()] } else { vec!["import".into(), file.display().to_string()] }
 }
 
 fn model_name(raw: &str) -> String {

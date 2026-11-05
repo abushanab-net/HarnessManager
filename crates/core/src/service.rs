@@ -437,6 +437,7 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
     let peers = crate::journal::peers(ctx).unwrap_or_default();
     let elsewhere = crate::journal::open_elsewhere(&peers, now_ms());
     let names = crate::journal::device_names(ctx);
+    let forks = crate::transcripts::forks(ctx);
     let mut out = vec![];
     // the filters that apply to a session wherever it ran
     let keep = |s: &SessionMeta| -> bool {
@@ -452,13 +453,16 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
     };
     // the other computers' sessions, as their journals described them
     if f.scope.as_deref() != Some("here") {
-        for (dev, mut s) in ctx.db.remote_sessions()? {
+        let remote = ctx.db.remote_sessions()?;
+        let roots = if remote.is_empty() { Default::default() } else { crate::transcripts::roots_here(ctx).unwrap_or_default() };
+        for (dev, mut s) in remote {
             s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
             s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
             s.open = false;
             s.open_elsewhere = elsewhere.contains(&s.id);
             s.device_name = names.get(&dev).cloned().unwrap_or_else(|| dev.clone());
             s.device = dev;
+            s.resumable = Some(crate::transcripts::resumable(&s, &roots, &reg));
             if f.open == Some(true) || !keep(&s) { continue; }
             out.push(s);
         }
@@ -488,6 +492,7 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             s.device_name = ctx.settings.device_name.clone();
             // the other computers learn of it here, once its project is known
             if let Err(e) = ctx.db.journal_session(&s) { crate::log::warn(&format!("journal: session {}: {e:#}", s.id)); }
+            s.continued_from = forks.get(&crate::db::session_key(&s)).and_then(|d| names.get(d).cloned());
             if f.open == Some(true) && !s.open { continue; }
             s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
             s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
@@ -628,7 +633,9 @@ pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcri
     let reg = ctx.registry()?;
     let p = reg.get(profile)?;
     let f = SessionFilter { profile: Some(profile.into()), ..Default::default() };
-    let s = sessions(ctx, &f)?.into_iter().find(|s| s.id == session_id).context("session not found")?;
+    // this computer's own copy first: a session continued from another computer shares its id with the row from there
+    let list = sessions(ctx, &f)?;
+    let s = list.iter().find(|s| s.id == session_id && s.device == ctx.db.device).or_else(|| list.iter().find(|s| s.id == session_id)).cloned().context("session not found")?;
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
     Ok(t)

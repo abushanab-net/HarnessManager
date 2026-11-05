@@ -270,6 +270,24 @@ impl Harness for Codex {
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec!["resume".into(), id.into()] }
 
+    /// The rollout under `sessions/YYYY/MM/DD/` (the date from its name), plain even when the origin kept it
+    /// compressed; Codex finds it by name and `-C` sets the folder. Its state database is never touched.
+    fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let name = name.strip_suffix(".zst").unwrap_or(name);
+        // rollout-2026-11-01T10-00-00-<id>.jsonl
+        let date = name.strip_prefix("rollout-").filter(|d| d.len() >= 10 && d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-' && d[..10].chars().filter(|c| c.is_ascii_digit()).count() == 8);
+        let Some(d) = date else { bail!("the rollout's name ({name}) carries no date; Codex would not find it") };
+        let dest = self.home(ctx, p).join("sessions").join(&d[..4]).join(&d[5..7]).join(&d[8..10]).join(name);
+        if !dest.exists() {
+            std::fs::create_dir_all(dest.parent().unwrap())?;
+            std::fs::copy(&t.path, &dest)?;
+        }
+        Ok(crate::transcripts::Materialized { launch_args: vec!["-C".into(), local_root.display().to_string(), "resume".into(), t.id.clone()], cwd: local_root.to_path_buf(), new_session_id: None,
+            note: "Codex resumes the copied rollout in this folder; the original stays as it is.".into() })
+    }
+    fn resumes_elsewhere(&self) -> bool { true }
+
     fn running(&self, ctx: &Ctx, p: &Profile) -> Vec<RunningConsole> {
         // Codex leaves no pid file; a codex process plus a rollout written in the last two minutes counts as open.
         let procs = crate::procs::by_name(&["codex"], None);

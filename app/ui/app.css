@@ -1272,3 +1272,5 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .paircode { font-size: 44px; font-weight: 600; letter-spacing: 0.12em; text-align: center; padding: 14px 0 6px; color: var(--t); }
 .linkb { border: 0; background: none; color: var(--acT); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
 .bubble .linkb { color: var(--on-ink); }
+/* Resume here (phase 3): a session continued from another computer says so under its title */
+.srow .t .cfrom, .smeta [data-testid=session-from] { color: var(--ac); }
