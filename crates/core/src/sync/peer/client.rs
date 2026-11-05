@@ -53,7 +53,7 @@ impl Client {
         let cfg = rustls::ClientConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions()?
             .dangerous().with_custom_certificate_verifier(Arc::new(Pinned { der, provider }))
             .with_client_auth_cert(vec![CertificateDer::from(id.cert_der.clone())], PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(id.key_der.clone())))?;
-        let http = reqwest::blocking::Client::builder().use_preconfigured_tls(cfg).connect_timeout(Duration::from_secs(3)).timeout(Duration::from_secs(60)).build()?;
+        let http = reqwest::blocking::Client::builder().no_proxy().use_preconfigured_tls(cfg).connect_timeout(Duration::from_secs(3)).timeout(Duration::from_secs(60)).build()?;
         let host = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.to_string() };
         Ok(Client { http, base: format!("https://{host}:{port}") })
     }
@@ -119,13 +119,18 @@ pub fn pull_all(ctx: &Ctx) {
         match Client::connect(&id, &p.cert_pem, &host, port).and_then(|c| c.json("/v1/hello")?.context("no answer").map(|h| (c, h))) {
             Ok((c, h)) => {
                 let _ = ctx.db.with(|db| {
-                    db.execute("update peers set connected=?1, last_seen=?1, path=?2, relayed_by='', name=coalesce(?3, name), incarnation=coalesce(?4, incarnation), last_seq=max(coalesce(last_seq, 0), coalesce(?5, 0)), app_version=coalesce(?6, app_version) where device_id=?7",
+                    db.execute("update peers set connected=?1, last_seen=?1, path=?2, relayed_by='', last_error='', name=coalesce(?3, name), incarnation=coalesce(?4, incarnation), last_seq=max(coalesce(last_seq, 0), coalesce(?5, 0)), app_version=coalesce(?6, app_version) where device_id=?7",
                         params![now_ms(), path, h["name"].as_str(), h["incarnation"].as_str(), h["last_seq"].as_i64(), h["app_version"].as_str(), p.id])?;
                     Ok(())
                 });
                 via.push((p, c, h));
             }
-            Err(e) => crate::log::info(&format!("computers: {} at {host}:{port} did not answer: {e:#}", p.name)),
+            Err(e) => {
+                // kept on the peer, so the card (and a failing test) can say why
+                let why = format!("{host}:{port}: {e:#}");
+                let _ = ctx.db.with(|db| { db.execute("update peers set last_error=?1 where device_id=?2", params![why.chars().take(300).collect::<String>(), p.id])?; Ok(()) });
+                crate::log::info(&format!("computers: {} at {host}:{port} did not answer: {e:#}", p.name));
+            }
         }
     }
     for (p, c, _) in &via {
