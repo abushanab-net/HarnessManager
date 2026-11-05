@@ -97,6 +97,23 @@ pub fn origin_url(root: &Path) -> Option<String> {
     first_remote
 }
 
+/// The repository of a folder (its git root and origin), remembered for five minutes: the index refresh and the
+/// pages resolve the same few hundred folders, and each lookup is a handful of metadata calls on Windows.
+fn repo_of(norm: &str) -> (PathBuf, Option<String>) {
+    type Memo = HashMap<String, (i64, PathBuf, Option<String>)>;
+    static MEMO: std::sync::Mutex<Option<Memo>> = std::sync::Mutex::new(None);
+    let now = crate::util::now_ms();
+    if let Some((at, r, o)) = MEMO.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).get(norm) {
+        if now - at < 300_000 { return (r.clone(), o.clone()); }
+    }
+    let path = PathBuf::from(norm);
+    // an empty path would resolve against our own working directory and pick up its repository
+    let root = if norm.is_empty() || !path.exists() { path.clone() } else { git_root(&path).unwrap_or_else(|| path.clone()) };
+    let remote = if norm.is_empty() { None } else { origin_url(&root) };
+    MEMO.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(norm.to_string(), (now, root.clone(), remote.clone()));
+    (root, remote)
+}
+
 pub struct Resolver<'a> {
     cache: HashMap<String, ProjectInfo>,
     aliases: &'a [ProjectAlias],
@@ -110,10 +127,7 @@ impl<'a> Resolver<'a> {
         if let Some(p) = self.cache.get(&norm) {
             return p.clone();
         }
-        let path = PathBuf::from(&norm);
-        // an empty path would resolve against our own working directory and pick up its repository
-        let root = if norm.is_empty() || !path.exists() { path.clone() } else { git_root(&path).unwrap_or_else(|| path.clone()) };
-        let remote = if norm.is_empty() { None } else { origin_url(&root) };
+        let (root, remote) = repo_of(&norm);
         let root_s = normalize(&root.display().to_string());
         let mut key = remote.clone().unwrap_or_else(|| if cfg!(windows) { root_s.to_lowercase() } else { root_s.clone() });
         let mut name = root.file_name().and_then(|n| n.to_str()).map(String::from).unwrap_or_else(|| root_s.clone());

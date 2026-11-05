@@ -251,6 +251,15 @@ flows:
 - [The local router](docs/diagrams/router.png): failover, the token, and the format conversion.
 - [CI and releases](docs/diagrams/release.png): from a pull request to a signed update on every installed copy.
 
+The pages read an index, not the tools' folders. The `sessions` table in `hm.db` holds every session the
+tools' scans found (this computer's, the other computers' merged journals, and the archived ones) with the
+columns the pages filter and sort on, plus an FTS5 table for the search; a page open is one query, paged at
+50 rows, however many session files exist. A folder watcher on the tools' session folders (`notify`) puts a
+changed file into the index within about a second, re-reading only that file from its cursor, and the window
+redraws in place; the five-minute refresh walks every folder as the safety net. `hrm index status` shows the
+rows per tool, the last refresh and whether the watcher is on; `hrm index refresh` walks now, `--all` reads
+every file again.
+
 Layout:
 - `crates/core`: `hrm-core`, all the rules (tool adapters, accounts, usage, sessions, shared setup, apps,
   backups, the launcher)
