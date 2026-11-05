@@ -44,9 +44,10 @@ write(path.join(repoDir, 'README.md'), 'not a skill');
 const repoZip = path.join(sb, 'repo.zip');
 execFileSync('pwsh', ['-NoProfile', '-Command', `Compress-Archive -Path '${repoDir}' -DestinationPath '${repoZip}' -Force`]);
 const codeloadHits = [];
+let latestVersion = '9.9.9';
 const codeload = http.createServer((req, res) => {
   // a newer Harness Manager release, for the update check
-  if (req.url === '/latest.json') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ version: '9.9.9', notes: 'Faster limits.', pub_date: '2026-11-01T00:00:00Z', platforms: { 'windows-x86_64': { signature: 'x', url: 'https://example.invalid/setup.exe' } } })); }
+  if (req.url === '/latest.json') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ version: latestVersion, notes: 'Faster limits.', pub_date: '2026-11-01T00:00:00Z', platforms: { 'windows-x86_64': { signature: 'x', url: 'https://example.invalid/setup.exe' } } })); }
   codeloadHits.push(req.url); res.writeHead(200, { 'content-type': 'application/zip' }); res.end(fs.readFileSync(repoZip)); });
 await new Promise((r) => codeload.listen(0, '127.0.0.1', r));
 const env = {
@@ -1110,6 +1111,15 @@ description: Bulk skill ${i}
     await $('[data-testid=self-install]');
     await hasText('.sheet', 'Version 9.9.9 is available');
     await hasText('.sheet', 'Faster limits.');
+    // the offer is out of date (the release is the version running, as after an update): installing says so and withdraws it
+    latestVersion = await exec("return document.querySelector('.sheet').textContent.match(/you have (\\d+\\.\\d+\\.\\d+)/)[1]");
+    await click('[data-testid=self-install]');
+    await hasText('#toast', `Harness Manager ${latestVersion} is the newest version`);
+    await $('[data-testid=self-check]');
+    assert.ok(await exec("return document.getElementById('settings-upd').hidden"), 'the dot is gone');
+    latestVersion = '9.9.9';
+    await click('[data-testid=self-check]');
+    await $('[data-testid=self-install]');
   });
 
   await test('settings: change the terminal', async () => {

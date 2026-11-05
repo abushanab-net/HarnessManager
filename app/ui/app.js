@@ -44,10 +44,13 @@ call('projects', { days: 30 }).then(drawPins).catch(() => {});
 restoreFolds();
 S.usageAt = Date.now();
 if (ev) ev.listen('app-updates', (e) => setAppUpdates(e.payload));
-// a new Harness Manager: Settings > Updates offers it
+// a new Harness Manager: Settings > Updates offers it; the hourly check also withdraws an offer that is no longer one
+let told;
 if (ev) ev.listen('self-update', (e) => {
+  if (e.payload.version === told) return;
+  told = e.payload.version;
   setSelfUpdate(e.payload);
-  toast(`Harness Manager ${e.payload.version} is available. Settings > Updates installs it.`);
+  if (told) toast(`Harness Manager ${told} is available. Settings > Updates installs it.`);
   if (S.route.view === 'settings') render();
 });
 
