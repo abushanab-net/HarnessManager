@@ -420,10 +420,10 @@ try {
     await waitFor(async () => (await exec(`return document.querySelectorAll('[data-testid=group]').length`)) === 4, 'four tool groups');
     await click('[data-testid=group-project]');
     await type('[data-testid=find]', 'longhorn');
-    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]:not([hidden])').length`)) === 1, 'the top bar search narrows to one session');
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]').length`)) === 1 && (await exec('return location.hash')).includes('q=longhorn'), 'the top bar search asks the index and shows one session');
     await page.fill('[data-testid=find]', '');
     await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
-    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]:not([hidden])').length`)) > 1, 'every session is back');
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]').length`)) > 1, 'every session is back');
   });
 
   await test('projects: cost per project, pin, rename and tabs in place, and a project opened in Sessions', async () => {
@@ -1386,6 +1386,7 @@ description: Bulk skill ${i}
     ]));
     // the tools' homes exist now: init adds their main profiles, as the first run does for installed tools
     hrm('init');
+    hrm('index', 'refresh'); // the new accounts' session files into the index now (the app's walk would, in time)
     const hs = hrm('harnesses');
     assert.ok(hs.includes('pi ') && hs.includes('Oh My Pi'), `hrm harnesses lists both:\n${hs}`);
     const names = JSON.parse(hrm('list', '--json')).map((p) => p.name);
@@ -1470,7 +1471,7 @@ description: Bulk skill ${i}
       { type: 'ai-title', aiTitle: 'Rotate the staging certificates', sessionId: 'laptop-s9' },
     ]));
     hrm2('init');
-    hrm2('sessions');
+    hrm2('index', 'refresh');
     const id2 = JSON.parse(fs.readFileSync(path.join(data2, 'settings.json'), 'utf8')).device_id;
     assert.ok(id2, 'the second computer has an id');
     // the second computer shows a code and waits up to two minutes; its stdout gives the code and the host hint
@@ -1676,12 +1677,12 @@ description: Bulk skill ${i}
         { type: 'ai-title', aiTitle: 'Renew the hub certificate', sessionId: 'hub-s5' },
       ]));
       hrm3('init');
-      hrm3('sessions');
+      hrm3('index', 'refresh');
       const joined = hrm3('hub', 'join', hubUrl, '--code', code);
       assert.ok(joined.includes('joined ' + hubUrl), joined);
       assert.ok(hrm3('hub', 'status').includes('missing'), 'no ring key on the second computer yet');
       hrm3('ring', 'enter', key);
-      hrm3('sessions'); // listed with sync on, the sessions are journaled (indexed before the join, they were not)
+      hrm3('index', 'refresh'); // refreshed with sync on, the sessions are journaled (indexed before the join, they were not)
       hrm3('computers', 'now');
       const id3 = JSON.parse(fs.readFileSync(path.join(data3, 'settings.json'), 'utf8')).device_id;
       // Sync now here: the second computer's card through the hub, and its session
@@ -1739,6 +1740,7 @@ description: Bulk skill ${i}
     assert.equal(zlib.zstdDecompressSync(fs.readFileSync(path.join(archiveDir, 'platform-gitops', month, 'claude-claude-main-s-old-1.jsonl.zst'))).toString().split('\n')[0].includes('Tidy the old'), true);
     const st = hrm('archive', 'status');
     assert.ok(st.startsWith('1 archived'), st);
+    hrm('index', 'refresh'); // the moved file leaves the index now, not at the app's next walk
     // the row keeps its place with the pill, reads from the archive, and offers no Resume
     await nav('#sessions?days=all');
     await hasText('[data-testid=archived-s-old-1]', 'archived');
@@ -1797,6 +1799,53 @@ description: Bulk skill ${i}
     await nav('#sessions?days=all');
     await hasText('[data-testid=session-desk-s1] .pc', 'DESK');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-desk-s1] [data-act=resume]')")), 'a past computer\'s session is not resumed here as a local one');
+  });
+
+  // ---- index and watcher (WP-10) ----
+  // The pages read the sessions table; the folder watcher puts a changed file into it within a second and the
+  // page redraws in place; the search is the index's (FTS5); the list comes in pages of 50.
+  await test('index and watcher: a seeded file is on the Sessions page within two seconds, the search finds a word of a title, and the list pages at 50', async () => {
+    await nav('#sessions?days=all');
+    await $('[data-testid=session-s-main-1]');
+    const t = new Date().toISOString();
+    const f = path.join(home, '.claude', 'projects', 'p', 's-watched-1.jsonl');
+    // no reload, no click: the watcher sees the file and the page redraws through the refreshed event
+    const t0 = Date.now();
+    write(f, jl([
+      { type: 'user', sessionId: 's-watched-1', cwd: repo, timestamp: t, message: { role: 'user', content: 'Watch the Velero schedule drift' } },
+      { type: 'assistant', sessionId: 's-watched-1', cwd: repo, timestamp: t, message: { id: 'w1', model: 'claude-opus-5-5', usage: { input_tokens: 40, output_tokens: 8 }, content: [{ type: 'text', text: 'Watched.' }] } },
+    ]));
+    await waitFor(() => exec("return !!document.querySelector('[data-testid=session-s-watched-1]')"), 'the new session on the page without a reload', 2000);
+    console.log(`     indexed and drawn in ${Date.now() - t0} ms`);
+    assert.ok((await exec("return document.querySelector('#sheet h1').textContent")).includes('Sessions'), 'still the Sessions page');
+    const st = JSON.parse(hrm('index', 'status', '--json'));
+    assert.ok(st.watcher === true && st.sessions >= 5 && st.tools.some((x) => x.harness === 'claude'), JSON.stringify(st));
+    // the search: a word of the title, through the top bar and the CLI
+    await type('[data-testid=find]', 'velero');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('.srow[data-search]')].map((r) => r.dataset.testid)")).join() === 'session-s-watched-1', 'only the Velero session');
+    assert.ok(hrm('sessions', '--search', 'velero').includes('s-watched-1'), 'the CLI searches the same index');
+    await page.fill('[data-testid=find]', '');
+    await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
+    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 1, 'every session is back');
+    // paging: 60 more sessions, 50 on the first page and the rest on the next
+    for (let i = 0; i < 60; i++) {
+      const at = new Date(Date.now() - (i + 1) * 60000).toISOString();
+      write(path.join(home, '.claude', 'projects', 'p', `s-page-${i}.jsonl`), jl([{ type: 'user', sessionId: `s-page-${i}`, cwd: repo, timestamp: at, message: { role: 'user', content: `Paged session ${i}` } }]));
+    }
+    hrm('index', 'refresh');
+    await nav('#sessions?days=all&group=tool');
+    await $('[data-testid=s-pager]');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) === 50, '50 rows on the first page');
+    const count = await text('[data-testid=sessions-count]');
+    assert.ok(+(count.match(/^(\d+) sessions/) || [])[1] >= 61, count); // the 60 seeded here and every earlier test's
+    await click('[data-testid=page-next]');
+    await waitFor(async () => (await exec("return location.hash")).includes('page=1') && (await exec("return document.querySelectorAll('.srow[data-search]').length")) < 50 && (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 0, 'the rest on the next page');
+    await shot('60-sessions-paged');
+    // a group's Show all fetches its rows beyond the page
+    await nav('#sessions?days=all&group=tool');
+    await $('[data-testid=s-more-claude]');
+    await click('[data-testid=s-more-claude]');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 60, 'every Claude Code session in the group');
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

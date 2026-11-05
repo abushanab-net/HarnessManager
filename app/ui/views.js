@@ -59,32 +59,43 @@ const href = (view, p) => '#' + view + (Object.keys(clean(p)).length ? '?' + new
 const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
 const sMore = new Set();
 let railMore = false;
+// the page reads the index in pages of 50 rows; the search, the computer and every filter are the backend's
+const PER = 50;
 
 view('sessions', async (sheet, params) => {
-  // pc: every computer (''), this one ('here', which the sync core answers), or one other computer (its id, filtered here)
-  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '', pc = params.pc || '';
+  // pc: every computer (''), this one ('here'), or one other computer (its id); all answered by the index
+  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '', pc = params.pc || '', page = +params.page || 0;
   if (!S.state) await call('state').then((s) => (S.state = s));
-  const filter = { harness: null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null };
+  const scope = pc === 'here' ? 'here' : 'all';
+  const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
   sheet.className = 'sheet';
   const wk = 'sessions:' + JSON.stringify(params);
   if (!warmPage(sheet, wk)) sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
-  let [groups, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope: pc === 'here' ? 'here' : 'all' }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
+  let [ans, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   S.cache.tags = tlist;
   drawPins(plist);
-  if (pc && pc !== 'here') groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => s.device === pc) })).filter((g) => g.sessions.length).map((g) => ({ ...g, tokens: g.sessions.reduce((a, s) => a + s.tokens, 0) }));
+  let groups = ans.groups;
+  const total = ans.total;
+  // a group opened in full fetches its own rows: the page carries at most 50 rows across every group
+  const gfilter = (k) => ({ ...filter, per: 1000, page: 0, ...{ project: { project: k }, account: { profile: k }, tool: { harness: k }, tag: { tag: k }, date: { day: k } }[group] });
+  await Promise.all(groups.filter((g) => sMore.has(group + ':' + g.key) && g.sessions.length < g.total).map(async (g) => {
+    const r = await call('sessions', { filter: gfilter(g.key), group, scope }).catch(() => null);
+    const full = r && r.groups.find((x) => x.key === g.key);
+    if (full) g.sessions = full.sessions;
+  }));
   const all = groups.flatMap((g) => g.sessions);
   S.cache.sessionOrder = all.map((s) => ({ profile: s.profile, id: s.id }));
   const tools = [...new Set(all.map((s) => s.harness))].map((h) => TOOL[h]).join(', ').replace(/, ([^,]*)$/, ' and $1');
   // a running session sits at the top, whatever the grouping, never inside a fold
   const running = all.filter((s) => s.open);
   if (!live) groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => !s.open) })).filter((g) => g.sessions.length);
-  const cur = project ? plist.find((p) => p.key === project) || { key: project, name: (all[0] && all[0].project_name) || project, sessions: all.length, tokens: all.reduce((a, s) => a + s.tokens, 0), accounts: [...new Set(all.map((s) => s.profile))], live: running.length } : null;
+  const cur = project ? plist.find((p) => p.key === project) || { key: project, name: (all[0] && all[0].project_name) || project, sessions: total, tokens: all.reduce((a, s) => a + s.tokens, 0), accounts: [...new Set(all.map((s) => s.profile))], live: running.length } : null;
   const grp = (g, k, cls) => {
-    const open = !sFold.has(k), list = sMore.has(k) || g.sessions.length <= 25 ? g.sessions : g.sessions.slice(0, 20);
+    const open = !sFold.has(k), list = g.sessions, n = g.total || g.sessions.length;
     const cost = g.key && plist.find((p) => p.key === g.key && p.cost != null);
     return `<div class="grp ${cls || ''} ${open ? '' : 'shut'}" data-testid="group"><div class="gh"><h2 class="gname">${group === 'tag' && g.key ? `<span class="tagc ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${g.root && !g.remote ? `<span class="mono">${esc(g.root)}</span>` : ''}${g.remote ? `<span class="rem">${esc(g.remote)}</span>` : ''}
       ${group === 'project' && !cls ? `<button class="iconbtn" style="width:24px;height:24px" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${cost && cost.pinned || (plist.find((p) => p.key === g.key) || {}).pinned ? 1 : ''}" aria-label="Open, pin, rename or merge">${ic.dots}</button>` : ''}
-      <span class="tot mono">${g.sessions.length} ${g.sessions.length === 1 ? 'session' : 'sessions'} · ${fmt(g.tokens)} tokens${cost && group === 'project' ? ' · ' + money(cost.cost) : ''}</span>${group === 'project' && g.root && !cls ? `<button class="btn outline sm" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}<button class="fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}"><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></div>${open ? list.map(sessionRow).join('') + (list.length < g.sessions.length ? `<div class="srow more"><span></span><a class="acT" data-act="s-more" data-k="${esc(k)}" role="button" tabindex="0">Show all ${g.sessions.length} sessions</a></div>` : '') : ''}</div>`;
+      <span class="tot mono">${n} ${n === 1 ? 'session' : 'sessions'} · ${fmt(g.tokens)} tokens${cost && group === 'project' ? ' · ' + money(cost.cost) : ''}</span>${group === 'project' && g.root && !cls ? `<button class="btn outline sm" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}<button class="fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}"><span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></button></div>${open ? list.map(sessionRow).join('') + (list.length < n ? `<div class="srow more"><span></span><a class="acT" data-act="s-more" data-k="${esc(k)}" role="button" tabindex="0" data-testid="s-more-${esc(g.key)}">Show all ${n} sessions</a></div>` : '') : ''}</div>`;
   };
   // the rail: what runs now, every project, the pinned ones, the recent ones, and the tags
   const keep = clean({ group: params.group, days: params.days });
@@ -104,7 +115,7 @@ view('sessions', async (sheet, params) => {
       <div class="acts"><button class="iconbtn sq" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge">${ic.dots}</button>
         ${cur.root ? `<button class="btn primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}</div></div>`
     : `<div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${running.length ? ` <b>${running.length} running now</b>: open one to follow it live.` : ''}</p></div>
-      <div class="acts"><span class="muted mono sm">${all.length} ${all.length === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
+      <div class="acts"><span class="muted mono sm" data-testid="sessions-count">${total} ${total === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
       <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>`;
   // a project's view has no rail of other projects: its own accounts and tags are chips in the bar, and a panel
   // about the project appears only when it spans several folders or accounts
@@ -124,21 +135,22 @@ view('sessions', async (sheet, params) => {
       <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')).map(([k, l]) => `<a class="${group === k ? 'on' : ''}" data-act="s-set" data-k="group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
       <span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="s-set" data-k="days" data-v="${v}" data-testid="days-${v}">${l}</a>`).join('')}</span>
       ${syncOn(pcs) ? `<span class="seg3" role="group" aria-label="Computer" data-testid="pc-seg">${[['', 'All computers'], ['here', 'This computer'], ...pcs.peers.map((x) => [x.id, x.name])].map(([v, l]) => `<a class="${pc === v ? 'on' : ''}" data-act="s-set" data-k="pc" data-v="${esc(v)}" data-testid="pc-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}
-      ${chips}<span class="muted sm">Search above narrows this list</span></div>
+      ${chips}<span class="muted sm">Search above searches every session</span></div>
     ${running.length && !live ? grp({ name: 'Running now', sessions: running, tokens: running.reduce((a, s) => a + s.tokens, 0) }, 'live', 'livegrp') : ''}
-    ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length ? '' : '<p class="empty">No sessions match.</p>'}</div></div>`;
-  // the top bar's search narrows the rows on the page; a group with no row left folds away
+    ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length ? '' : '<p class="empty">No sessions match.</p>'}
+    ${total > PER ? `<div class="pager" data-testid="s-pager"><button class="btn sm" data-act="s-set" data-k="page" data-v="${page - 1}" ${page === 0 ? 'disabled' : ''} aria-label="Previous page" data-testid="page-prev">‹</button><span class="help">${page * PER + 1}–${Math.min(total, (page + 1) * PER)} of ${total}</span><button class="btn sm" data-act="s-set" data-k="page" data-v="${page + 1}" ${(page + 1) * PER >= total ? 'disabled' : ''} aria-label="Next page" data-testid="page-next">›</button></div>` : ''}</div></div>`;
+  // the top bar's search is the index's: a pause in typing asks for the matching sessions
   const find = document.getElementById('find');
-  const narrow = (v) => {
-    const t = (v || '').trim().toLowerCase();
-    sheet.querySelectorAll('.srow[data-search]').forEach((r) => { r.hidden = !!t && !r.dataset.search.includes(t); });
-    sheet.querySelectorAll('.grp').forEach((g) => { g.hidden = !!t && !g.querySelector('.srow[data-search]:not([hidden])'); });
-  };
-  S.pageFind = narrow;
-  narrow(find.value);
+  if (q && !find.value.trim()) find.value = q; // searched from another page
+  let timer;
+  S.pageFind = (v) => { clearTimeout(timer); timer = setTimeout(() => { if ((v || '').trim() !== q) sq({ q: (v || '').trim(), page: '' }); }, 250); };
+  S.pageFind(find.value); // typed while the page was being drawn (a redraw clears the page's search until it is set again)
   keepPage(sheet, wk);
 });
-action('s-set', (el) => sq({ [el.dataset.k]: el.dataset.v }));
+action('s-set', (el) => {
+  if (el.dataset.k === 'q') document.getElementById('find').value = el.dataset.v;
+  sq({ [el.dataset.k]: el.dataset.v, ...(el.dataset.k === 'page' ? {} : { page: '' }) });
+});
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
 action('rail-more', () => { railMore = true; render(); });
 action('go-live', () => go('sessions', { live: '1' }));
