@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The orbital route map, three ways</title>
+<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../shared.css">
+<link rel="stylesheet" href="theme.css">
+<style>
+  /* the brand mark that matches the theme */
+  .app .brand .mark { display: none; }
+  .app[data-brand="hm"] .brand .mark.hm, .app[data-brand="vg"][data-theme="light"] .brand .mark.vgc, .app[data-brand="vg"][data-theme="dark"] .brand .mark.vgg { display: grid; }
+  /* dimming on selection */
+  .app [data-node] { cursor: pointer; transition: opacity .25s; outline: 0; }
+  .app [data-node].dim { opacity: .18; }
+  .app [data-node]:focus-visible > :first-child { stroke: var(--ac); stroke-width: 2; }
+  .app path.e { transition: opacity .25s; }
+  .app path.e.dim { opacity: .07 !important; }
+  .app .lb.tag b, .app .lb.tag span { background: var(--veil); padding: 0 4px; border-radius: 3px; display: inline-block; }
+  .app .lb.gauge b { font-weight: 500; font-family: var(--mono); font-size: 10.5px; color: var(--m); }
+  .app .lb.gauge b.warn { color: var(--warn); }
+  .app .lb.gauge b i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  /* the page */
+  .themebar { position: sticky; top: 0; z-index: 20; background: rgba(233, 238, 241, .92); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid #D4DDE2; }
+  .themebar .lbl { font-size: 13px; color: #5A6B74; }
+  .sw { display: inline-grid; grid-template-columns: 1fr 1fr; width: 28px; height: 18px; border-radius: 4px; overflow: hidden; margin-right: 6px; vertical-align: -4px; border: 1px solid rgba(0,0,0,.15); }
+  .sw i { display: block; }
+  .said { background: #fff; border: 1px solid #D4DDE2; border-left: 4px solid #0F6E7A; border-radius: 10px; padding: 14px 18px; margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font-size: 14px; }
+  .said div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 6px 12px; align-content: start; }
+  .said b { color: #0F6E7A; font-weight: 600; }
+  .said .you { color: #33464F; font-style: italic; }
+  @media (max-width: 1000px) { .said { grid-template-columns: 1fr; } }
+  .vgnote { margin-top: 14px; font-size: 14px; color: #33464F; max-width: 90ch; }
+</style>
+</head>
+<body class="page">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review, round two · 6 November 2026</p>
+    <h1 class="ttl">The orbital route map, three ways</h1>
+    <p class="lede">You liked Orbit's idea and not its execution, so this round is only the map, agreed with Astra, in the four themes you asked for. Everything else you ticked is in place around it: the finding as the headline, the readouts floating on the scene, limit arcs on every account, the real marks, and no tokens per second anywhere.</p>
+    <nav class="toc"><a href="#said">What changed</a><a href="#atlas">1, Route Atlas</a><a href="#dial">2, Horizon Dial</a><a href="#transit">3, Transit Orbit</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <div class="themebar"><span class="lbl">Theme for the whole page</span>
+    <span class="seg">
+      <button data-brand-btn="hm" data-mode-btn="light" class="on"><span class="sw"><i style="background:#F5F8F9"></i><i style="background:#0E7E88"></i></span>Harness light</button>
+      <button data-brand-btn="hm" data-mode-btn="dark"><span class="sw"><i style="background:#08161B"></i><i style="background:#3FD6CF"></i></span>Harness dark</button>
+      <button data-brand-btn="vg" data-mode-btn="light"><span class="sw"><i style="background:#FAF7F2"></i><i style="background:#0F6863"></i></span>VektraGrid light</button>
+      <button data-brand-btn="vg" data-mode-btn="dark"><span class="sw"><i style="background:#0B1F1D"></i><i style="background:#D4B064"></i></span>VektraGrid dark</button>
+    </span></div>
+
+  <h2 class="sec" id="said">What you said, and what changed</h2>
+  <div class="said">
+    <div><b>The logo</b><span>The sidebar now carries the real Harness Manager mark from docs/logo.svg. The VektraGrid themes carry the VektraGrid symbol: the 03 full-colour one on ivory, the 06 warm-gold one on deep green.</span>
+      <b>Tokens per second</b><span>Gone from the page. The scene opens with the finding instead. Beads still move in proportion to traffic, because that is what makes a route look alive, but no number claims it.</span>
+      <b>The finding</b><span>Leads every variation, in the display face of the theme: Inter for Harness, EB Garamond for VektraGrid.</span>
+      <b>Multi-theme</b><span>Two brands, each light and dark, switched at the top of this page. Colours are roles, not hues: the signed-in route, the route through the router, a limit getting close, something broken. VektraGrid gives those roles deep teal, royal plum, sand gold and a muted red.</span></div>
+    <div><b>The orbit</b><span>Astra's main correction: the setup is a shared graph, not a tree. Claude Max runs on two computers; Claude Code serves two accounts; the router serves two tools. So no layout can promise zero crossings by assigning each account a wedge. Each of the three maps makes a different trade: Atlas keeps every body in one place and routes crossings through corridors; Dial fans the hops upward from the computers so most routes never meet; Transit gives every account its own lane and draws a shared body once, spanning the lanes it serves.</span>
+      <b>Kept from Orbit</b><span>Limit arcs around each account (inner 5-hour, outer weekly, solid is used, dashed is the estimate at the reset), the readouts floating on the scene with dot-matrix trends, the porcelain light theme (now "Harness light"). The year clock stays in the page below the map; it is not shown here because this round is the map only.</span>
+      <b>Dropped</b><span>The 3D tilt, the auto-rotation, the WebGL sky, the hand-placed angles. Every position now follows a rule, and labels are measured and pushed apart until none overlap.</span></div>
+  </div>
+  <p class="vgnote"><b>One question for you.</b> In the VektraGrid themes the sidebar shows the VektraGrid symbol beside the name "Harness Manager". If Harness Manager is a VektraGrid product that is right; if the theme is only a skin, say so and the Harness mark stays in every theme. There is a box for it at the bottom.</p>
+
+  <!-- ===================== 1 ===================== -->
+  <section class="var" id="atlas">
+    <header><div><span class="tag">Map 1 · agreed with Astra</span><h2>Route Atlas</h2>
+      <p>A flat circle. The rings are the hops: your computers at the centre, then accounts, tools, the router's gate, and the providers outside. Every body has one stable place, set by what it serves, and routes travel corridors between the rings. The whole shared setup is visible at once.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>The complete topology in one glance: six accounts, five tools, the router and six providers, with no body drawn twice.</div>
+      <div><b>Its trade</b>Shared bodies mean some corridors cross. Crossings are confined to the arcs between rings, never at a body, so a crossing is never mistaken for a connection.</div>
+      <div><b>Motion</b>Beads on every live route at low strength; select a body and only its chain moves while the rest fades.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v1" data-k="v1" value="This one">This one</label><label><input type="radio" name="v1" data-k="v1" value="Parts of it">Parts of it</label><label><input type="radio" name="v1" data-k="v1" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whichever map wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="p1" value="Atlas: rings as hops, full circle">Rings as hops, full circle</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: corridors between rings">Corridors between rings</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: computers at the centre">Computers at the centre</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: provider labels outside the ring">Provider labels outside the ring</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: select to trace, Esc to clear">Select to trace, Esc to clear</label></div></div>
+      <div class="full"><h4>Comments on Route Atlas</h4><textarea data-k="c1" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <!-- ===================== 2 ===================== -->
+  <section class="var" id="dial">
+    <header><div><span class="tag">Map 2 · agreed with Astra</span><h2>Horizon Dial</h2>
+      <p>A half circle rising from the baseline. Your three computers dock on the line; accounts, tools and providers fan upward on their arcs, with the router as a gate only routed traffic passes. The finding's route is selected when the page opens, and it is the only thing that moves.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>The finding selects a route across the whole dial: open the page and you are already looking at the account that will run out, and everything it touches.</div>
+      <div><b>Its trade</b>Half the circle means wider spacing per hop and a reading direction (up and out), at the cost of a taller panel; the docks keep the three computers from crowding one centre.</div>
+      <div><b>Motion</b>Only the selected route carries beads. Hover, focus or click selects another; Escape or a click on empty space returns to the finding's route.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v2" data-k="v2" value="This one">This one</label><label><input type="radio" name="v2" data-k="v2" value="Parts of it">Parts of it</label><label><input type="radio" name="v2" data-k="v2" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whichever map wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="p2" value="Dial: half circle on a baseline">Half circle on a baseline</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: computer docks">Computer docks</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: the finding's route selected on open">The finding's route selected on open</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: only the selected route moves">Only the selected route moves</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: router as a gate">Router as a gate</label></div></div>
+      <div class="full"><h4>Comments on Horizon Dial</h4><textarea data-k="c2" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <!-- ===================== 3 ===================== -->
+  <section class="var" id="transit">
+    <header><div><span class="tag">Map 3 · Astra's candidate, accepted</span><h2>Transit Orbit</h2>
+      <p>Six racetracks, one per account, ordered so that shared bodies sit beside each other and are drawn once, spanning the lanes they serve. The top straight is the route, read left to right: computers, account, tool, router, provider. The bottom straight is that account's capacity: used, the estimate to the reset, and where it runs out. Beads circulate the whole loop.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>Every route reads as one sentence, and the loop closes on the account's capacity, so route and limit sit on the same orbit.</div>
+      <div><b>Its trade</b>No crossings at all, because nothing is radial; the orbital character is in the loop, not in rings. Groq, which no lane reaches, hangs off the router as a stub.</div>
+      <div><b>Motion</b>Beads circulate each lane in proportion to its traffic; a lane with an expired login is dashed and still. Hover a body and every lane it serves lights.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v3" data-k="v3" value="This one">This one</label><label><input type="radio" name="v3" data-k="v3" value="Parts of it">Parts of it</label><label><input type="radio" name="v3" data-k="v3" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whichever map wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="p3" value="Transit: a lane per account">A lane per account</label>
+        <label><input type="checkbox" data-k="p3" value="Transit: shared bodies drawn once, spanning lanes">Shared bodies drawn once, spanning lanes</label>
+        <label><input type="checkbox" data-k="p3" value="Transit: capacity on the bottom straight">Capacity on the bottom straight</label>
+        <label><input type="checkbox" data-k="p3" value="Transit: beads circulating the loop">Beads circulating the loop</label>
+        <label><input type="checkbox" data-k="p3" value="Transit: the finding's lane tinted">The finding's lane tinted</label></div></div>
+      <div class="full"><h4>Comments on Transit Orbit</h4><textarea data-k="c3" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="final" id="answers">
+    <h2>Decisions</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">With the map settled, every page gets redesigned in this direction and reviewed on one page before any app code changes.</p>
+    <div class="pick"><span style="color:#9FBFC5">The map:</span>
+      <label><input type="radio" name="pick" data-k="pick" value="1, Route Atlas">1, Route Atlas</label><label><input type="radio" name="pick" data-k="pick" value="2, Horizon Dial">2, Horizon Dial</label>
+      <label><input type="radio" name="pick" data-k="pick" value="3, Transit Orbit">3, Transit Orbit</label><label><input type="radio" name="pick" data-k="pick" value="A mix of the parts I ticked">A mix of the parts I ticked</label></div>
+    <div class="pick"><span style="color:#9FBFC5">Themes to ship:</span>
+      <label><input type="radio" name="themes" data-k="themes" value="all four">All four</label><label><input type="radio" name="themes" data-k="themes" value="Harness only">Harness only</label><label><input type="radio" name="themes" data-k="themes" value="VektraGrid only">VektraGrid only</label></div>
+    <div class="pick"><span style="color:#9FBFC5">VektraGrid mark beside the name "Harness Manager":</span>
+      <label><input type="radio" name="vgname" data-k="vgname" value="right, it is a VektraGrid product">Right, it is a VektraGrid product</label><label><input type="radio" name="vgname" data-k="vgname" value="no, keep the Harness mark in every theme">No, keep the Harness mark</label></div>
+    <textarea data-k="general" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="../data.js"></script>
+<script src="logos.js"></script>
+<script src="page.js"></script>
+<script src="atlas.js"></script>
+<script src="dial.js"></script>
+<script src="transit.js"></script>
+<script>
+  H2.themePicker();
+  for (const k of ['atlas', 'dial', 'transit']) H2.mount(document.getElementById(k), k);
+  H2.feedback([['1', '1, Route Atlas'], ['2', '2, Horizon Dial'], ['3', '3, Transit Orbit']]);
+</script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Every page, in the Overview's direction</title>
+<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../shared.css">
+<link rel="stylesheet" href="../round2/theme.css">
+<link rel="stylesheet" href="ui.css">
+<style>
+  .themebar { position: sticky; top: 0; z-index: 20; background: rgba(233, 238, 241, .92); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid #D4DDE2; }
+  .themebar .lbl { font-size: 13px; color: #5A6B74; }
+  .sw0 { display: inline-grid; grid-template-columns: 1fr 1fr; width: 28px; height: 18px; border-radius: 4px; overflow: hidden; margin-right: 6px; vertical-align: -4px; border: 1px solid rgba(0,0,0,.15); }
+  .sw0 i { display: block; }
+  .said { background: #fff; border: 1px solid #D4DDE2; border-left: 4px solid #0F6E7A; border-radius: 10px; padding: 14px 18px; margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font-size: 14px; }
+  .said div { display: grid; grid-template-columns: 9rem 1fr; gap: 6px 12px; align-content: start; }
+  .said b { color: #0F6E7A; font-weight: 600; }
+  @media (max-width: 1000px) { .said { grid-template-columns: 1fr; } }
+  .var { margin-top: 56px; }
+  .pgfb { margin-top: 12px; background: #fff; border: 1px solid #D4DDE2; border-radius: 10px; padding: 12px 14px; display: grid; grid-template-columns: 14rem 1fr; gap: 12px 20px; align-items: start; }
+  .pgfb h4 { margin: 0 0 6px; font-size: 14px; }
+  .pgfb label { display: block; font-size: 13.5px; margin: 3px 0; cursor: pointer; }
+  .pgfb textarea { width: 100%; min-height: 56px; font: 13px/1.45 var(--sans); padding: 8px 10px; border: 1px solid #CBD5DB; border-radius: 8px; resize: vertical; }
+  .toc { flex-wrap: wrap; }
+</style>
+</head>
+<body class="page" data-fbkey="hm-pages-redesign-2026-11-round2">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review, every page, round two · 6 November 2026</p>
+    <h1 class="ttl">Every page, in the Overview's direction</h1>
+    <p class="lede"><b>Round two:</b> the router's map stays inside its card; Settings rows line up on one control column, and everything the app's Settings has is back (Connections, direct connection and pairing, the recovery key, data folder, import and export, the sync folder's backups, include transcripts, archive location, restore). Elsewhere only pagers and the folded By-model panel were missing; they are back too. The dialogs are still not drawn. The Overview is approved; here is every other page drawn the same way. Each page leads with its finding (the one sentence that matters now, the warning word in amber), the body is quiet until something needs attention, every number says whether it is measured or an estimate (≈), each computer keeps its colour, and each harness shows its official icon. Twelve screens, four themes, the same screen simulator as before. Scroll inside each screen; the stage shows the first screen of each computer.</p>
+    <nav class="toc"><a href="#said">The direction</a><a href="#sessions">Sessions</a><a href="#session">Session</a><a href="#projects">Projects</a><a href="#accounts">Accounts</a><a href="#account">Account</a><a href="#mcp">MCP servers</a><a href="#skills">Skills</a><a href="#prompts">System prompts</a><a href="#routing">API keys &amp; routing</a><a href="#apps">Apps</a><a href="#cli">CLI reference</a><a href="#settings">Settings</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <div class="themebar"><span class="lbl">Theme for the whole page</span>
+    <span class="seg">
+      <button data-brand-btn="hm" data-mode-btn="light" class="on"><span class="sw0"><i style="background:#F5F8F9"></i><i style="background:#0E7E88"></i></span>Harness light</button>
+      <button data-brand-btn="hm" data-mode-btn="dark"><span class="sw0"><i style="background:#08161B"></i><i style="background:#3FD6CF"></i></span>Harness dark</button>
+      <button data-brand-btn="vg" data-mode-btn="light"><span class="sw0"><i style="background:#FAF7F2"></i><i style="background:#0F6863"></i></span>VektraGrid light</button>
+      <button data-brand-btn="vg" data-mode-btn="dark"><span class="sw0"><i style="background:#0B1F1D"></i><i style="background:#D4B064"></i></span>VektraGrid dark</button>
+    </span></div>
+
+  <h2 class="sec" id="said">What every page shares</h2>
+  <div class="said">
+    <div><b>The finding</b><span>Each page opens with one sentence of what matters now, as the Overview does, with the thing to act on in amber. Under it, the basis: counts, range, what is measured and what is estimated.</span>
+      <b>Quiet body</b><span>Tables and cards say names and numbers; detail, warnings and actions appear where something needs them. Open sessions, limits near their end and paused providers speak for themselves.</span>
+      <b>One instrument a page</b><span>Sessions: today as a ribbon, a lane per computer. Projects: where the tokens went. Accounts: the limit rings from the Overview beside each account. Routing: the routes as a small map in the dial's language. Session: the conversation with its steps.</span></div>
+    <div><b>Icons and colours</b><span>Every harness shows its official icon, in rows, column heads, filters and tabs. Computers keep their colour dots; the Harness Manager mark stays in every theme.</span>
+      <b>Measured or ≈</b><span>Tokens, requests and the router's timings are measured and plain. Costs at list prices, first-reply times read from logs and run-out forecasts carry ≈.</span>
+      <b>Sizes</b><span>The shared foundation: rem spacing, fixed reading sizes, headings and key numbers in clamp(), container queries at 70rem and 56rem of sheet width, the sidebar folding below 75rem of app width. No page has a pixel width of its own any more.</span></div>
+  </div>
+
+  <div id="pages"></div>
+
+  <section class="final" id="answers">
+    <h2>Decision</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">Approve the pages and the implementation in the app starts, in this order: the foundation and the shell, then the Overview, then each page; or one more round on the pages you marked.</p>
+    <div class="pick">
+      <label><input type="radio" name="pick" data-k="pick" value="Approve the pages, implement in the app">Approve the pages, implement in the app</label>
+      <label><input type="radio" name="pick" data-k="pick" value="One more round on the pages I marked">One more round on the pages I marked</label></div>
+    <textarea data-k="general" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="../data.js"></script>
+<script src="../round2/logos.js"></script>
+<script src="../round2/tool-icons.js"></script>
+<script src="pages.js"></script>
+<script src="content.js"></script>
+<script>
+  const PAGES = [
+    ['sessions', 'Sessions', 'The rail, the groups and the rows as today; above them today as a ribbon, a lane per computer, open sessions reaching the now line. The running group is pinned on top.'],
+    ['session', 'Session', 'The reading view of an open session from another computer: the finding is the title, the five numbers under it, then the conversation with its steps folded. Live and following.'],
+    ['projects', 'Projects', 'The five numbers, where the tokens went, then one row card per project with a dot-matrix fortnight, its cost (≈) and its computers.'],
+    ['accounts', 'Accounts', 'Tokens per day by account, then one group per harness; each account has its limit ring from the Overview, its limits as tracks, tokens, cost and a Start.'],
+    ['account', 'Account', 'One account in full: the five numbers, the ring large beside the limits with the run-out estimate, tokens per day, by model, login and folder, what is open now, recent sessions.'],
+    ['mcp', 'MCP servers', 'The matrix: a server a row, a harness a column with its icon. Entries left alone are said on the row.'],
+    ['skills', 'Skills', 'The same matrix for skills, with the source and the update tag; the not-managed folders in their own panel.'],
+    ['prompts', 'System prompts', 'A tab per harness with its icon, the library on the left with the enabled one marked, the editor on the right with where it writes.'],
+    ['routing', 'API keys & routing', 'The router card with the routes drawn as a small map (accounts, the router gate, providers; a paused provider dashed and red), the routes and providers side by side, then the router\'s own log.'],
+    ['apps', 'Apps', 'Every tool with its icon, installed and newest versions, how it was installed; a second copy as a sub-row; the duplicate warning above.'],
+    ['cli', 'CLI reference', 'The examples block, then a card per area with the commands in the accent.'],
+    ['settings', 'Settings', 'Every section the app has: Appearance, Window and terminal, Updates, Usage and limits, Connections, Computers (sync, recovery key, carry, presence, direct connection and pairing, the computer cards), Backups and archive (data folder, import, export, the sync folder\'s, archive, restore), Diagnostic log, Maintenance.'],
+  ];
+  document.getElementById('pages').innerHTML = PAGES.map(([k, t, d], i) => `<section class="var" id="${k}">
+    <header><div><span class="tag">${i + 1} of ${PAGES.length}</span><h2>${t}</h2><p>${d}</p></div>
+      <div class="ctl"><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="pgfb"><div><h4>${t}</h4><label><input type="radio" name="v${k}" data-k="v${k}" value="Good">Good</label><label><input type="radio" name="v${k}" data-k="v${k}" value="Change">Change (say what)</label></div><div><h4>Comments</h4><textarea data-k="c${k}" placeholder="What works, what does not, what to change"></textarea></div></div></section>`).join('');
+  P.themePicker();
+  for (const [k] of PAGES) P.mount(document.getElementById(k), k);
+  P.feedback(PAGES.map(([k, t]) => [k, t]), 'Every page, round two', 'pages-round2-answers.md');
+</script>
+</body>
+</html>

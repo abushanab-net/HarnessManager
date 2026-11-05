@@ -25,6 +25,8 @@ pub struct Settings {
     pub check_updates_at_launch: bool,
     /// "system" (the default: as Windows or macOS is), "light" or "dark".
     pub theme: String,
+    /// The look: "hm" (Harness, the default) or "vg" (VektraGrid).
+    pub brand: String,
     /// Limits as what is "left" or what is "used".
     pub quota_display: String,
     /// Tools left out of every page (their accounts too).
@@ -78,7 +80,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings { registry_path: String::new(), terminal: "wt".into(), refresh_minutes: 5, quota_max_age_minutes: 10, router_port: 15731,
-            close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), quota_display: "left".into(), hidden_tools: vec![],
+            close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), brand: "hm".into(), quota_display: "left".into(), hidden_tools: vec![],
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),

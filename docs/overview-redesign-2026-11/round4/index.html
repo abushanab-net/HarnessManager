@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The orbital route map, round four: bigger circles</title>
+<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../shared.css">
+<link rel="stylesheet" href="../round2/theme.css">
+<style>
+  .app .brand .mark { display: none; }
+  .app .brand .mark.hm { display: grid; }
+  /* the band above the map: the finding on the left, the readouts on the right */
+  .app .band { display: flex; gap: var(--s6); align-items: flex-start; margin-bottom: var(--s3); }
+  .app .band > div:first-child { flex: 1; min-width: 0; }
+  .app .band h1 { font-size: clamp(1.2rem, .9rem + 1cqi, 1.7rem); max-width: 46ch; margin: var(--s1) 0 var(--s1); }
+  .app[data-brand="vg"] .band h1 { font-size: clamp(1.45rem, 1rem + 1.3cqi, 2.1rem); }
+  .app .band .rds { width: 24rem; flex: none; border-top: 0; padding-top: var(--s2); gap: var(--s4); }
+  .app .band .rd label { font-size: var(--fs-xs); }
+  .app .band .rd strong { font-size: 1.5rem; }
+  /* the map has the whole scene */
+  .app .scene.atlas { min-height: 44rem; }
+  .app .scene.dial { min-height: 30rem; }
+  .app .ov.b { right: 16rem; }
+  .app .ov.h { bottom: var(--s3); }
+  /* the attention strip below the map */
+  .app .attn { display: grid; grid-template-columns: 9rem repeat(3, minmax(0, 1fr)); gap: var(--s2); margin-top: var(--s3); align-items: stretch; }
+  .app .attn .inc.hd { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
+  /* quiet labels: a name until the route is selected or something is wrong */
+  .app .lb span { display: none; }
+  .app .lb.lit span, .app .lb span.warn, .app .lb span.neg { display: block; }
+  .app .lb.dim span { display: none; }
+  .app .map.measuring .lb span { display: block; }
+  .app [data-node] { cursor: pointer; transition: opacity .25s; outline: 0; }
+  .app [data-node].dim { opacity: .45; }
+  .app [data-node]:focus-visible > :first-child { stroke: var(--ac); stroke-width: 2; }
+  .app path.e { transition: opacity .25s; }
+  .app path.e.dim { opacity: .14 !important; }
+  .app .lb.dim { opacity: .6; }
+  @container sheet (max-width: 70rem) { .app .band .rds { width: 18rem; } .app .attn { grid-template-columns: 1fr 1fr; } .app .attn .inc.hd { grid-column: 1 / -1; flex-direction: row; } }
+  .themebar { position: sticky; top: 0; z-index: 20; background: rgba(233, 238, 241, .92); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid #D4DDE2; }
+  .themebar .lbl { font-size: 13px; color: #5A6B74; }
+  .sw { display: inline-grid; grid-template-columns: 1fr 1fr; width: 28px; height: 18px; border-radius: 4px; overflow: hidden; margin-right: 6px; vertical-align: -4px; border: 1px solid rgba(0,0,0,.15); }
+  .sw i { display: block; }
+  .said { background: #fff; border: 1px solid #D4DDE2; border-left: 4px solid #0F6E7A; border-radius: 10px; padding: 14px 18px; margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font-size: 14px; }
+  .said div { display: grid; grid-template-columns: 9rem 1fr; gap: 6px 12px; align-content: start; }
+  .said b { color: #0F6E7A; font-weight: 600; }
+  .said .you { color: #33464F; font-style: italic; display: block; margin-bottom: 4px; }
+  @media (max-width: 1000px) { .said { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body class="page" data-fbkey="hm-overview-redesign-2026-11-round4">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review, round four · 6 November 2026</p>
+    <h1 class="ttl">Bigger circles, less said on the selected route</h1>
+    <p class="lede">Both circles were held back by the same thing: the readouts column and the attention cards sat inside the scene, so the map could only use the strip between them. In this round the finding and the readouts sit in a band above the map, the attention cards in a strip below it, and each circle has the whole scene.</p>
+    <nav class="toc"><a href="#said">What changed</a><a href="#atlas">Route Atlas</a><a href="#dial">Horizon Dial</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <div class="themebar"><span class="lbl">Theme for the whole page</span>
+    <span class="seg">
+      <button data-brand-btn="hm" data-mode-btn="light" class="on"><span class="sw"><i style="background:#F5F8F9"></i><i style="background:#0E7E88"></i></span>Harness light</button>
+      <button data-brand-btn="hm" data-mode-btn="dark"><span class="sw"><i style="background:#08161B"></i><i style="background:#3FD6CF"></i></span>Harness dark</button>
+      <button data-brand-btn="vg" data-mode-btn="light"><span class="sw"><i style="background:#FAF7F2"></i><i style="background:#0F6863"></i></span>VektraGrid light</button>
+      <button data-brand-btn="vg" data-mode-btn="dark"><span class="sw"><i style="background:#0B1F1D"></i><i style="background:#D4B064"></i></span>VektraGrid dark</button>
+    </span></div>
+
+  <h2 class="sec" id="said">What you ticked, and what changed</h2>
+  <div class="said">
+    <div><b>Atlas</b><span><span class="you">"the circle should be bigger" · "still too much on the selected route"</span>The circle now has the whole scene: at 1920×1080 at 125% it grew from a radius of about 260 px to 320 px, and at 100% to 400 px. On the selected route an account now says only its week ("week 78% · ≈ out Sat 14:08"; the 5-hour window is its inner arc), a tool says nothing (versions belong to the Apps page), and a provider says its first-reply time. Anything that needs attention still speaks for itself.</span>
+      <b>Dial</b><span><span class="you">"clear of the readouts now" · "now too small" · "docks should spread out again"</span>With nothing floating over its shoulders the dial is back to its round-two size and larger at 1920 at 100%, and it cannot overlay anything. The docks are spread along the baseline again (Lab, Studio, Surface at −0.42R, 0, +0.42R).</span></div>
+    <div><b>Readouts</b><span>Still three dot-matrix readouts, now in the band above the map beside the finding, so the map keeps its width and height. If you would rather have them floating on the scene again, say so; it costs circle size.</span>
+      <b>Attention</b><span>A strip below the map, three cards in a row.</span>
+      <b>Logo and themes</b><span>Harness Manager mark everywhere; all four themes.</span>
+      <b>Form</b><span>Round three's form re-used round two's saved answers, which is why your old comments came back. This round saves under its own name.</span></div>
+  </div>
+
+  <section class="var" id="atlas">
+    <header><div><span class="tag">Route Atlas · round four</span><h2>Route Atlas</h2>
+      <p>The full circle with the whole scene; rings as hops, computers at the centre, corridors between rings; the finding's route selected on open with only its week and first-reply time shown.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v1" data-k="v1" value="This one">This one</label><label><input type="radio" name="v1" data-k="v1" value="Closer, but">Closer, but (see comments)</label><label><input type="radio" name="v1" data-k="v1" value="Not this one">Not this one</label></div></div>
+      <div><h4>Check what holds</h4><div class="parts">
+        <label><input type="checkbox" data-k="p1" value="Atlas: big enough now">Big enough now</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: the selected route says the right amount">The selected route says the right amount</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: readouts back on the scene, even if smaller">Readouts back on the scene, even if smaller</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: attention strip below is fine">Attention strip below is fine</label></div></div>
+      <div class="full"><h4>Comments on Route Atlas</h4><textarea data-k="c1" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="var" id="dial">
+    <header><div><span class="tag">Horizon Dial · round four</span><h2>Horizon Dial</h2>
+      <p>The half circle with the whole scene, docks spread along the baseline, the finding's route selected on open.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v2" data-k="v2" value="This one">This one</label><label><input type="radio" name="v2" data-k="v2" value="Closer, but">Closer, but (see comments)</label><label><input type="radio" name="v2" data-k="v2" value="Not this one">Not this one</label></div></div>
+      <div><h4>Check what holds</h4><div class="parts">
+        <label><input type="checkbox" data-k="p2" value="Dial: big enough now">Big enough now</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: docks right">Docks right</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: readouts back on the scene, even if smaller">Readouts back on the scene, even if smaller</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: attention strip below is fine">Attention strip below is fine</label></div></div>
+      <div class="full"><h4>Comments on Horizon Dial</h4><textarea data-k="c2" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="final" id="answers">
+    <h2>Decision</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">The chosen map goes into the Overview; then every page gets the redesign on one review page before any app code changes.</p>
+    <div class="pick"><span style="color:#9FBFC5">The map:</span>
+      <label><input type="radio" name="pick" data-k="pick" value="Route Atlas">Route Atlas</label><label><input type="radio" name="pick" data-k="pick" value="Horizon Dial">Horizon Dial</label><label><input type="radio" name="pick" data-k="pick" value="One more round">One more round (see comments)</label></div>
+    <textarea data-k="general" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="../data.js"></script>
+<script src="../round2/logos.js"></script>
+<script src="../round2/page.js"></script>
+<script src="page4.js"></script>
+<script src="atlas.js"></script>
+<script src="dial.js"></script>
+<script>
+  H2.themePicker();
+  for (const k of ['atlas', 'dial']) H2.mount(document.getElementById(k), k);
+  H2.feedback([['1', 'Route Atlas'], ['2', 'Horizon Dial']]);
+</script>
+</body>
+</html>

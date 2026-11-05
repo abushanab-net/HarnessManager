@@ -1,0 +1,188 @@
+/* A, Blueprint: the setup drawn like a technical drawing. Light is drafting paper with teal ink; dark is a cyanotype.
+   Every group is one block of cells that share hairlines (no floating cards), groups are set apart by --s5. */
+.vA[data-theme="light"] {
+  --g: #DFE7E6; --s: #F7FAF9; --cell: #FBFDFC; --ink: #0D2B31; --t2: #2F4A50; --m: #5B7379; --line: rgba(13, 43, 49, .16); --line2: rgba(13, 43, 49, .08);
+  --ac: #0F6E7A; --acS: #D3EAEA; --iris: #5B49C4; --warn: #B06A00; --warnS: #F7E7C8; --neg: #BE3A2F; --negS: #F6DCD8; --dot: rgba(13, 43, 49, .17);
+  --brand2: #273C75; --brand3: #C8A45A; --hot: rgba(15, 110, 122, .10); color-scheme: light;
+  --h0: #E6EDEC; --h1: #BFDCDD; --h2: #86C0C4; --h3: #2F8F98; --h4: #0F6E7A;
+}
+.vA[data-theme="dark"] {
+  --g: #051E24; --s: #082931; --cell: #0A2F38; --ink: #DDF2EF; --t2: #B5D2D2; --m: #84A6AA; --line: rgba(221, 242, 239, .17); --line2: rgba(221, 242, 239, .08);
+  --ac: #62DED4; --acS: rgba(98, 222, 212, .13); --iris: #B7ACF7; --warn: #F3B64C; --warnS: rgba(243, 182, 76, .14); --neg: #FF8173; --negS: rgba(255, 129, 115, .14); --dot: rgba(221, 242, 239, .13);
+  --brand2: #8EA5EA; --brand3: #D9B76A; --hot: rgba(98, 222, 212, .09); color-scheme: dark;
+  --h0: #0D3640; --h1: #134A55; --h2: #1E6C76; --h3: #34A3A6; --h4: #62DED4;
+}
+.vA { background: var(--g); color: var(--ink); display: grid; grid-template-columns: 14.5rem minmax(0, 1fr); grid-template-rows: 3.25rem minmax(0, 1fr); }
+
+/* shell */
+.vA .side { grid-row: 1 / 3; display: flex; flex-direction: column; padding: var(--s2) var(--s3) var(--s4); min-height: 0; }
+.vA .brand { display: flex; gap: var(--s3); align-items: center; padding: var(--s3) var(--s2) var(--s5); }
+.vA .brand b { display: block; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
+.vA .brand small { color: var(--m); font-size: var(--fs-xs); font-family: var(--mono); }
+.vA .nav { display: grid; gap: 2px; }
+.vA .nav.bottom { margin-top: auto; }
+.vA .nav a { display: flex; gap: var(--s3); align-items: center; height: 2rem; padding: 0 var(--s3); border-radius: var(--r1); color: var(--t2); text-decoration: none; font-size: var(--fs-md); }
+.vA .nav a svg { color: var(--m); flex: none; }
+.vA .nav a em { margin-left: auto; font: normal var(--fs-xs) var(--mono); color: var(--m); }
+.vA .nav a em.upd { color: var(--warn); }
+.vA .nav a:hover { background: var(--line2); }
+.vA .nav a.on { background: var(--s); color: var(--ink); font-weight: 600; box-shadow: inset 2px 0 0 var(--ac), 0 0 0 1px var(--line); }
+.vA .nav a.sub { padding-left: 2.6rem; font-size: var(--fs-sm); height: 1.75rem; }
+.vA .nav .gap { height: var(--s4); }
+.vA .nav .ver { padding: var(--s1) var(--s3) 0 2.6rem; font: var(--fs-xs) var(--mono); color: var(--m); }
+.vA .top { display: flex; align-items: center; gap: var(--s4); padding: 0 var(--s5) 0 0; }
+.vA .find { flex: 1 1 18rem; max-width: 30rem; height: 2.125rem; display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r1); background: var(--s); color: var(--m); }
+.vA .find input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; }
+.vA .find kbd { font: var(--fs-xs) var(--mono); color: var(--m); border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; }
+.vA .top .right { margin-left: auto; display: flex; gap: var(--s4); align-items: center; font-size: var(--fs-sm); color: var(--m); white-space: nowrap; }
+.vA .pcs { display: inline-flex; align-items: center; gap: 4px; }
+.vA .pcs i { width: 8px; height: 8px; border-radius: 2px; }
+.vA .pcs span { margin-left: 4px; }
+.vA .fresh { font-family: var(--mono); font-size: var(--fs-xs); }
+.vA .ib { width: 2rem; height: 2rem; border: 1px solid var(--line); background: var(--s); border-radius: var(--r1); display: grid; place-items: center; color: var(--m); cursor: pointer; }
+.vA .sheet { container: sheet / inline-size; background: var(--s); border: 1px solid var(--line); border-radius: var(--r2) 0 0 0; border-right: 0; border-bottom: 0; overflow: auto; padding: var(--s5) var(--s6) var(--s7); min-height: 0;
+  background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 1.5rem 1.5rem; background-position: -1px -1px; }
+
+/* head */
+.vA .hd { display: flex; gap: var(--s5); align-items: flex-start; flex-wrap: wrap; }
+.vA .hd > div:first-child { flex: 1 1 32rem; min-width: 0; }
+.vA .status { font: var(--fs-xs) var(--mono); color: var(--m); display: flex; gap: var(--s2); align-items: center; }
+.vA .status .live { width: 7px; height: 7px; background: var(--ac); border-radius: 1px; box-shadow: 0 0 0 3px var(--acS); }
+.vA h1 { font-size: var(--fs-h1); margin: var(--s2) 0 var(--s2); font-weight: 600; letter-spacing: -.02em; }
+.vA .finding { max-width: 70ch; font-size: var(--fs-lg); color: var(--t2); margin: 0; }
+.vA .finding b { color: var(--warn); font-weight: 600; }
+.vA .est { font-family: var(--mono); font-size: .9em; color: var(--m); }
+.vA .acts { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+.vA .seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r1); background: var(--cell); }
+.vA .seg button { border: 0; background: transparent; padding: 0 var(--s3); height: 2rem; font-size: var(--fs-sm); color: var(--m); cursor: pointer; }
+.vA .seg button + button { border-left: 1px solid var(--line2); }
+.vA .seg button.on { color: var(--ink); background: var(--acS); font-weight: 600; }
+.vA .btn { height: 2.125rem; padding: 0 var(--s4); border-radius: var(--r1); border: 1px solid var(--ink); background: var(--ink); color: var(--s); display: inline-flex; gap: var(--s2); align-items: center; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
+.vA .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+
+/* blocks of cells that share hairlines */
+.vA .blk { margin-top: var(--s5); display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r2); overflow: hidden; }
+.vA .cell { background: var(--cell); padding: var(--s4) var(--s4); min-width: 0; position: relative; }
+.vA .ch { display: flex; align-items: baseline; gap: var(--s3); margin: 0 0 var(--s3); }
+.vA .ch h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.vA .ch .note { font: var(--fs-xs) var(--mono); color: var(--m); }
+.vA .ch .r { margin-left: auto; }
+
+/* key numbers */
+.vA .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.vA .kpi .lab { display: flex; justify-content: space-between; font-size: var(--fs-sm); color: var(--m); }
+.vA .kpi .lab b { font: 600 var(--fs-xs) var(--mono); color: var(--ac); }
+.vA .kpi .lab b.warn { color: var(--warn); }
+.vA .kpi strong { display: block; font: 500 var(--fs-kpi)/1.1 var(--sans); letter-spacing: -.025em; margin: var(--s2) 0 var(--s1); }
+.vA .kpi strong small { font-size: .5em; font-weight: 500; color: var(--m); margin-left: 2px; letter-spacing: 0; }
+.vA .kpi svg.plot { display: block; width: 100%; height: 2.75rem; overflow: visible; }
+.vA .kpi .foot { font-size: var(--fs-xs); color: var(--m); margin-top: var(--s2); }
+.vA .kpi .split { display: flex; height: 4px; gap: 2px; margin-top: var(--s2); }
+.vA .kpi .split i { display: block; border-radius: 1px; }
+.vA .kpi.risk strong { color: var(--warn); }
+.vA .kpi.click { cursor: pointer; }
+.vA .kpi.click:hover { background: var(--hot); }
+.vA .kpi.on { box-shadow: inset 0 -2px 0 var(--ac); }
+
+/* the schematic and the rail */
+.vA .main2 { grid-template-columns: minmax(0, 1fr) 21rem; }
+.vA .schem { padding: var(--s4) var(--s4) var(--s3); }
+.vA .schem svg { display: block; width: 100%; overflow: visible; }
+.vA .schem .n rect.box { fill: var(--cell); stroke: var(--ink); stroke-width: 1; }
+.vA .schem .n.idle rect.box { stroke: var(--line); }
+.vA .schem .n .hatch { fill: url(#hatchA); }
+.vA .schem .n text.t { font: 600 12.5px var(--sans); fill: var(--ink); }
+.vA .schem .n text.s { font: 10.5px var(--mono); fill: var(--m); }
+.vA .schem .n text.s.warn { fill: var(--warn); } .vA .schem .n text.s.neg { fill: var(--neg); } .vA .schem .n text.s.ok { fill: var(--ac); }
+.vA .schem .n path.tick { stroke: var(--ink); stroke-width: 1.4; fill: none; }
+.vA .schem .n { cursor: pointer; }
+.vA .schem .n:hover rect.box, .vA .schem .n.lit rect.box { stroke: var(--ac); stroke-width: 1.6; }
+.vA .schem path.e { fill: none; stroke-width: 1.3; stroke-linejoin: round; }
+.vA .schem path.e.c { stroke: var(--ac); } .vA .schem path.e.a { stroke: var(--iris); } .vA .schem path.e.r { stroke: var(--neg); stroke-dasharray: 3 4; }
+.vA .schem path.e.idle { stroke: var(--line); }
+.vA .schem.focus path.e { opacity: .18; } .vA .schem.focus path.e.lit { opacity: 1; stroke-width: 2; }
+.vA .schem .bead { fill: var(--ac); } .vA .schem .bead.a { fill: var(--iris); }
+.vA .schem .colh { font: var(--fs-xs) var(--mono); fill: var(--m); }
+.vA .schem .callout rect { fill: var(--s); stroke: var(--ink); stroke-width: 1; }
+.vA .schem .callout text { font: 10.5px var(--mono); fill: var(--ink); }
+.vA .schem .callout text.k { font-weight: 700; }
+.vA .schem .callout line, .vA .schem .callout path { stroke: var(--ink); stroke-width: .9; fill: none; }
+.vA .schem .callout circle { fill: var(--ink); }
+.vA .schem .callout.neg rect { stroke: var(--neg); } .vA .schem .callout.neg text.k { fill: var(--neg); }
+.vA .legend { display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--m); padding-top: var(--s2); }
+.vA .legend i { display: inline-block; width: 18px; height: 0; border-top: 1.5px solid; vertical-align: middle; margin-right: 6px; }
+.vA .legend i.c { border-color: var(--ac); } .vA .legend i.a { border-color: var(--iris); } .vA .legend i.r { border-color: var(--neg); border-top-style: dashed; }
+.vA .rail { display: grid; gap: 1px; background: var(--line); padding: 0; align-content: start; }
+.vA .rail > div { background: var(--cell); padding: var(--s4); }
+.vA .att { display: grid; gap: var(--s2); }
+.vA .att .it { display: grid; grid-template-columns: auto 1fr auto; gap: 2px var(--s3); align-items: start; padding: var(--s2) var(--s3); border-radius: var(--r1); background: var(--warnS); }
+.vA .att .it.neg { background: var(--negS); }
+.vA .att .it .sv { width: 6px; height: 6px; margin-top: 7px; background: var(--warn); }
+.vA .att .it.neg .sv { background: var(--neg); }
+.vA .att .it b { font-weight: 600; font-size: var(--fs-sm); }
+.vA .att .it p { grid-column: 2 / 4; margin: 0; font-size: var(--fs-xs); color: var(--t2); }
+.vA .att .it button { font-size: var(--fs-xs); border: 1px solid var(--line); background: var(--cell); border-radius: 3px; padding: 1px 8px; cursor: pointer; }
+.vA .att .big { font: 500 1.75rem/1 var(--sans); }
+.vA .sched { display: grid; gap: 0; font-size: var(--fs-sm); }
+.vA .sched div { display: grid; grid-template-columns: 4.5rem 1fr auto; gap: var(--s2); padding: 6px 0; border-top: 1px dashed var(--line); align-items: center; }
+.vA .sched div:first-child { border-top: 0; }
+.vA .sched time { font: var(--fs-xs) var(--mono); color: var(--m); }
+.vA .sched em { font: normal var(--fs-xs) var(--mono); color: var(--m); }
+.vA .runs div { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: var(--s2); align-items: center; padding: 5px 0; font-size: var(--fs-sm); }
+.vA .runs div i { width: 8px; height: 8px; border-radius: 2px; }
+.vA .runs div span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vA .runs div small { color: var(--m); }
+.vA .runs time { font: var(--fs-xs) var(--mono); color: var(--m); }
+
+/* limits as dimension lines */
+.vA .lims { grid-template-columns: 1fr; }
+.vA .limhd, .vA .limrow { display: grid; grid-template-columns: 10rem 12rem minmax(0, 1fr); gap: var(--s4); align-items: center; }
+.vA .limhd .axis { display: grid; grid-template-columns: repeat(7, 1fr); font: var(--fs-xs) var(--mono); color: var(--m); }
+.vA .limhd .axis span { border-left: 1px solid var(--line); padding-left: 4px; }
+.vA .limrow { padding: 7px 0; border-top: 1px dashed var(--line); }
+.vA .limrow .nm b { display: block; font-size: var(--fs-sm); font-weight: 600; }
+.vA .limrow .nm small { font: var(--fs-xs) var(--mono); color: var(--m); }
+.vA .gauge { position: relative; height: 10px; border: 1px solid var(--ink); border-radius: 1px; }
+.vA .gauge i { position: absolute; inset: 0 auto 0 0; background: var(--ink); }
+.vA .gauge i.warn { background: var(--warn); } .vA .gauge i.neg { background: var(--neg); }
+.vA .gauge u { position: absolute; top: -4px; bottom: -4px; border-left: 1.5px dashed var(--warn); }
+.vA .gauge + small { display: block; font: var(--fs-xs) var(--mono); color: var(--m); margin-top: 3px; }
+.vA .dim { position: relative; height: 34px; background: repeating-linear-gradient(90deg, var(--line2) 0 1px, transparent 1px calc(100% / 7)); }
+.vA .dim .ln { position: absolute; top: 17px; height: 0; border-top: 1px solid var(--ink); }
+.vA .dim .ln::before, .vA .dim .ln::after { content: ""; position: absolute; top: -6px; height: 11px; border-left: 1px solid var(--ink); }
+.vA .dim .ln::before { left: 0; } .vA .dim .ln::after { right: 0; }
+.vA .dim .lbl { position: absolute; top: 2px; font: var(--fs-xs) var(--mono); color: var(--t2); white-space: nowrap; background: var(--cell); padding: 0 4px; transform: translateX(-50%); }
+.vA .dim .x { position: absolute; top: 9px; width: 16px; height: 16px; margin-left: -8px; }
+.vA .dim .x::before, .vA .dim .x::after { content: ""; position: absolute; left: 7px; top: 0; height: 16px; border-left: 2px solid var(--warn); transform: rotate(45deg); }
+.vA .dim .x::after { transform: rotate(-45deg); }
+.vA .dim .xl { position: absolute; top: 20px; font: 600 var(--fs-xs) var(--mono); color: var(--warn); white-space: nowrap; padding-left: 10px; }
+.vA .dim .short { position: absolute; top: 17px; border-top: 2px solid var(--warn); }
+
+/* activity and the replies */
+.vA .low { grid-template-columns: minmax(0, 1fr) 17rem; }
+.vA .hm svg { display: block; width: 100%; height: auto; }
+.vA .hm rect.d { shape-rendering: crispEdges; }
+.vA .hmleg { display: flex; gap: 3px; align-items: center; font: var(--fs-xs) var(--mono); color: var(--m); margin-top: var(--s2); }
+.vA .hmleg i { width: 10px; height: 10px; }
+.vA .hmleg span:first-child { margin-right: 4px; } .vA .hmleg span:last-child { margin-left: 4px; }
+.vA .bypc { display: grid; gap: var(--s3); }
+.vA .bypc .row { display: grid; grid-template-columns: 1fr auto; gap: 4px; font-size: var(--fs-sm); }
+.vA .bypc .bar { grid-column: 1 / -1; height: 8px; background: var(--line2); }
+.vA .bypc .bar i { display: block; height: 100%; }
+.vA table.rep { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.vA table.rep th { text-align: left; font-weight: 500; color: var(--m); font-size: var(--fs-xs); padding: 0 var(--s2) var(--s2); white-space: nowrap; }
+.vA table.rep td { padding: 0 var(--s2); height: 2.4rem; border-top: 1px solid var(--line2); white-space: nowrap; }
+.vA table.rep .n { text-align: right; font-family: var(--mono); font-size: var(--fs-xs); }
+.vA table.rep .tm { font-family: var(--mono); font-size: var(--fs-xs); color: var(--m); }
+.vA table.rep tr:hover td { background: var(--hot); }
+.vA .tl { display: inline-flex; gap: 6px; align-items: center; }
+.vA .tl i { width: 6px; height: 6px; border-radius: 1px; }
+.vA .evid { display: flex; gap: var(--s5); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--m); margin-top: var(--s4); }
+.vA .evid span { display: inline-flex; gap: 6px; align-items: center; }
+.vA .evid i { width: 18px; border-top: 1.5px solid var(--ink); }
+.vA .evid i.e { border-top-style: dashed; border-color: var(--warn); }
+
+/* the sheet's width decides the arrangement, never the screen's */
+@container sheet (max-width: 70rem) { .vA .main2 { grid-template-columns: 1fr; } .vA .rail { grid-template-columns: repeat(3, minmax(0, 1fr)); } .vA .low { grid-template-columns: 1fr; } }
+@container sheet (max-width: 56rem) { .vA .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vA .rail { grid-template-columns: 1fr; } .vA .limhd, .vA .limrow { grid-template-columns: 9rem 7rem minmax(0, 1fr); } }
+@container app (max-width: 75rem) { .vA { grid-template-columns: 4rem minmax(0, 1fr); } .vA .side .brand div, .vA .nav a span, .vA .nav a em, .vA .nav a.sub, .vA .nav .ver { display: none; } .vA .nav a { justify-content: center; padding: 0; } .vA .brand { justify-content: center; padding-inline: 0; } }

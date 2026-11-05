@@ -57,6 +57,26 @@ function rowNote(p, best, now, x = {}) {
   return '';
 }
 
+/** An account's limits as a ring, as the Overview draws them: inner 5-hour, outer weekly; dashed is the estimate at the reset. */
+const arcPath = (cx, cy, r, f0, f1) => { if (f1 - f0 >= 0.999) f1 = f0 + 0.999; const a0 = f0 * 2 * Math.PI - Math.PI / 2, a1 = f1 * 2 * Math.PI - Math.PI / 2; return `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)} A${r} ${r} 0 ${f1 - f0 > 0.5 ? 1 : 0} 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`; };
+const ringTone = (u) => (u >= 80 ? 'var(--neg)' : u >= 55 ? 'var(--warn)' : 'var(--ac)');
+export function limitRing(p, x = {}, S = 56) {
+  const c = S / 2, r1 = c - 5, r0 = c - 12, cap = x.caps && x.caps[p.name];
+  let g = '', mid = '';
+  if (p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in)) { g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--neg)" stroke-dasharray="3 5" opacity=".7"/>`; mid = '—'; }
+  else if (cap) { const u = Math.min(1, cap.spent / cap.cap); g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--line)" stroke-width="5"/>${u > 0 ? `<path d="${arcPath(c, c, r1, 0, u)}" fill="none" stroke="var(--r2)" stroke-width="5" stroke-linecap="round"/>` : ''}`; mid = Math.round((1 - u) * 100) + '%'; }
+  else if (!(p.quota && p.quota.tiers.length)) { g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--line)" stroke-dasharray="2 4"/>`; mid = p.kind === 'api_key' ? '∞' : '—'; }
+  else {
+    const tiers = [tier(p, 'session'), weekTier(p)].filter(Boolean);
+    (tiers.length ? tiers : p.quota.tiers.slice(0, 2)).forEach((t, i) => {
+      const r = i || tiers.length === 1 ? r1 : r0, u = Math.min(1, t.used / 100), f = x.forecast && x.forecast[p.name + '|' + t.id] ? Math.min(1, x.forecast[p.name + '|' + t.id].at_reset / 100) : u;
+      g += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--line)" stroke-width="5"/>${f > u ? `<path d="${arcPath(c, c, r, u, f)}" fill="none" stroke="${ringTone(f * 100)}" stroke-width="5" stroke-dasharray="2 3" opacity=".55"/>` : ''}${u > 0 ? `<path d="${arcPath(c, c, r, 0, u)}" fill="none" stroke="${ringTone(u * 100)}" stroke-width="5" stroke-linecap="round"/>` : ''}`;
+    });
+    const w = weekTier(p) || p.quota.tiers[0]; mid = Math.max(0, Math.round(100 - w.used)) + '%';
+  }
+  return `<svg class="lring" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" aria-hidden="true">${g}<text x="${c}" y="${c + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${mid}</text></svg>`;
+}
+
 /** One account in its tool's card. */
 // usage drawn into the rows: the range, each account's breakdown and day series, and the colour it has in the chart
 const au = { days: 7, by: {}, series: {}, color: {}, models: [], fold: new Set(['models']) };
@@ -69,7 +89,7 @@ function accountRow(p, best, now, x = {}) {
   const live = p.harness === 'claude' && p.kind === 'subscription' && p.identity.logged_in;
   const added = p.created_at ? 'Added ' + new Date(p.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
   return `<div class="acr click ${best && p.name === best.name ? 'best' : ''}" data-act="open-account" data-name="${esc(p.name)}" data-testid="row-${esc(p.name)}">
-    ${avatar(p.label)}
+    ${limitRing(p, x)}
     <div class="who"><b>${esc(p.label)}${p.main ? ' <span class="muted" style="font-weight:400">· main</span>' : ''}</b>
       <span class="mono">${esc(emailOf(p) || p.identity.name || p.base_url || (p.identity.logged_in ? 'logged in' : 'not logged in'))}</span>
       <span class="meta">${planCell(p)}${added ? `<span>${added}</span>` : ''}${p.email_mismatch ? ' <span class="pill neg" title="Logged in as a different email than you entered">email differs</span>' : ''}</span></div>
@@ -132,16 +152,16 @@ view('accounts', async (sheet) => {
   if (st.first_run && (st.first_run.main_profiles.length || st.first_run.accounts.length)) {
     toast(`Found ${st.first_run.main_profiles.length} installed tools and imported ${st.first_run.accounts.length} accounts from your PowerShell launcher.`);
   }
-  const { best } = findings(ps, now);
+  const { best, text } = findings(ps, now);
   const x = await call('limits_extra').catch(() => ({}));
   const q = (document.getElementById('find').value || '').toLowerCase();
   const shown = ps.filter((p) => !q || p.name.toLowerCase().includes(q) || p.label.toLowerCase().includes(q) || emailOf(p).toLowerCase().includes(q));
   const fetched = ps.map((p) => p.quota && p.quota.fetched_at).filter(Boolean);
-  const readAgo = fetched.length ? `Limits read ${dur(now - Math.max(...fetched))} ago` : '';
+  const readAgo = fetched.length ? `Limits read ${now - Math.max(...fetched) < 60000 ? 'just now' : dur(now - Math.max(...fetched)) + ' ago'}` : '';
   const tools = shownTools(st).filter((h) => !acctTool || h.id === acctTool);
   const chip = (id, label) => `<a class="${acctTool === id ? 'on' : ''}" data-act="acct-tool" data-v="${id}" data-testid="chip-${id || 'all'}">${label}</a>`;
   sheet.innerHTML = `
-    <div class="trow"><div><h1>Accounts</h1><p class="find" data-testid="finding">${ps.length} ${ps.length === 1 ? 'account' : 'accounts'} across ${new Set(ps.map((p) => p.harness)).size} ${new Set(ps.map((p) => p.harness)).size === 1 ? 'tool' : 'tools'}. Each runs in its own folder with its own login, side by side.</p></div>
+    <div class="trow"><div><div class="crumb">Accounts · ${au.days} days${readAgo ? ' · ' + readAgo.toLowerCase() : ''}</div><h1 data-testid="finding">${text || `${ps.length} ${ps.length === 1 ? 'account' : 'accounts'}, each in its own folder with its own login.`}</h1><p class="find">${ps.length} ${ps.length === 1 ? 'account' : 'accounts'} across ${new Set(ps.map((p) => p.harness)).size} ${new Set(ps.map((p) => p.harness)).size === 1 ? 'tool' : 'tools'}, each in its own folder with its own login. Sorted by room left. Usage at API list prices, so ≈.</p></div>
       <div class="acts"><span class="seg3">${[7, 14, 30].map((d) => `<a class="${d === au.days ? 'on' : ''} mono" data-act="acct-days" data-v="${d}" data-testid="u-days-${d}">${d}d</a>`).join('')}</span><button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${best ? `<button class="btn" data-act="start-in-folder" data-name="${esc(best.name)}" data-testid="start-best">Start in a folder…</button>` : ''}
       <button class="btn primary" data-act="add-account" data-testid="add-account">Add account</button></div></div>
     ${(() => { const series = ps.filter((p) => au.series[p.name] && au.series[p.name].some((v) => v)).map((p) => ({ name: p.label, color: au.color[p.name] || SERIES[0], vals: au.series[p.name] })); const open = !au.fold.has('chart');
@@ -249,7 +269,7 @@ view('account', async (sheet, params) => {
   }
   const planPill = p.kind === 'subscription' ? (p.identity.logged_in ? `<span class="pill teal">${esc(p.identity.plan || 'Logged in')}</span>` : '<span class="pill neg">Not logged in</span>') : `<span class="pill ${p.kind === 'routed' ? 'iris' : 'warn'}">${p.kind === 'routed' ? 'Routed' : 'API key'}</span>`;
   sheet.innerHTML = `<div class="ahead"><span class="av big">${esc(p.label.split(/[-_ ]/).filter(Boolean).slice(0, 2).map((x) => x[0].toUpperCase()).join(''))}</span>
-    <div class="aname"><a href="#accounts" class="crumb acT">← Accounts</a><h1 data-testid="detail-name">${esc(p.label)}</h1>
+    <div class="aname"><a href="#accounts" class="crumb acT">← Accounts</a><h1 data-testid="detail-name">${toolIcon(p.harness, 22)}${esc(p.label)}</h1>
       <p class="find">${esc(p.harness_label)} ${emailOf(p) ? `<span class="mono">${esc(emailOf(p))}</span>` : ''} ${planPill} ${esc([p.identity.org, p.identity.role].filter(Boolean).join(' · '))}${p.main ? ' <span class="muted">· main profile</span>' : ''}${openTxt}</p></div>
     <div class="acts"><button class="btn" data-act="start-in-folder" data-name="${esc(name)}">Start in a folder…</button>
       <button class="btn primary" data-act="start" data-name="${esc(name)}" ${!p.identity.logged_in && p.kind === 'subscription' ? 'disabled' : ''}>Start ${esc(p.label)}</button>
