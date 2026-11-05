@@ -1,0 +1,4 @@
+# One site: Let's Encrypt on 443, everything proxied to the hub (WebSocket included)
+{$HUB_DOMAIN} {
+	reverse_proxy hrm-hub:8787
+}
