@@ -124,6 +124,24 @@ enum Cmd {
     Hub { #[command(subcommand)] cmd: HubCmd },
     /// The ring key the hub's data is sealed with: show the recovery key, or enter it
     Ring { #[command(subcommand)] cmd: RingCmd },
+    /// Make a backup now (the account list, settings, the history; never keys or logins)
+    Backup {
+        /// Also this computer's session transcripts, compressed
+        #[arg(long)] with_transcripts: bool,
+        #[command(flatten)] j: Json,
+    },
+    /// Merge the history in a backup zip or a sync folder into this computer; nothing is counted twice
+    Restore {
+        /// A backup zip, or the sync folder
+        source: PathBuf,
+        /// Continue as the computer named in it: its id, a new incarnation
+        #[arg(long)] adopt: bool,
+        /// Only say what it holds
+        #[arg(long)] preview: bool,
+        #[command(flatten)] j: Json,
+    },
+    /// Old transcripts out of the tools' folders into the archive; the sessions stay listed and readable
+    Archive { #[command(subcommand)] cmd: ArchiveCmd },
 }
 
 #[derive(Subcommand)]
@@ -144,24 +162,6 @@ enum RingCmd {
     Show,
     /// Enter the recovery key shown on another computer (asked for when not given)
     Enter { key: Option<String> },
-    /// Make a backup now (the account list, settings, the history; never keys or logins)
-    Backup {
-        /// Also this computer's session transcripts, compressed
-        #[arg(long)] with_transcripts: bool,
-        #[command(flatten)] j: Json,
-    },
-    /// Merge the history in a backup zip or a sync folder into this computer; nothing is counted twice
-    Restore {
-        /// A backup zip, or the sync folder
-        source: PathBuf,
-        /// Continue as the computer named in it: its id, a new incarnation
-        #[arg(long)] adopt: bool,
-        /// Only say what it holds
-        #[arg(long)] preview: bool,
-        #[command(flatten)] j: Json,
-    },
-    /// Old transcripts out of the tools' folders into the archive; the sessions stay listed and readable
-    Archive { #[command(subcommand)] cmd: ArchiveCmd },
 }
 
 #[derive(Subcommand)]
