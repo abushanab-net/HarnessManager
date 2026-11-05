@@ -923,7 +923,7 @@ pub fn ensure_router(ctx: &Ctx) -> Result<()> {
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000 | 0x0000_0008); } // no window, detached
     without_inherited_std(|| c.spawn()).context("start the router")?;
-    for _ in 0..50 {
+    for _ in 0..150 { // fifteen seconds: a loaded computer (the CI runner tests two suites at once) starts a process slowly
         if router_running(ctx) { return Ok(()); }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
