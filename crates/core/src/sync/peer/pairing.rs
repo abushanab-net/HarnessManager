@@ -195,7 +195,7 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
         }
     };
     let base = format!("http://{}:{port}", if addr.contains(':') { format!("[{addr}]") } else { addr.clone() });
-    let http = reqwest::blocking::Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build()?;
+    let http = reqwest::blocking::Client::builder().no_proxy().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build()?;
     let hello: Value = http.get(format!("{base}/pair/hello")).send().with_context(|| format!("could not reach {addr}:{port}"))?.error_for_status()?.json()?;
     let their_id = hello["id"].as_str().filter(|s| !s.is_empty()).context("the other computer did not say who it is")?.to_string();
     let me = ctx.settings.device_id.as_str();

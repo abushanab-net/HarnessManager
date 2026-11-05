@@ -119,7 +119,7 @@ impl Db {
         }
         conn.execute_batch("create index if not exists usage_unpriced on usage(model) where cost_usd is null;")?;
         // the direct connection: how a peer is reached and what it signs with
-        for (col, ty) in [("address", "text"), ("port", "integer"), ("cert_pem", "text"), ("pubkey", "text"), ("paired_at", "integer"), ("last_pull", "integer"), ("path", "text"), ("connected", "integer"), ("relayed_by", "text")] {
+        for (col, ty) in [("address", "text"), ("last_error", "text"), ("port", "integer"), ("cert_pem", "text"), ("pubkey", "text"), ("paired_at", "integer"), ("last_pull", "integer"), ("path", "text"), ("connected", "integer"), ("relayed_by", "text")] {
             let has: bool = conn.prepare("select 1 from pragma_table_info('peers') where name = ?")?.exists([col])?;
             if !has { conn.execute_batch(&format!("alter table peers add column {col} {ty};"))?; }
         }

@@ -57,6 +57,8 @@ pub struct Peer {
     /// When the last `hello` answered.
     pub connected: Option<i64>,
     pub relayed_by: String,
+    /// Why the last attempt to reach it failed; empty once one succeeds.
+    pub last_error: String,
 }
 
 /// Append one change to the outbox, inside the writer's own transaction.
@@ -326,14 +328,14 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
     ctx.db.with(|c| {
-        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by
+        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error
             from peers order by name, device_id")?;
         let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
         let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: s(r, 1)?, os: s(r, 2)?, app_version: s(r, 3)?, last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
             applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: s(r, 7)?,
             presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), incarnation: s(r, 9)?,
             address: s(r, 10)?, port: r.get::<_, Option<i64>>(11)?.unwrap_or(0) as u16, cert_pem: s(r, 12)?, pubkey: s(r, 13)?, paired_at: r.get(14)?, last_pull: r.get(15)?,
-            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)? }))?.collect::<rusqlite::Result<_>>()?;
+            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)? }))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })
 }
@@ -362,7 +364,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
         "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": p.presence["running"].as_array().cloned().unwrap_or_default(),
         "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
-        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty()})).collect();
+        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
         "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
         "last_run": last["at"], "error": last["error"], "peers": peers}))
