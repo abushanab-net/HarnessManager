@@ -4,7 +4,7 @@ import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, open
 import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
-import { computersStatus, syncOn, computers, nameOf, cdot, cdots } from './computers.js';
+import { computersStatus, syncOn, computers, nameOf, cdot, cdots, heardOn, transportLine } from './computers.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
@@ -736,13 +736,17 @@ async function drawComputers(s, st) {
   const pill = (t) => `<span class="pill">${t}</span>`;
   const card = (d) => {
     const me = d === c.this, seq = d.last_seq || 0, done = me ? (d.published_seq ?? seq) : (d.applied_seq || 0), pct = seq ? Math.min(100, Math.round((done / seq) * 100)) : 100;
-    const stale = !me && !(d.last_seen && now - d.last_seen < 180000);
-    const heard = me ? 'writing now' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';
-    const facts = [d.projects != null ? `${d.projects} ${d.projects === 1 ? 'project' : 'projects'} here` : '', d.accounts != null ? `${d.accounts} ${d.accounts === 1 ? 'account' : 'accounts'}` : '', (d.running || []).length ? `${d.running.length} running` : '', d.transport ? `over ${d.transport}` : ''].filter(Boolean);
+    const stale = !me && !heardOn(d, now);
+    const heard = me ? 'writing now' : d.connected ? 'connected' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';
+    const facts = [d.projects != null ? `${d.projects} ${d.projects === 1 ? 'project' : 'projects'} here` : '', d.accounts != null ? `${d.accounts} ${d.accounts === 1 ? 'account' : 'accounts'}` : '', (d.running || []).length ? `${d.running.length} running` : ''].filter(Boolean);
+    const when = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    // a peer: how it is reached now, when it was paired and last pulled (popover), its address, and Forget
+    const peer = me ? '' : `<span class="st tr mono muted" data-testid="transport">${esc(transportLine(c, d))}${info('peer-' + d.id, `${d.direct ? `<b>Paired</b> ${d.paired_at ? esc(when(d.paired_at)) : 'yes'}` : '<b>Not paired</b>: known through the folder only'}<br><b>Last pull</b> ${d.last_pull ? esc(ago(d.last_pull)) : 'never'}${d.address ? `<br><b>Address</b> ${esc(d.address)}` : ''}${d.relayed_by ? `<br><b>Relayed through</b> ${esc(nameOf(c, d.relayed_by))}` : ''}`)}</span>
+      <div class="f">${d.direct ? `<input class="input mono" id="addr-${esc(d.id)}" value="${esc(d.address || '')}" placeholder="name:port" maxlength="120" aria-label="Address of ${esc(d.name)}" title="Where to reach ${esc(d.name)} when not on this network: a VPN name, with the port" data-testid="addr-${esc(d.id)}"><button class="btn sm" data-act="peer-addr" data-id="${esc(d.id)}" data-testid="addr-save-${esc(d.id)}">Save</button>` : ''}<button class="btn sm" data-act="peer-forget" data-id="${esc(d.id)}" data-name="${esc(d.name)}" data-testid="forget-${esc(d.id)}">Forget</button></div>`;
     return `<div class="dev" data-testid="computer-${esc(d.id || 'this')}">${me ? '<span class="pill teal me">this one</span>' : ''}<b>${cdot(c, d.id)}${esc(d.name)}</b>
       <span class="st mono ${stale ? 'warnT' : 'acT'}">${esc([me ? { windows: 'Windows', macos: 'macOS', linux: 'Linux' }[st.os] || st.os : d.os, me ? st.version : d.app_version, heard].filter(Boolean).join(' · '))}</span>
       <div class="bar" title="${me ? `${done.toLocaleString()} of ${seq.toLocaleString()} entries published` : `${done.toLocaleString()} of ${seq.toLocaleString()} entries applied here`}"><i class="${pct < 100 && stale ? 'warn' : ''}" style="width:${pct}%"></i></div>
-      <span class="st mono muted">${esc(facts.join(' · ') || (seq ? `${seq.toLocaleString()} journal entries` : 'nothing written yet'))}</span></div>`;
+      <span class="st mono muted">${esc(facts.join(' · ') || (seq ? `${seq.toLocaleString()} journal entries` : 'nothing written yet'))}</span>${peer}</div>`;
   };
   el.innerHTML = `${row('This computer', info('devname', 'The name the other computers show for this one, in their lists, on sessions and on the chip at the top.<br><b>Default: the computer name</b> Windows or macOS gives it.'), 'How your other computers see this one.',
       `<input class="input" id="st-devname" value="${esc(c.this.name)}" maxlength="40" aria-label="This computer's name" style="width:220px" data-testid="st-devname"><button class="btn outline" data-act="computers-set" data-key="device_name" data-from="st-devname" data-testid="st-devname-save">Rename</button>`)}
@@ -753,7 +757,7 @@ async function drawComputers(s, st) {
           <div class="f"><input class="input mono" disabled placeholder="https://hub.example.com" aria-label="Hub address"><button class="btn sm" disabled>Join with a code…</button></div></div></div></div>`, '')}
     ${row('Carry transcripts', info('transcripts', 'Also share this computer\'s session transcripts, so they can be resumed on another computer (phase 3). Up to 200 MB; older ones go to the archive first.<br><b>Default: on.</b>'), 'Share this computer\'s session transcripts, so they can be resumed elsewhere.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_transcripts" ${s.sync_transcripts !== false ? 'checked' : ''} data-testid="st-transcripts"> Carry transcripts</label>`)}
     ${row('Presence', info('presence', 'Writes what is running here every minute while the app is open, so the other computers show it in Live routes and Running now.<br><b>Default: on.</b>'), 'Tell the other computers what is running here, every minute while the app is open.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_presence" ${s.sync_presence !== false ? 'checked' : ''} data-testid="st-presence"> Share what runs here</label>`)}
-    ${row('Direct connection ' + pill('phase 2'), '', 'On top of the folder or the hub: find the other computers on this network or over the VPN and talk to them directly, for live routes within a second.', `<label class="switch"><input type="checkbox" disabled data-testid="st-direct"> Connect directly</label><button class="btn outline" disabled data-testid="pair">Pair a computer…</button>`)}
+    ${row('Direct connection', info('direct', `Finds your other computers on this network (mDNS) or at an address you give (a VPN name), after pairing once with a six-digit code, and talks to them over TLS: what runs there every ten seconds, their history the moment it is written. The folder keeps working underneath; a computer reached neither way is still merged through it.<br><b>Default: off.</b><br>Listens on port <span class="mono" data-testid="listen-port">${c.port || 'chosen at first use'}</span> <button type="button" class="linkb" data-act="listen-port" data-testid="listen-port-change">Change…</button>`), 'On top of the folder or the hub: find the other computers on this network or over the VPN and talk to them directly, for live routes within a second.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="direct_connection" ${s.direct_connection ? 'checked' : ''} data-testid="st-direct"> Connect directly</label><button class="btn outline" data-act="pair" data-testid="pair">Pair a computer…</button>`)}
     <div class="devhead"><b>${n} ${n === 1 ? 'computer' : 'computers'}</b><span class="muted sm">${on ? `synced through a ${c.mode === 'hub' ? 'hub' : 'folder'}${c.last_run ? ' · last round ' + ago(c.last_run) : ''}` : 'sync is off: only this computer'}</span>${c.error ? `<span class="err sm" data-testid="sync-error">${esc(c.error)}</span>` : ''}
       <span class="acts">${on ? `<button class="btn sm primary" data-act="computers-now" data-testid="computers-now">${ic.refresh} Sync now</button>` : ''}</span></div>
     <div class="devs" data-testid="computer-cards">${computers(c).map(card).join('')}</div>`;
@@ -775,6 +779,26 @@ action('computers-now', async () => {
   const n = (r.peers || []).length;
   toast(r.error ? 'Sync round: ' + r.error : `Synced with ${n} other ${n === 1 ? 'computer' : 'computers'}`, !!r.error);
   changed();
+});
+// phase 2: the port the direct connection listens on, a peer's address, and forgetting a peer
+action('listen-port', () => {
+  openDialog(`${dlgHead('Listen port')}<div class="df"><label for="lp-v">Port</label><div><input class="input mono" id="lp-v" type="number" min="0" max="65535" value="${(S.cache.computers || {}).port || 0}" data-testid="lp-v"><span class="hint">0 picks a free port once and keeps it. Your other computers find this one by mDNS or by its address with this port.</span></div></div>
+    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="lp-ok" data-testid="lp-ok">Save</button></span></div>`);
+  document.getElementById('lp-ok').onclick = async () => {
+    const v = +document.getElementById('lp-v').value;
+    if (!(v >= 0 && v <= 65535)) return toast('A port is 0 to 65535', true);
+    closeDialog();
+    mutate(() => call('computers_set', { listen_port: v }), 'Saved');
+  };
+});
+action('peer-addr', (el) => mutate(() => call('computers_set_peer', { id: el.dataset.id, address: document.getElementById('addr-' + el.dataset.id).value.trim() }), 'Saved'));
+action('peer-forget', async (el) => {
+  if (await confirmDialog('Forget ' + el.dataset.name, `Forget <b>${esc(el.dataset.name)}</b>? This computer stops connecting to it and drops its certificate; what was merged from it stays. Pair again to reconnect.`, 'Forget')) mutate(() => call('computers_forget', { id: el.dataset.id }), 'Forgotten');
+});
+// presence arrives every 10 s while a peer is connected: the cards follow, unless one of them is being edited
+document.addEventListener('presence', () => {
+  const el = document.getElementById('st-computers');
+  if (S.route.view === 'settings' && el && S.state && !document.getElementById('dialog-root').innerHTML && !el.contains(document.activeElement)) drawComputers(S.state.settings, S.state);
 });
 
 const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
@@ -869,6 +893,9 @@ const CLI = [
   ['Shared setup', [['sync', 'Bring every account in step'], ['mcp', 'MCP servers shared across tools'], ['skills', 'Skills shared across tools'], ['prompts', 'Prompt files per tool']]],
   ['Routing and setup', [['provider', 'Router providers: endpoints and keys'], ['route', 'Failover or aggregate routes'], ['router', 'Start, stop or check the local router'], ['settings', 'Read or change settings'],
     ['init', 'Find installed tools and add their main profiles'], ['import', 'Import from the old claude-accounts.ps1 launcher']]],
+  ['Computers', [['computers status', 'This computer, the shared folder and the others; --json'], ['computers now', 'Publish what is new here and merge what the others published'], ['computers set', 'The name, the folder, what is shared, --direct on|off, --port'],
+    ['computers pair', 'Show a six-digit code and wait for the other computer; --host for one on another network'], ['computers join <code>', 'Pair with the computer showing the code; --host name:port when not on this network'],
+    ['computers peers', 'The paired computers, how each is reached and when it was last pulled'], ['computers forget <id or name>', 'Stop connecting to a computer; what it sent stays'], ['computers serve --seconds <n>', 'Run the listener without the app, for tests and headless use']]],
 ];
 view('cli', async (sheet) => {
   sheet.className = 'sheet';
