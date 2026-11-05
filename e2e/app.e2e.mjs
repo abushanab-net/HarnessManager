@@ -1265,7 +1265,7 @@ description: Bulk skill ${i}
     assert.deepEqual(d.cards, [d.name], 'only this computer');
     assert.equal(d.syncNow, false, 'no Sync now while sync is off');
     assert.equal(d.chip, true, 'no computers chip while sync is off');
-    assert.deepEqual(d.order.slice(-2), ['Computers', 'Backups'], 'the section sits above Backups');
+    assert.deepEqual(d.order.slice(-2), ['Computers', 'Backups and archive'], 'the section sits above Backups');
     await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
     await shot('19-settings-computers');
     // the tooltip of the section's first setting, like every other row
@@ -1702,6 +1702,92 @@ description: Bulk skill ${i}
       await click('#confirm-ok');
       await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')")), 'the hub card off after leaving', 15000);
     } finally { hub.kill(); }
+  });
+
+  // ---- backup, archive and welcome back (WP-8) ----
+  // Backups hold the history and a restore merges it; old transcripts move to the archive while the session stays
+  // listed and readable; a sync folder with history offers Welcome back when it is chosen.
+  await test('backups and archive: the section, hrm archive now on an old session, Restore… from a backup, Welcome back', async () => {
+    const { createHash } = await import('node:crypto');
+    await nav('#settings');
+    await $('[data-testid=sec-backups-and-archive] [data-testid=archive-now]');
+    const d = await exec(`return { title: document.querySelector('[data-testid=sec-backups-and-archive] h2 .fold').firstChild.textContent.trim(),
+      folder: document.querySelector('[data-testid=st-bk-folder]').checked, transcripts: document.querySelector('[data-testid=st-bk-transcripts]').checked,
+      days: document.querySelector('[data-testid=st-archive-days] a.on')?.textContent, sync: document.querySelector('[data-testid=st-archive-sync]').checked,
+      dir: document.querySelector('[data-testid=st-archive-dir]').textContent, restore: !!document.querySelector('[data-testid=restore-open]') }`);
+    assert.equal(d.title, 'Backups and archive');
+    assert.ok(d.folder && !d.transcripts, 'backups go to the sync folder; transcripts stay out by default');
+    assert.equal(d.days, '30 days');
+    assert.ok(d.sync && d.dir.includes('No folder') && d.restore, JSON.stringify(d));
+    await exec("document.querySelector('[data-testid=sec-backups-and-archive]').scrollIntoView()");
+    await shot('44-settings-backups-archive');
+    // an old session, three days old: a one-day age and hrm archive now move it into the chosen folder (and the sync folder)
+    const oldAt = new Date(Date.now() - 3 * 86400000), old = oldAt.toISOString(), month = `${oldAt.getFullYear()}-${String(oldAt.getMonth() + 1).padStart(2, '0')}`;
+    write(path.join(home, '.claude', 'projects', 'p', 's-old-1.jsonl'), jl([
+      { type: 'user', sessionId: 's-old-1', cwd: repo, timestamp: old, message: { role: 'user', content: 'Tidy the old Longhorn manifests' } },
+      { type: 'assistant', sessionId: 's-old-1', cwd: repo, timestamp: old, message: { id: 'o1', model: 'claude-opus-5-5', usage: { input_tokens: 50, output_tokens: 20 }, content: [{ type: 'text', text: 'The old manifests are tidy.' }] } },
+    ]));
+    const archiveDir = path.join(sb, 'archive');
+    hrm('settings', 'archive_days', '1');
+    hrm('settings', 'archive_dir', archiveDir);
+    const out = hrm('archive', 'now');
+    assert.ok(/^[01] sessions? moved/.test(out), out); // the app's own daily step may have moved it first
+    assert.ok(!fs.existsSync(path.join(home, '.claude', 'projects', 'p', 's-old-1.jsonl')), 'the original left the tool\'s folder');
+    assert.ok(fs.existsSync(path.join(home, '.claude', 'projects', 'p', 's-main-1.jsonl')), 'the fresh session stays');
+    const copies = fs.readdirSync(path.join(archiveDir, 'platform-gitops', month));
+    assert.ok(copies.includes('claude-claude-main-s-old-1.jsonl.zst') && copies.includes('claude-claude-main-s-old-1.json'), copies.join(','));
+    assert.equal(zlib.zstdDecompressSync(fs.readFileSync(path.join(archiveDir, 'platform-gitops', month, 'claude-claude-main-s-old-1.jsonl.zst'))).toString().split('\n')[0].includes('Tidy the old'), true);
+    const st = hrm('archive', 'status');
+    assert.ok(st.startsWith('1 archived'), st);
+    // the row keeps its place with the pill, reads from the archive, and offers no Resume
+    await nav('#sessions?days=all');
+    await hasText('[data-testid=archived-s-old-1]', 'archived');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-s-old-1] [data-act=resume]')")), 'no Resume on an archived session');
+    await shot('45-sessions-archived');
+    await click('[data-testid=read-s-old-1]');
+    await hasText('[data-testid=chat] .msg.ai', 'The old manifests are tidy.');
+    await hasText('[data-testid=resume-reason]', 'archived');
+    await shot('46-session-archived');
+    // Restore… from a backup made now: the preview counts this computer's history and names it; merging adds nothing
+    await nav('#settings');
+    await click('[data-testid=backup-now]');
+    await $('[data-testid=backup-Manual]');
+    await click('[data-testid=restore-open]');
+    await click('[data-testid=restore-src-Manual]');
+    await hasText('[data-testid=restore-counts]', 'archived transcripts');
+    const counts = (await text('[data-testid=restore-counts]')).replace(/,/g, '');
+    assert.ok(+((counts.match(/(\d+) requests/) || [])[1] || 0) > 0 && /\b1 archived/.test(counts), counts);
+    const before = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=welcome-adopt]')")), 'its own backup: this computer is in it as itself, nothing to adopt');
+    assert.equal((await text('[data-testid=welcome-new]')).trim(), 'Restore');
+    await shot('47-restore-dialog');
+    await click('[data-testid=welcome-new]');
+    await hasText('#toast', 'Restored: 0 requests');
+    const after = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
+    assert.equal(after.device_id, before.device_id, 'its own backup: the id stays');
+    // Welcome back: a sync folder with another computer's journal (seeded as the phase 1 test does), chosen
+    const sync = path.join(sb, 'sync-welcome'), dev = 'e2e-desk-8888', inc = 'inc-e2e-8', devDir = path.join(sync, 'devices', dev);
+    const t0 = Date.now() - 86400000, key = 'github.com/example/platform-gitops', cwd = 'C:\\desk\\Projects\\platform-gitops';
+    const usage = (n) => ({ request_id: `claude:desk-s1:m${n}`, profile: 'claude-main', harness: 'claude', ts: t0 + n * 60000, model: 'claude-opus-5-5', project: cwd, session_id: 'desk-s1', input: 1000, output: 200, cache_read: 500, cache_write: 0, ttft_ms: 900, gen_ms: 4000, cost_usd: 0.0081, price_rev: 'e2e' });
+    const session = { harness: 'claude', profile: 'claude-main', id: 'desk-s1', title: 'Rotate the desk certificates', cwd, started_at: t0, last_active_at: t0 + 120000, prompts: 2, tool_calls: 2, failed: 0, messages: 4, model: 'claude-opus-5-5', tokens: 3400, source_path: '', project_key: key, project_name: 'platform-gitops', open: false, tags: [] };
+    const chunk = jl([{ seq: 1, ts: t0, op: 'usage', key: usage(1).request_id, data: usage(1) }, { seq: 2, ts: t0 + 60000, op: 'usage', key: usage(2).request_id, data: usage(2) },
+      { seq: 3, ts: t0 + 120000, op: 'session', key: 'claude/claude-main/desk-s1', data: session }]);
+    const file = `${inc}-1-3.jsonl`;
+    write(path.join(devDir, 'journal', file), chunk);
+    write(path.join(devDir, 'device.json'), JSON.stringify({ id: dev, name: 'DESK', os: 'windows', app_version: '1.5.0', incarnation: inc, roots: { [key]: cwd }, updated_at: Date.now() }));
+    write(path.join(devDir, 'manifest.json'), JSON.stringify({ incarnation: inc, last_seq: 3, chunks: [{ file, from: 1, to: 3, sha256: createHash('sha256').update(chunk).digest('hex'), bytes: Buffer.byteLength(chunk) }] }));
+    // what the chooser does after the picker: the folder is set, then Welcome back asks
+    await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
+    await exec("import('./restore.js').then((m) => m.welcomeBack(arguments[0]))", [sync]);
+    await hasText('[data-testid=welcome-back]', 'DESK');
+    await hasText('[data-testid=restore-computers]', 'DESK · 2 requests · 1 sessions');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=welcome-adopt]')")), 'no record with this computer\'s name: no adopt');
+    await shot('48-welcome-back');
+    await click('[data-testid=welcome-new]');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=welcome-back]')")), 'the dialog closed');
+    await nav('#sessions?days=all');
+    await hasText('[data-testid=session-desk-s1] .pc', 'DESK');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-desk-s1] [data-act=resume]')")), 'a past computer\'s session is not resumed here as a local one');
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

@@ -328,6 +328,7 @@ pub fn resume(ctx: &Ctx, profile: &str, session_id: &str, cwd: Option<PathBuf>) 
     let p = reg.get(profile)?;
     let args = harness::of(p).resume_args(session_id);
     if args.is_empty() { bail!("{} cannot resume sessions", harness::of(p).label()); }
+    if crate::archive::is_archived(ctx, profile, session_id) { bail!("{}", crate::archive::REFUSAL); }
     start(ctx, profile, cwd, &args)
 }
 
@@ -500,6 +501,14 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             out.push(s);
         }
     }
+    // phase 4: sessions whose transcript moved to the archive no longer come from the scan
+    if f.open != Some(true) {
+        out.extend(crate::archive::sessions(ctx).into_iter().filter(|s| f.scope.as_deref() != Some("here") || s.device == ctx.db.device).map(|mut s| {
+            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
+            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
+            s
+        }).filter(|s| keep(s)));
+    }
     out.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(out)
 }
@@ -636,6 +645,7 @@ pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcri
     // this computer's own copy first: a session continued from another computer shares its id with the row from there
     let list = sessions(ctx, &f)?;
     let s = list.iter().find(|s| s.id == session_id && s.device == ctx.db.device).or_else(|| list.iter().find(|s| s.id == session_id)).cloned().context("session not found")?;
+    if s.archived { return crate::archive::transcript(ctx, &s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
     Ok(t)

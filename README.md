@@ -99,7 +99,26 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   the command): its OpenAI-format endpoint, its Anthropic-format one for Claude Code routes, both models and
   their list prices, with cache hits counted from the usage it returns.
 - **Backups:** automatic and manual, of the account list, settings, what Harness Manager wrote into each
-  tool, and the skills it manages. Backups never hold keys or logins.
+  tool, and the skills it manages. Backups never hold keys or logins. Since 1.6 a backup also holds the
+  history: every request with the computer it ran on and the cost it was valued at, the sessions, the limit
+  readings, the tags, the other computers (names and certificates, never keys) and the archived sessions;
+  with Include transcripts on, this computer's session transcripts too. With a sync folder chosen, every
+  backup is also copied to `backups\<this computer>` there, so a fresh computer finds its history beside the
+  journal. **Restore is a merge:** Settings › Backups and archive › Restore… takes a backup (this computer's
+  or one from the sync folder), the sync folder itself, or a zip or folder from elsewhere, shows what it holds
+  (computers, requests, tokens, sessions, limit history, archived transcripts, the newest date) and merges it
+  by the same rules sync uses, so nothing is counted twice and restoring again adds nothing. When the source
+  names this computer, "Restore and continue as <name>" takes over that identity (its id, a new incarnation,
+  so the other computers see a continuation); otherwise the restored computer stays a past computer in the
+  lists. **The archive** moves the transcripts of sessions older than an age you choose (30 days by default;
+  Never keeps everything where it is) out of the tools' folders into `archive\<this computer>` in the sync
+  folder and into a folder of your choice, compressed by project and month, each copy checked before the
+  original is deleted, once a day while the app runs and with Archive now. The session stays in the list with
+  an "archived" pill and its numbers, and reads from the archive; it cannot be resumed from there. Usage is
+  never touched. **Welcome back:** when a sync folder is chosen (or at first launch with one already set and
+  nothing published yet) and it holds history, the app offers to restore it and continue as the computer of
+  that name, to restore it as a new computer, or to start fresh. From a terminal: `hrm backup
+  [--with-transcripts]`, `hrm restore <zip|folder> [--adopt] [--preview]` and `hrm archive status | now`.
 - **Computers:** point every computer at one shared folder (OneDrive, Google Drive, SMB, a NAS) and each
   publishes its usage, sessions, limit readings and tags there as an append-only journal, which the others
   merge into their own database. Every request keeps its id and the cost it was valued at, so nothing is

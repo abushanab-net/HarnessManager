@@ -1280,3 +1280,13 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .ringkey { font-size: 19px; font-weight: 600; letter-spacing: 0.05em; text-align: center; padding: 12px 0 6px; color: var(--t); user-select: all; word-spacing: 0.3em; }
 .mcard .st { display: block; margin-top: 6px; font-size: 11px; }
 .mcard .st .err { font-weight: 600; }
+/* phase 4: the archived pill on a session, the archive folder in its row, the Restore picker and the counts */
+.pill.arch { background: var(--track); color: var(--m); font-size: 11px; vertical-align: middle; margin-left: 6px; }
+.frow .ctl .inp { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.rlist { margin: 0; padding-left: 18px; font-size: 13px; }
+.rlist li { margin: 4px 0; }
+.rpick { gap: 6px; }
+.rsrc { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--b); border-radius: 10px; cursor: pointer; color: var(--t); }
+.rsrc:hover { background: var(--sub); }
+.rsrc small { color: var(--m); font-size: 12px; }
+.bklist .bkrow + .bkhead { border-top: 1px solid var(--ru); }

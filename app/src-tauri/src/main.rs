@@ -73,7 +73,8 @@ const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", 
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
     "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
     "session_resume_here", "session_fetch", "transcripts_status",
-    "hub_join", "hub_leave", "hub_invite", "hub_status", "ring_key_show", "ring_key_enter"];
+    "hub_join", "hub_leave", "hub_invite", "hub_status", "ring_key_show", "ring_key_enter",
+    "restore_preview", "restore_welcome", "archive_status", "archive_now"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
     let ctx = state.ctx();
@@ -575,8 +576,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "router_start" => { service::router_token(ctx)?; service::ensure_router(ctx)?; json!(true) }
         "router_stop" => { service::router_stop(ctx)?; json!(true) }
 
-        "backups" => json!({"list": hrm_core::backup::list(ctx), "dir": hrm_core::backup::dir(ctx), "data": ctx.data, "log": hrm_core::log::file(&ctx.data)}),
-        "backup_create" => json!(hrm_core::backup::create(ctx, a["label"].as_str().unwrap_or("Manual"))?),
+        "backups" => json!({"list": hrm_core::backup::list(ctx), "dir": hrm_core::backup::dir(ctx), "data": ctx.data, "log": hrm_core::log::file(&ctx.data), "in_sync_folder": hrm_core::backup::in_sync_folder(ctx)}),
+        "backup_create" => json!(hrm_core::backup::create_with(ctx, a["label"].as_str().unwrap_or("Manual"), a["transcripts"].as_bool().unwrap_or(ctx.settings.backup_transcripts))?),
         "backup_delete" => { hrm_core::backup::delete(ctx, &s(a, "name")?)?; json!(true) }
         "backup_rename" => json!(hrm_core::backup::rename(ctx, &s(a, "name")?, &s(a, "label")?)?),
         "backup_export" => { hrm_core::backup::export(ctx, std::path::Path::new(&s(a, "path")?))?; json!(true) }
@@ -654,6 +655,20 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             hrm_core::sync::hub::ring_enter(ctx, &s(a, "key")?)?;
             if ctx.settings.sync_mode == "hub" { hrm_core::journal::round(ctx)? } else { hrm_core::journal::status(ctx)? }
         }
+        // phase 4: restore as a merge (a backup zip or a sync folder), Welcome back, and the archive
+        "restore_preview" => hrm_core::restore::preview(ctx, &hrm_core::restore::Source::parse(a)?)?,
+        "restore_run" => {
+            let r = hrm_core::restore::run(ctx, &hrm_core::restore::Source::parse(a)?, a["adopt"] == true)?;
+            hrm_core::restore::welcome_done(ctx)?;
+            // with adopt the settings changed: the identity follows now
+            let fresh = Arc::new(Ctx::open_at(&ctx.data, &ctx.home)?);
+            *state.ctx.lock().unwrap() = fresh;
+            *state.settings_mtime.lock().unwrap() = None;
+            r
+        }
+        "restore_welcome" => if a["done"] == true { hrm_core::restore::welcome_done(ctx)?; json!(true) } else { hrm_core::restore::welcome(ctx)? },
+        "archive_status" => hrm_core::archive::status(ctx)?,
+        "archive_now" => hrm_core::archive::archive_now(ctx)?,
         other => bail!("unknown operation {other}"),
     })
 }
@@ -786,6 +801,7 @@ fn main() {
                 let n = service::import_usage(&ctx).unwrap_or(0);
                 let _ = service::refresh_quotas(&ctx, false);
                 if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
+                if let Err(e) = hrm_core::archive::daily(&ctx) { hrm_core::log::warn(&format!("archive: {e:#}")); }
                 // across computers: out with what is new here, in with what the others published
                 if hrm_core::journal::on(&ctx) {
                     match hrm_core::journal::round(&ctx) {
