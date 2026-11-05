@@ -36,7 +36,7 @@ if (ev) ev.listen('refreshed', () => {
 });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
-call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); }).catch(() => {});
+call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
 // a newer Harness Manager found by an earlier check: the dot on Settings
 call('self_latest').then((v) => v && setSelfUpdate(v)).catch(() => {});
 // how many MCP servers and skills there are, beside their pages; the pinned projects under Projects

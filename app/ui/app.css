@@ -58,6 +58,8 @@ aside.side { grid-row: 1 / 3; display: flex; flex-direction: column; padding: 4p
 .brand small { color: var(--m); font-size: 12px; }
 nav.nav { display: grid; gap: 2px; }
 nav.nav.bottom { margin-top: auto; }
+/* the version, under Settings */
+nav.nav .ver { display: block; padding: 4px 10px 0 38px; font-size: 11px; color: var(--m); }
 nav.nav a { display: flex; gap: 10px; align-items: center; height: 32px; padding: 0 10px; border-radius: 8px; color: var(--t2); text-decoration: none; cursor: pointer; }
 nav.nav a:hover { background: var(--act); }
 nav.nav a.on { background: var(--act); color: var(--t); font-weight: 500; }
