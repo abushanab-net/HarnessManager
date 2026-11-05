@@ -61,9 +61,9 @@ fn sync_soft(ctx: &Ctx) -> Value {
 
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
-    "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv"];
+    "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
     let ctx = state.ctx();
@@ -179,20 +179,24 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let errors = service::refresh_quotas(ctx, a["live"] == true);
             json!({"new_rows": n, "quota_errors": errors})
         }
+        // scope "all" (every computer, the default) or "here" (this one)
         "home" => {
             let days = a["days"].as_i64();
             let h = a["harness"].as_str().filter(|s| !s.is_empty());
+            let scope = a["scope"].as_str();
             let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
-            let (total, rows) = service::request_log_since(ctx, days, since, h, a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
-            json!({"overview": service::overview(ctx, days, h)?, "requests": {"total": total, "rows": rows},
-                   "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h)?})
+            let (total, rows) = service::request_log_since(ctx, days, since, h, scope, a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
+            json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows},
+                   "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h, scope)?, "activity": service::activity(ctx, h, scope)?})
         }
+        // the last five minutes of traffic, here and on the other computers
+        "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
             let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
-            let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
+            let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["scope"].as_str(), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
             json!({"total": total, "rows": rows})
         }
-        "today" => json!(service::overview(ctx, Some(1), None)?.today_cost),
+        "today" => json!(service::overview(ctx, Some(1), None, None)?.today_cost),
         "usage" => {
             let days = a["days"].as_i64().unwrap_or(7);
             json!({"summary": service::usage_summary(ctx, days, a["profile"].as_str())?, "route_log": ctx.db.route_log(30)?,
@@ -209,7 +213,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "sessions" => {
-            let f: SessionFilter = serde_json::from_value(a["filter"].clone()).unwrap_or_default();
+            let mut f: SessionFilter = serde_json::from_value(a["filter"].clone()).unwrap_or_default();
+            f.scope = f.scope.or_else(|| opt(a, "scope"));
             json!(service::grouped_sessions(ctx, &f, a["group"].as_str().unwrap_or("project"))?)
         }
         "transcript" => json!(service::transcript(ctx, &s(a, "profile")?, &s(a, "id")?)?),
@@ -225,7 +230,16 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "project_alias" => { service::alias_project(ctx, &s(a, "key")?, opt(a, "name"), opt(a, "merge_into"))?; json!(true) }
-        "projects" => json!(service::projects(ctx, a["days"].as_i64())?),
+        "projects" => json!(service::projects(ctx, a["days"].as_i64(), a["scope"].as_str())?),
+        // across computers: the shared folder, this computer and the others
+        "computers_status" => hrm_core::journal::status(ctx)?,
+        "computers_now" => hrm_core::journal::round(ctx)?,
+        "computers_set" => {
+            let fresh = Arc::new(hrm_core::journal::configure(&ctx.data, &ctx.home, a)?);
+            *state.ctx.lock().unwrap() = fresh.clone();
+            *state.settings_mtime.lock().unwrap() = None;
+            if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
+        }
         // tags: free text on sessions ("session", key profile/id) and projects ("project", the project key)
         "tag_set" => {
             let tags: Vec<String> = a["tags"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
@@ -729,10 +743,23 @@ fn main() {
                 let n = service::import_usage(&ctx).unwrap_or(0);
                 let _ = service::refresh_quotas(&ctx, false);
                 if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
+                // across computers: out with what is new here, in with what the others published
+                if ctx.settings.sync_mode == "folder" {
+                    match hrm_core::journal::round(&ctx) {
+                        Ok(v) => { let _ = handle.emit("computers", v); }
+                        Err(e) => hrm_core::log::warn(&format!("computers: {e:#}")),
+                    }
+                }
                 let _ = handle.emit("refreshed", json!({"new_rows": n}));
                 let mins = ctx.settings.refresh_minutes.max(1) as u64;
                 drop(ctx);
                 std::thread::sleep(std::time::Duration::from_secs(mins * 60));
+            });
+            // what runs here, for the other computers' live views, once a minute
+            let st2 = state.clone();
+            std::thread::spawn(move || loop {
+                if let Err(e) = hrm_core::journal::presence_tick(&st2.ctx()) { hrm_core::log::warn(&format!("presence: {e:#}")); }
+                std::thread::sleep(std::time::Duration::from_secs(60));
             });
             let mut win = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .title("Harness Manager")

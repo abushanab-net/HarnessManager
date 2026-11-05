@@ -44,6 +44,25 @@ pub struct Settings {
     pub moving_routes: bool,
     /// Projects shown in the sidebar, by key, in this order.
     pub pinned_projects: Vec<String>,
+    /// This computer, across computers: made once; empty means "make one now".
+    pub device_id: String,
+    /// The name other computers see; the computer name unless changed.
+    pub device_name: String,
+    /// Made once per fresh database: a restore keeps `device_id` and starts a new incarnation.
+    pub incarnation: String,
+    /// "off", "folder" (a shared folder) or "hub" (a hub you host; later).
+    pub sync_mode: String,
+    /// The shared folder, absolute, when `sync_mode` is "folder".
+    pub sync_folder: String,
+    /// The hub's address when `sync_mode` is "hub"; its token lives in Credential Manager.
+    pub hub_url: String,
+    pub sync_transcripts: bool,
+    /// Tell the other computers what runs here, once a minute.
+    pub sync_presence: bool,
+    pub direct_connection: bool,
+    pub archive_days: u32,
+    /// "" means `<sync_folder>/archive`.
+    pub archive_dir: String,
 }
 
 impl Default for Settings {
@@ -51,7 +70,9 @@ impl Default for Settings {
         Settings { registry_path: String::new(), terminal: "wt".into(), refresh_minutes: 5, quota_max_age_minutes: 10, router_port: 15731,
             close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), quota_display: "left".into(), hidden_tools: vec![],
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
-            first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![] }
+            first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![],
+            device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
+            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, archive_days: 30, archive_dir: String::new() }
     }
 }
 
@@ -79,11 +100,18 @@ impl Ctx {
         let settings_path = data.join("settings.json");
         // defaults only when there is no file: a broken one would otherwise be saved over with defaults later
         let text = crate::util::read_or_empty(&settings_path)?;
-        let settings = if text.trim().is_empty() { Settings::default() } else {
+        let mut settings: Settings = if text.trim().is_empty() { Settings::default() } else {
             serde_json::from_str(&text).with_context(|| format!("{} is not valid; fix it or delete it to use the defaults", settings_path.display()))?
         };
         crate::log::init(data, settings.log_enabled, &settings.log_level);
-        let db = Db::open(&data.join("hm.db"))?;
+        // this computer's ids are made once and kept; the name defaults to the computer's
+        let mut made = false;
+        for id in [&mut settings.device_id, &mut settings.incarnation] {
+            if id.is_empty() { *id = crate::util::uuid4(); made = true; }
+        }
+        if settings.device_name.is_empty() { settings.device_name = crate::util::hostname(); made = true; }
+        if made { write_atomic(&settings_path, serde_json::to_string_pretty(&settings)?.as_bytes())?; }
+        let db = Db::open(&data.join("hm.db"), &settings.device_id, settings.sync_mode != "off")?;
         Ok(Ctx { data: data.to_path_buf(), home: home.to_path_buf(), settings, db })
     }
 

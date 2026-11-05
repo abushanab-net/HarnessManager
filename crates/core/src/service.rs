@@ -156,6 +156,8 @@ pub fn import_usage(ctx: &Ctx) -> Result<usize> {
             Err(e) => crate::log::warn(&format!("usage import for {name}: {e:#}")),
         }
     }
+    // rows from before costs were frozen, or whose model the catalog did not know yet, get their price now
+    if let Err(e) = ctx.db.price_unpriced(&crate::pricing::load(ctx)) { crate::log::warn(&format!("pricing usage rows: {e:#}")); }
     Ok(n)
 }
 
@@ -403,6 +405,17 @@ pub struct SessionFilter {
     /// Only sessions carrying this tag, their own or their project's.
     #[serde(default)]
     pub tag: Option<String>,
+    /// "all" (every computer, the default) or "here" (sessions that ran on this one).
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// The SQL that keeps a usage query to this computer when `scope` is "here", as parameter `?n`.
+fn device_clause(ctx: &Ctx, scope: Option<&str>, n: usize) -> (String, String) {
+    match scope {
+        Some("here") => (format!("device = ?{n}"), ctx.db.device.clone()),
+        _ => (format!("?{n} = ?{n}"), String::new()),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -421,7 +434,35 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
     let since = f.days.map(|d| now_ms() - d * 86_400_000).unwrap_or(0);
     let mut res = Resolver::new(&reg.projects);
     let (stags, ptags) = (ctx.db.tags_of("session").unwrap_or_default(), ctx.db.tags_of("project").unwrap_or_default());
+    let peers = crate::journal::peers(ctx).unwrap_or_default();
+    let elsewhere = crate::journal::open_elsewhere(&peers, now_ms());
+    let names = crate::journal::device_names(ctx);
     let mut out = vec![];
+    // the filters that apply to a session wherever it ran
+    let keep = |s: &SessionMeta| -> bool {
+        if s.last_active_at < since { return false; }
+        if f.harness.as_deref().map(|h| h != s.harness).unwrap_or(false) || f.profile.as_deref().map(|x| x != s.profile).unwrap_or(false) { return false; }
+        if let Some(q) = &f.query {
+            let q = q.to_lowercase();
+            if !s.title.to_lowercase().contains(&q) && !s.cwd.to_lowercase().contains(&q) && !s.id.to_lowercase().contains(&q) { return false; }
+        }
+        if f.project.as_deref().map(|k| k != s.project_key).unwrap_or(false) { return false; }
+        if let Some(t) = &f.tag { if !s.tags.contains(t) && !s.project_tags.contains(t) { return false; } }
+        true
+    };
+    // the other computers' sessions, as their journals described them
+    if f.scope.as_deref() != Some("here") {
+        for (dev, mut s) in ctx.db.remote_sessions()? {
+            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
+            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
+            s.open = false;
+            s.open_elsewhere = elsewhere.contains(&s.id);
+            s.device_name = names.get(&dev).cloned().unwrap_or_else(|| dev.clone());
+            s.device = dev;
+            if f.open == Some(true) || !keep(&s) { continue; }
+            out.push(s);
+        }
+    }
     for p in &reg.profiles {
         if f.harness.as_deref().map(|h| h != p.harness).unwrap_or(false) { continue; }
         if f.profile.as_deref().map(|x| x != p.name).unwrap_or(false) { continue; }
@@ -438,19 +479,19 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             .chain(recent.iter().take(running.iter().filter(|r| r.session_id.is_none()).count()).map(|s| s.id.clone())).collect();
         for mut s in list {
             if s.last_active_at < since { continue; }
-            if let Some(q) = &f.query {
-                let q = q.to_lowercase();
-                if !s.title.to_lowercase().contains(&q) && !s.cwd.to_lowercase().contains(&q) && !s.id.to_lowercase().contains(&q) { continue; }
-            }
             let info = res.resolve(&s.cwd);
             s.project_key = info.key;
             s.project_name = info.name;
             s.open = open_ids.contains(&s.id);
+            s.open_elsewhere = elsewhere.contains(&s.id);
+            s.device = ctx.db.device.clone();
+            s.device_name = ctx.settings.device_name.clone();
+            // the other computers learn of it here, once its project is known
+            if let Err(e) = ctx.db.journal_session(&s) { crate::log::warn(&format!("journal: session {}: {e:#}", s.id)); }
             if f.open == Some(true) && !s.open { continue; }
-            if f.project.as_deref().map(|k| k != s.project_key).unwrap_or(false) { continue; }
             s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
             s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
-            if let Some(t) = &f.tag { if !s.tags.contains(t) && !s.project_tags.contains(t) { continue; } }
+            if !keep(&s) { continue; }
             out.push(s);
         }
     }
@@ -528,31 +569,34 @@ pub struct ProjectStat {
     pub series: Vec<i64>,
     pub pinned: bool,
     pub tags: Vec<String>,
+    /// The computers its sessions ran on: `{id, name, sessions, tokens}` each.
+    pub devices: Vec<serde_json::Value>,
+    /// A session of it ran on this computer.
+    pub here: bool,
 }
 
-/// Every project with sessions in the last `days` days (None: all time), busiest first.
-pub fn projects(ctx: &Ctx, days: Option<i64>) -> Result<Vec<ProjectStat>> {
+/// Every project with sessions in the last `days` days (None: all time), busiest first; `scope` "here" keeps to this computer.
+pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec<ProjectStat>> {
     let reg = ctx.registry()?;
-    let f = SessionFilter { days, ..Default::default() };
+    let f = SessionFilter { days, scope: scope.map(String::from), ..Default::default() };
     let groups = grouped_sessions(ctx, &f, "project")?;
-    // cost and the day series come from the request log, priced per model as Overview does
-    let prices = crate::pricing::load(ctx);
+    // cost (as frozen per request) and the day series come from the request log
     let span = days.unwrap_or(30).clamp(1, 53 * 7);
     let day_list = last_days(span);
     let from = from_day(days);
-    let rows: Vec<(String, String, String, i64, i64, i64, i64)> = ctx.db.with(|c| {
-        let mut st = c.prepare("select project, day, model, sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 group by project, day, model")?;
-        let r = st.query_map([&from], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?.collect::<rusqlite::Result<_>>()?;
+    let (dc, dv) = device_clause(ctx, scope, 2);
+    let rows: Vec<(String, String, i64, Option<f64>, i64)> = ctx.db.with(|c| {
+        let mut st = c.prepare(&format!("select project, day, sum(input + output + cache_read + cache_write), sum(cost_usd), coalesce(sum(case when cost_usd is null then 0 else input + output + cache_read + cache_write end), 0) from usage where day >= ?1 and {dc} group by project, day"))?;
+        let r = st.query_map(rusqlite::params![from, dv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(r)
     })?;
     let mut res = Resolver::new(&reg.projects);
     let mut by_key: HashMap<String, (Option<f64>, i64, i64, Vec<i64>)> = HashMap::new(); // cost, priced tokens, all tokens, series
-    for (dir, day, model, i, out, cr, cw) in rows {
+    for (dir, day, tokens, cost, priced) in rows {
         let key = res.resolve(&dir).key;
         let e = by_key.entry(key).or_insert_with(|| (None, 0, 0, vec![0; day_list.len()]));
-        let tokens = i + out + cr + cw;
         e.2 += tokens;
-        if let Some(c) = crate::pricing::find(&prices, &model).map(|p| p.cost(i, out, cr, cw)) { e.0 = Some(e.0.unwrap_or(0.0) + c); e.1 += tokens; }
+        if let Some(c) = cost { e.0 = Some(e.0.unwrap_or(0.0) + c); e.1 += priced; }
         if let Some(di) = day_list.iter().position(|d| *d == day) { e.3[di] += tokens; }
     }
     let pins = &ctx.settings.pinned_projects;
@@ -562,8 +606,17 @@ pub fn projects(ctx: &Ctx, days: Option<i64>) -> Result<Vec<ProjectStat>> {
         let mut accounts: Vec<String> = g.sessions.iter().map(|s| s.profile.clone()).collect();
         accounts.sort();
         accounts.dedup();
+        let mut devices: Vec<(String, String, usize, i64)> = vec![];
+        for s in &g.sessions {
+            match devices.iter_mut().find(|d| d.0 == s.device) {
+                Some(d) => { d.2 += 1; d.3 += s.tokens; }
+                None => devices.push((s.device.clone(), s.device_name.clone(), 1, s.tokens)),
+            }
+        }
+        let here = devices.iter().any(|d| d.0 == ctx.db.device);
+        let devices = devices.into_iter().map(|(id, name, sessions, tokens)| serde_json::json!({"id": id, "name": name, "sessions": sessions, "tokens": tokens})).collect();
         ProjectStat { pinned: pins.contains(&g.key), tags: ptags.get(&g.key).cloned().unwrap_or_default(), key: g.key, name: g.name, root: g.root, remote: g.remote, sessions: g.sessions.len(), tokens: g.tokens, cost,
-            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open).count(), series }
+            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open).count(), series, devices, here }
     }).collect())
 }
 
@@ -834,24 +887,26 @@ fn from_day(days: Option<i64>) -> String {
     days.map(|d| (today - chrono::Duration::days(d.max(1) - 1)).format("%Y-%m-%d").to_string()).unwrap_or_else(|| "0000".into())
 }
 
-/// Totals for the last `days` days (None: all time) and a 53-week heatmap, optionally for one tool.
-pub fn overview(ctx: &Ctx, days: Option<i64>, harness: Option<&str>) -> Result<Overview> {
-    let prices = crate::pricing::load(ctx);
+/// Totals for the last `days` days (None: all time) and a 53-week heatmap, optionally for one tool; `scope` "here"
+/// keeps to this computer. Cost is the sum of what each request was valued at when it was read.
+pub fn overview(ctx: &Ctx, days: Option<i64>, harness: Option<&str>, scope: Option<&str>) -> Result<Overview> {
     let today = chrono::Local::now().date_naive();
     let from = from_day(days);
     let heat_days = last_days(53 * 7);
     let (hc, hv) = harness_clause(harness);
+    let (dc, dv) = device_clause(ctx, scope, 3);
     ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select day, model, count(*), sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 and {hc} group by day, model"))?;
+        let mut st = c.prepare(&format!("select day, count(*), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost_usd),
+            coalesce(sum(case when cost_usd is null then 0 else input + output + cache_read + cache_write end), 0) from usage where day >= ?1 and {hc} and {dc} group by day"))?;
         let earliest = if from < heat_days[0] { from.clone() } else { heat_days[0].clone() };
-        let rows: Vec<(String, String, i64, i64, i64, i64, i64)> = st.query_map(rusqlite::params![earliest, hv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?.collect::<rusqlite::Result<_>>()?;
+        type Row = (String, i64, i64, i64, i64, i64, Option<f64>, i64);
+        let rows: Vec<Row> = st.query_map(rusqlite::params![earliest, hv, dv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?.collect::<rusqlite::Result<_>>()?;
         let today_s = today.format("%Y-%m-%d").to_string();
         let mut o = Overview { cost: None, requests: 0, tokens: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, cache_hit_rate: 0.0, today_cost: None, today_tokens: 0, priced_share: 0.0,
             heatmap: heat_days.iter().map(|d| HeatDay { day: d.clone(), tokens: 0, requests: 0, cost: 0.0 }).collect() };
         let mut priced_tokens = 0i64;
-        for (day, model, n, i, out, cr, cw) in rows {
+        for (day, n, i, out, cr, cw, cost, priced) in rows {
             let tokens = i + out + cr + cw;
-            let cost = crate::pricing::find(&prices, &model).map(|p| p.cost(i, out, cr, cw));
             if let Some(h) = o.heatmap.iter_mut().find(|h| h.day == day) {
                 h.tokens += tokens;
                 h.requests += n;
@@ -868,7 +923,7 @@ pub fn overview(ctx: &Ctx, days: Option<i64>, harness: Option<&str>) -> Result<O
             o.cache_read += cr;
             o.cache_write += cw;
             o.tokens += tokens;
-            if let Some(x) = cost { o.cost = Some(o.cost.unwrap_or(0.0) + x); priced_tokens += tokens; }
+            if let Some(x) = cost { o.cost = Some(o.cost.unwrap_or(0.0) + x); priced_tokens += priced; }
         }
         let prompt = o.input + o.cache_read + o.cache_write;
         o.cache_hit_rate = if prompt > 0 { o.cache_read as f64 / prompt as f64 } else { 0.0 };
@@ -892,30 +947,50 @@ pub struct RequestRow {
     pub cost: Option<f64>,
     pub ttft_ms: Option<i64>,
     pub gen_ms: Option<i64>,
+    /// The computer it ran on.
+    pub device: String,
 }
 
 /// Every model response, newest first: (total count, one page of rows).
 pub fn request_log(ctx: &Ctx, days: Option<i64>, harness: Option<&str>, limit: i64, offset: i64) -> Result<(i64, Vec<RequestRow>)> {
-    request_log_since(ctx, days, None, harness, limit, offset)
+    request_log_since(ctx, days, None, harness, None, limit, offset)
 }
 
-/// The same, from `since_ms` (epoch ms) when given instead of whole calendar days.
-pub fn request_log_since(ctx: &Ctx, days: Option<i64>, since_ms: Option<i64>, harness: Option<&str>, limit: i64, offset: i64) -> Result<(i64, Vec<RequestRow>)> {
-    let prices = crate::pricing::load(ctx);
+/// The same, from `since_ms` (epoch ms) when given instead of whole calendar days; `scope` "here" keeps to this computer.
+pub fn request_log_since(ctx: &Ctx, days: Option<i64>, since_ms: Option<i64>, harness: Option<&str>, scope: Option<&str>, limit: i64, offset: i64) -> Result<(i64, Vec<RequestRow>)> {
     let since = from_day(days);
     let since_ms = since_ms.unwrap_or(0);
     let (hc, hv) = harness_clause(harness);
+    let (dc4, dv) = device_clause(ctx, scope, 4);
+    let (dc6, _) = device_clause(ctx, scope, 6);
     ctx.db.with(|c| {
-        let total: i64 = c.query_row(&format!("select count(*) from usage where day >= ?1 and {hc} and ts >= ?3"), rusqlite::params![since, hv, since_ms], |r| r.get(0))?;
-        let mut st = c.prepare(&format!("select ts, harness, profile, model, project, session_id, input, output, cache_read, cache_write, ttft_ms, gen_ms from usage where day >= ?1 and {hc} and ts >= ?5 order by ts desc limit ?3 offset ?4"))?;
-        let rows = st.query_map(rusqlite::params![since, hv, limit, offset, since_ms], |r| {
-            let (input, output, cr, cw): (i64, i64, i64, i64) = (r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?);
-            let model: String = r.get(3)?;
-            let cost = crate::pricing::find(&prices, &model).map(|p| p.cost(input, output, cr, cw));
-            Ok(RequestRow { ts: r.get(0)?, harness: r.get(1)?, profile: r.get(2)?, model, project: r.get(4)?, session_id: r.get(5)?, input, output, cache_read: cr, cache_write: cw, cost, ttft_ms: r.get(10)?, gen_ms: r.get(11)? })
+        let total: i64 = c.query_row(&format!("select count(*) from usage where day >= ?1 and {hc} and ts >= ?3 and {dc4}"), rusqlite::params![since, hv, since_ms, dv], |r| r.get(0))?;
+        let mut st = c.prepare(&format!("select ts, harness, profile, model, project, session_id, input, output, cache_read, cache_write, ttft_ms, gen_ms, cost_usd, device from usage where day >= ?1 and {hc} and ts >= ?5 and {dc6} order by ts desc limit ?3 offset ?4"))?;
+        let rows = st.query_map(rusqlite::params![since, hv, limit, offset, since_ms, dv], |r| {
+            Ok(RequestRow { ts: r.get(0)?, harness: r.get(1)?, profile: r.get(2)?, model: r.get(3)?, project: r.get(4)?, session_id: r.get(5)?, input: r.get(6)?, output: r.get(7)?,
+                cache_read: r.get(8)?, cache_write: r.get(9)?, cost: r.get(12)?, ttft_ms: r.get(10)?, gen_ms: r.get(11)?, device: r.get(13)? })
         })?.collect::<rusqlite::Result<_>>()?;
         Ok((total, rows))
     })
+}
+
+/// Tokens per calendar day over the last 53 weeks, split by computer: `{days: [{day, tokens, by_device: {id: tokens}}]}`.
+pub fn activity(ctx: &Ctx, harness: Option<&str>, scope: Option<&str>) -> Result<serde_json::Value> {
+    let days = last_days(53 * 7);
+    let (hc, hv) = harness_clause(harness);
+    let (dc, dv) = device_clause(ctx, scope, 3);
+    let mut out: Vec<serde_json::Value> = days.iter().map(|d| serde_json::json!({"day": d, "tokens": 0, "by_device": {}})).collect();
+    ctx.db.with(|c| {
+        let mut st = c.prepare(&format!("select day, device, sum(input + output + cache_read + cache_write) from usage where day >= ?1 and {hc} and {dc} group by day, device"))?;
+        for r in st.query_map(rusqlite::params![days[0], hv, dv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?.flatten() {
+            if let Some(i) = days.iter().position(|d| *d == r.0) {
+                out[i]["tokens"] = serde_json::json!(out[i]["tokens"].as_i64().unwrap_or(0) + r.2);
+                out[i]["by_device"][r.1] = serde_json::json!(r.2);
+            }
+        }
+        Ok(())
+    })?;
+    Ok(serde_json::json!({"days": out}))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -936,24 +1011,23 @@ pub fn breakdown(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str>) 
 
 /// `breakdown`, kept to one account when `profile` is given.
 pub fn breakdown_of(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str>, profile: Option<&str>) -> Result<Vec<Breakdown>> {
-    let prices = crate::pricing::load(ctx);
     let since = from_day(days);
     let (hc, hv) = harness_clause(harness);
     let (pc, pv) = match profile { Some(p) if !p.is_empty() => ("profile = ?3", p.to_string()), _ => ("?3 = ?3", String::new()) };
     let key = if by == "model" { "model" } else { "profile" };
     ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select {key}, model, max(harness), count(*), sum(input), sum(output), sum(cache_read), sum(cache_write) from usage where day >= ?1 and {hc} and {pc} group by {key}, model"))?;
+        let mut st = c.prepare(&format!("select {key}, max(harness), count(*), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost_usd) from usage where day >= ?1 and {hc} and {pc} group by {key}"))?;
         let mut map: BTreeMap<String, Breakdown> = BTreeMap::new();
         let mut prompt: HashMap<String, (i64, i64)> = HashMap::new();
-        for r in st.query_map(rusqlite::params![since, hv, pv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?, r.get::<_, i64>(6)?, r.get::<_, i64>(7)?)))?.flatten() {
-            let (k, model, h, n, i, o, cr, cw) = r;
+        for r in st.query_map(rusqlite::params![since, hv, pv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?, r.get::<_, i64>(6)?, r.get::<_, Option<f64>>(7)?)))?.flatten() {
+            let (k, h, n, i, o, cr, cw, cost) = r;
             let e = map.entry(k.clone()).or_insert(Breakdown { key: k.clone(), harness: h, requests: 0, tokens: 0, input: 0, output: 0, cache_read: 0, cost: None, cache_hit_rate: 0.0 });
             e.requests += n;
             e.input += i;
             e.output += o;
             e.cache_read += cr;
             e.tokens += i + o + cr + cw;
-            if let Some(p) = crate::pricing::find(&prices, &model) { e.cost = Some(e.cost.unwrap_or(0.0) + p.cost(i, o, cr, cw)); }
+            if let Some(c) = cost { e.cost = Some(e.cost.unwrap_or(0.0) + c); }
             let pe = prompt.entry(k).or_insert((0, 0));
             pe.0 += cr;
             pe.1 += i + cr + cw;

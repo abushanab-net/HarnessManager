@@ -117,7 +117,7 @@ impl Harness for OpenCode {
                 gen_ms: v["time"]["completed"].as_i64().zip(v["time"]["created"].as_i64()).map(|(e, s)| e - s).filter(|d| *d > 0),
             });
         }
-        let stored = ctx.db.insert_usage(&rows)?;
+        let stored = ctx.db.insert_usage(&rows, &crate::pricing::load(ctx))?;
         ctx.db.kv_set(&mark_key, &max.to_string())?;
         Ok(stored)
     }

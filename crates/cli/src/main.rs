@@ -112,8 +112,29 @@ enum Cmd {
     Harnesses { #[command(flatten)] j: Json },
     /// Read or change settings
     Settings { key: Option<String>, value: Option<String> },
+    /// Across computers: the shared folder, this computer and the others
+    Computers { #[command(subcommand)] cmd: ComputersCmd },
     /// Open the desktop app
     Open,
+}
+
+#[derive(Subcommand)]
+enum ComputersCmd {
+    /// This computer, the last round and the other computers
+    Status { #[command(flatten)] j: Json },
+    /// Publish what is new here and merge what the others published, now
+    Now { #[command(flatten)] j: Json },
+    /// Change the name, the mode (off or folder), the folder, and what is shared
+    Set {
+        #[arg(long)] name: Option<String>,
+        #[arg(long)] mode: Option<String>,
+        #[arg(long)] folder: Option<PathBuf>,
+        /// on or off
+        #[arg(long)] transcripts: Option<String>,
+        /// on or off
+        #[arg(long)] presence: Option<String>,
+        #[command(flatten)] j: Json,
+    },
 }
 
 #[derive(Subcommand)]
@@ -245,7 +266,7 @@ fn real_main(cli: Cli) -> Result<i32> {
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
-    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open))
+    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. }))
         .then(|| ctx.lock_registry());
     if !matches!(cli.cmd, Cmd::Init { .. } | Cmd::Run { .. }) {
         let _l = ctx.lock_registry();
@@ -329,7 +350,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
         Cmd::Overview { days, harness, j } => {
             service::import_usage(&ctx)?;
-            let o = service::overview(&ctx, days, harness.as_deref())?;
+            let o = service::overview(&ctx, days, harness.as_deref(), None)?;
             if j.json { return print_json(&o).map(|_| 0); }
             let money = |c: Option<f64>| c.map(|c| format!("${c:.2}")).unwrap_or_else(|| "-".into());
             println!("Cost (API list prices)  {}", money(o.cost));
@@ -364,7 +385,7 @@ fn real_main(cli: Cli) -> Result<i32> {
             }
         }
         Cmd::Sessions { group, harness: h, profile, days, search, open, project, tag, j } => {
-            let f = SessionFilter { harness: h, profile, days, query: search, open: open.then_some(true), project, tag };
+            let f = SessionFilter { harness: h, profile, days, query: search, open: open.then_some(true), project, tag, scope: None };
             let groups = service::grouped_sessions(&ctx, &f, &group)?;
             if j.json { return print_json(&groups).map(|_| 0); }
             for g in groups {
@@ -407,7 +428,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
         Cmd::Projects { cmd } => match cmd {
             ProjectCmd::List { days, j } => {
-                let list = service::projects(&ctx, days)?;
+                let list = service::projects(&ctx, days, None)?;
                 if j.json { return print_json(&list).map(|_| 0); }
                 println!("{:<28} {:>5}  {:>10}  {:>10}  {}", "project", "sess", "tokens", "list $", "key");
                 for p in list { println!("{:<28} {:>5}  {:>10}  {:>10}  {}{}", p.name, p.sessions, fmt_tokens(p.tokens), p.cost.map(|c| format!("{c:.2}")).unwrap_or_else(|| "-".into()), p.key, if p.live > 0 { format!("  ({} live)", p.live) } else { String::new() }); }
@@ -527,6 +548,31 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Open => {
             let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "harnessmanager" });
             std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
+        }
+        Cmd::Computers { cmd } => {
+            let on_off = |s: &Option<String>| -> Result<Option<bool>> {
+                Ok(match s.as_deref() { None => None, Some("on") => Some(true), Some("off") => Some(false), Some(x) => bail!("'{x}' is not on or off") })
+            };
+            let (st, j) = match cmd {
+                ComputersCmd::Status { j } => (hrm_core::journal::status(&ctx)?, j),
+                ComputersCmd::Now { j } => (hrm_core::journal::round(&ctx)?, j),
+                ComputersCmd::Set { name, mode, folder, transcripts, presence, j } => {
+                    let args = serde_json::json!({"device_name": name, "sync_mode": mode, "sync_folder": folder.map(|f| f.display().to_string()),
+                        "sync_transcripts": on_off(&transcripts)?, "sync_presence": on_off(&presence)?});
+                    let fresh = hrm_core::journal::configure(&ctx.data, &ctx.home, &args)?;
+                    (if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }, j)
+                }
+            };
+            if j.json { return print_json(&st).map(|_| 0); }
+            let t = &st["this"];
+            println!("{}  ({})  mode {}{}", t["name"].as_str().unwrap_or(""), t["id"].as_str().unwrap_or(""), st["mode"].as_str().unwrap_or("off"),
+                st["folder"].as_str().filter(|f| !f.is_empty()).map(|f| format!("  folder {f}")).unwrap_or_default());
+            println!("  journal    {} entries, {} published", t["last_seq"], t["published_seq"]);
+            if let Some(e) = st["error"].as_str() { println!("  last run   {}", e); } else if let Some(at) = st["last_run"].as_i64() { println!("  last run   {}", fmt_reset(Some(at))); }
+            for p in st["peers"].as_array().into_iter().flatten() {
+                println!("  {:<24} {:<8} {:<8} seen {}  applied {}/{}  {} running", p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""),
+                    fmt_reset(p["last_seen"].as_i64()), p["applied_seq"], p["last_seq"], p["running"].as_array().map(|r| r.len()).unwrap_or(0));
+            }
         }
     }
     Ok(0)
