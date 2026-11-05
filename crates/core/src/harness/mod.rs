@@ -1,13 +1,14 @@
 //! One module per coding tool, all behind the `Harness` trait. Adding a tool is one module plus one
 //! line in `all()`; the app asks `caps()` instead of hard-coding what each tool supports.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
 use crate::launch::LaunchSpec;
 use crate::model::*;
 use crate::registry::Profile;
+use crate::transcripts::{FetchedTranscript, Materialized};
 use crate::Ctx;
 
 pub mod agy;
@@ -64,6 +65,13 @@ pub trait Harness: Sync + Send {
     fn item_paths(&self, _ctx: &Ctx, _p: &Profile) -> ItemPaths { ItemPaths { mcp: None, skills: None, prompt: None } }
     /// Called before launching a profile whose harness cannot run accounts in parallel (Antigravity).
     fn activate(&self, _ctx: &Ctx, _p: &Profile) -> Result<()> { Ok(()) }
+    /// Copy a transcript from another computer where this tool looks for sessions here, for the repository at
+    /// `local_root`, and say how to resume it as a fork; the fetched file and the original are never changed.
+    fn materialize(&self, _ctx: &Ctx, _p: &Profile, _local_root: &Path, _t: &FetchedTranscript) -> Result<Materialized> {
+        anyhow::bail!("resuming elsewhere is not available for {}", self.label())
+    }
+    /// `materialize` is implemented: a session of this tool from another computer can be resumed here.
+    fn resumes_elsewhere(&self) -> bool { false }
 }
 
 pub fn all() -> &'static [&'static dyn Harness] {

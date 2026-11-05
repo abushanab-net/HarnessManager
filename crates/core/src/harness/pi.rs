@@ -181,6 +181,21 @@ impl Harness for PiLike {
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec![self.resume_flag.into(), id.into()] }
 
+    /// The log under `sessions/<this clone's folder, encoded the tool's way>/<its original name>`; Pi resumes
+    /// by path, Oh My Pi by id.
+    fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".jsonl")).unwrap_or("");
+        if name.is_empty() { bail!("the session log's name is unknown") }
+        let dest = self.home(ctx, p).join("sessions").join(session_dir_name(local_root, (self.id == "omp").then_some(ctx.home.as_path()))).join(name);
+        if !dest.exists() {
+            std::fs::create_dir_all(dest.parent().unwrap())?;
+            std::fs::copy(&t.path, &dest)?;
+        }
+        let args = if self.id == "pi" { vec![self.resume_flag.into(), dest.display().to_string()] } else { self.resume_args(&t.id) };
+        Ok(crate::transcripts::Materialized { launch_args: args, cwd: local_root.to_path_buf(), new_session_id: None, note: format!("{} resumes the copied log in this folder; the original stays as it is.", self.label) })
+    }
+    fn resumes_elsewhere(&self) -> bool { true }
+
     fn running(&self, ctx: &Ctx, p: &Profile) -> Vec<RunningConsole> {
         // no pid file: a process of the tool plus a session file written in the last two minutes counts as open
         let procs = crate::procs::by_name(&[self.binary], None);
@@ -207,6 +222,16 @@ impl Harness for PiLike {
         // mcp.json holds a `mcpServers` map in Claude Code's shape (Pi's docs say to copy that entry over)
         ItemPaths { mcp: self.caps.mcp.then(|| (home.join("mcp.json"), "claude-json")), skills: Some(home.join("skills")), prompt: Some(home.join("AGENTS.md")) }
     }
+}
+
+/// The folder a working directory's sessions sit in: `/`, `\` and `:` become `-`, wrapped in `--`; with
+/// `home` given (Oh My Pi), a folder under it is `-<relative>` instead.
+pub fn session_dir_name(cwd: &Path, home: Option<&Path>) -> String {
+    let enc = |s: &str| s.replace(['/', '\\', ':'], "-");
+    if let Some(rel) = home.and_then(|h| cwd.strip_prefix(h).ok()).filter(|r| !r.as_os_str().is_empty()) {
+        return format!("-{}", enc(&rel.display().to_string()));
+    }
+    format!("--{}--", enc(cwd.display().to_string().trim_start_matches(['/', '\\'])))
 }
 
 /// The session header: line 1, or line 2 behind Oh My Pi's title slot.

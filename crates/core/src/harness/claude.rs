@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use super::parse::*;
@@ -319,6 +319,19 @@ impl Harness for Claude {
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec!["--resume".into(), id.into()] }
 
+    /// One copy under `projects/<this clone's folder, encoded>/<id>.jsonl` (reused when there), resumed by its
+    /// path as a fork, so neither the copy nor the original is written.
+    fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        let dest = self.home(ctx, p).join("projects").join(project_dir_name(local_root)).join(format!("{}.jsonl", t.id));
+        if !dest.exists() {
+            std::fs::create_dir_all(dest.parent().unwrap())?;
+            std::fs::copy(&t.path, &dest).with_context(|| format!("copy the transcript to {}", dest.display()))?;
+        }
+        Ok(crate::transcripts::Materialized { launch_args: vec!["--resume".into(), dest.display().to_string(), "--fork-session".into()], cwd: local_root.to_path_buf(), new_session_id: None,
+            note: "Claude Code opens a new session that continues from the transcript; the copy and the original stay as they are.".into() })
+    }
+    fn resumes_elsewhere(&self) -> bool { true }
+
     fn running(&self, ctx: &Ctx, p: &Profile) -> Vec<RunningConsole> {
         let dir = self.home(ctx, p).join("sessions");
         let Ok(rd) = std::fs::read_dir(&dir) else { return vec![] };
@@ -346,6 +359,12 @@ impl Harness for Claude {
         let home = self.home(ctx, p);
         ItemPaths { mcp: Some((self.claude_json(ctx, p), "claude-json")), skills: Some(home.join("skills")), prompt: Some(home.join("CLAUDE.md")) }
     }
+}
+
+/// The folder Claude Code keeps a working directory's sessions in: every character that is not a letter or
+/// digit becomes `-` (`C:\Users\sam\src\my.app` is `C--Users-sam-src-my-app`, `/home/sam` is `-home-sam`).
+pub fn project_dir_name(cwd: &Path) -> String {
+    cwd.display().to_string().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
 /// Parse a Claude Code session log. `full` also builds the turns (the reading view needs them; the list does not).
