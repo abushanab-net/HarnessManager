@@ -34,9 +34,19 @@ pub fn rev(prices: &Prices) -> String {
 
 const DAY_MS: i64 = 86_400_000;
 
-/// Flatten the catalog to model id -> price. Anthropic and OpenAI entries win over resellers' copies.
+/// Prices the catalog may lack or lag on, from the vendor's own page. DeepSeek: api-docs.deepseek.com/quick_start/pricing,
+/// read 5 Nov 2026, peak rates in USD per 1M tokens (off-peak is half; cache writes are free):
+/// deepseek-flash 0.30 in, 0.006 cache hit, 1.20 out; deepseek-v4-pro 1.32 in, 0.044 cache hit, 3.96 out.
+fn builtin() -> Prices {
+    [("deepseek-flash", Price { input: 0.30, output: 1.20, cache_read: 0.006, cache_write: 0.0 }),
+     ("deepseek-v4-pro", Price { input: 1.32, output: 3.96, cache_read: 0.044, cache_write: 0.0 })]
+        .into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+}
+
+/// Flatten the catalog to model id -> price. Anthropic and OpenAI entries win over resellers' copies, and
+/// the built-in vendor prices win over the catalog.
 pub fn parse_catalog(v: &Value) -> Prices {
-    let mut out = Prices::new();
+    let mut out = builtin();
     let mut providers: Vec<(&String, &Value)> = v.as_object().map(|o| o.iter().collect()).unwrap_or_default();
     providers.sort_by_key(|(k, _)| match k.as_str() { "anthropic" => 0, "openai" => 1, _ => 2 });
     for (_, p) in providers {
@@ -121,5 +131,16 @@ mod tests {
         let c = find(&p, "gpt-6.1-sol").unwrap();
         assert_eq!(c.cache_write, 2.5, "missing cache write priced at 1.25x input");
         assert!((find(&p, "claude-opus-5-5").unwrap().cost(1_000_000, 100_000, 2_000_000, 0) - 6.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn deepseek_list_prices_are_built_in_and_beat_the_catalog() {
+        let cat = serde_json::json!({"deepseek": {"models": {"deepseek-flash": {"cost": {"input": 9, "output": 9}}}}});
+        let p = parse_catalog(&cat);
+        assert_eq!(*find(&p, "deepseek-flash").unwrap(), Price { input: 0.30, output: 1.20, cache_read: 0.006, cache_write: 0.0 });
+        assert_eq!(*find(&p, "deepseek/deepseek-v4-pro").unwrap(), Price { input: 1.32, output: 3.96, cache_read: 0.044, cache_write: 0.0 });
+        // 1M fresh input, 1M cache hits, 100k output on v4-pro at list price
+        assert!((find(&p, "deepseek-v4-pro").unwrap().cost(1_000_000, 100_000, 1_000_000, 0) - 1.76).abs() < 1e-9);
+        assert!(find(&parse_catalog(&serde_json::json!({})), "deepseek-flash").is_some(), "no catalog at all still prices DeepSeek");
     }
 }

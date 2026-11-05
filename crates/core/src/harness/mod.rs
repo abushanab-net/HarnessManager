@@ -13,8 +13,10 @@ use crate::Ctx;
 pub mod agy;
 pub mod claude;
 pub mod codex;
+pub mod omp;
 pub mod opencode;
 pub mod parse;
+pub mod pi;
 
 /// Where a harness keeps the things Harness Manager can sync into it.
 #[derive(Debug, Clone)]
@@ -65,7 +67,8 @@ pub trait Harness: Sync + Send {
 }
 
 pub fn all() -> &'static [&'static dyn Harness] {
-    &[&claude::Claude, &codex::Codex, &opencode::OpenCode, &agy::Agy]
+    static ALL: [&dyn Harness; 6] = [&claude::Claude, &codex::Codex, &opencode::OpenCode, &agy::Agy, &pi::PI, &omp::OMP];
+    &ALL
 }
 
 pub fn by_id(id: &str) -> Option<&'static dyn Harness> { all().iter().copied().find(|h| h.id() == id) }

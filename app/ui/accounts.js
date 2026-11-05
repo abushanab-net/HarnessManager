@@ -206,7 +206,7 @@ view('account', async (sheet, params) => {
     const facts = [
       ['Login', p.kind !== 'subscription' ? (p.identity.logged_in ? 'key saved' : '<span class="negT">no key</span>') : !p.identity.logged_in ? '<span class="negT">not logged in</span>' : p.identity.needs_login ? '<span class="negT">expired</span>' : '<span class="acT">valid</span>'],
       ['Folder', `<a class="mono" style="cursor:pointer" data-act="open-folder" data-path="${esc(p.home)}">${esc(p.home)}</a>`],
-      ['Started with', { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', opencode: 'XDG_CONFIG_HOME', agy: 'its own login' }[p.harness] || '—'],
+      ['Started with', { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', opencode: 'XDG_CONFIG_HOME', agy: 'its own login', pi: 'PI_CODING_AGENT_DIR', omp: 'PI_CODING_AGENT_DIR' }[p.harness] || '—'],
       ...(p.harness === 'claude' && !p.main ? [['Follows the main profile', 'CLAUDE.md, rules, skills, MCP'], ['Own', 'login, history, usage']] : []),
       ...(p.harness === 'claude' && p.kind === 'subscription' ? [['Live limits', S.state && S.state.live_quota ? 'on (reads the saved login)' : 'off']] : []),
       ['CLI', esc(d.cli)],
@@ -258,7 +258,7 @@ view('account', async (sheet, params) => {
 
 export function sessionRow(s) {
   // a dot (teal: open now), the title with where it ran, the account, the tool, tokens, when, and one action
-  const tool = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' }[s.harness];
+  const tool = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' }[s.harness];
   const where = [`${s.messages} ${s.messages === 1 ? 'msg' : 'msgs'}`, s.cwd ? s.cwd.split(/[\\/]/).slice(-2).join('\\') : ''].filter(Boolean).join(' · ');
   // with sync on, a Computer column: where the session ran; one open on another computer says so, with no action yet
   // (Resume here comes with phase 3: the cell stays)
@@ -413,8 +413,8 @@ function addDialog() {
   const keep = (id) => { const e = document.getElementById(id); return e ? e.value : ''; };
   const v = { name: keep('ad-name'), email: keep('ad-email'), key: keep('ad-key'), url: keep('ad-url'), model: keep('ad-model'), route: keep('ad-route') };
   const routes = S.state.routes || [];
-  const kindLabel = { subscription: { claude: 'Pro, Max, Team or Enterprise. You sign in in the browser.', codex: 'ChatGPT Plus, Pro or Team. You sign in in the browser.', opencode: 'OpenCode signs in to its providers in a terminal.', agy: 'Google sign-in. Antigravity keeps one login at a time; Start swaps it.' }[h.id], api_key: 'Pay per use. The key is kept in Windows Credential Manager.', routed: 'Sent through the local router to a route of providers.' }[add.kind];
-  const prefix = { claude: '.claude-', codex: '.codex-', opencode: '.opencode-', agy: '.agy-' }[h.id];
+  const kindLabel = { subscription: { claude: 'Pro, Max, Team or Enterprise. You sign in in the browser.', codex: 'ChatGPT Plus, Pro or Team. You sign in in the browser.', opencode: 'OpenCode signs in to its providers in a terminal.', agy: 'Google sign-in. Antigravity keeps one login at a time; Start swaps it.', pi: 'Pi signs in to a provider with /login inside the tool.', omp: 'Oh My Pi signs in to a provider with /login inside the tool.' }[h.id], api_key: 'Pay per use. The key is kept in Windows Credential Manager.', routed: 'Sent through the local router to a route of providers.' }[add.kind];
+  const prefix = { claude: '.claude-', codex: '.codex-', opencode: '.opencode-', agy: '.agy-', pi: '.pi-', omp: '.omp-' }[h.id];
   const cliOf = (v) => `hrm add ${v.name || '<name>'}${h.id !== 'claude' ? ' --harness ' + h.id : ''}${add.kind === 'api_key' ? ' --api-key' : ''}${add.kind === 'routed' ? ' --route ' + (v.route || '<route>') : ''}${v.email ? ' --email ' + v.email : ''}`;
   const cli = cliOf(v);
   openDialog(`${dlgHead('Add account')}

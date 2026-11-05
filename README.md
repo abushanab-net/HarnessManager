@@ -95,7 +95,9 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
 - **API keys and a local router:** API-key accounts keep their key in Windows Credential Manager, and only
   the launched process receives it. A local router on 127.0.0.1 sends routed accounts to providers, moves to
   the next one when a provider fails, and converts between the Anthropic Messages and OpenAI Chat Completions
-  formats. Subscription logins never pass through it.
+  formats. Subscription logins never pass through it. DeepSeek is a built-in preset (`hrm provider` shows
+  the command): its OpenAI-format endpoint, its Anthropic-format one for Claude Code routes, both models and
+  their list prices, with cache hits counted from the usage it returns.
 - **Backups:** automatic and manual, of the account list, settings, what Harness Manager wrote into each
   tool, and the skills it manages. Backups never hold keys or logins.
 - **Computers:** point every computer at one shared folder (OneDrive, Google Drive, SMB, a NAS) and each
@@ -114,16 +116,24 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
 
 ## Supported tools
 
-| | Claude Code | Codex | OpenCode | Antigravity |
-|---|:---:|:---:|:---:|:---:|
-| Several accounts at once | ✓ | ✓ | ✓ | one at a time |
-| Subscription login | ✓ | ✓ | ✓ | ✓ |
-| API-key account | ✓ | ✓ | | |
-| 5-hour and weekly limits | ✓ | ✓ | | |
-| Tokens and cost | ✓ | ✓ | ✓ | |
-| Sessions | ✓ | ✓ | ✓ | ✓ |
-| MCP servers and skills | ✓ | ✓ | ✓ | ✓ |
-| Prompt file | `CLAUDE.md` | `AGENTS.md` | `AGENTS.md` | `GEMINI.md` |
+| | Claude Code | Codex | OpenCode | Antigravity | Pi | Oh My Pi |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Several accounts at once | ✓ | ✓ | ✓ | one at a time | ✓ | ✓ |
+| Subscription login | ✓ | ✓ | ✓ | ✓ | `/login` in the tool | `/login` in the tool |
+| API-key account | ✓ | ✓ | | | ✓ | |
+| 5-hour and weekly limits | ✓ | ✓ | | | | |
+| Tokens and cost | ✓ | ✓ | ✓ | | ✓ | ✓ |
+| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| MCP servers and skills | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Prompt file | `CLAUDE.md` | `AGENTS.md` | `AGENTS.md` | `GEMINI.md` | `AGENTS.md` | `AGENTS.md` |
+
+Pi and Oh My Pi share one session format, so one parser reads both; each account is its own
+`PI_CODING_AGENT_DIR`.
+
+**DeepSeek Harness (`dsh`)** is not supported yet. It runs as a desktop app, a web UI or headless, and does not
+document where it stores sessions or in what format, so there is nothing stable to read; its session logs are
+also uploaded to DeepSeek by default. It is gated the way Antigravity's usage is, and will be revisited when
+its session store is documented. DeepSeek's models are available today through the router preset above.
 
 To add a tool, write an adapter in `crates/core/src/harness/` next to `claude.rs` and `codex.rs`.
 

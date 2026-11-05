@@ -6,8 +6,8 @@ import { esc, fmt, hm, dur, toolIcon, toolPill, ic } from './lib.js';
 import { findings, limitRows } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, cdot, cdots, splitBar, tileSplit, scope, scopeSeg } from './computers.js';
 
-const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
-const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google' };
+const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
+const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google', pi: 'Pi', omp: 'Oh My Pi' };
 const RANGES = [['24h', 24], ['7d', 168], ['30d', 720]];
 // device: the Activity grid's own computer ('' is every computer added up)
 const st = { harness: '', range: '24h', metric: 'tokens', rows: null, total: 0, log: false, device: '' };
