@@ -138,6 +138,11 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   files changed since, attachments and running shells do not, so pull the branch first. A session continued
   this way says "continued from LAPTOP" under its title. `hrm resume-here <computer>/<tool>/<account>/<id>`
   and `hrm transcripts` do the same from a terminal.
+
+  **The hub.** Instead of a folder, point every computer at a small service you host on a VPS behind Caddy,
+  in Docker: it carries the journal, presence and transcripts (encrypted with a ring key the hub never sees)
+  and gives direct connections a rendezvous across networks. [deploy/hub/README.md](deploy/hub/README.md) sets
+  one up in ten lines; `hrm hub join | invite | status` does the joining from a terminal.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 
