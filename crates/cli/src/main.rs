@@ -133,8 +133,28 @@ enum ComputersCmd {
         #[arg(long)] transcripts: Option<String>,
         /// on or off
         #[arg(long)] presence: Option<String>,
+        /// on or off: talk to paired computers straight over the network (mDNS or an address)
+        #[arg(long)] direct: Option<String>,
+        /// The direct connection's port; 0 picks a free one once
+        #[arg(long)] port: Option<u16>,
         #[command(flatten)] j: Json,
     },
+    /// Show a six-digit code and wait up to two minutes for another computer to join with it
+    Pair {
+        /// Print the host form (name:port) for `join --host`; a value replaces this computer's name in it (a VPN name, an IP)
+        #[arg(long, num_args = 0..=1, default_missing_value = "")] host: Option<String>,
+    },
+    /// Pair with the computer showing a code: found by mDNS, or at --host name:port
+    Join {
+        code: String,
+        #[arg(long)] host: Option<String>,
+    },
+    /// Forget a paired computer (what was merged from it stays)
+    Forget { id: String },
+    /// The paired and known computers, how each is reached
+    Peers { #[command(flatten)] j: Json },
+    /// Run the direct connection's listener (and mDNS) for n seconds without the app
+    Serve { #[arg(long)] seconds: u64 },
 }
 
 #[derive(Subcommand)]
@@ -560,11 +580,66 @@ fn real_main(cli: Cli) -> Result<i32> {
             let (st, j) = match cmd {
                 ComputersCmd::Status { j } => (hrm_core::journal::status(&ctx)?, j),
                 ComputersCmd::Now { j } => (hrm_core::journal::round(&ctx)?, j),
-                ComputersCmd::Set { name, mode, folder, transcripts, presence, j } => {
+                ComputersCmd::Set { name, mode, folder, transcripts, presence, direct, port, j } => {
                     let args = serde_json::json!({"device_name": name, "sync_mode": mode, "sync_folder": folder.map(|f| f.display().to_string()),
-                        "sync_transcripts": on_off(&transcripts)?, "sync_presence": on_off(&presence)?});
+                        "sync_transcripts": on_off(&transcripts)?, "sync_presence": on_off(&presence)?, "direct_connection": on_off(&direct)?, "listen_port": port});
                     let fresh = hrm_core::journal::configure(&ctx.data, &ctx.home, &args)?;
                     (if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }, j)
+                }
+                ComputersCmd::Forget { id } => (hrm_core::sync::peer::forget(&ctx, &id)?, Json { json: false }),
+                ComputersCmd::Peers { j } => {
+                    let st = hrm_core::journal::status(&ctx)?;
+                    if j.json { return print_json(&st["peers"]).map(|_| 0); }
+                    for p in st["peers"].as_array().into_iter().flatten() {
+                        let how = if p["direct"] == true { if p["connected"] == true { format!("connected by {}", p["path"].as_str().unwrap_or("")) } else { "paired, not reached".into() } } else { "folder only".into() };
+                        println!("{:<24} {:<38} {:<24} address {}", p["name"].as_str().unwrap_or(""), p["id"].as_str().unwrap_or(""), how, p["address"].as_str().filter(|a| !a.is_empty()).unwrap_or("-"));
+                    }
+                    return Ok(0);
+                }
+                ComputersCmd::Pair { host } => {
+                    let (rt, ctx) = peers_runtime(ctx)?;
+                    let v = rt.pair_start(&ctx, host.as_deref().filter(|h| !h.is_empty()))?;
+                    println!("code     {}", v["code"].as_str().unwrap_or(""));
+                    println!("host     {}", v["host_hint"].as_str().unwrap_or(""));
+                    println!("waiting two minutes for the other computer to join");
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                    let mut n = 0;
+                    let code = loop {
+                        match rt.pair_result() {
+                            Some(Some(r)) if r["ok"] == true => { rt.tick(&ctx); println!("paired with {}", r["peer"]["name"].as_str().unwrap_or("")); break 0 }
+                            Some(Some(r)) => { eprintln!("{}", r["error"].as_str().unwrap_or("the pairing ended")); break 1 }
+                            None => { eprintln!("the code expired"); break 1 }
+                            Some(None) => {}
+                        }
+                        if n % 20 == 0 { rt.tick(&ctx); }
+                        n += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    };
+                    rt.stop();
+                    return Ok(code);
+                }
+                ComputersCmd::Join { code, host } => {
+                    let (rt, ctx) = peers_runtime(ctx)?;
+                    let st = rt.pair_join(&ctx, &code, host.as_deref())?;
+                    let name = st["peers"].as_array().into_iter().flatten().filter(|p| p["paired_at"].is_i64()).max_by_key(|p| p["paired_at"].as_i64()).and_then(|p| p["name"].as_str()).unwrap_or("");
+                    println!("paired with {name}");
+                    rt.stop();
+                    return Ok(0);
+                }
+                ComputersCmd::Serve { seconds } => {
+                    let (rt, ctx) = peers_runtime(ctx)?;
+                    let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+                    rt.tick(&ctx);
+                    println!("listening on port {} for {seconds} s", hrm_core::Ctx::open_at(&ctx.data, &ctx.home)?.settings.listen_port);
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                    while std::time::Instant::now() < until {
+                        std::thread::sleep(std::time::Duration::from_secs(10).min(until.saturating_duration_since(std::time::Instant::now())));
+                        rt.tick(&ctx);
+                    }
+                    rt.stop();
+                    return Ok(0);
                 }
             };
             if j.json { return print_json(&st).map(|_| 0); }
@@ -580,6 +655,13 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// The direct connection's runtime for one CLI command, bound to every interface; the setting is turned on.
+fn peers_runtime(ctx: Ctx) -> Result<(hrm_core::sync::peer::Runtime, std::sync::Arc<Ctx>)> {
+    let ctx = if ctx.settings.direct_connection { ctx } else { hrm_core::journal::configure(&ctx.data, &ctx.home, &serde_json::json!({"direct_connection": true}))? };
+    let rt = hrm_core::sync::peer::Runtime::new(std::net::Ipv4Addr::UNSPECIFIED.into(), std::sync::Arc::new(|_, _| {}))?;
+    Ok((rt, std::sync::Arc::new(ctx)))
 }
 
 fn login(ctx: &Ctx, name: &str) -> Result<i32> {
