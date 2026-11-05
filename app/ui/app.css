@@ -1274,3 +1274,13 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .bubble .linkb { color: var(--on-ink); }
 /* Resume here (phase 3): a session continued from another computer says so under its title */
 .srow .t .cfrom, .smeta [data-testid=session-from] { color: var(--ac); }
+/* phase 4: the archived pill on a session, the archive folder in its row, the Restore picker and the counts */
+.pill.arch { background: var(--track); color: var(--m); font-size: 11px; vertical-align: middle; margin-left: 6px; }
+.frow .ctl .inp { flex: 1 1 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.rlist { margin: 0; padding-left: 18px; font-size: 13px; }
+.rlist li { margin: 4px 0; }
+.rpick { gap: 6px; }
+.rsrc { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--b); border-radius: 10px; cursor: pointer; color: var(--t); }
+.rsrc:hover { background: var(--sub); }
+.rsrc small { color: var(--m); font-size: 12px; }
+.bklist .bkrow + .bkhead { border-top: 1px solid var(--ru); }

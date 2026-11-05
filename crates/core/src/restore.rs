@@ -178,9 +178,10 @@ fn read(src: &Source) -> Result<History> {
     Ok(h)
 }
 
-/// The record in the source that is this computer: the same id, else the same name.
+/// The record in the source that is this computer's past self: another id with this computer's name. A record
+/// with this computer's own id is this computer as it is (it writes one into the folder the moment it is chosen).
 fn this_computer(ctx: &Ctx, h: &History) -> Option<(String, String)> {
-    h.devices.iter().find(|(id, _)| *id == ctx.settings.device_id).or_else(|| h.devices.iter().find(|(_, n)| n.eq_ignore_ascii_case(&ctx.settings.device_name))).cloned()
+    h.devices.iter().find(|(id, n)| *id != ctx.settings.device_id && n.eq_ignore_ascii_case(&ctx.settings.device_name)).cloned()
 }
 
 fn counts(ctx: &Ctx, h: &History, src: &Source) -> Value {
@@ -215,7 +216,7 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
     let this = this_computer(ctx, &h);
     let adopted = if adopt {
         let (id, name) = this.clone().context("no record of this computer's name in it: restore as a new computer instead")?;
-        if id != me && live_peer(ctx, &id)? { bail!("another computer uses this identity"); }
+        if live_peer(ctx, &id)? { bail!("another computer uses this identity"); }
         Some((id, name))
     } else { None };
     let mut quotas = h.quotas.clone();
@@ -278,11 +279,9 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
     if let Some((id, name)) = adopted {
         let mut s = ctx.settings.clone();
         ctx.db.with(|c| {
-            if id != me {
-                for t in ["usage", "sessions", "archived"] { c.execute(&format!("update {t} set device=?1 where device=?2"), [&id, &me])?; }
-                c.execute("delete from peers where device_id=?", [&id])?;
-                c.execute("delete from kv where k in ('device:pubkey', 'journal:published_seq')", [])?;
-            }
+            for t in ["usage", "sessions", "archived"] { c.execute(&format!("update {t} set device=?1 where device=?2"), [&id, &me])?; }
+            c.execute("delete from peers where device_id=?", [&id])?;
+            c.execute("delete from kv where k in ('device:pubkey', 'journal:published_seq')", [])?;
             // the sequence starts again under the new incarnation, so the others see a continuation
             c.execute("insert or replace into kv values('journal:backfilled', '0')", [])?;
             Ok(())
