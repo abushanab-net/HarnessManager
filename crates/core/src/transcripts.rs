@@ -96,7 +96,7 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
 pub fn roots_here(ctx: &Ctx) -> Result<HashMap<String, String>> {
     let reg = ctx.registry()?;
     let dirs: Vec<String> = ctx.db.with(|c| {
-        let mut st = c.prepare("select distinct project from usage where device = ?1 and project <> '' union select distinct json_extract(json, '$.cwd') from sessions where device = ?1 and json_extract(json, '$.cwd') <> ''")?;
+        let mut st = c.prepare("select distinct project from usage where device = ?1 and project <> '' union select distinct cwd from sessions where device = ?1 and instr(key, '|') > 0 and cwd <> ''")?;
         let v = st.query_map([&ctx.db.device], |r| r.get::<_, Option<String>>(0))?.flatten().flatten().collect();
         Ok(v)
     })?;
@@ -145,6 +145,7 @@ pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id:
     let t = fetch(ctx, device, harness_id, profile, id)?;
     let m = h.materialize(ctx, p, Path::new(root), &t)?;
     crate::service::start(ctx, profile, Some(m.cwd.clone()), &m.launch_args)?;
+    if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false) { crate::log::warn(&format!("index after resume here: {e:#}")); }
     let key = format!("forked:{harness_id}/{profile}/{}", m.new_session_id.as_deref().unwrap_or(id));
     ctx.db.kv_set(&key, &json!({"from": device, "at": now_ms()}).to_string())?;
     Ok(json!({"ok": true, "cwd": m.cwd, "args": m.launch_args, "note": m.note}))

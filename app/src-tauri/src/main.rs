@@ -107,9 +107,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let name = s(a, "name")?;
             let reg = ctx.registry()?;
             let p = reg.get(&name)?;
-            let f = SessionFilter { profile: Some(name.clone()), days: Some(30), ..Default::default() };
-            let mut sessions = service::sessions(ctx, &f)?;
-            sessions.truncate(40);
+            let f = SessionFilter { profile: Some(name.clone()), days: Some(30), per: Some(40), ..Default::default() };
+            let sessions = service::sessions(ctx, &f)?;
             json!({
                 "view": service::profile_view(ctx, p),
                 "projects": service::profile_projects(ctx, &name, 7)?,
@@ -226,7 +225,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "sessions" => {
             let mut f: SessionFilter = serde_json::from_value(a["filter"].clone()).unwrap_or_default();
             f.scope = f.scope.or_else(|| opt(a, "scope"));
-            json!(service::grouped_sessions(ctx, &f, a["group"].as_str().unwrap_or("project"))?)
+            json!({"groups": service::grouped_sessions(ctx, &f, a["group"].as_str().unwrap_or("project"))?, "total": service::sessions_total(ctx, &f)?})
         }
         // with `device` another computer's: its fetched transcript (phase 3)
         "transcript" => match opt(a, "device").filter(|d| d != &ctx.db.device) {
@@ -802,6 +801,8 @@ fn main() {
                 let _ = service::refresh_quotas(&ctx, false);
                 if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
                 if let Err(e) = hrm_core::archive::daily(&ctx) { hrm_core::log::warn(&format!("archive: {e:#}")); }
+                // the index the pages read: every account's folders walked (the watcher's safety net)
+                if let Err(e) = hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All) { hrm_core::log::warn(&format!("index: {e:#}")); }
                 // across computers: out with what is new here, in with what the others published
                 if hrm_core::journal::on(&ctx) {
                     match hrm_core::journal::round(&ctx) {
@@ -818,8 +819,12 @@ fn main() {
             let st2 = state.clone();
             std::thread::spawn(move || loop {
                 if let Err(e) = hrm_core::journal::presence_tick(&st2.ctx()) { hrm_core::log::warn(&format!("presence: {e:#}")); }
+                if let Err(e) = hrm_core::index::mark_open(&st2.ctx()) { hrm_core::log::warn(&format!("index: open sessions: {e:#}")); }
                 std::thread::sleep(std::time::Duration::from_secs(60));
             });
+            // the folder watcher: a changed session file is in the index within a second, and the pages redraw
+            let (h6, st6) = (app.handle().clone(), state.clone());
+            hrm_core::watch::start(Arc::new(move || st6.ctx()), Arc::new(move |r| { let _ = h6.emit("refreshed", json!({"new_rows": 0, "index": r})); }));
             // the direct connection: the listener while it is on, the paired computers pulled every ten seconds
             let (h3, st3) = (app.handle().clone(), state.clone());
             let on_event: hrm_core::sync::peer::OnEvent = Arc::new(move |name, v| { let _ = h3.emit(name, v); });

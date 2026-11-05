@@ -386,6 +386,7 @@ pub fn profile_projects(ctx: &Ctx, profile: &str, days_back: i64) -> Result<Vec<
 }
 
 // ---------- sessions ----------
+// The pages read the index (the `sessions` table, kept by `index::refresh`); nothing here touches the tools' folders.
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionFilter {
@@ -409,6 +410,20 @@ pub struct SessionFilter {
     /// "all" (every computer, the default) or "here" (sessions that ran on this one).
     #[serde(default)]
     pub scope: Option<String>,
+    /// One other computer, by its id.
+    #[serde(default)]
+    pub device: Option<String>,
+    /// Sessions last active on one calendar day ("YYYY-MM-DD" in this computer's zone): a date group's rows.
+    #[serde(default)]
+    pub day: Option<String>,
+    /// One session by its id.
+    #[serde(default)]
+    pub id: Option<String>,
+    /// Paging: `per` rows of page `page` (from 0); without `per`, every row.
+    #[serde(default)]
+    pub per: Option<i64>,
+    #[serde(default)]
+    pub page: Option<i64>,
 }
 
 /// The SQL that keeps a usage query to this computer when `scope` is "here", as parameter `?n`.
@@ -428,143 +443,193 @@ pub struct ProjectGroup {
     pub tokens: i64,
     pub last_active_at: i64,
     pub sessions: Vec<SessionMeta>,
+    /// Sessions of the group in the whole filter (`sessions` holds the page's).
+    pub total: usize,
 }
 
-pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
-    let reg = ctx.registry()?;
-    let since = f.days.map(|d| now_ms() - d * 86_400_000).unwrap_or(0);
-    let mut res = Resolver::new(&reg.projects);
+/// The index as the pages read it: this computer's rows (the scans' cache rows), the other computers' (merged
+/// journal rows) and the archived ones, with the promoted columns. `rid` is the rowid the search table knows.
+/// Parameter 1 is this computer's id.
+const ROWS: &str = "select rowid as rid, key, device, profile, harness, id, title, cwd, started_at, last_active_at, tokens, project_key, project_name, open, 0 as archived, json
+      from sessions where device <> ?1 or instr(key, '|') > 0
+    union all
+    select 0, key, device, profile, harness, id, coalesce(json_extract(json, '$.title'), ''), coalesce(json_extract(json, '$.cwd'), ''), coalesce(json_extract(json, '$.started_at'), 0),
+      coalesce(json_extract(json, '$.last_active_at'), 0), coalesce(json_extract(json, '$.tokens'), 0), coalesce(json_extract(json, '$.project_key'), ''), coalesce(json_extract(json, '$.project_name'), ''), 0, 1, json
+      from archived";
+
+/// The FTS5 query for a search string: each word as a prefix, all required; empty when there is no word.
+fn fts_query(q: &str) -> String {
+    q.split(|c: char| !c.is_alphanumeric()).filter(|t| !t.is_empty()).map(|t| format!("\"{t}\"*")).collect::<Vec<_>>().join(" ")
+}
+
+struct Q { w: Vec<String>, p: Vec<rusqlite::types::Value> }
+impl Q {
+    fn arg(&mut self, v: impl Into<rusqlite::types::Value>) -> String { self.p.push(v.into()); format!("?{}", self.p.len()) }
+}
+
+/// The where clause of a filter over `ROWS` and its parameters (the first is this computer's id).
+fn filter_sql(ctx: &Ctx, f: &SessionFilter) -> (String, Vec<rusqlite::types::Value>) {
+    let mut q = Q { w: vec![], p: vec![ctx.db.device.clone().into()] };
+    if let Some(d) = f.days { let a = q.arg(now_ms() - d * 86_400_000); q.w.push(format!("last_active_at >= {a}")); }
+    for (col, v) in [("harness", &f.harness), ("profile", &f.profile), ("project_key", &f.project), ("id", &f.id)] {
+        if let Some(v) = v { let a = q.arg(v.clone()); q.w.push(format!("{col} = {a}")); }
+    }
+    if f.scope.as_deref() == Some("here") { q.w.push("device = ?1".into()); }
+    else if let Some(d) = &f.device { let a = q.arg(d.clone()); q.w.push(format!("device = {a}")); }
+    if f.open == Some(true) { q.w.push("open = 1".into()); }
+    if let Some(t) = &f.tag {
+        let (a, b) = (q.arg(t.clone()), q.arg(t.clone()));
+        q.w.push(format!("((profile || '/' || id) in (select key from tags where kind = 'session' and tag = {a}) or project_key in (select key from tags where kind = 'project' and tag = {b}))"));
+    }
+    if let Some(d) = &f.day { let a = q.arg(d.clone()); q.w.push(format!("date(last_active_at / 1000, 'unixepoch', 'localtime') = {a}")); }
+    if let Some(s) = f.query.as_deref().map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()) {
+        let (a, b) = (q.arg(s.clone()), q.arg(s.clone()));
+        let mut parts = vec![format!("instr(lower(title), {a}) > 0"), format!("instr(lower(id), {b}) > 0")];
+        let fts = fts_query(&s);
+        if !fts.is_empty() { let c = q.arg(fts); parts.push(format!("rid in (select rowid from sessions_fts where sessions_fts match {c})")); }
+        q.w.push(format!("({})", parts.join(" or ")));
+    }
+    (if q.w.is_empty() { "1".into() } else { q.w.join(" and ") }, q.p)
+}
+
+/// A row of the index without its JSON: enough to group, count and sum.
+#[derive(Debug, Clone)]
+struct Lite { device: String, profile: String, harness: String, id: String, project_key: String, project_name: String, tokens: i64, last_active_at: i64, open: bool, archived: bool }
+
+fn lite_of(m: &SessionMeta) -> Lite {
+    Lite { device: m.device.clone(), profile: m.profile.clone(), harness: m.harness.clone(), id: m.id.clone(), project_key: m.project_key.clone(), project_name: m.project_name.clone(),
+        tokens: m.tokens, last_active_at: m.last_active_at, open: m.open, archived: m.archived }
+}
+
+/// The rows a filter matches, newest first, paged when the filter says so; the JSON only when asked for.
+fn rows(ctx: &Ctx, f: &SessionFilter, with_json: bool) -> Result<Vec<(Lite, String)>> {
+    let (w, p) = filter_sql(ctx, f);
+    let json = if with_json { "json" } else { "''" };
+    let (limit, offset) = (f.per.unwrap_or(-1), f.per.map(|per| per * f.page.unwrap_or(0).max(0)).unwrap_or(0));
+    ctx.db.with(|c| {
+        let mut st = c.prepare(&format!("select device, profile, harness, id, project_key, project_name, tokens, last_active_at, open, archived, {json} from ({ROWS}) where {w} order by last_active_at desc, archived, key limit {limit} offset {offset}"))?;
+        let v = st.query_map(rusqlite::params_from_iter(p), |r| Ok((Lite { device: r.get(0)?, profile: r.get(1)?, harness: r.get(2)?, id: r.get(3)?, project_key: r.get(4)?, project_name: r.get(5)?,
+            tokens: r.get(6)?, last_active_at: r.get(7)?, open: r.get::<_, i64>(8)? != 0, archived: r.get::<_, i64>(9)? != 0 }, r.get::<_, String>(10)?)))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    })
+}
+
+/// How many sessions a filter matches (its paging apart).
+pub fn sessions_total(ctx: &Ctx, f: &SessionFilter) -> Result<i64> {
+    let (w, p) = filter_sql(ctx, f);
+    ctx.db.with(|c| Ok(c.query_row(&format!("select count(*) from ({ROWS}) where {w}"), rusqlite::params_from_iter(p), |r| r.get(0))?))
+}
+
+/// A first launch with an empty index reads the folders now; after that the background refresh keeps it.
+fn ensure_index(ctx: &Ctx) -> Result<()> {
+    if ctx.db.kv_get("index:refreshed_at")?.is_none() { crate::index::refresh(ctx, crate::index::Scope::All)?; }
+    Ok(())
+}
+
+/// The project table the refresh keeps: key to (name, root, remote).
+type ProjectIndex = HashMap<String, (String, String, Option<String>)>;
+fn project_index(ctx: &Ctx) -> Result<ProjectIndex> {
+    ctx.db.with(|c| {
+        let mut st = c.prepare("select key, name, root, remote from project_index")?;
+        let m = st.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?.flatten().collect();
+        Ok(m)
+    })
+}
+
+/// The rows as the pages show them: tags, the computer's name, what is open here or elsewhere, whether a session
+/// from another computer can be resumed here, and the archived mark.
+fn decorate(ctx: &Ctx, reg: &Registry, list: Vec<(Lite, String)>) -> Result<Vec<SessionMeta>> {
     let (stags, ptags) = (ctx.db.tags_of("session").unwrap_or_default(), ctx.db.tags_of("project").unwrap_or_default());
     let peers = crate::journal::peers(ctx).unwrap_or_default();
     let elsewhere = crate::journal::open_elsewhere(&peers, now_ms());
     let names = crate::journal::device_names(ctx);
     let forks = crate::transcripts::forks(ctx);
-    let mut out = vec![];
-    // the filters that apply to a session wherever it ran
-    let keep = |s: &SessionMeta| -> bool {
-        if s.last_active_at < since { return false; }
-        if f.harness.as_deref().map(|h| h != s.harness).unwrap_or(false) || f.profile.as_deref().map(|x| x != s.profile).unwrap_or(false) { return false; }
-        if let Some(q) = &f.query {
-            let q = q.to_lowercase();
-            if !s.title.to_lowercase().contains(&q) && !s.cwd.to_lowercase().contains(&q) && !s.id.to_lowercase().contains(&q) { return false; }
+    let me = &ctx.db.device;
+    let roots = if list.iter().any(|(l, _)| l.device != *me && !l.archived) { crate::transcripts::roots_here(ctx).unwrap_or_default() } else { Default::default() };
+    let mut out = Vec::with_capacity(list.len());
+    for (l, json) in list {
+        let Ok(mut m) = serde_json::from_str::<SessionMeta>(&json) else { continue };
+        m.device = l.device;
+        m.device_name = names.get(&m.device).cloned().unwrap_or_else(|| m.device.clone());
+        if !l.project_key.is_empty() { m.project_key = l.project_key; m.project_name = l.project_name; }
+        m.tags = stags.get(&format!("{}/{}", m.profile, m.id)).cloned().unwrap_or_default();
+        m.project_tags = ptags.get(&m.project_key).cloned().unwrap_or_default();
+        m.open = l.open && !l.archived;
+        m.open_elsewhere = !l.archived && elsewhere.contains(&m.id);
+        if l.archived {
+            m.archived = true;
+            m.resumable = (m.device != *me).then(|| serde_json::json!(crate::archive::REFUSAL));
+        } else if m.device != *me {
+            m.resumable = Some(crate::transcripts::resumable(&m, &roots, reg));
+        } else {
+            m.continued_from = forks.get(&crate::db::session_key(&m)).and_then(|d| names.get(d).cloned());
         }
-        if f.project.as_deref().map(|k| k != s.project_key).unwrap_or(false) { return false; }
-        if let Some(t) = &f.tag { if !s.tags.contains(t) && !s.project_tags.contains(t) { return false; } }
-        true
-    };
-    // the other computers' sessions, as their journals described them
-    if f.scope.as_deref() != Some("here") {
-        let remote = ctx.db.remote_sessions()?;
-        let roots = if remote.is_empty() { Default::default() } else { crate::transcripts::roots_here(ctx).unwrap_or_default() };
-        for (dev, mut s) in remote {
-            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
-            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
-            s.open = false;
-            s.open_elsewhere = elsewhere.contains(&s.id);
-            s.device_name = names.get(&dev).cloned().unwrap_or_else(|| dev.clone());
-            s.device = dev;
-            s.resumable = Some(crate::transcripts::resumable(&s, &roots, &reg));
-            if f.open == Some(true) || !keep(&s) { continue; }
-            out.push(s);
-        }
+        out.push(m);
     }
-    let mut to_journal: Vec<SessionMeta> = vec![];
-    for p in &reg.profiles {
-        if f.harness.as_deref().map(|h| h != p.harness).unwrap_or(false) { continue; }
-        if f.profile.as_deref().map(|x| x != p.name).unwrap_or(false) { continue; }
-        let h = harness::of(p);
-        let running = h.running(ctx, p);
-        let list = match h.sessions(ctx, p, since) {
-            Ok(l) => l,
-            Err(e) => { crate::log::warn(&format!("sessions for {}: {e:#}", p.name)); continue; }
-        };
-        // the most recently active sessions are the ones the open consoles are working in
-        let mut recent: Vec<&SessionMeta> = list.iter().collect();
-        recent.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
-        let open_ids: Vec<String> = running.iter().filter_map(|r| r.session_id.clone())
-            .chain(recent.iter().take(running.iter().filter(|r| r.session_id.is_none()).count()).map(|s| s.id.clone())).collect();
-        for mut s in list {
-            if s.last_active_at < since { continue; }
-            let info = res.resolve(&s.cwd);
-            s.project_key = info.key;
-            s.project_name = info.name;
-            s.open = open_ids.contains(&s.id);
-            s.open_elsewhere = elsewhere.contains(&s.id);
-            s.device = ctx.db.device.clone();
-            s.device_name = ctx.settings.device_name.clone();
-            // the other computers learn of it here, once its project is known (recorded in one go below)
-            to_journal.push(s.clone());
-            s.continued_from = forks.get(&crate::db::session_key(&s)).and_then(|d| names.get(d).cloned());
-            if f.open == Some(true) && !s.open { continue; }
-            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
-            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
-            if !keep(&s) { continue; }
-            out.push(s);
-        }
-    }
-    // phase 4: sessions whose transcript moved to the archive no longer come from the scan
-    if f.open != Some(true) {
-        out.extend(crate::archive::sessions(ctx).into_iter().filter(|s| f.scope.as_deref() != Some("here") || s.device == ctx.db.device).map(|mut s| {
-            s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
-            s.project_tags = ptags.get(&s.project_key).cloned().unwrap_or_default();
-            s
-        }).filter(|s| keep(s)));
-    }
-    if let Err(e) = ctx.db.journal_sessions(&to_journal) { crate::log::warn(&format!("journal: sessions: {e:#}")); }
-    out.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(out)
 }
 
-/// Sessions grouped by "project" (default), "date", "account" or "tool".
-pub fn grouped_sessions(ctx: &Ctx, f: &SessionFilter, by: &str) -> Result<Vec<ProjectGroup>> {
+/// The sessions a filter matches, newest first (the page's when the filter pages).
+pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
+    ensure_index(ctx)?;
     let reg = ctx.registry()?;
-    let list = sessions(ctx, f)?;
-    let mut res = Resolver::new(&reg.projects);
-    let mut groups: Vec<ProjectGroup> = vec![];
-    let mut index: HashMap<String, usize> = HashMap::new();
-    for s in list {
-        // by tag: a session sits under each of its tags (its own and its project's); none puts it under "untagged"
-        if by == "tag" {
-            let mut tags: Vec<String> = s.tags.iter().chain(s.project_tags.iter()).cloned().collect();
+    let list = rows(ctx, f, true)?;
+    let r = decorate(ctx, &reg, list);
+    r
+}
+
+/// The group keys of a row: one, or one per tag (its own and its project's; none is "untagged").
+fn group_keys(by: &str, l: &Lite, stags: &HashMap<String, Vec<String>>, ptags: &HashMap<String, Vec<String>>, pindex: &ProjectIndex) -> Vec<(String, String, String, Option<String>)> {
+    match by {
+        "tag" => {
+            let mut tags: Vec<String> = stags.get(&format!("{}/{}", l.profile, l.id)).into_iter().flatten().chain(ptags.get(&l.project_key).into_iter().flatten()).cloned().collect();
             tags.sort();
             tags.dedup();
             if tags.is_empty() { tags.push(String::new()); }
-            for t in tags {
-                let name = if t.is_empty() { "untagged".to_string() } else { t.clone() };
-                let gi = *index.entry(format!("tag:{t}")).or_insert_with(|| { groups.push(ProjectGroup { key: t.clone(), name, root: String::new(), remote: None, tokens: 0, last_active_at: 0, sessions: vec![] }); groups.len() - 1 });
-                let g = &mut groups[gi];
-                g.tokens += s.tokens;
-                g.last_active_at = g.last_active_at.max(s.last_active_at);
-                g.sessions.push(s.clone());
-            }
-            continue;
+            tags.into_iter().map(|t| (t.clone(), if t.is_empty() { "untagged".to_string() } else { t }, String::new(), None)).collect()
         }
-        let (key, name, root, remote) = match by {
-            "date" => {
-                let d = chrono::DateTime::from_timestamp_millis(s.last_active_at).map(|d| d.with_timezone(&chrono::Local).format("%A %-d %B %Y").to_string()).unwrap_or_default();
-                (d.clone(), d, String::new(), None)
-            }
-            "account" => (s.profile.clone(), s.profile.clone(), String::new(), None),
-            "tool" => (s.harness.clone(), harness::by_id(&s.harness).map(|h| h.label().to_string()).unwrap_or_default(), String::new(), None),
-            // a session from another computer keeps the project key it was journaled with: its folder is not here
-            _ if s.device != ctx.db.device && !s.project_key.is_empty() => (s.project_key.clone(), s.project_name.clone(), String::new(), None),
-            _ => {
-                let i = res.resolve(&s.cwd);
-                (i.key, i.name, i.root, i.remote)
-            }
-        };
-        let gi = *index.entry(key.clone()).or_insert_with(|| {
-            groups.push(ProjectGroup { key, name, root: root.clone(), remote: remote.clone(), tokens: 0, last_active_at: 0, sessions: vec![] });
-            groups.len() - 1
-        });
-        let g = &mut groups[gi];
-        // the group may have been opened by a remote session before a local one brought the folder
-        if g.root.is_empty() && !root.is_empty() { g.root = root; g.remote = remote; }
-        g.tokens += s.tokens;
-        g.last_active_at = g.last_active_at.max(s.last_active_at);
-        g.sessions.push(s);
+        "date" => {
+            let d = chrono::DateTime::from_timestamp_millis(l.last_active_at).map(|d| d.with_timezone(&chrono::Local));
+            vec![(d.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default(), d.map(|d| d.format("%A %-d %B %Y").to_string()).unwrap_or_default(), String::new(), None)]
+        }
+        "account" => vec![(l.profile.clone(), l.profile.clone(), String::new(), None)],
+        "tool" => vec![(l.harness.clone(), harness::by_id(&l.harness).map(|h| h.label().to_string()).unwrap_or_default(), String::new(), None)],
+        _ => match pindex.get(&l.project_key) {
+            Some((name, root, remote)) => vec![(l.project_key.clone(), name.clone(), root.clone(), remote.clone())],
+            None => vec![(l.project_key.clone(), if l.project_name.is_empty() { l.project_key.clone() } else { l.project_name.clone() }, String::new(), None)],
+        },
     }
-    groups.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
+}
+
+/// Sessions grouped by "project" (default), "date", "account", "tool" or "tag", most recently active group first.
+/// With paging, the groups of the page's rows, each with the whole filter's count and tokens in `total`/`tokens`.
+pub fn grouped_sessions(ctx: &Ctx, f: &SessionFilter, by: &str) -> Result<Vec<ProjectGroup>> {
+    let list = sessions(ctx, f)?;
+    let pindex = project_index(ctx)?;
+    let (stags, ptags) = (ctx.db.tags_of("session").unwrap_or_default(), ctx.db.tags_of("project").unwrap_or_default());
+    // the whole filter's rows for the groups' totals; without paging the page is the whole filter
+    let whole: Vec<Lite> = match f.per {
+        Some(_) => rows(ctx, &SessionFilter { per: None, page: None, ..f.clone() }, false)?.into_iter().map(|(l, _)| l).collect(),
+        None => list.iter().map(lite_of).collect(),
+    };
+    let mut groups: Vec<ProjectGroup> = vec![];
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for l in &whole {
+        for (key, name, root, remote) in group_keys(by, l, &stags, &ptags, &pindex) {
+            let gi = *index.entry(key.clone()).or_insert_with(|| { groups.push(ProjectGroup { key, name, root, remote, tokens: 0, last_active_at: 0, sessions: vec![], total: 0 }); groups.len() - 1 });
+            let g = &mut groups[gi];
+            g.tokens += l.tokens;
+            g.last_active_at = g.last_active_at.max(l.last_active_at);
+            g.total += 1;
+        }
+    }
+    for s in list {
+        for (key, ..) in group_keys(by, &lite_of(&s), &stags, &ptags, &pindex) {
+            if let Some(&gi) = index.get(&key) { groups[gi].sessions.push(s.clone()); }
+        }
+    }
+    groups.retain(|g| !g.sessions.is_empty());
+    groups.sort_by_key(|g| std::cmp::Reverse(g.last_active_at));
     Ok(groups)
 }
 
@@ -597,9 +662,20 @@ pub struct ProjectStat {
 
 /// Every project with sessions in the last `days` days (None: all time), busiest first; `scope` "here" keeps to this computer.
 pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec<ProjectStat>> {
+    ensure_index(ctx)?;
     let reg = ctx.registry()?;
     let f = SessionFilter { days, scope: scope.map(String::from), ..Default::default() };
-    let groups = grouped_sessions(ctx, &f, "project")?;
+    let lites: Vec<Lite> = rows(ctx, &f, false)?.into_iter().map(|(l, _)| l).collect();
+    let pindex = project_index(ctx)?;
+    let names = crate::journal::device_names(ctx);
+    let elsewhere = crate::journal::open_elsewhere(&crate::journal::peers(ctx).unwrap_or_default(), now_ms());
+    // the sessions by project, in the order of their latest activity
+    let mut groups: Vec<(String, Vec<Lite>)> = vec![];
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for l in lites {
+        let gi = *index.entry(l.project_key.clone()).or_insert_with(|| { groups.push((l.project_key.clone(), vec![])); groups.len() - 1 });
+        groups[gi].1.push(l);
+    }
     // cost (as frozen per request) and the day series come from the request log
     let span = days.unwrap_or(30).clamp(1, 53 * 7);
     let day_list = last_days(span);
@@ -621,32 +697,40 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
     }
     let pins = &ctx.settings.pinned_projects;
     let ptags = ctx.db.tags_of("project").unwrap_or_default();
-    Ok(groups.into_iter().map(|g| {
-        let (cost, priced, all, series) = by_key.remove(&g.key).unwrap_or((None, 0, 0, vec![0; day_list.len()]));
-        let mut accounts: Vec<String> = g.sessions.iter().map(|s| s.profile.clone()).collect();
+    let mut out: Vec<ProjectStat> = groups.into_iter().map(|(key, ss)| {
+        let (cost, priced, all, series) = by_key.remove(&key).unwrap_or((None, 0, 0, vec![0; day_list.len()]));
+        let (name, root, remote) = pindex.get(&key).cloned().unwrap_or_else(|| (ss.iter().map(|s| s.project_name.clone()).find(|n| !n.is_empty()).unwrap_or_else(|| key.clone()), String::new(), None));
+        let mut accounts: Vec<String> = ss.iter().map(|s| s.profile.clone()).collect();
         accounts.sort();
         accounts.dedup();
-        let mut devices: Vec<(String, String, usize, i64)> = vec![];
-        for s in &g.sessions {
+        let mut devices: Vec<(String, usize, i64)> = vec![];
+        for s in &ss {
             match devices.iter_mut().find(|d| d.0 == s.device) {
-                Some(d) => { d.2 += 1; d.3 += s.tokens; }
-                None => devices.push((s.device.clone(), s.device_name.clone(), 1, s.tokens)),
+                Some(d) => { d.1 += 1; d.2 += s.tokens; }
+                None => devices.push((s.device.clone(), 1, s.tokens)),
             }
         }
         let here = devices.iter().any(|d| d.0 == ctx.db.device);
-        let devices = devices.into_iter().map(|(id, name, sessions, tokens)| serde_json::json!({"id": id, "name": name, "sessions": sessions, "tokens": tokens})).collect();
-        ProjectStat { pinned: pins.contains(&g.key), tags: ptags.get(&g.key).cloned().unwrap_or_default(), key: g.key, name: g.name, root: g.root, remote: g.remote, sessions: g.sessions.len(), tokens: g.tokens, cost,
-            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open || s.open_elsewhere).count(), series, devices, here }
-    }).collect())
+        let devices = devices.into_iter().map(|(id, sessions, tokens)| serde_json::json!({"id": id, "name": names.get(&id).cloned().unwrap_or_else(|| id.clone()), "sessions": sessions, "tokens": tokens})).collect();
+        ProjectStat { pinned: pins.contains(&key), tags: ptags.get(&key).cloned().unwrap_or_default(), name, root, remote, sessions: ss.len(), tokens: ss.iter().map(|s| s.tokens).sum(), cost,
+            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: ss.iter().map(|s| s.last_active_at).max().unwrap_or(0),
+            live: ss.iter().filter(|s| !s.archived && (s.open || elsewhere.contains(&s.id))).count(), series, devices, here, key }
+    }).collect();
+    out.sort_by_key(|p| std::cmp::Reverse(p.last_active_at));
+    Ok(out)
 }
 
 pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {
     let reg = ctx.registry()?;
     let p = reg.get(profile)?;
-    let f = SessionFilter { profile: Some(profile.into()), ..Default::default() };
+    let f = SessionFilter { profile: Some(profile.into()), id: Some(session_id.into()), ..Default::default() };
     // this computer's own copy first: a session continued from another computer shares its id with the row from there
-    let list = sessions(ctx, &f)?;
-    let s = list.iter().find(|s| s.id == session_id && s.device == ctx.db.device).or_else(|| list.iter().find(|s| s.id == session_id)).cloned().context("session not found")?;
+    let find = || -> Result<Option<SessionMeta>> { let list = sessions(ctx, &f)?; Ok(list.iter().find(|s| s.device == ctx.db.device).or_else(|| list.first()).cloned()) };
+    let s = match find()? {
+        Some(s) => s,
+        // a session the index has not seen yet (its file was just written): its account's folders are read now
+        None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false)?; find()?.context("session not found")? }
+    };
     if s.archived { return crate::archive::transcript(ctx, &s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
@@ -660,7 +744,10 @@ pub fn alias_project(ctx: &Ctx, key: &str, name: Option<String>, merge_into: Opt
     if name.is_some() || merge_into.is_some() {
         reg.projects.push(crate::registry::ProjectAlias { key: key.into(), name, merge_into });
     }
-    ctx.save_registry(&reg)
+    ctx.save_registry(&reg)?;
+    // the index carries the project of every session: resolved again with the new names and merges
+    crate::index::refresh(ctx, crate::index::Scope::All)?;
+    Ok(())
 }
 
 // ---------- in-app login ----------

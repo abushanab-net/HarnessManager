@@ -142,6 +142,16 @@ enum Cmd {
     },
     /// Old transcripts out of the tools' folders into the archive; the sessions stay listed and readable
     Archive { #[command(subcommand)] cmd: ArchiveCmd },
+    /// The session index the pages read: its status, or a refresh now
+    Index { #[command(subcommand)] cmd: IndexCmd },
+}
+
+#[derive(Subcommand)]
+enum IndexCmd {
+    /// Rows per tool, the other computers' and archived rows, the last refresh, the watcher
+    Status { #[command(flatten)] j: Json },
+    /// Walk every account's folders now; --all reads every session file again
+    Refresh { #[arg(long)] all: bool, #[command(flatten)] j: Json },
 }
 
 #[derive(Subcommand)]
@@ -459,7 +469,8 @@ fn real_main(cli: Cli) -> Result<i32> {
             }
         }
         Cmd::Sessions { group, harness: h, profile, days, search, open, project, tag, j } => {
-            let f = SessionFilter { harness: h, profile, days, query: search, open: open.then_some(true), project, tag, scope: None };
+            fresh_index(&ctx)?;
+            let f = SessionFilter { harness: h, profile, days, query: search, open: open.then_some(true), project, tag, ..Default::default() };
             let groups = service::grouped_sessions(&ctx, &f, &group)?;
             if j.json { return print_json(&groups).map(|_| 0); }
             for g in groups {
@@ -502,6 +513,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
         Cmd::Projects { cmd } => match cmd {
             ProjectCmd::List { days, j } => {
+                fresh_index(&ctx)?;
                 let list = service::projects(&ctx, days, None)?;
                 if j.json { return print_json(&list).map(|_| 0); }
                 println!("{:<28} {:>5}  {:>10}  {:>10}  {}", "project", "sess", "tokens", "list $", "key");
@@ -774,6 +786,20 @@ fn real_main(cli: Cli) -> Result<i32> {
                     if v["adopted"] == true { format!("; this computer continues as {}", v["device"]["name"].as_str().unwrap_or("")) } else { String::new() });
             }
         }
+        Cmd::Index { cmd } => match cmd {
+            IndexCmd::Status { j } => {
+                let v = hrm_core::index::status(&ctx)?;
+                if j.json { return print_json(&v).map(|_| 0); }
+                println!("{} sessions of this computer in the index, {} from other computers, {} archived, {} projects", v["sessions"], v["remote"], v["archived"], v["projects"]);
+                for t in v["tools"].as_array().into_iter().flatten() { println!("  {:<10} {:>6} sessions, last active {}", t["harness"].as_str().unwrap_or(""), t["sessions"], fmt_reset(t["last_active_at"].as_i64())); }
+                println!("last full refresh: {}; watcher: {}", v["refreshed_at"].as_i64().map(|t| fmt_reset(Some(t))).unwrap_or_else(|| "never".into()), if v["watcher"] == true { "on" } else { "off (it runs in the app)" });
+            }
+            IndexCmd::Refresh { all, j } => {
+                let r = if all { hrm_core::index::rebuild(&ctx)? } else { hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All)? };
+                if j.json { return print_json(&r).map(|_| 0); }
+                println!("{} accounts, {} sessions: {} written, {} removed, {} ms", r.profiles, r.sessions, r.changed, r.removed, r.ms);
+            }
+        },
         Cmd::Archive { cmd } => {
             let (v, j) = match cmd {
                 ArchiveCmd::Status { j } => (hrm_core::archive::status(&ctx)?, j),
@@ -904,3 +930,6 @@ fn prompts(ctx: &Ctx, cmd: PromptCmd) -> Result<i32> {
     ctx.save_registry(&reg)?;
     Ok(0)
 }
+
+/// The CLI has no background walk: the index is refreshed first when it is older than the app's refresh interval.
+fn fresh_index(ctx: &Ctx) -> Result<()> { hrm_core::index::refresh_if_older(ctx, ctx.settings.refresh_minutes.max(1) as i64 * 60_000) }
