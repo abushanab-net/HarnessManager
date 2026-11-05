@@ -61,9 +61,12 @@ impl Runtime {
             ctx = Arc::new(c);
         }
         crate::log::info(&format!("computers: listening for paired computers on port {}", lis.port));
-        match mdns::Mdns::start(&ctx.settings.device_id, &ctx.settings.device_name, lis.port) {
-            Ok(m) => *self.mdns.lock().unwrap() = Some(m),
-            Err(e) => crate::log::warn(&format!("computers: mDNS is not available: {e}")),
+        // a loopback-only listener (the tests) cannot be reached at the addresses mDNS would announce
+        if !self.bind.is_loopback() {
+            match mdns::Mdns::start(&ctx.settings.device_id, &ctx.settings.device_name, lis.port) {
+                Ok(m) => *self.mdns.lock().unwrap() = Some(m),
+                Err(e) => crate::log::warn(&format!("computers: mDNS is not available: {e}")),
+            }
         }
         *l = Some(lis);
         Ok(ctx)
