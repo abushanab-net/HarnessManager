@@ -1,7 +1,8 @@
-//! Across computers: this computer's changes go to an append-only outbox, are published as immutable chunk
-//! files in the sync folder, and every other computer's journal is merged into this database. Usage rows
-//! keep their request id, so a merge never double counts; a chunk that cannot be read yet (a OneDrive
-//! placeholder, a half-copied file) is tried again next round. Nothing here is fatal to the app.
+//! Across computers: this computer's changes go to an append-only outbox, are published as immutable, signed
+//! chunk files in the local journal store (mirrored to the sync folder, served to paired computers), and every
+//! other computer's journal is merged into this database. Usage rows keep their request id, so a merge never
+//! double counts; a chunk that cannot be read yet (a OneDrive placeholder, a half-copied file) is tried again
+//! next round. Nothing here is fatal to the app.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -13,12 +14,15 @@ use serde_json::{json, Value};
 
 use crate::db::{quota_point_in, upsert_session, upsert_usage};
 use crate::model::{SessionMeta, UsageRow};
-use crate::sync::folder;
+use crate::sync::peer::{identity, store};
+use crate::sync::{folder, peer};
 use crate::util::{now_ms, sha256_hex};
 use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
 const CHUNK_BYTES: usize = 1_000_000;
+/// A peer whose `hello` answered within this long is connected.
+pub const CONNECTED_MS: i64 = 30_000;
 
 /// One change, as a line of the journal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,11 +41,22 @@ pub struct Peer {
     pub name: String,
     pub os: String,
     pub app_version: String,
+    pub incarnation: String,
     pub last_seen: Option<i64>,
     pub last_seq: i64,
     pub applied_seq: i64,
     pub transport: String,
     pub presence: Value,
+    pub address: String,
+    pub port: u16,
+    pub cert_pem: String,
+    pub pubkey: String,
+    pub paired_at: Option<i64>,
+    pub last_pull: Option<i64>,
+    pub path: String,
+    /// When the last `hello` answered.
+    pub connected: Option<i64>,
+    pub relayed_by: String,
 }
 
 /// Append one change to the outbox, inside the writer's own transaction.
@@ -84,23 +99,24 @@ fn backfill_if_needed(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
-/// Unpublished entries as chunk files, then the manifest (atomically): readers only ever see whole chunks.
-fn publish(ctx: &Ctx, root: &Path) -> Result<()> {
-    let dir = folder::mine(ctx, root);
-    let published: i64 = ctx.db.kv_get("journal:published_seq")?.and_then(|s| s.parse().ok()).unwrap_or(0);
+/// Unpublished entries as signed chunk files in the local store, then its manifest: readers only ever see whole
+/// chunks. The store's manifest is the water line; a store lost with the data folder is simply made again.
+pub fn publish(ctx: &Ctx) -> Result<()> {
+    let me = &ctx.settings.device_id;
+    let inc = &ctx.settings.incarnation;
+    let published = store::manifest(ctx, me).filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
     let entries: Vec<Entry> = ctx.db.with(|c| {
         let mut st = c.prepare("select seq, ts, op, key, data from outbox where seq > ? order by seq")?;
         let v = st.query_map([published], |r| Ok(Entry { seq: r.get(0)?, ts: r.get(1)?, op: r.get(2)?, key: r.get(3)?,
             data: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
-    let inc = &ctx.settings.incarnation;
-    // the manifest lists this incarnation's chunks; a fresh database starts a new list
-    let mut manifest = folder::read_manifest(&dir).filter(|m| m["incarnation"].as_str() == Some(inc)).unwrap_or_else(|| json!({"incarnation": inc, "last_seq": 0, "chunks": []}));
     if entries.is_empty() {
-        if !dir.join("manifest.json").exists() { folder::write_manifest(&dir, &manifest)?; }
+        if store::manifest(ctx, me).is_none() { store::put_manifest_empty(ctx, me, inc)?; }
+        ctx.db.kv_set("journal:published_seq", &published.to_string())?;
         return Ok(());
     }
+    let id = identity::load(ctx)?;
     let mut chunks: Vec<(i64, i64, Vec<u8>)> = vec![];
     for e in &entries {
         let line = format!("{}\n", serde_json::to_string(e)?);
@@ -109,18 +125,30 @@ fn publish(ctx: &Ctx, root: &Path) -> Result<()> {
             _ => chunks.push((e.seq, e.seq, line.into_bytes())),
         }
     }
-    let list = manifest["chunks"].as_array_mut().context("manifest chunks")?;
     for (from, to, bytes) in &chunks {
-        let file = format!("{inc}-{from}-{to}.jsonl");
-        folder::write_chunk(&dir, &file, bytes)?;
-        list.push(json!({"file": file, "from": from, "to": to, "sha256": sha256_hex(bytes), "bytes": bytes.len()}));
+        let (file, sha) = (format!("{inc}-{from}-{to}.jsonl"), sha256_hex(bytes));
+        let sig = id.sign(identity::chunk_message(inc, *from, *to, &sha).as_bytes());
+        store::put_chunk(ctx, me, inc, &json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sig, "bytes": bytes.len()}), bytes)?;
     }
     let last = entries.last().map(|e| e.seq).unwrap_or(published);
-    manifest["last_seq"] = json!(last);
-    folder::write_manifest(&dir, &manifest)?;
     ctx.db.kv_set("journal:published_seq", &last.to_string())?;
     crate::log::info(&format!("journal: published {} entries in {} chunks (to seq {last})", entries.len(), chunks.len()));
     Ok(())
+}
+
+/// The local store into this computer's folder in the sync folder: chunks the folder lacks, then the manifest.
+fn mirror(ctx: &Ctx, root: &Path) -> Result<()> {
+    let me = &ctx.settings.device_id;
+    let Some(man) = store::manifest(ctx, me) else { return Ok(()) };
+    let dir = folder::mine(ctx, root);
+    let there = folder::read_manifest(&dir);
+    if there.as_ref().map(|t| t["incarnation"] == man["incarnation"] && t["last_seq"] == man["last_seq"] && t["chunks"].as_array().map(|c| c.len()) == man["chunks"].as_array().map(|c| c.len())).unwrap_or(false) { return Ok(()); }
+    for ch in man["chunks"].as_array().into_iter().flatten() {
+        let file = ch["file"].as_str().unwrap_or("");
+        if dir.join("journal").join(file).is_file() { continue; }
+        folder::write_chunk(&dir, file, &store::chunk(ctx, me, file)?)?;
+    }
+    folder::write_manifest(&dir, &man)
 }
 
 /// One entry of another computer's journal into this database.
@@ -157,21 +185,33 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
     Ok(())
 }
 
-/// One computer's new chunks, in manifest order, each checked against its sha256 and applied in one
-/// transaction with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the
-/// next round tries again. Returns the sequence applied up to.
-fn apply_manifest(ctx: &Ctx, id: &str, dir: &Path, man: &Value) -> Result<i64> {
+/// The public key this computer knows for an origin, "" when none yet.
+pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
+    ctx.db.with(|c| Ok(c.query_row("select coalesce(pubkey, '') from peers where device_id=?", [id], |r| r.get(0)).optional()?.unwrap_or_default()))
+}
+
+/// One computer's new chunks, in manifest order, each read through `read`, checked against its sha256 and (when
+/// the origin's key is known) its signature, kept in the local store for relay, and applied in one transaction
+/// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
+/// tries again. Returns the sequence applied up to.
+pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
+    let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
     for ch in man["chunks"].as_array().into_iter().flatten() {
-        let (file, to) = (ch["file"].as_str().unwrap_or(""), ch["to"].as_i64().unwrap_or(0));
+        let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || file.is_empty() || file.contains(['/', '\\']) { continue; }
-        let bytes = match std::fs::read(dir.join("journal").join(file)) {
+        let bytes = match read(file) {
             Ok(b) => b,
-            Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e})")); break; }
+            Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
         };
-        if sha256_hex(&bytes) != ch["sha256"].as_str().unwrap_or("") {
+        let sha = sha256_hex(&bytes);
+        if sha != ch["sha256"].as_str().unwrap_or("") {
             crate::log::warn(&format!("journal: {file} from {id} does not match its manifest yet; tried again next round"));
+            break;
+        }
+        if !pubkey.is_empty() && !identity::verify(&pubkey, identity::chunk_message(inc, from, to, &sha).as_bytes(), ch["sig"].as_str().unwrap_or("")) {
+            crate::log::warn(&format!("journal: {file} from {id} is not signed by that computer; skipped"));
             break;
         }
         let text = String::from_utf8_lossy(&bytes);
@@ -190,10 +230,32 @@ fn apply_manifest(ctx: &Ctx, id: &str, dir: &Path, man: &Value) -> Result<i64> {
             tx.commit()?;
             Ok(())
         })?;
+        if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
         crate::log::info(&format!("journal: {n} entries from {id} applied ({file}{})", if bad > 0 { format!(", {bad} skipped") } else { String::new() }));
         cur = to;
     }
     Ok(cur)
+}
+
+/// What another computer says about itself (a `device.json`, from the folder or a peer), when it is signed by
+/// the key it carries: its name, incarnation, roots and key are kept, the record is cached for relay. The key
+/// is learned once and never replaced by a record.
+pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
+    if dev["id"].as_str() != Some(id) || !identity::record_ok(dev) { return Ok(false); }
+    let known = pubkey_of(ctx, id)?;
+    if !known.is_empty() && dev["pubkey"].as_str() != Some(&known) {
+        crate::log::warn(&format!("computers: {id} presents another key than the one paired; its record is ignored"));
+        return Ok(false);
+    }
+    ctx.db.with(|c| {
+        c.execute("insert into peers(device_id, name, os, app_version, incarnation, roots, pubkey, transport) values(?1,?2,?3,?4,?5,?6,?7,'relay')
+            on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
+            roots=coalesce(?6, roots), pubkey=?7",
+            params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str(), dev["roots"].is_object().then(|| dev["roots"].to_string()), dev["pubkey"].as_str()])?;
+        Ok(())
+    })?;
+    store::put_device(ctx, id, dev)?;
+    Ok(true)
 }
 
 /// Every other computer's journal, and what each says about itself, into this database. Per computer: an
@@ -201,10 +263,11 @@ fn apply_manifest(ctx: &Ctx, id: &str, dir: &Path, man: &Value) -> Result<i64> {
 fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
     for (id, dir) in folder::others(ctx, root) {
         let dev = crate::util::read_json(&dir.join("device.json")).unwrap_or(Value::Null);
+        if dev.is_object() { learn_device(ctx, &id, &dev)?; }
         let presence = std::fs::read_to_string(dir.join("presence.json")).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
         let man = folder::read_manifest(&dir);
         let applied = match &man {
-            Some(m) => match apply_manifest(ctx, &id, &dir, m) {
+            Some(m) => match apply_manifest(ctx, &id, m, &|file| Ok(std::fs::read(dir.join("journal").join(file))?)) {
                 Ok(seq) => Some(seq),
                 Err(e) => { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None }
             },
@@ -214,7 +277,8 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
         ctx.db.with(|c| {
             c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport, presence) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder',?10)
                 on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
-                last_seen=coalesce(?6, last_seen), last_seq=coalesce(?7, last_seq), applied_seq=coalesce(?8, applied_seq), roots=coalesce(?9, roots), transport='folder', presence=coalesce(?10, presence)",
+                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder',
+                presence=case when coalesce(json_extract(?10, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then coalesce(?10, presence) else presence end",
                 params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.as_ref().and_then(|m| m["incarnation"].as_str())),
                     seen, man.as_ref().and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string()), presence])?;
             Ok(())
@@ -223,16 +287,25 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// One round: what this computer has, out; what the others have, in. What happened is kept for the status.
+/// Sync in any form: through the folder or straight to paired computers.
+pub fn on(ctx: &Ctx) -> bool { ctx.settings.sync_mode != "off" || ctx.settings.direct_connection }
+
+/// One round: what this computer has, out; what the others have, in (through the folder, then from the paired
+/// computers). What happened is kept for the status.
 pub fn round(ctx: &Ctx) -> Result<Value> {
     let r = (|| -> Result<()> {
-        if ctx.settings.sync_mode != "folder" { bail!("sync is off"); }
-        let root = folder::root(ctx)?;
+        if !on(ctx) { bail!("sync is off"); }
         backfill_if_needed(ctx)?;
-        publish(ctx, &root)?;
-        folder::write_device(ctx, &root)?;
-        folder::write_presence(ctx, &root)?;
-        merge(ctx, &root)
+        publish(ctx)?;
+        if ctx.settings.sync_mode == "folder" {
+            let root = folder::root(ctx)?;
+            mirror(ctx, &root)?;
+            folder::write_device(ctx, &root)?;
+            folder::write_presence(ctx, &root)?;
+            merge(ctx, &root)?;
+        }
+        if ctx.settings.direct_connection { peer::pull_all(ctx); }
+        Ok(())
     })();
     let error = r.err().map(|e| format!("{e:#}"));
     if let Some(e) = &error { crate::log::warn(&format!("computers: {e}")); }
@@ -248,11 +321,14 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
     ctx.db.with(|c| {
-        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence from peers order by name, device_id")?;
-        let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: r.get::<_, Option<String>>(1)?.unwrap_or_default(), os: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            app_version: r.get::<_, Option<String>>(3)?.unwrap_or_default(), last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
-            applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
-            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
+        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by
+            from peers order by name, device_id")?;
+        let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
+        let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: s(r, 1)?, os: s(r, 2)?, app_version: s(r, 3)?, last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: s(r, 7)?,
+            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), incarnation: s(r, 9)?,
+            address: s(r, 10)?, port: r.get::<_, Option<i64>>(11)?.unwrap_or(0) as u16, cert_pem: s(r, 12)?, pubkey: s(r, 13)?, paired_at: r.get(14)?, last_pull: r.get(15)?,
+            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)? }))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })
 }
@@ -273,20 +349,26 @@ pub fn open_elsewhere(peers: &[Peer], now: i64) -> std::collections::HashSet<Str
 /// The Computers page: this computer, the last round, and the others.
 pub fn status(ctx: &Ctx) -> Result<Value> {
     let s = &ctx.settings;
+    let now = now_ms();
     let last_seq: i64 = ctx.db.with(|c| Ok(c.query_row("select coalesce(max(seq), 0) from outbox", [], |r| r.get(0))?))?;
     let published: i64 = ctx.db.kv_get("journal:published_seq")?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let last = ctx.db.kv_get("computers:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
+    let pairing = ctx.db.kv_get("pairing:current")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).filter(|p| p["expires_at"].as_i64().unwrap_or(0) > now).unwrap_or(Value::Null);
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
-        "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": p.presence["running"].as_array().cloned().unwrap_or_default()})).collect();
-    Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published},
+        "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": p.presence["running"].as_array().cloned().unwrap_or_default(),
+        "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
+        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty()})).collect();
+    Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
+        "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
         "last_run": last["at"], "error": last["error"], "peers": peers}))
 }
 
-/// Change the Computers settings from `{device_name?, sync_mode?, sync_folder?, sync_transcripts?, sync_presence?}`,
-/// saved and reopened so the journal follows the mode; turning sync on queues a backfill for the next round.
+/// Change the Computers settings from `{device_name?, sync_mode?, sync_folder?, sync_transcripts?, sync_presence?,
+/// direct_connection?, listen_port?}`, saved and reopened so the journal follows the mode; turning sync on queues
+/// a backfill for the next round.
 pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
     let mut ctx = Ctx::open_at(data, home)?;
-    let before = ctx.settings.sync_mode.clone();
+    let before = on(&ctx);
     let s = &mut ctx.settings;
     if let Some(n) = a["device_name"].as_str() {
         let n = n.trim();
@@ -303,12 +385,17 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
     }
     if let Some(b) = a["sync_transcripts"].as_bool() { s.sync_transcripts = b; }
     if let Some(b) = a["sync_presence"].as_bool() { s.sync_presence = b; }
+    if let Some(b) = a["direct_connection"].as_bool() { s.direct_connection = b; }
+    if let Some(p) = a["listen_port"].as_i64() {
+        if !(0..=65535).contains(&p) { bail!("the port is a number up to 65535, or 0 to pick one"); }
+        s.listen_port = p as u16;
+    }
     if s.sync_mode == "folder" {
         let p = Path::new(&s.sync_folder);
         if s.sync_folder.is_empty() || !p.is_absolute() || !p.is_dir() { bail!("choose an existing folder (its full path) to sync through"); }
     }
     ctx.save_settings()?;
-    if ctx.settings.sync_mode != before { ctx.db.kv_set("journal:backfilled", "0")?; }
+    if on(&ctx) != before { ctx.db.kv_set("journal:backfilled", "0")?; }
     Ctx::open_at(data, home)
 }
 
@@ -317,8 +404,10 @@ mod tests {
     use super::*;
     use crate::pricing::Prices;
 
-    /// A computer with sync on through `shared`, its data in `dir/<name>`.
+    /// A computer with sync on through `shared`, its data in `dir/<name>`; its device key under the test prefix,
+    /// deleted when the context is dropped.
     fn computer(dir: &Path, name: &str, shared: &Path) -> Ctx {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
         let data = dir.join(name);
         let mut ctx = Ctx::open_at(&data, &dir.join("home")).unwrap();
         ctx.settings.device_name = name.into();
@@ -335,12 +424,20 @@ mod tests {
 
     fn count(ctx: &Ctx, sql: &str) -> i64 { ctx.db.with(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() }
 
+    /// Deletes the computers' device keys from the credential store when the test ends.
+    struct Keys(Vec<String>);
+    impl Drop for Keys {
+        fn drop(&mut self) { for id in &self.0 { let _ = crate::secrets::delete(&identity::target(id)); } }
+    }
+    fn keys(ctxs: &[&Ctx]) -> Keys { Keys(ctxs.iter().map(|c| c.settings.device_id.clone()).collect()) }
+
     #[test]
     fn what_a_records_b_merges_once_with_a_as_its_device() {
         let t = tempfile::tempdir().unwrap();
         let shared = t.path().join("shared");
         std::fs::create_dir_all(&shared).unwrap();
         let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
         let prices: Prices = [("claude-opus-5-5".to_string(), crate::pricing::Price { input: 10.0, output: 10.0, cache_read: 1.0, cache_write: 1.0 })].into_iter().collect();
         assert_eq!(a.db.insert_usage(&[row("claude:1", 1_000), row("claude:2", 2_000)], &prices).unwrap(), 2);
         a.db.tag_set("project", "github.com/o/r", &["release".into()]).unwrap();
@@ -382,6 +479,7 @@ mod tests {
         let shared = t.path().join("shared");
         std::fs::create_dir_all(&shared).unwrap();
         let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
         a.db.insert_usage(&[row("claude:1", 1_000)], &Prices::new()).unwrap();
         round(&a).unwrap();
         let dir = shared.join("devices").join(&a.settings.device_id);
@@ -415,6 +513,7 @@ mod tests {
         let shared = t.path().join("shared");
         std::fs::create_dir_all(&shared).unwrap();
         let ctx = computer(t.path(), "A", &shared);
+        let _k = keys(&[&ctx]);
         ctx.db.insert_usage(&[row("claude:3", 3_000)], &Prices::new()).unwrap();
         assert_eq!(count(&ctx, "select count(*) from outbox"), 1, "sync on: the new row is journaled as it comes");
         assert_eq!(backfill(&ctx).unwrap(), 5, "two usage rows, one tag list, two readings");
@@ -461,6 +560,7 @@ mod tests {
         let shared = t.path().join("shared");
         std::fs::create_dir_all(&shared).unwrap();
         let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
         let m = SessionMeta { harness: "codex".into(), profile: "work".into(), id: "abc".into(), title: "fix the build".into(), cwd: "C:\\p".into(), started_at: 1, last_active_at: 5,
             project_key: "github.com/o/r".into(), project_name: "r".into(), source_path: "C:\\p\\abc.jsonl".into(), ..Default::default() };
         a.db.journal_session(&m).unwrap();

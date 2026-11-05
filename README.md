@@ -111,6 +111,17 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   filter (a session open elsewhere says "running on <name>"), project cards show which computers have the
   repository, and a chip in the top bar shows which computers were heard from in the last three minutes.
   With sync off, nothing changes. `hrm computers status | now | set` does the same from a terminal.
+  **Direct connection:** turn it on in Settings › Computers and two computers talk to each other straight
+  over the network, so live routes and presence arrive within seconds instead of a folder round. Pair them
+  once with a six-digit code (Pair a computer on one, Join on the other); each then holds the other's
+  certificate, and every connection is mutual TLS that only paired computers can open. They find each other
+  by mDNS on the same network; across a VPN (Pangolin, Tailscale and the like) give the computer's card an
+  address, a stable name or IP, and it is reached there. Journal chunks are signed by the computer they come
+  from, and a computer that is reachable only through another paired computer is relayed, so three computers
+  need not all see each other; one that is reached neither way is still merged through the folder, just not
+  live. Forget removes a computer and its certificate (what was merged from it stays). From a terminal:
+  `hrm computers pair [--host name]`, `hrm computers join <code> [--host name:port]`, `hrm computers peers`,
+  `hrm computers forget <name>`, and `hrm computers serve --seconds <n>` runs the listener without the app.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 
