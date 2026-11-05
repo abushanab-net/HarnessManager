@@ -111,6 +111,19 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   filter (a session open elsewhere says "running on <name>"), project cards show which computers have the
   repository, and a chip in the top bar shows which computers were heard from in the last three minutes.
   With sync off, nothing changes. `hrm computers status | now | set` does the same from a terminal.
+
+  **Resuming elsewhere.** With Carry transcripts on, each computer also puts its session transcripts in the
+  folder (compressed; a transcript over 20 MB stays home, and the folder holds up to 200 MB per computer, the
+  oldest going first). A session from another computer can then be read here, fetched the first time, and
+  resumed here with **Resume here** when this computer has the same repository and an account of that name
+  for that tool; otherwise the row says why ("not cloned here", "no account work for Claude Code on this
+  computer", "running on LAPTOP"). Resuming is a fork: the transcript is copied where the tool looks for it
+  here (Claude Code is started with `--resume <copy> --fork-session`, Codex with `-C <clone> resume <id>`,
+  OpenCode imports the export, Pi and Oh My Pi get the log under their sessions folder; Antigravity is
+  read-only) and the original on the other computer is never written. Only the conversation comes across:
+  files changed since, attachments and running shells do not, so pull the branch first. A session continued
+  this way says "continued from LAPTOP" under its title. `hrm resume-here <computer>/<tool>/<account>/<id>`
+  and `hrm transcripts` do the same from a terminal.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 

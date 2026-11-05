@@ -5,6 +5,7 @@ import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, cdot, cdots } from './computers.js';
+import { resumeData, reasonShort } from './resume.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
@@ -332,7 +333,9 @@ view('session', async (sheet, params) => {
   sheet.className = 'sheet';
   // a redraw of the shown session (live update, unfolding a step) keeps it on screen until the new one is ready
   if (rv.sessionKey !== params.profile + '/' + params.id || !sheet.querySelector('#chat')) sheet.innerHTML = '<p class="muted">Opening the session…</p>';
-  const [t, ss, tl] = await Promise.all([call('transcript', { profile: params.profile, id: params.id }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null), S.cache.tags ? null : call('tag_list').catch(() => [])]);
+  // a session from another computer: its transcript is fetched from the sync folder the first time
+  if (params.device && rv.sessionKey !== params.profile + '/' + params.id) toast('Fetching from the folder…');
+  const [t, ss, tl] = await Promise.all([call('transcript', { profile: params.profile, id: params.id, device: params.device }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null), S.cache.tags ? null : call('tag_list').catch(() => [])]);
   if (tl) S.cache.tags = tl;
   if (rv.sessionKey !== params.profile + '/' + params.id) { rv.sessionKey = params.profile + '/' + params.id; rv.open = new Set(); rv.more = new Set(); rv.follow = false; rv.top = 0; rv.fresh = true; }
   const m = t.meta;
@@ -375,9 +378,11 @@ view('session', async (sheet, params) => {
   sheet.innerHTML = `
     <div class="trow sesh"><div><a href="#sessions" class="crumb acT">← Sessions · ${esc(project)}</a><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1>
         <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
+          ${params.device ? `<span data-testid="session-from">ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
           <span>started ${esc(when(m.started_at))} · ${m.prompts} ${m.prompts === 1 ? 'turn' : 'turns'}</span><span class="mono">${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · $' + ss.cost.toFixed(2) : ''}</span></div></div>
-      <div class="acts"><button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>
-        <span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button>` : ''}</span>
+      <div class="acts">${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}
+        ${params.device ? (m.resumable === true ? `<button class="btn primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
+        : `<span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button>` : ''}</span>`}
         <button class="iconbtn sq" data-act="session-menu" data-path="${esc(m.source_path)}" data-cwd="${esc(m.cwd)}" aria-label="More">${ic.dots}</button></div></div>
     <div class="ovkpis skpis">${[['Tokens', fmt(m.tokens)], ['Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—'], ['First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—'],
       ['Failed commands', String(failed.length), failed.length ? 'negT' : ''], ['Files changed', String(files)]]
@@ -732,6 +737,8 @@ async function drawComputers(s, st) {
   const c = await computersStatus().catch(() => null);
   const el = document.getElementById('st-computers');
   if (!c || !el) return;
+  // phase 3: what this computer has carried, for the Carry transcripts popover
+  const ts = syncOn(c) ? await call('transcripts_status').catch(() => null) : null;
   const on = syncOn(c), now = Date.now(), n = computers(c).length;
   const pill = (t) => `<span class="pill">${t}</span>`;
   const card = (d) => {
@@ -751,7 +758,7 @@ async function drawComputers(s, st) {
           <div class="f"><span class="inp mono ${c.folder ? '' : 'muted'}" title="${esc(c.folder)}" data-testid="sync-folder-path">${esc(c.folder || 'No folder chosen yet')}</span><button class="btn sm" data-act="sync-folder-pick" data-testid="sync-folder-pick">${c.folder ? 'Change…' : 'Choose…'}</button>${on && c.mode === 'folder' ? '<button class="btn sm" data-act="sync-off" data-testid="sync-off">Stop syncing</button>' : ''}</div></div></div>
         <div class="mcard off" aria-disabled="true" data-testid="sync-hub"><i></i><div><b>A hub you host ${pill('phase 5')}</b><span>Your VPS with Docker, or a Cloudflare Worker. Works from any network, no VPN needed, and gives live presence everywhere.</span>
           <div class="f"><input class="input mono" disabled placeholder="https://hub.example.com" aria-label="Hub address"><button class="btn sm" disabled>Join with a code…</button></div></div></div></div>`, '')}
-    ${row('Carry transcripts', info('transcripts', 'Also share this computer\'s session transcripts, so they can be resumed on another computer (phase 3). Up to 200 MB; older ones go to the archive first.<br><b>Default: on.</b>'), 'Share this computer\'s session transcripts, so they can be resumed elsewhere.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_transcripts" ${s.sync_transcripts !== false ? 'checked' : ''} data-testid="st-transcripts"> Carry transcripts</label>`)}
+    ${row('Carry transcripts', info('transcripts', `Also share this computer's session transcripts, so they can be read and resumed on another computer. A transcript over 20 MB is not carried; the folder holds up to 200 MB of this computer's transcripts, the oldest going first.${ts ? `<br>Carried ${ts.carried} · ${(ts.bytes / 1048576).toFixed(1)} MB${ts.skipped && ts.skipped.length ? ` · ${ts.skipped.length} skipped` : ''}` : ''}<br><b>Default: on.</b>`), 'Share this computer\'s session transcripts, so they can be resumed elsewhere.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_transcripts" ${s.sync_transcripts !== false ? 'checked' : ''} data-testid="st-transcripts"> Carry transcripts</label>`)}
     ${row('Presence', info('presence', 'Writes what is running here every minute while the app is open, so the other computers show it in Live routes and Running now.<br><b>Default: on.</b>'), 'Tell the other computers what is running here, every minute while the app is open.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_presence" ${s.sync_presence !== false ? 'checked' : ''} data-testid="st-presence"> Share what runs here</label>`)}
     ${row('Direct connection ' + pill('phase 2'), '', 'On top of the folder or the hub: find the other computers on this network or over the VPN and talk to them directly, for live routes within a second.', `<label class="switch"><input type="checkbox" disabled data-testid="st-direct"> Connect directly</label><button class="btn outline" disabled data-testid="pair">Pair a computer…</button>`)}
     <div class="devhead"><b>${n} ${n === 1 ? 'computer' : 'computers'}</b><span class="muted sm">${on ? `synced through a ${c.mode === 'hub' ? 'hub' : 'folder'}${c.last_run ? ' · last round ' + ago(c.last_run) : ''}` : 'sync is off: only this computer'}</span>${c.error ? `<span class="err sm" data-testid="sync-error">${esc(c.error)}</span>` : ''}
