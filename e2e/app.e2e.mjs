@@ -1410,6 +1410,66 @@ description: Bulk skill ${i}
     await shot('40-pi-omp');
   });
 
+  // ---- resume here (WP-7) ----
+  // A session from another computer, seeded in the sync folder with its compressed transcript: the row offers
+  // Resume here when its repository and account are here (and says why not otherwise), reading it fetches the
+  // transcript, and Resume here launches the tool on a copy in this computer's clone, as a fork.
+  await test('resume here: a remote session is read from the folder and resumed as a fork in the local clone', async () => {
+    const { createHash } = await import('node:crypto');
+    const sync = path.join(sb, 'sync-resume'), dev = 'e2e-laptop-7777', inc = 'inc-e2e-7', devDir = path.join(sync, 'devices', dev);
+    const key = 'github.com/example/platform-gitops', cwd = 'C:\laptop\Projects\platform-gitops', t0 = Date.now() - 7200000, iso = new Date(t0).toISOString();
+    // the transcript as Claude Code wrote it on the laptop, compressed as the folder carries it
+    const log = jl([
+      { type: 'user', sessionId: 'laptop-s7', cwd, timestamp: iso, message: { role: 'user', content: 'Rotate the staging certificates on the laptop' } },
+      { type: 'assistant', sessionId: 'laptop-s7', cwd, timestamp: iso, message: { id: 'l7', model: 'claude-opus-5-5', usage: { input_tokens: 100, output_tokens: 20 }, content: [{ type: 'text', text: 'Certificates rotated on the laptop.' }] } },
+    ]);
+    const packed = zlib.zstdCompressSync(Buffer.from(log));
+    const file = 'transcripts/claude/claude-main/laptop-s7.jsonl.zst';
+    write(path.join(devDir, file), packed);
+    const session = (id, title, pkey, pname) => ({ harness: 'claude', profile: 'claude-main', id, title, cwd, started_at: t0, last_active_at: t0 + 60000, prompts: 1, tool_calls: 0, failed: 0, messages: 2, model: 'claude-opus-5-5', tokens: 120, source_path: `C:\laptop\.claude\projects\C--laptop-Projects-platform-gitops\${id}.jsonl`, project_key: pkey, project_name: pname, open: false, tags: [] });
+    const chunk = jl([
+      { seq: 1, ts: t0, op: 'session', key: 'claude/claude-main/laptop-s7', data: session('laptop-s7', 'Rotate the staging certificates (laptop)', key, 'platform-gitops') },
+      { seq: 2, ts: t0, op: 'session', key: 'claude/claude-main/laptop-s8', data: session('laptop-s8', 'A project only the laptop has', 'github.com/example/elsewhere', 'elsewhere') },
+      { seq: 3, ts: t0 + 1, op: 'transcript', key: 'claude/claude-main/laptop-s7', data: { file, bytes: packed.length, sha256: createHash('sha256').update(packed).digest('hex'), mtime: t0 + 60000, source_rel: 'projects/C--laptop-Projects-platform-gitops/laptop-s7.jsonl' } },
+    ]);
+    const chunkFile = `${inc}-1-3.jsonl`;
+    write(path.join(devDir, 'journal', chunkFile), chunk);
+    write(path.join(devDir, 'device.json'), JSON.stringify({ id: dev, name: 'LAPTOP', os: 'windows', app_version: '1.4.0', incarnation: inc, roots: { [key]: cwd }, updated_at: Date.now() }));
+    write(path.join(devDir, 'manifest.json'), JSON.stringify({ incarnation: inc, last_seq: 3, chunks: [{ file: chunkFile, from: 1, to: 3, sha256: createHash('sha256').update(chunk).digest('hex'), bytes: Buffer.byteLength(chunk) }] }));
+    // the folder is chosen: a round merges the laptop's journal
+    await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
+    await nav('#sessions?days=all');
+    await $('[data-testid=resume-here-laptop-s7]');
+    await hasText('[data-testid=reason-laptop-s8]', 'not cloned here');
+    await shot('41-sessions-resume-here');
+    // reading it: fetched from the folder, shown through Claude Code's parser
+    await click('[data-testid=read-laptop-s7]');
+    await hasText('[data-testid=session-title]', 'Rotate the staging certificates (laptop)');
+    await hasText('[data-testid=chat] .msg.ai', 'Certificates rotated on the laptop.');
+    await hasText('[data-testid=session-from]', 'LAPTOP');
+    assert.ok(fs.existsSync(path.join(data, 'transcripts', dev, 'claude', 'claude-main', 'laptop-s7.jsonl')), 'the fetched copy sits in the data folder');
+    await shot('42-session-remote');
+    // Resume here: the dialog names the local clone, then the fake claude gets the copy's path and --fork-session, in the clone
+    await nav('#sessions?days=all');
+    await click('[data-testid=resume-here-laptop-s7]');
+    await hasText('[data-testid=resume-here-root]', 'platform-gitops');
+    await hasText('[data-testid=resume-here-dialog]', 'the LAPTOP copy stays as it is');
+    await shot('43-resume-here-dialog');
+    await click('[data-testid=resume-here-ok]');
+    const launch = await waitFor(() => readLines(termLog).find((t) => t.args && t.args[3] === '--resume' && String(t.args[4]).endsWith('laptop-s7.jsonl')), 'the fork launched');
+    assert.deepEqual(launch.args.slice(0, 3).concat(launch.args.slice(5)), ['run', 'claude-main', '--', '--fork-session'], JSON.stringify(launch));
+    assert.equal(launch.cwd, repo, 'opened in this computer\'s clone');
+    assert.ok(fs.existsSync(launch.args[4]) && launch.args[4].startsWith(path.join(home, '.claude', 'projects')), 'the copy is under this computer\'s Claude Code folder: ' + launch.args[4]);
+    // the copy is a session of this computer now, marked as continued from the laptop
+    await nav('#sessions?days=all');
+    await hasText('[data-testid=continued-laptop-s7]', 'continued from LAPTOP');
+    // Settings: the Carry transcripts popover counts what this computer carried
+    await nav('#settings');
+    await $('[data-testid=sec-computers] [data-testid=st-transcripts]');
+    await hasText('#tip-transcripts', 'Carried');
+    await hasText('#tip-transcripts', '20 MB');
+  });
+
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
 } catch (e) {
   console.error(e);

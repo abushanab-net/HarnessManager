@@ -1262,3 +1262,5 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .dev .bar { height: 4px; border-radius: 2px; background: var(--ru); margin: 8px 0 6px; overflow: hidden; }
 .dev .bar i { display: block; height: 100%; background: var(--ac); }
 .dev .bar i.warn { background: var(--warn); }
+/* Resume here (phase 3): a session continued from another computer says so under its title */
+.srow .t .cfrom, .smeta [data-testid=session-from] { color: var(--ac); }
