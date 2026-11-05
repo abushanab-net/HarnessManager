@@ -98,6 +98,11 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   formats. Subscription logins never pass through it.
 - **Backups:** automatic and manual, of the account list, settings, what Harness Manager wrote into each
   tool, and the skills it manages. Backups never hold keys or logins.
+- **Computers:** point every computer at one shared folder (OneDrive, Google Drive, SMB, a NAS) and each
+  publishes its usage, sessions, limit readings and tags there as an append-only journal, which the others
+  merge into their own database. Every request keeps its id and the cost it was valued at, so nothing is
+  counted twice and nothing is re-priced. The Overview, Projects and Sessions show all computers or this one,
+  and the live view shows what runs elsewhere. `hrm computers status | now | set` does the same from a terminal.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 

@@ -25,6 +25,13 @@ impl Price {
 
 pub type Prices = HashMap<String, Price>;
 
+/// A short name for one state of the table: rows priced under the same revision are comparable.
+pub fn rev(prices: &Prices) -> String {
+    let mut lines: Vec<String> = prices.iter().map(|(m, p)| format!("{m} {} {} {} {}", p.input, p.output, p.cache_read, p.cache_write)).collect();
+    lines.sort();
+    crate::util::sha256_hex(lines.join("\n").as_bytes())[..8].to_string()
+}
+
 const DAY_MS: i64 = 86_400_000;
 
 /// Flatten the catalog to model id -> price. Anthropic and OpenAI entries win over resellers' copies.

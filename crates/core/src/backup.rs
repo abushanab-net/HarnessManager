@@ -23,18 +23,19 @@ pub struct Backup {
 pub fn dir(ctx: &Ctx) -> PathBuf { ctx.data.join("backups") }
 
 /// State worth keeping; caches (discover, pricing, version checks), a running router's pid and its token are not:
-/// the token is a secret, and a new one is made when the router starts without one.
+/// the token is a secret, and a new one is made when the router starts without one. The journal's marks describe
+/// the outbox, which is not in a backup either.
 fn keep_kv(k: &str) -> bool {
     !(k.starts_with("discover:") || k.starts_with("pricing:") || k.starts_with("apps:") || k.starts_with("self:")
-        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:"))
+        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:") || k.starts_with("journal:") || k.starts_with("computers:"))
 }
 
 #[cfg(test)]
 mod keep_tests {
     #[test]
     fn the_router_token_and_caches_stay_out_of_backups() {
-        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models"] { assert!(!super::keep_kv(k), "{k}"); }
-        for k in ["live_quota", "migrated:codex-timing", "mcp:last_import"] { assert!(super::keep_kv(k), "{k}"); }
+        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models", "journal:published_seq", "journal:backfilled", "computers:last"] { assert!(!super::keep_kv(k), "{k}"); }
+        for k in ["live_quota", "migrated:codex-timing", "mcp:last_import", "migrated:device"] { assert!(super::keep_kv(k), "{k}"); }
     }
 }
 
