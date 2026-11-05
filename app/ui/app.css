@@ -1262,3 +1262,13 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .dev .bar { height: 4px; border-radius: 2px; background: var(--ru); margin: 8px 0 6px; overflow: hidden; }
 .dev .bar i { display: block; height: 100%; background: var(--ac); }
 .dev .bar i.warn { background: var(--warn); }
+/* phase 2: a peer's address and Forget on its card, the ⓘ beside its transport line, and the six digits of a pairing */
+.dev .f { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.dev .f .input { flex: 1 1 90px; min-width: 0; height: 28px; font-size: 12px; }
+.dev .st.tr { overflow: visible; }
+.dev .st .tip { margin-left: 2px; vertical-align: -2px; }
+.dev .st .tip .bubble { white-space: normal; width: 260px; font-family: var(--sans); }
+.dev .st .tip .bubble b { display: inline; padding: 0; font-size: inherit; white-space: normal; }
+.paircode { font-size: 44px; font-weight: 600; letter-spacing: 0.12em; text-align: center; padding: 14px 0 6px; color: var(--t); }
+.linkb { border: 0; background: none; color: var(--acT); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; }
+.bubble .linkb { color: var(--on-ink); }
