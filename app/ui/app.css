@@ -1209,3 +1209,56 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .tn small, .tn.router small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tn { overflow: hidden; }
 .tn.tool small { white-space: normal; }
+
+/* ---------- Across computers ----------
+   One dot per computer in its colour (this one teal, then sand, iris, amber); the chip in the top bar; a thin split bar
+   on the Overview tiles; the Computer column on Sessions; the dots cluster on a project card; Settings > Computers. */
+.cdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--dot); }
+.cdot.c0 { background: var(--ac); }
+.cdot.c1 { background: var(--sand); }
+.cdot.c2 { background: var(--iris); }
+.cdot.c3 { background: var(--warn); }
+.cdots { display: inline-flex; gap: 3px; align-items: center; vertical-align: -1px; }
+.pcs { display: inline-flex; gap: 5px; align-items: center; border: 1px solid var(--ctl); border-radius: 999px; padding: 3px 10px 3px 8px; background: var(--s); color: var(--t2); font: 11px var(--mono); white-space: nowrap; }
+.pcs .cdot { width: 7px; height: 7px; margin-right: 1px; }
+.pcs .cdot.on { background: var(--ac); }
+.pcs > span { margin-left: 4px; color: var(--m); }
+.ovk .split { display: flex; height: 5px; border-radius: 3px; overflow: hidden; gap: 1px; background: var(--ru); margin: 2px 0; }
+.ovk .split i { display: block; height: 100%; min-width: 2px; }
+.ovk .split .c0 { background: var(--ac); }
+.ovk .split .c1 { background: var(--sand); }
+.ovk .split .c2 { background: var(--iris); }
+.ovk .split .c3 { background: var(--warn); }
+.tn .cdots { position: absolute; right: 8px; top: 7px; }
+.legend .lp { background: var(--sand); }
+.runrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 2px; border-top: 1px solid var(--ru); font-size: 13px; }
+.runrow:first-of-type { border-top: 0; }
+.runrow b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.runrow b + span { font-size: 12px; }
+.srow .pc { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.srow .pc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow.withpc { grid-template-columns: 12px minmax(0, 1fr) 130px 120px 120px 70px 90px 96px; }
+.swrap .srow.withpc { grid-template-columns: 12px minmax(0, 1fr) auto auto auto auto auto auto; }
+.pcrow .meta .pcs-row { display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end; }
+/* Settings > Computers: the chooser cards and a card per computer */
+.mcards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; max-width: 760px; }
+.mcard { border: 1px solid var(--b); border-radius: 12px; padding: 12px 14px; background: var(--s); font-size: 12.5px; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; cursor: pointer; color: var(--t); }
+.mcard.on { border-color: var(--ac); box-shadow: inset 0 0 0 1px var(--ac); background: var(--ac-soft); }
+.mcard.off { opacity: .55; cursor: default; }
+.mcard > i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--m); margin-top: 2px; display: block; }
+.mcard.on > i { border-color: var(--ac); background: radial-gradient(circle, var(--ac) 45%, transparent 50%); }
+.mcard b { display: block; font-size: 13.5px; font-weight: 600; }
+.mcard > div > span { color: var(--m); display: block; margin-top: 2px; }
+.mcard .f { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mcard .f .inp { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t); }
+.mcard .f .input { flex: 1 1 140px; height: 32px; }
+.devhead { display: flex; align-items: center; gap: 10px; padding: 14px 0 0; border-top: 1px solid var(--ru); }
+.devhead .acts { margin-left: auto; }
+.devs { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 12px 0 8px; }
+.dev { background: var(--sub); border: 1px solid var(--b); border-radius: 12px; padding: 12px 14px; font-size: 12.5px; position: relative; min-width: 0; }
+.dev b { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 64px; }
+.dev .st { display: block; margin-top: 3px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dev .me { position: absolute; right: 10px; top: 10px; }
+.dev .bar { height: 4px; border-radius: 2px; background: var(--ru); margin: 8px 0 6px; overflow: hidden; }
+.dev .bar i { display: block; height: 100%; background: var(--ac); }
+.dev .bar i.warn { background: var(--warn); }

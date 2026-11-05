@@ -4,18 +4,22 @@
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill, ic } from './lib.js';
 import { findings, limitRows } from './accounts.js';
+import { computersStatus, syncOn, computers, nameOf, cdot, cdots, splitBar, tileSplit, scope, scopeSeg } from './computers.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
 const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google' };
 const RANGES = [['24h', 24], ['7d', 168], ['30d', 720]];
-const st = { harness: '', range: '24h', metric: 'tokens', rows: null, total: 0, log: false };
+// device: the Activity grid's own computer ('' is every computer added up)
+const st = { harness: '', range: '24h', metric: 'tokens', rows: null, total: 0, log: false, device: '' };
 const money = (c, digits = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 const secs = (ms) => (ms == null ? '—' : (ms / 1000).toFixed(1));
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 
 /** GitHub-style grid: weeks across, Monday to Sunday down, five shades from the day's share of the busiest days. */
-function heatmap(days, metric, width = 900) {
-  const val = (d) => (metric === 'cost' ? d.cost : metric === 'requests' ? d.requests : d.tokens);
+// pc: the computers and each day's tokens by computer (by[day] = {id: tokens}); dev: one computer's tokens only
+function heatmap(days, metric, width = 900, pc = null) {
+  const byDev = (d) => (pc && pc.by[d.day]) || null;
+  const val = (d) => (pc && pc.dev ? (byDev(d) || {})[pc.dev] || 0 : metric === 'cost' ? d.cost : metric === 'requests' ? d.requests : d.tokens);
   const nz = days.map(val).filter((v) => v > 0).sort((a, b) => a - b);
   const q = (p) => nz[Math.min(nz.length - 1, Math.floor(p * nz.length))];
   const cuts = nz.length ? [q(0.25), q(0.5), q(0.75)] : [];
@@ -40,7 +44,9 @@ function heatmap(days, metric, width = 900) {
       if (m !== lastMonth && col - lastLabelCol >= 4) { s += `<text x="${x}" y="11" font-size="10.5" style="fill:var(--m)">${date.toLocaleDateString([], { month: 'short' })}</text>`; lastMonth = m; lastLabelCol = col; }
     }
     const v = val(d);
-    const label = `${date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}: ${fmt(d.tokens)} tokens · ${d.requests} requests · ${money(d.cost)}`;
+    // with several computers the caption splits the day's tokens by computer
+    const split = byDev(d) && Object.keys(byDev(d)).length > 1 ? ' · ' + Object.entries(byDev(d)).filter(([, t]) => t).map(([id, t]) => `${nameOf(pc.c, id)} ${fmt(t)}`).join(' · ') : '';
+    const label = `${date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}: ${pc && pc.dev ? `${fmt(val(d))} tokens on ${nameOf(pc.c, pc.dev)}` : `${fmt(d.tokens)} tokens · ${d.requests} requests · ${money(d.cost)}`}${split}`;
     s += `<rect class="hm" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="2" style="fill:${shade[level(v)]}" data-l="${level(v)}"><title>${esc(label)}</title></rect>`;
   });
   [['Mon', 0], ['Wed', 2], ['Fri', 4]].forEach(([t, r]) => { s += `<text x="0" y="${top + r * (cell + gap) + Math.min(10, cell)}" font-size="10.5" style="fill:var(--m)">${t}</text>`; });
@@ -98,13 +104,20 @@ function change(cur, prev, kind) {
   const d = (cur - prev) / 1000; // seconds: lower is better
   return [(d > 0 ? '+' : '−') + Math.abs(d).toFixed(1) + ' s', d > 0 ? 'warn' : 'up'];
 }
-function kpis(d, ps, risks) {
+// home: the whole answer of the home call (its tiles carry each number split by computer); pcs: the computers
+function kpis(d, ps, risks, home, pcs) {
   const c = d.cur, p = d.prev, sp = d.spark, fresh = !p.requests;
   const best = d.mix.account.filter((m) => m.tokens > 0)[0];
   // no change to show when the period before had no usage at all
   const vs = (...a) => (fresh ? [c.requests ? 'new' : '', 'flat'] : change(...a));
-  const tile = (key, label, value, unit, [delta, tone], vals, note, click) => `<div class="ovk ${tone} ${click ? 'click' : ''} ${st.metric === key ? 'on' : ''}" ${click ? `data-act="home-metric" data-v="${key}"` : ''} data-testid="kpi-${key}">
-      <div class="kl"><span>${label}</span><span class="kd">${esc(delta)}</span></div><strong>${value}<small> ${unit}</small></strong>${spark(vals)}<div class="kn">${note}</div></div>`;
+  const tile = (key, label, value, unit, [delta, tone], vals, note, click) => {
+    // with several computers: a thin bar of the number by computer, and the largest named in the note
+    const parts = tileSplit(home, key);
+    // the cache hit is a rate, not a sum: each computer's own, no bar
+    const sb = key === 'hit' ? { bar: '', note: parts.length > 1 ? parts.map((x) => `${esc(x.name || nameOf(pcs, x.id))} ${Math.round(x.value * 100)}%`).join(' · ') : '' } : splitBar(pcs, parts);
+    return `<div class="ovk ${tone} ${click ? 'click' : ''} ${st.metric === key ? 'on' : ''}" ${click ? `data-act="home-metric" data-v="${key}"` : ''} data-testid="kpi-${key}">
+      <div class="kl"><span>${label}</span><span class="kd">${esc(delta)}</span></div><strong>${value}<small> ${unit}</small></strong>${spark(vals)}${sb.bar}<div class="kn">${sb.note ? sb.note + ' · ' : ''}${note}</div></div>`;
+  };
   const first = risks[0];
   return `<section class="ovkpis" aria-label="Key numbers">
     ${tile('tokens', 'Tokens', fmt(c.tokens), '', vs(c.tokens, p.tokens, 'pct'), sp.tokens, `${Math.round(c.hit * 100)}% read from cache · ${c.requests.toLocaleString()} ${c.requests === 1 ? 'request' : 'requests'}`, true)}
@@ -116,9 +129,13 @@ function kpis(d, ps, risks) {
 
 // ---------- live routes ----------
 /** Accounts, the tools they run, the router and the providers, with the traffic of the last five minutes between them. */
-function topology(state, d) {
+// pcs: the computers; with peers, an account card gets a dot per computer it runs on, and traffic only from another
+// computer is drawn in that colour
+function topology(state, d, pcs) {
   const ps = state.profiles.filter((p) => shownTools(state).some((h) => h.id === p.harness)).slice(0, 8);
   const live = d.live, breakers = live.breakers, now = d.now;
+  const peers = syncOn(pcs) && pcs.peers.length > 0;
+  const peerRuns = (p) => (peers ? (live.running || []).filter((r) => r.profile === p.name && r.device && r.device !== pcs.this.id) : []);
   const paused = (id) => breakers[id] && breakers[id].state === 'open' && (!breakers[id].retry_at || breakers[id].retry_at > now);
   const rate = (t) => (t > 0 ? Math.max(1, Math.min(12, Math.round(Math.log10(t + 1) * 2))) : 0);
   const nodes = [], edges = [], tools = [], vendors = [], provs = [];
@@ -130,13 +147,16 @@ function topology(state, d) {
     add(tools, 't:' + p.harness, { id: 't:' + p.harness, label: TOOL[p.harness] || p.harness, tokens: 0, open: 0 });
     const tn = tools.find((t) => t.id === 't:' + p.harness);
     tn.tokens += tk;
-    tn.open += p.running.length;
+    const far = peerRuns(p);
+    tn.open += p.running.length + far.length;
     const tiers = (p.quota && p.quota.tiers) || [], left = tiers.length ? Math.max(0, Math.round(100 - Math.max(...tiers.map((t) => t.used)))) : null;
     const sub = p.kind === 'subscription' ? (p.identity.needs_login || !p.identity.logged_in ? 'Needs login' : [p.identity.plan || 'logged in', left != null ? left + '% left' : ''].filter(Boolean).join(' · '))
       : routed ? ['Routed', p.model].filter(Boolean).join(' · ') : 'API key';
     const tone = sub === 'Needs login' ? 'neg' : left != null && left < 20 ? 'neg' : left != null && left < 45 ? 'warn' : p.kind === 'subscription' ? 'ok' : '';
-    nodes.push({ id: 'a:' + p.name, col: 0, label: p.label, sub, tone, hot: tk ? (routed ? 'a' : 'c') : '', act: `data-act="open-account" data-name="${esc(p.name)}"` });
-    edges.push(['a:' + p.name, 't:' + p.harness, !p.identity.logged_in && p.kind === 'subscription' ? 'r' : routed ? 'a' : 'c', rate(tk)]);
+    const devs = peers ? [...(p.running.length ? [pcs.this.id] : []), ...far.map((r) => r.device)] : [];
+    const onlyFar = far.length && !p.running.length;
+    nodes.push({ id: 'a:' + p.name, col: 0, label: p.label, sub, tone, hot: tk ? (routed ? 'a' : onlyFar ? 'p' : 'c') : '', act: `data-act="open-account" data-name="${esc(p.name)}"`, dots: devs.length ? cdots(pcs, devs) : '' });
+    edges.push(['a:' + p.name, 't:' + p.harness, !p.identity.logged_in && p.kind === 'subscription' ? 'r' : routed ? 'a' : onlyFar ? 'p' : 'c', rate(tk)]);
     if (routed) {
       routerUsed = true;
       edges.push(['t:' + p.harness, 'router', 'a', rate(tk)]);
@@ -179,8 +199,8 @@ function topology(state, d) {
   }
   const tps = Object.values(live.accounts).reduce((a, x) => a + x.tokens, 0) / (live.window_ms / 1000);
   const html = `<div class="topo" data-testid="routes" style="height:${H}px"><canvas aria-hidden="true"></canvas>
-    ${nodes.map((n) => `<div class="tn ${n.router ? 'router' : ''} ${n.bad ? 'bad' : ''} ${n.col === 1 ? 'tool' : ''}" data-node="${esc(n.id)}" ${n.hot ? `data-hot="${n.hot}"` : ''} ${n.act} style="left:${n.x};top:${n.y}px;width:${W[n.col]}px;min-height:${n.router ? 64 : 54}px" title="${esc(n.label + (n.sub ? ' · ' + n.sub : ''))}"><b>${esc(n.label)}</b><small class="${n.tone ? n.tone + 'T' : ''}">${esc(n.sub || '')}</small></div>`).join('')}</div>`;
-  return { html, edges, tps, empty: !ps.length };
+    ${nodes.map((n) => `<div class="tn ${n.router ? 'router' : ''} ${n.bad ? 'bad' : ''} ${n.col === 1 ? 'tool' : ''}" data-node="${esc(n.id)}" ${n.hot ? `data-hot="${n.hot}"` : ''} ${n.act} style="left:${n.x};top:${n.y}px;width:${W[n.col]}px;min-height:${n.router ? 64 : 54}px" title="${esc(n.label + (n.sub ? ' · ' + n.sub : ''))}"><b>${esc(n.label)}</b><small class="${n.tone ? n.tone + 'T' : ''}">${esc(n.sub || '')}</small>${n.dots || ''}</div>`).join('')}</div>`;
+  return { html, edges, tps, empty: !ps.length, peers };
 }
 
 let topoRaf = 0;
@@ -215,8 +235,8 @@ function startTopo(host, edges, still) {
       const r = el.getBoundingClientRect();
       box[el.dataset.node] = { l: ((r.left - hr.left) / k) * d, t: ((r.top - hr.top) / k) * d, w: (r.width / k) * d, h: (r.height / k) * d, hot: el.dataset.hot };
     });
-    // teal: logins straight to the provider; iris: through the router; red: paused or logged out
-    const COL = light ? { c: [0.06, 0.43, 0.48], a: [0.43, 0.36, 0.82], r: [0.86, 0.15, 0.15] } : { c: [0.21, 0.78, 0.77], a: [0.62, 0.56, 0.94], r: [0.94, 0.27, 0.27] };
+    // teal: logins straight to the provider; iris: through the router; red: paused or logged out; sand: from another computer
+    const COL = light ? { c: [0.06, 0.43, 0.48], a: [0.43, 0.36, 0.82], r: [0.86, 0.15, 0.15], p: [0.78, 0.64, 0.35] } : { c: [0.21, 0.78, 0.77], a: [0.62, 0.56, 0.94], r: [0.94, 0.27, 0.27], p: [0.78, 0.64, 0.35] };
     let n = 0;
     const put = (x, y, s, c, a) => { if (n >= 8000) return; const o = n * 7; A[o] = x; A[o + 1] = y; A[o + 2] = Math.min(s, maxPt); A[o + 3] = c[0]; A[o + 4] = c[1]; A[o + 5] = c[2]; A[o + 6] = a; n++; };
     let hi = 0;
@@ -299,7 +319,8 @@ view('home', async (sheet) => {
   sheet.className = 'sheet';
   const hours = RANGES.find((r) => r[0] === st.range)[1];
   const days = Math.round(hours / 24);
-  const [state, d] = await Promise.all([loadState(), call('home', { days, hours, harness: st.harness, limit: 50 })]);
+  // scope: every computer added up, or this one only; the sync core answers the same shape either way
+  const [state, d, pcs] = await Promise.all([loadState(), call('home', { days, hours, harness: st.harness, limit: 50, scope: scope() }), computersStatus().catch(() => null)]);
   st.rows = d.requests.rows;
   st.total = d.requests.total;
   const o = d.overview, k = d.dash, s = state.settings;
@@ -314,7 +335,11 @@ view('home', async (sheet) => {
     S.appVersions = {};
     call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); if (S.route.view === 'home') render(); }).catch(() => {});
   }
-  const topo = topology(state, k);
+  const topo = topology(state, k, pcs);
+  // the Activity grid: each day's tokens by computer (activity.days[*].by_device), and the switch when there are peers
+  const byDay = Object.fromEntries((((d.activity || {}).days) || []).filter((x) => x.by_device).map((x) => [x.day, x.by_device]));
+  const pc = topo.peers ? { c: pcs, by: byDay, dev: computers(pcs).some((x) => x.id === st.device) ? st.device : '' } : null;
+  const running = topo.peers ? (k.live.running || []) : [];
   sheet.innerHTML = `
     <div class="trow ovhead"><div>
         <div class="live"><i></i>Live · ${esc(state.computer || 'this computer')} · ${ps.length} accounts · ${logged} logged in · ${open ? `<a href="#sessions?live=1" class="acT" data-testid="home-live">${open} ${open === 1 ? 'console' : 'consoles'} open</a>` : '0 consoles open'} · router :${state.router.port} ${state.router.running ? 'running' : 'stopped'}</div>
@@ -322,25 +347,28 @@ view('home', async (sheet) => {
       <div class="acts">
         <div class="toolfilter" role="group" aria-label="Tool"><a class="${!st.harness ? 'on' : ''}" data-act="home-tool" data-v="" data-testid="tool-all">All</a>
           ${tools.map((h) => `<a class="${st.harness === h.id ? 'on' : ''}" data-act="home-tool" data-v="${h.id}" data-testid="tool-${h.id}">${esc(h.label)}</a>`).join('')}</div>
-        <span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${r}</a>`).join('')}</span>
+        ${syncOn(pcs) ? scopeSeg() : ''}<span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${r}</a>`).join('')}</span>
         ${best ? `<button class="btn primary" data-act="start" data-name="${esc(best.name)}" data-testid="start-best">${ic.play} Start ${esc(best.label)}</button>` : ''}</div></div>
-    ${kpis(k, ps, risks)}
+    ${kpis(k, ps, risks, d, pcs)}
     <section class="panel ovroutes"><div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><span class="muted mono sm">particles = tokens per second, last 5 minutes, updated each minute</span></div>
       ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
-      <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span><span>Click a card to open it</span></div></section>
+      <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span>${topo.peers ? `<span><i class="lp"></i>Traffic from another computer</span><span>${cdots(pcs, computers(pcs).map((x) => x.id))} in use on ${esc(computers(pcs).map((x) => x.name).join(', '))}</span>` : ''}<span>Click a card to open it</span></div></section>
+    ${running.length ? `<section class="panel" data-testid="running-now"><div class="ph"><h2>Running now</h2><span class="muted mono sm">${running.length} ${running.length === 1 ? 'session' : 'sessions'} on your computers</span></div>
+      ${running.map((r) => `<div class="runrow">${cdot(pcs, r.device)}<b>${esc(r.project_name || r.project || (r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder')}</b><span class="muted">${esc(nameOf(pcs, r.device))} · ${esc(acctName(r.profile))} · ${esc(TOOL[r.harness] || r.harness || '')}</span><span class="mono muted">${r.started_at ? dur(now - r.started_at) : ''}</span></div>`).join('')}</section>` : ''}
     ${limitsPanel(burn, ps, now)}
-    <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2><span class="muted mono sm">daily ${st.metric === 'cost' ? 'cost' : st.metric}</span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
+    <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2><span class="acts">${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[['', 'All'], ...computers(pcs).map((x) => [x.id, x.name])].map(([v, l]) => `<a class="${pc.dev === v ? 'on' : ''}" data-act="home-device" data-v="${esc(v)}" data-testid="activity-pc-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}<span class="muted mono sm">daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : (st.metric === 'cost' ? 'cost' : st.metric) + (pc ? ' · all computers' : '')}</span></span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
     <section class="panel" style="padding-bottom:6px"><div class="ph"><h2>${st.log ? 'Request log' : 'Latest replies'} <span class="muted mono sm">${d.requests.total.toLocaleString()}</span></h2>
         <a class="acT sm linkb" data-act="home-log" data-testid="request-log-open">${st.log ? 'Latest replies' : 'Request log'}</a></div>
       ${st.log ? `<p class="hint">Costs are what these tokens would cost at API list prices (models.dev). Subscriptions are not billed per token.</p>
       <div class="tscroll" id="home-table">${requestTable(st.rows)}</div>
       ${st.rows.length < st.total ? '<div style="padding:10px 0"><button class="btn outline sm" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}` : latestTable(st.rows)}</section>`;
-  fit(sheet.querySelector('.hmwrap'), (w) => heatmap(o.heatmap, st.metric, w));
+  fit(sheet.querySelector('.hmwrap'), (w) => heatmap(o.heatmap, st.metric, w, pc));
   const host = sheet.querySelector('.topo');
   if (host) startTopo(host, topo.edges, !s.moving_routes);
 });
 
 action('home-metric', (el) => { st.metric = el.dataset.v; render(); });
+action('home-device', (el) => { st.device = el.dataset.v; render(); });
 action('home-log', () => { st.log = !st.log; render(); });
 action('home-tool', (el) => { st.harness = el.dataset.v; render(); });
 action('home-range', (el) => { st.range = el.dataset.v; render(); });

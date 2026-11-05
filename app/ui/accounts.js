@@ -4,6 +4,7 @@ import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, refr
 import { esc, fmt, hm, when, dur, resetText, lvl, avatar, toolPill, toolIcon, meter, ic, bars, timeline } from './lib.js';
 import { tagsHtml, stacked } from './views.js';
 import { saveFile } from './core.js';
+import { syncOn, cdot, nameOf } from './computers.js';
 
 const tier = (p, id) => p.quota && p.quota.tiers.find((t) => t.id === id);
 const weekTier = (p) => tier(p, 'week') || (p.quota && p.quota.tiers.find((t) => t.id.startsWith('week')));
@@ -259,11 +260,15 @@ export function sessionRow(s) {
   // a dot (teal: open now), the title with where it ran, the account, the tool, tokens, when, and one action
   const tool = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' }[s.harness];
   const where = [`${s.messages} ${s.messages === 1 ? 'msg' : 'msgs'}`, s.cwd ? s.cwd.split(/[\\/]/).slice(-2).join('\\') : ''].filter(Boolean).join(' · ');
-  return `<div class="srow" data-search="${esc(((s.title || '') + ' ' + (s.cwd || '') + ' ' + acctName(s.profile) + ' ' + (tool || '')).toLowerCase())}" data-testid="session-${esc(s.id)}"><i class="sdot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : 'aria-hidden="true"'}></i>
+  // with sync on, a Computer column: where the session ran; one open on another computer says so, with no action yet
+  // (Resume here comes with phase 3: the cell stays)
+  const pcs = S.cache.computers, far = s.open_elsewhere ? (s.device_name || nameOf(pcs, s.device)) : '';
+  const pc = syncOn(pcs) ? `<div class="pc" title="Ran on ${esc(s.device_name || nameOf(pcs, s.device))}">${cdot(pcs, s.device)}<span>${esc(s.device_name || nameOf(pcs, s.device))}</span></div>` : '';
+  return `<div class="srow ${pc ? 'withpc' : ''}" data-search="${esc(((s.title || '') + ' ' + (s.cwd || '') + ' ' + acctName(s.profile) + ' ' + (tool || '') + ' ' + (s.device_name || '')).toLowerCase())}" data-testid="session-${esc(s.id)}"><i class="sdot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : 'aria-hidden="true"'}></i>
     <div class="t" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-testid="read-${esc(s.id)}" role="button" tabindex="0"><b>${esc(s.title || 'Untitled session')}</b><span class="mono" title="${esc(s.cwd)}">${esc(where)}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</span></div>
-    <div class="acct">${esc(acctName(s.profile))}</div><div>${toolPill(s.harness, tool)}</div><div class="num mono">${fmt(s.tokens)}</div>
-    <div class="when mono ${s.open ? 'live' : ''}">${s.open ? 'live' : esc(when(s.last_active_at))}</div>
-    <div class="num">${s.open ? `<button class="btn outline sm" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>`
+    <div class="acct">${esc(acctName(s.profile))}</div><div>${toolPill(s.harness, tool)}</div>${pc}<div class="num mono">${fmt(s.tokens)}</div>
+    <div class="when mono ${s.open || far ? 'live' : ''}">${far ? 'running on ' + esc(far) : s.open ? 'live' : esc(when(s.last_active_at))}</div>
+    <div class="num">${far ? '' : s.open ? `<button class="btn outline sm" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>`
       : `<button class="btn outline sm" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`}</div></div>`;
 }
 

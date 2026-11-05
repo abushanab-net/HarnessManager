@@ -4,6 +4,7 @@ import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, open
 import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
+import { computersStatus, syncOn, computers, nameOf, cdot, cdots } from './computers.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
 
@@ -58,14 +59,16 @@ const sMore = new Set();
 let railMore = false;
 
 view('sessions', async (sheet, params) => {
-  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '';
+  // pc: every computer (''), this one ('here', which the sync core answers), or one other computer (its id, filtered here)
+  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '', pc = params.pc || '';
   if (!S.state) await call('state').then((s) => (S.state = s));
   const filter = { harness: null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null };
   sheet.className = 'sheet';
   sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
-  let [groups, plist, tlist] = await Promise.all([call('sessions', { filter, group }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => [])]);
+  let [groups, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope: pc === 'here' ? 'here' : 'all' }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   S.cache.tags = tlist;
   drawPins(plist);
+  if (pc && pc !== 'here') groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => s.device === pc) })).filter((g) => g.sessions.length).map((g) => ({ ...g, tokens: g.sessions.reduce((a, s) => a + s.tokens, 0) }));
   const all = groups.flatMap((g) => g.sessions);
   S.cache.sessionOrder = all.map((s) => ({ profile: s.profile, id: s.id }));
   const tools = [...new Set(all.map((s) => s.harness))].map((h) => TOOL[h]).join(', ').replace(/, ([^,]*)$/, ' and $1');
@@ -117,6 +120,7 @@ view('sessions', async (sheet, params) => {
     <div class="fbar sbar">${live ? `<a class="chip on" data-act="s-set" data-k="live" data-v="" role="button" tabindex="0" data-testid="chip-live">Running now ✕</a>` : ''}${tag && !cur ? `<a class="chip on" data-act="s-set" data-k="tag" data-v="" role="button" tabindex="0" data-testid="chip-tag"><span class="tagc ${tagColor(tag)}">${esc(tag)}</span> ✕</a>` : ''}${q ? `<a class="chip on" data-act="s-set" data-k="q" data-v="" role="button" tabindex="0">“${esc(q)}” ✕</a>` : ''}
       <span class="lbl">Group by</span><span class="seg3">${[['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')).map(([k, l]) => `<a class="${group === k ? 'on' : ''}" data-act="s-set" data-k="group" data-v="${k}" data-testid="group-${k}">${l}</a>`).join('')}</span>
       <span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${days === v ? 'on' : ''} mono" data-act="s-set" data-k="days" data-v="${v}" data-testid="days-${v}">${l}</a>`).join('')}</span>
+      ${syncOn(pcs) ? `<span class="seg3" role="group" aria-label="Computer" data-testid="pc-seg">${[['', 'All computers'], ['here', 'This computer'], ...pcs.peers.map((x) => [x.id, x.name])].map(([v, l]) => `<a class="${pc === v ? 'on' : ''}" data-act="s-set" data-k="pc" data-v="${esc(v)}" data-testid="pc-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}
       ${chips}<span class="muted sm">Search above narrows this list</span></div>
     ${running.length && !live ? grp({ name: 'Running now', sessions: running, tokens: running.reduce((a, s) => a + s.tokens, 0) }, 'live', 'livegrp') : ''}
     ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length ? '' : '<p class="empty">No sessions match.</p>'}</div></div>`;
@@ -143,7 +147,7 @@ const SH = ['var(--ac)', 'var(--h3)', 'var(--h2)', 'var(--h1)', 'var(--iris)', '
 const pj = { list: null, fetched: '', days: '7', sort: 'active', metric: 'tokens', per: 10, page: 0, tiles: {} };
 const pjHash = () => history.replaceState(null, '', href('projects', { days: pj.days === '7' ? '' : pj.days, sort: pj.sort === 'active' ? '' : pj.sort, metric: pj.metric === 'tokens' ? '' : pj.metric, per: pj.per === 10 ? '' : String(pj.per), page: pj.page ? String(pj.page) : '' }));
 async function fetchProjects() {
-  const [list, tl] = await Promise.all([call('projects', { days: pj.days === 'all' ? null : +pj.days }), call('tag_list').catch(() => [])]);
+  const [list, tl] = await Promise.all([call('projects', { days: pj.days === 'all' ? null : +pj.days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   pj.list = list; pj.fetched = pj.days; S.cache.tags = tl;
   drawPins(list);
 }
@@ -155,6 +159,12 @@ const area = (s) => {
 };
 const pinBtn = (p) => `<button class="ib pin ${p.pinned ? 'on' : ''}" data-act="project-pin" data-key="${esc(p.key)}" data-on="${p.pinned ? '' : '1'}" title="${p.pinned ? 'Pinned to the sidebar: click to unpin' : 'Pin to the sidebar'}" aria-label="${p.pinned ? 'Unpin' : 'Pin'} ${esc(p.name)}" data-testid="pin-${esc(p.key)}">${ic.pin}</button>`;
 const editBtn = (p) => `<button class="ib edit" data-act="project-rename" data-key="${esc(p.key)}" title="Rename (or double-click the name)" aria-label="Rename ${esc(p.name)}" data-testid="rename-${esc(p.key)}">${ic.edit}</button>`;
+/** With sync on: a dot per computer that has the repository (the counts above sum them all), and whether this one has it. */
+const pcDots = (p) => {
+  const pcs = S.cache.computers;
+  if (!syncOn(pcs) || !p.devices || !p.devices.length) return '';
+  return `<br><span class="pcs-row" title="${esc(p.devices.map((d) => `${d.name || nameOf(pcs, d.id)}: ${d.sessions} ${d.sessions === 1 ? 'session' : 'sessions'}`).join(', '))}" data-testid="pcard-pcs">${cdots(pcs, p.devices.map((d) => d.id))}${p.here === false ? '<span class="muted">not cloned here</span>' : ''}</span>`;
+};
 /** The name of a project, renamed in place by the pencil or a double-click. */
 export const nameEl = (p, big) => `<span class="pname ${big ? 'big' : ''}" data-name="${esc(p.key)}" title="Double-click to rename">${esc(p.name)}</span>`;
 
@@ -224,7 +234,7 @@ function drawRows() {
       <div class="who"><div class="hd">${nameEl(p)}${editBtn(p)}</div><span class="path mono" title="${esc(p.remote || p.root)}">${esc(p.remote || p.root)}</span><div class="hd">${tagsHtml(p.tags, 'project', p.key, p.name)}</div></div>
       ${area(p.series)}
       <div class="num"><b>${money(p.cost)}</b><small>${fmt(p.tokens)} tokens${p.cost != null && p.priced_share < 0.95 ? ' · ' + Math.round(p.priced_share * 100) + '% priced' : ''}</small></div>
-      <div class="meta">${p.sessions} ${p.sessions === 1 ? 'session' : 'sessions'} · ${p.accounts.length} ${p.accounts.length === 1 ? 'account' : 'accounts'}<br><span class="${p.live ? 'acT' : ''}">${p.live ? p.live + ' live' : esc(when(p.last_active_at))}</span></div>
+      <div class="meta">${p.sessions} ${p.sessions === 1 ? 'session' : 'sessions'} · ${p.accounts.length} ${p.accounts.length === 1 ? 'account' : 'accounts'}<br><span class="${p.live ? 'acT' : ''}">${p.live ? p.live + ' live' : esc(when(p.last_active_at))}</span>${pcDots(p)}</div>
       <div class="pacts">${pinBtn(p)}${p.root ? `<button class="ib" data-act="project-new" data-dir="${esc(p.root)}" data-name="${esc(p.name)}" data-profile="" title="New session here" aria-label="New session in ${esc(p.name)}">${ic.play}</button>` : ''}<button class="ib" data-act="project-menu" data-key="${esc(p.key)}" data-name="${esc(p.name)}" data-root="${esc(p.root)}" data-pinned="${p.pinned ? 1 : ''}" aria-label="More for ${esc(p.name)}">${ic.dots}</button></div></div>`).join('') || '<p class="empty">No sessions in this range yet.</p>';
   if (pager) pager.innerHTML = sorted.length > 10 ? `<button class="btn sm" data-act="p-set" data-k="page" data-v="${Math.max(0, pj.page - 1)}" ${pj.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === pj.page ? 'on' : ''}" data-act="p-set" data-k="page" data-v="${i}" data-testid="ppage-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="p-set" data-k="page" data-v="${Math.min(pages - 1, pj.page + 1)}" ${pj.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
       <span class="help">${pj.page * pj.per + 1}–${Math.min(sorted.length, (pj.page + 1) * pj.per)} of ${sorted.length}</span><span class="seg3 mono">${[10, 25, 50].map((n) => `<a class="${pj.per === n ? 'on' : ''}" data-act="p-set" data-k="per" data-v="${n}" data-testid="pper-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>` : '';
@@ -692,6 +702,8 @@ view('settings', async (sheet) => {
     ${row('Find tools again', '', 'Adds a main profile for Claude Code, Codex, OpenCode or Antigravity when found.', '<button class="btn outline" data-act="detect">Find tools</button>')}
     ${row('Old launcher', '', 'Accounts and keys from <span class="mono">claude-accounts.json</span>. Keys can only be read on the computer that saved them.', '<button class="btn outline" data-act="import-ps">Import</button>')}
     ${row('Tours', '', 'The walkthrough each page shows the first time you open it. The ? at the top replays the tour of the page you are on.', '<button class="btn outline" data-act="guides-reset" data-testid="guides-reset">Show the tours again</button>')}
+    <h5 class="sh5">Computers</h5>
+    <div id="st-computers" data-testid="computers"><p class="muted">Reading computers…</p></div>
     <h5 class="sh5">Backups</h5>
     <div id="st-backups" data-testid="backups"><p class="muted">Reading backups…</p></div>`;
   // every section a card that folds; open by default, and its fields stay on the page while folded
@@ -701,6 +713,7 @@ view('settings', async (sheet) => {
     const n = (part.match(/class="frow"/g) || []).length;
     return `<section class="panel sset ${open ? '' : 'shut'}" data-testid="sec-${id}"><h2 class="sh5"><button class="fold" data-act="set-fold" data-v="${id}" aria-expanded="${open}">${title}<span class="cnt">${n ? `${n} ${n === 1 ? 'setting' : 'settings'}` : ''}<span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span></span></button></h2><div class="sbody">${part.slice(i + 5)}</div></section>`;
   }).join('');
+  drawComputers(s, st);
   drawBackups(s);
 });
 const setFold = new Set();
@@ -710,6 +723,58 @@ action('set-fold', (el) => {
   sec.classList.toggle('shut', setFold.has(id));
   el.setAttribute('aria-expanded', String(!setFold.has(id)));
   el.querySelector('.chev').textContent = setFold.has(id) ? '▸' : '▾';
+});
+
+// ---------- Settings > Computers ----------
+// this computer's name, how it syncs (a shared folder now; a hub in phase 5), what travels, and a card per computer
+const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + ' ago');
+async function drawComputers(s, st) {
+  const c = await computersStatus().catch(() => null);
+  const el = document.getElementById('st-computers');
+  if (!c || !el) return;
+  const on = syncOn(c), now = Date.now(), n = computers(c).length;
+  const pill = (t) => `<span class="pill">${t}</span>`;
+  const card = (d) => {
+    const me = d === c.this, seq = d.last_seq || 0, done = me ? (d.published_seq ?? seq) : (d.applied_seq || 0), pct = seq ? Math.min(100, Math.round((done / seq) * 100)) : 100;
+    const stale = !me && !(d.last_seen && now - d.last_seen < 180000);
+    const heard = me ? 'writing now' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';
+    const facts = [d.projects != null ? `${d.projects} ${d.projects === 1 ? 'project' : 'projects'} here` : '', d.accounts != null ? `${d.accounts} ${d.accounts === 1 ? 'account' : 'accounts'}` : '', (d.running || []).length ? `${d.running.length} running` : '', d.transport ? `over ${d.transport}` : ''].filter(Boolean);
+    return `<div class="dev" data-testid="computer-${esc(d.id || 'this')}">${me ? '<span class="pill teal me">this one</span>' : ''}<b>${cdot(c, d.id)}${esc(d.name)}</b>
+      <span class="st mono ${stale ? 'warnT' : 'acT'}">${esc([me ? { windows: 'Windows', macos: 'macOS', linux: 'Linux' }[st.os] || st.os : d.os, me ? st.version : d.app_version, heard].filter(Boolean).join(' · '))}</span>
+      <div class="bar" title="${me ? `${done.toLocaleString()} of ${seq.toLocaleString()} entries published` : `${done.toLocaleString()} of ${seq.toLocaleString()} entries applied here`}"><i class="${pct < 100 && stale ? 'warn' : ''}" style="width:${pct}%"></i></div>
+      <span class="st mono muted">${esc(facts.join(' · ') || (seq ? `${seq.toLocaleString()} journal entries` : 'nothing written yet'))}</span></div>`;
+  };
+  el.innerHTML = `${row('This computer', info('devname', 'The name the other computers show for this one, in their lists, on sessions and on the chip at the top.<br><b>Default: the computer name</b> Windows or macOS gives it.'), 'How your other computers see this one.',
+      `<input class="input" id="st-devname" value="${esc(c.this.name)}" maxlength="40" aria-label="This computer's name" style="width:220px" data-testid="st-devname"><button class="btn outline" data-act="computers-set" data-key="device_name" data-from="st-devname" data-testid="st-devname-save">Rename</button>`)}
+    ${row('How your computers sync', info('syncmode', 'Pick one per computer. Each computer writes its own journal there and reads the others\'; keys and logins never go in it. Switching later keeps everything, because the journal is the same either way.<br><b>Default: off.</b>'), `Pick one per computer. Each computer writes its own journal there and reads the others'; keys and logins never go in it.
+      <div class="mcards"><div class="mcard ${on && c.mode === 'folder' ? 'on' : ''}" role="button" tabindex="0" data-act="sync-folder-pick" data-testid="sync-folder" aria-pressed="${on && c.mode === 'folder'}"><i></i><div><b>A shared folder</b><span>OneDrive, Google Drive, an SMB share or a NAS. Nothing to run; the service carries the files.</span>
+          <div class="f"><span class="inp mono ${c.folder ? '' : 'muted'}" title="${esc(c.folder)}" data-testid="sync-folder-path">${esc(c.folder || 'No folder chosen yet')}</span><button class="btn sm" data-act="sync-folder-pick" data-testid="sync-folder-pick">${c.folder ? 'Change…' : 'Choose…'}</button>${on && c.mode === 'folder' ? '<button class="btn sm" data-act="sync-off" data-testid="sync-off">Stop syncing</button>' : ''}</div></div></div>
+        <div class="mcard off" aria-disabled="true" data-testid="sync-hub"><i></i><div><b>A hub you host ${pill('phase 5')}</b><span>Your VPS with Docker, or a Cloudflare Worker. Works from any network, no VPN needed, and gives live presence everywhere.</span>
+          <div class="f"><input class="input mono" disabled placeholder="https://hub.example.com" aria-label="Hub address"><button class="btn sm" disabled>Join with a code…</button></div></div></div></div>`, '')}
+    ${row('Carry transcripts', info('transcripts', 'Also share this computer\'s session transcripts, so they can be resumed on another computer (phase 3). Up to 200 MB; older ones go to the archive first.<br><b>Default: on.</b>'), 'Share this computer\'s session transcripts, so they can be resumed elsewhere.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_transcripts" ${s.sync_transcripts !== false ? 'checked' : ''} data-testid="st-transcripts"> Carry transcripts</label>`)}
+    ${row('Presence', info('presence', 'Writes what is running here every minute while the app is open, so the other computers show it in Live routes and Running now.<br><b>Default: on.</b>'), 'Tell the other computers what is running here, every minute while the app is open.', `<label class="switch"><input type="checkbox" data-act="computers-set" data-key="sync_presence" ${s.sync_presence !== false ? 'checked' : ''} data-testid="st-presence"> Share what runs here</label>`)}
+    ${row('Direct connection ' + pill('phase 2'), '', 'On top of the folder or the hub: find the other computers on this network or over the VPN and talk to them directly, for live routes within a second.', `<label class="switch"><input type="checkbox" disabled data-testid="st-direct"> Connect directly</label><button class="btn outline" disabled data-testid="pair">Pair a computer…</button>`)}
+    <div class="devhead"><b>${n} ${n === 1 ? 'computer' : 'computers'}</b><span class="muted sm">${on ? `synced through a ${c.mode === 'hub' ? 'hub' : 'folder'}${c.last_run ? ' · last round ' + ago(c.last_run) : ''}` : 'sync is off: only this computer'}</span>${c.error ? `<span class="err sm" data-testid="sync-error">${esc(c.error)}</span>` : ''}
+      <span class="acts">${on ? `<button class="btn sm primary" data-act="computers-now" data-testid="computers-now">${ic.refresh} Sync now</button>` : ''}</span></div>
+    <div class="devs" data-testid="computer-cards">${computers(c).map(card).join('')}</div>`;
+}
+// a switch or the name: saved through computers_set, which answers with the new status
+action('computers-set', async (el) => {
+  const value = el.type === 'checkbox' ? el.checked : document.getElementById(el.dataset.from).value.trim();
+  if (el.type !== 'checkbox' && !value) return;
+  if (await mutate(() => call('computers_set', { [el.dataset.key]: value }), 'Saved') === undefined && el.type === 'checkbox') el.checked = !el.checked;
+});
+action('sync-folder-pick', async () => {
+  const p = await pickFolder();
+  if (p) mutate(() => call('computers_set', { sync_mode: 'folder', sync_folder: p }), 'Syncing through ' + p);
+});
+action('sync-off', () => mutate(() => call('computers_set', { sync_mode: 'off' }), 'Sync is off; the folder keeps what was written'));
+action('computers-now', async () => {
+  const r = await attempt(() => call('computers_now'));
+  if (!r) return;
+  const n = (r.peers || []).length;
+  toast(r.error ? 'Sync round: ' + r.error : `Synced with ${n} other ${n === 1 ? 'computer' : 'computers'}`, !!r.error);
+  changed();
 });
 
 const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
