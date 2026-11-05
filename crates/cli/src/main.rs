@@ -727,7 +727,7 @@ fn real_main(cli: Cli) -> Result<i32> {
                 for l in v["locations"].as_array().into_iter().flatten() { println!("  {:<12} {} ({} sessions, {:.1} MB){}", l["kind"].as_str().unwrap_or(""), l["path"].as_str().unwrap_or(""), l["sessions"], l["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, if l["on"] == false { ", off" } else { "" }); }
                 if let Some(at) = v["last"]["at"].as_i64() { println!("  last run {}: {} moved", fmt_reset(Some(at)), v["last"]["archived"]); }
             } else {
-                println!("{} sessions moved to the archive ({:.1} MB){}", v["archived"], v["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, v["why"].as_str().map(|w| format!("; {w}")).unwrap_or_default());
+                println!("{} {} moved to the archive ({:.1} MB){}", v["archived"], if v["archived"] == 1 { "session" } else { "sessions" }, v["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, v["why"].as_str().map(|w| format!("; {w}")).unwrap_or_default());
             }
         }
     }
