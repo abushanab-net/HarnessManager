@@ -1238,6 +1238,126 @@ description: Bulk skill ${i}
     await waitFor(async () => (await win('isVisible()')) === true, 'shown again');
   });
 
+  // ---- across computers (WP-4) ----
+  // The screens for several computers. The sync core (computers_status, computers_now, computers_set; scope and the
+  // per-computer fields of home, sessions, projects and live) is built in parallel: without it every page draws the
+  // "sync off" state, which the first tests check. HRM_E2E_SYNC=1 runs the rest against a seeded sync folder.
+  await test('computers: the Settings section in the off state, the chooser, no chip, and the Overview as before', async () => {
+    await nav('#settings');
+    await $('[data-testid=sec-computers] [data-testid=sync-folder]');
+    const d = await exec(`return {
+      name: document.getElementById('st-devname').value,
+      folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('on'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
+      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubOff: document.querySelector('[data-testid=sync-hub] input').disabled && document.querySelector('[data-testid=sync-hub] button').disabled,
+      direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
+      transcripts: document.querySelector('[data-testid=st-transcripts]').checked, presence: document.querySelector('[data-testid=st-presence]').checked,
+      pills: [...document.querySelectorAll('[data-testid=computers] .pill')].map((p) => p.textContent.trim()),
+      cards: [...document.querySelectorAll('[data-testid=computer-cards] .dev b')].map((b) => b.textContent.trim()),
+      syncNow: !!document.querySelector('[data-testid=computers-now]'), chip: document.getElementById('pcs').hidden,
+      order: [...document.querySelectorAll('.sset h2 .fold')].map((h) => h.firstChild.textContent.trim()) }`);
+    assert.ok(d.name, 'this computer has a name');
+    assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
+    assert.ok(d.folderText.includes('No folder'), 'no folder yet');
+    assert.ok(d.hub.includes('A hub you host') && d.hubOff, 'the hub card waits for phase 5');
+    assert.ok(d.direct && d.pair, 'the direct connection and pairing wait for phase 2');
+    assert.ok(d.pills.includes('phase 5') && d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
+    assert.ok(d.transcripts && d.presence, 'transcripts and presence default to on');
+    assert.deepEqual(d.cards, [d.name], 'only this computer');
+    assert.equal(d.syncNow, false, 'no Sync now while sync is off');
+    assert.equal(d.chip, true, 'no computers chip while sync is off');
+    assert.deepEqual(d.order.slice(-2), ['Computers', 'Backups'], 'the section sits above Backups');
+    await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+    await shot('19-settings-computers');
+    // the tooltip of the section's first setting, like every other row
+    await page.hover('[data-testid=tip-devname]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-devname')).display`)) === 'block', 'tooltip shown');
+    // with sync off the other pages are as before: no scope switch, no Computer column, no dots
+    await nav('#home');
+    await $('[data-testid=limits]');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], [data-testid=running-now], .ovk .split, .tn .cdots')")), 'the Overview is as before');
+    await nav('#sessions');
+    await $('[data-testid=group]');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .srow .pc, .srow.withpc')")), 'Sessions as before');
+    await nav('#projects');
+    await $('[data-testid=project-cards] .pcrow');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=pcard-pcs]')")), 'Projects as before');
+  });
+
+  await test('computers: the All computers · This computer choice is remembered on this computer, All by default', async () => {
+    const r = await exec(`return import('./computers.js').then((m) => { localStorage.removeItem('hm.scope'); const a = m.scope(); m.setScope('here'); const b = m.scope(); const c = localStorage.getItem('hm.scope'); m.setScope('all'); return [a, b, c, m.scope()]; })`);
+    assert.deepEqual(r, ['all', 'here', 'here', 'all']);
+  });
+
+  if (process.env.HRM_E2E_SYNC) await test('computers: a second computer in the sync folder reaches Settings, the chip, the Overview, Sessions and Projects', async () => {
+    const { createHash } = await import('node:crypto');
+    // the other computer's folder: its record, one journal chunk (two usage rows and a session), its manifest and presence
+    const sync = path.join(sb, 'sync'), dev = 'e2e-laptop-0000', inc = 'inc-e2e-1', devDir = path.join(sync, 'devices', dev);
+    const key = 'github.com/example/platform-gitops', cwd = 'C:\\laptop\\Projects\\platform-gitops', t0 = Date.now() - 3600000;
+    const usage = (n) => ({ request_id: `claude:laptop-s1:m${n}`, profile: 'claude-main', harness: 'claude', ts: t0 + n * 60000, model: 'claude-opus-5-5', project: cwd, session_id: 'laptop-s1', input: 1000, output: 200, cache_read: 500, cache_write: 0, ttft_ms: 900, gen_ms: 4000, cost_usd: 0.0081, price_rev: 'e2e' });
+    const session = { harness: 'claude', profile: 'claude-main', id: 'laptop-s1', title: 'Rotate the staging certificates', cwd, started_at: t0, last_active_at: t0 + 120000, prompts: 2, tool_calls: 2, failed: 0, messages: 4, model: 'claude-opus-5-5', tokens: 3400, source_path: '', project_key: key, project_name: 'platform-gitops', open: false, tags: [] };
+    const chunk = jl([{ seq: 1, ts: t0, op: 'usage', key: usage(1).request_id, data: usage(1) }, { seq: 2, ts: t0 + 60000, op: 'usage', key: usage(2).request_id, data: usage(2) },
+      { seq: 3, ts: t0 + 120000, op: 'session', key: 'claude/claude-main/laptop-s1', data: session }]);
+    const file = `${inc}-1-3.jsonl`;
+    write(path.join(devDir, 'journal', file), chunk);
+    write(path.join(devDir, 'device.json'), JSON.stringify({ id: dev, name: 'LAPTOP', os: 'windows', app_version: '1.3.2', incarnation: inc, roots: { [key]: cwd }, updated_at: Date.now() }));
+    write(path.join(devDir, 'manifest.json'), JSON.stringify({ incarnation: inc, last_seq: 3, chunks: [{ file, from: 1, to: 3, sha256: createHash('sha256').update(chunk).digest('hex'), bytes: Buffer.byteLength(chunk) }] }));
+    write(path.join(devDir, 'presence.json'), JSON.stringify({ at: Date.now(), app_version: '1.3.2', running: [{ profile: 'claude-main', harness: 'claude', project: key, project_name: 'platform-gitops', session_id: 'laptop-s2', cwd, started_at: Date.now() - 600000 }], accounts: { 'claude-main': { tokens_5m: 5000, requests_5m: 4 } }, tps_5m: 16 }));
+    // the folder is chosen (what the Change… button does after the picker), then Sync now runs a round
+    await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).sync_mode, 'folder', 'saved in settings');
+    await nav('#settings');
+    await $('[data-testid=sync-folder].on');
+    await click('[data-testid=computers-now]');
+    await waitFor(async () => (await text('[data-testid=computer-cards]')).includes('LAPTOP'), 'the other computer listed');
+    const cards = await exec(`return [...document.querySelectorAll('[data-testid=computer-cards] .dev')].map((d) => d.innerText.replace(/\\s+/g, ' '))`);
+    assert.equal(cards.length, 2);
+    assert.ok(/LAPTOP.*(windows|Windows).*1\.3\.2.*(heard|writing)/.test(cards[1]), cards[1]);
+    assert.ok(fs.existsSync(path.join(sync, 'devices')) && fs.readdirSync(path.join(sync, 'devices')).length === 2, 'this computer wrote its own record beside the other');
+    await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+    await shot('19b-settings-two-computers');
+    // the chip: a dot per computer, both heard from lately
+    const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.cdot').length, on: el.querySelectorAll('.cdot.on').length, text: el.textContent }`);
+    assert.equal(chip.hidden, false, 'the chip shows with sync on');
+    assert.equal(chip.dots, 2);
+    assert.equal(chip.on, 2, 'both heard within three minutes');
+    assert.ok(chip.text.includes('LAPTOP') && chip.text.includes('synced'), chip.text);
+    // the Overview: the switch, the split on the tiles, the Activity switch, the account's dots and Running now
+    await nav('#home');
+    await $('[data-testid=scope]');
+    await waitFor(async () => (await exec("return !!document.querySelector('[data-testid=kpi-tokens] .split')")), 'the tokens tile split by computer');
+    assert.ok((await text('[data-testid=kpi-tokens] .kn')).includes('%'), 'the largest computer named in the note');
+    assert.ok((await text('[data-testid=activity-pc]')).includes('LAPTOP'), 'the Activity grid has a switch per computer');
+    await $('[data-testid=routes] [data-node="a:claude-main"] .cdots');
+    await hasText('[data-testid=running-now]', 'LAPTOP');
+    await shot('19c-overview-all-computers');
+    await click('[data-testid=activity-pc-' + dev + ']');
+    await hasText('[data-testid=activity] .ph', 'LAPTOP');
+    await click('[data-testid=scope-here]');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=scope] a.on')?.dataset.v")) === 'here', 'This computer picked');
+    assert.equal(await exec("return localStorage.getItem('hm.scope')"), 'here', 'remembered');
+    await shot('19d-overview-this-computer');
+    await click('[data-testid=scope-all]');
+    // Sessions: the Computer column, the filter, and the session open on the other computer
+    await nav('#sessions?days=all');
+    await $('[data-testid=session-laptop-s1] .pc');
+    assert.ok((await text('[data-testid=session-laptop-s1] .pc')).includes('LAPTOP'));
+    assert.ok((await text('[data-testid=session-s-main-1] .pc')).trim().length > 0, 'this computer named on its own session');
+    await click('[data-testid=pc-' + dev + ']');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=session-s-main-1]')")) && (await exec("return !!document.querySelector('[data-testid=session-laptop-s1]')")), 'only the other computer\'s sessions');
+    await shot('19e-sessions-computer');
+    await click('[data-testid=pc-here]');
+    await waitFor(async () => (await exec("return !!document.querySelector('[data-testid=session-s-main-1]')")) && !(await exec("return !!document.querySelector('[data-testid=session-laptop-s1]')")), 'only this computer\'s sessions');
+    await click('[data-testid=pc-all]');
+    await $('[data-testid=session-laptop-s1]');
+    // Projects: the repository both computers have carries two dots; the counts sum both
+    await nav('#projects?days=all');
+    const card = () => exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops'))?.querySelector('[data-testid=pcard-pcs]')?.outerHTML || ''");
+    await waitFor(card, 'the repository card with its computers');
+    assert.equal((await card()).match(/class="cdot/g).length, 2, 'a dot per computer that has the repository');
+    assert.ok(!(await card()).includes('not cloned'), 'this computer has it');
+    await shot('19f-projects-computers');
+  });
+
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
 } catch (e) {
   console.error(e);
