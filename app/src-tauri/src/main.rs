@@ -71,7 +71,8 @@ const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", 
     "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
-    "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer"];
+    "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
+    "session_resume_here", "session_fetch", "transcripts_status"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
     let ctx = state.ctx();
@@ -225,7 +226,11 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             f.scope = f.scope.or_else(|| opt(a, "scope"));
             json!(service::grouped_sessions(ctx, &f, a["group"].as_str().unwrap_or("project"))?)
         }
-        "transcript" => json!(service::transcript(ctx, &s(a, "profile")?, &s(a, "id")?)?),
+        // with `device` another computer's: its fetched transcript (phase 3)
+        "transcript" => match opt(a, "device").filter(|d| d != &ctx.db.device) {
+            Some(d) => json!(hrm_core::transcripts::remote_transcript(ctx, &d, &s(a, "profile")?, &s(a, "id")?)?),
+            None => json!(service::transcript(ctx, &s(a, "profile")?, &s(a, "id")?)?),
+        },
         // size and time only: an open session's page polls it and re-reads the transcript when it changes
         "file_stamp" => {
             let m = std::fs::metadata(s(a, "path")?)?;
@@ -627,6 +632,13 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             ctx.save_registry(&reg)?;
             json!(rep)
         }
+        // resume here (phase 3): a session from another computer as a fork in this computer's clone
+        "session_resume_here" => hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?)?,
+        "session_fetch" => {
+            let t = hrm_core::transcripts::fetch(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?)?;
+            json!({"path": t.path, "bytes": t.bytes})
+        }
+        "transcripts_status" => hrm_core::transcripts::status(ctx)?,
         other => bail!("unknown operation {other}"),
     })
 }
