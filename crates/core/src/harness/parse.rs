@@ -123,6 +123,10 @@ pub fn for_new_lines_with(ctx: &Ctx, profile: &str, path: &Path, cur: Option<(i6
 }
 
 /// A changed session's last cached record, dated by the file: shown now while the file is parsed again later.
+/// Set while the index refreshes: a changed file is parsed now, on the refresh's thread, not later.
+pub static PARSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn parse_now() -> bool { PARSE_NOW.load(std::sync::atomic::Ordering::Relaxed) }
+
 pub fn stale(meta: &SessionMeta, mtime: i64) -> SessionMeta {
     let mut m = meta.clone();
     m.last_active_at = m.last_active_at.max(mtime);

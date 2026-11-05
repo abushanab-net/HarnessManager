@@ -23,9 +23,25 @@ fn main() -> anyhow::Result<()> {
     }
     println!("all harness sessions: {} ms", t.elapsed().as_millis());
     let t = Instant::now();
+    let r = hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All)?;
+    println!("index::refresh(All): {} ms, {} sessions, {} written, {} removed", t.elapsed().as_millis(), r.sessions, r.changed, r.removed);
+    let t = Instant::now();
     let f = hrm_core::service::SessionFilter::default();
     let v = hrm_core::service::sessions(&ctx, &f)?;
     println!("service::sessions (journaling, projects, tags): {} ms, {} rows", t.elapsed().as_millis(), v.len());
+    let page = hrm_core::service::SessionFilter { per: Some(50), page: Some(0), days: Some(7), ..Default::default() };
+    let t = Instant::now();
+    let v = hrm_core::service::sessions(&ctx, &page)?;
+    println!("service::sessions (a page of 50, 7 days): {} ms, {} rows", t.elapsed().as_millis(), v.len());
+    let t = Instant::now();
+    let n = hrm_core::service::sessions_total(&ctx, &page)?;
+    println!("sessions_total: {} ms, {} rows", t.elapsed().as_millis(), n);
+    let t = Instant::now();
+    let g = hrm_core::service::grouped_sessions(&ctx, &page, "project")?;
+    println!("grouped_sessions (the Sessions page: a page of 50, 7 days): {} ms, {} groups", t.elapsed().as_millis(), g.len());
+    let t = Instant::now();
+    let g = hrm_core::service::grouped_sessions(&ctx, &hrm_core::service::SessionFilter { query: Some("build".into()), ..page.clone() }, "project")?;
+    println!("grouped_sessions with a search: {} ms, {} groups", t.elapsed().as_millis(), g.len());
     let t = Instant::now();
     let g = hrm_core::service::grouped_sessions(&ctx, &f, "project")?;
     println!("grouped_sessions: {} ms, {} groups", t.elapsed().as_millis(), g.len());

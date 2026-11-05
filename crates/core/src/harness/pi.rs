@@ -149,6 +149,8 @@ impl Harness for PiLike {
         Ok(stored)
     }
 
+    fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> { vec![self.home(ctx, p).join("sessions")].into_iter().filter(|d| d.is_dir()).collect() }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let mut out = vec![];
         let mut todo = vec![];
@@ -159,12 +161,12 @@ impl Harness for PiLike {
             match cached.get(&key) {
                 Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
                 // a session still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) => {
+                Some((_, _, meta)) if !parse_now() => {
                     out.push(stale(meta, mtime));
                     let (id, name) = (self.id, p.name.clone());
                     refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, id, &name, f, false).meta));
                 }
-                None => todo.push((f, mtime, len)),
+                _ => todo.push((f, mtime, len)),
             }
         }
         each_file_parallel_sig(&todo, |f, mtime, len| {
