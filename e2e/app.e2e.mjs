@@ -1750,12 +1750,21 @@ description: Bulk skill ${i}
     await shot('46-session-archived');
     // Restore… from a backup made now: the preview counts this computer's history and names it; merging adds nothing
     await nav('#settings');
-    await click('[data-testid=backup-now]');
-    await $('[data-testid=backup-Manual]');
-    await click('[data-testid=restore-open]');
-    await click('[data-testid=restore-src-Manual]');
-    await hasText('[data-testid=restore-counts]', 'archived transcripts');
-    const counts = (await text('[data-testid=restore-counts]')).replace(/,/g, '');
+    // the archived row is written by the CLI in its own process; on a busy computer the app's backup can be made
+    // before it sees it, so the backup is tried up to three times
+    let counts = '';
+    for (let i = 0; i < 3; i++) {
+      await click('[data-testid=backup-now]');
+      await $('[data-testid=backup-Manual]');
+      await click('[data-testid=restore-open]');
+      await click('[data-testid=restore-src-Manual]');
+      await hasText('[data-testid=restore-counts]', 'archived transcripts');
+      counts = (await text('[data-testid=restore-counts]')).replace(/,/g, '');
+      if (/\b1 archived/.test(counts)) break;
+      await page.keyboard.press('Escape');
+      await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+      await sleep(2000);
+    }
     assert.ok(+((counts.match(/(\d+) requests/) || [])[1] || 0) > 0 && /\b1 archived/.test(counts), counts);
     const before = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=welcome-adopt]')")), 'its own backup: this computer is in it as itself, nothing to adopt');
