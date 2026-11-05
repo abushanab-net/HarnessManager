@@ -1434,8 +1434,8 @@ description: Bulk skill ${i}
     await click('[data-testid=pair]');
     await $('[data-testid=pair-tabs]');
     assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] a')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
-    // Show a code asks computers_pair_start; without the peer core the answer is the error, in the dialog
-    await hasText('[data-testid=pair-show-body]', 'unknown operation');
+    // Show a code asks computers_pair_start: six digits, three and three
+    await waitFor(async () => /\d{3} \d{3}/.test(await text('[data-testid=pair-show-body]')), 'a code in the dialog');
     await shot('41-pair-show-code');
     await click('[data-testid=pair-enter]');
     await $('[data-testid=pair-code-in]');
@@ -1448,7 +1448,7 @@ description: Bulk skill ${i}
     await code('482915');
     await page.fill('[data-testid=pair-host]', 'laptop:7777');
     await click('[data-testid=pair-join]');
-    await hasText('[data-testid=pair-error]', 'unknown operation');
+    await waitFor(async () => { const t = (await exec("return document.querySelector('[data-testid=pair-error]')?.textContent || ''")).trim(); return t.length > 0 && !t.includes('six digits'); }, "the operation's own error text (no computer is pairing at laptop:7777)", 60000);
     assert.equal(await exec("return document.getElementById('pair-join').disabled"), false, 'Pair can be tried again');
     await shot('41b-pair-enter-code');
     await page.keyboard.press('Escape');
@@ -1490,6 +1490,7 @@ description: Bulk skill ${i}
         await click('[data-testid=st-direct]');
         await waitFor(() => exec("return document.querySelector('[data-testid=st-direct]')?.checked"), 'the direct connection on');
       }
+      await waitFor(async () => exec("return !!document.querySelector('[data-testid=pair]')"), 'the Pair button; the section reads: ' + (await exec("return (document.querySelector('[data-testid=sec-computers]') || { innerText: '(no section)' }).innerText.slice(0, 1500)")), 15000);
       await click('[data-testid=pair]');
       await click('[data-testid=pair-enter]');
       await page.type('[data-testid=pair-code-in]', code);

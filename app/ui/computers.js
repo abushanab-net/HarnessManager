@@ -21,7 +21,8 @@ export async function computersStatus() {
   drawChip(c); // every fresh read redraws the chip, so a page's own read never leaves it behind a stale one
   return c;
 }
-export const syncOn = (c) => !!c && c.mode !== 'off';
+// sync is on with a folder or a hub, and also with the direct connection alone (paired computers, no folder)
+export const syncOn = (c) => !!c && (c.mode !== 'off' || (c.peers || []).length > 0 || !!(S.state && S.state.settings && S.state.settings.direct_connection));
 /** Every computer, this one first. */
 export const computers = (c) => (c ? [c.this, ...c.peers] : []);
 export const nameOf = (c, id) => (computers(c).find((d) => d.id === id) || {}).name || id || '';
