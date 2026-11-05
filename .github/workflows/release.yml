@@ -4,7 +4,7 @@ name: release
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
-permissions: { contents: write }
+permissions: { contents: write, packages: write }
 concurrency: { group: release, cancel-in-progress: false }
 env:
   CARGO_INCREMENTAL: 0
@@ -122,6 +122,25 @@ jobs:
           curl -sSf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/x-apple-diskimage" \
             --data-binary @"$RUNNER_TEMP/$name" \
             "https://uploads.github.com/repos/$GH_REPO/releases/${{ needs.draft.outputs.id }}/assets?name=$name" > /dev/null
+
+  hub:
+    # the hub's image, ghcr.io/<owner>/hrm-hub:<X.Y.Z> and :latest. The job needs the docker CLI and a daemon
+    # (or buildx) on the homek8-general runners; if they have none, give them Docker rather than moving this
+    # job to a GitHub-hosted runner
+    runs-on: homek8-general
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with: { clean: false }
+      - name: Build and push
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GH_REPO,,}"; image="${image%/*}/hrm-hub"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f deploy/hub/Dockerfile -t "$image:$v" -t "$image:latest" .
+          docker push "$image:$v"
+          docker push "$image:latest"
 
   publish:
     needs: [draft, build]
