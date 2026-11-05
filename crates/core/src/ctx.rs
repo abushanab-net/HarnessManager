@@ -59,7 +59,10 @@ pub struct Settings {
     pub sync_transcripts: bool,
     /// Tell the other computers what runs here, once a minute.
     pub sync_presence: bool,
+    /// Talk to paired computers straight over the network (mDNS or an address), besides the folder.
     pub direct_connection: bool,
+    /// The direct connection's port; 0: a free one is picked once and saved here.
+    pub listen_port: u16,
     pub archive_days: u32,
     /// "" means `<sync_folder>/archive`.
     pub archive_dir: String,
@@ -72,7 +75,7 @@ impl Default for Settings {
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
-            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, archive_days: 30, archive_dir: String::new() }
+            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new() }
     }
 }
 
@@ -111,7 +114,7 @@ impl Ctx {
         }
         if settings.device_name.is_empty() { settings.device_name = crate::util::hostname(); made = true; }
         if made { write_atomic(&settings_path, serde_json::to_string_pretty(&settings)?.as_bytes())?; }
-        let db = Db::open(&data.join("hm.db"), &settings.device_id, settings.sync_mode != "off")?;
+        let db = Db::open(&data.join("hm.db"), &settings.device_id, settings.sync_mode != "off" || settings.direct_connection)?;
         Ok(Ctx { data: data.to_path_buf(), home: home.to_path_buf(), settings, db })
     }
 
