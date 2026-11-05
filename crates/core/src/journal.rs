@@ -304,6 +304,13 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
     let r = (|| -> Result<()> {
         if !on(ctx) { bail!("sync is off"); }
         backfill_if_needed(ctx)?;
+        // and, now and then, rows that reached the database without being recorded (the backfill adds nothing twice)
+        let last: i64 = ctx.db.kv_get("journal:catchup_at")?.and_then(|v| v.parse().ok()).unwrap_or(0);
+        if now_ms() - last > 600_000 {
+            let n = backfill(ctx)?;
+            if n > 0 { crate::log::info(&format!("journal: {n} entries caught up")); }
+            ctx.db.kv_set("journal:catchup_at", &now_ms().to_string())?;
+        }
         let root = if ctx.settings.sync_mode == "folder" { Some(folder::root(ctx)?) } else { None };
         // phase 3: changed transcripts go into the folder with their entries, in this round's chunks
         if let Some(root) = &root { if let Err(e) = crate::sync::transcripts::carry(ctx, root) { crate::log::warn(&format!("transcripts: {e:#}")); } }

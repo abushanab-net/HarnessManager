@@ -174,20 +174,30 @@ export function applyTheme(st) {
   document.documentElement.dataset.theme = st.settings.theme || 'system';
 }
 
-export async function loadState() {
-  S.state = await call('state');
-  applyTheme(S.state);
-  const n = S.state.profiles.length, running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name }))), live = running.length;
-  document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
-  setNavCounts({ 'n-accounts': n, 'n-live': live ? live + ' live' : '' });
-  // the live strip in the top bar: one session opens straight away, several open the live list
+/** The live count in the side menu and the strip in the top bar: this computer's running sessions plus every other computer's, from their presence. */
+export function redrawLive() {
+  if (!S.state) return;
+  const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
+  const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
+  const live = running.length + elsewhere;
+  setNavCounts({ 'n-live': live ? live + ' live' : '' });
+  // the live strip in the top bar: one session here opens straight away, otherwise the live list
   const strip = document.getElementById('live-strip');
   if (strip) {
     strip.hidden = !live;
-    const one = live === 1 ? running[0] : null;
-    strip.textContent = live ? `${live} live${one && one.cwd ? ' · ' + one.cwd.split(/[\\/]/).filter(Boolean).pop() : ''}` : '';
+    const one = live === 1 && running.length === 1 ? running[0] : null;
+    strip.textContent = live ? `${live} live${one && one.cwd ? ' · ' + one.cwd.split(/[\\/]/).filter(Boolean).pop() : elsewhere ? ' · ' + elsewhere + ' elsewhere' : ''}` : '';
     strip.href = one && one.session_id ? `#session?profile=${encodeURIComponent(one.profile)}&id=${encodeURIComponent(one.session_id)}` : '#sessions?live=1';
   }
+}
+
+export async function loadState() {
+  S.state = await call('state');
+  applyTheme(S.state);
+  const n = S.state.profiles.length;
+  document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
+  setNavCounts({ 'n-accounts': n });
+  redrawLive();
   setFresh();
   return S.state;
 }

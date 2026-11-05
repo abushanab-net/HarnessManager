@@ -7,7 +7,7 @@
 // Phase 5 adds the hub: Join with a code…, Invite a computer…, the recovery key dialogs (hub_join | hub_invite |
 // ring_key_show | ring_key_enter), "hub · connected" and "rendezvous" on the cards, and the first-run choice.
 
-import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate } from './core.js';
+import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate, redrawLive } from './core.js';
 import { esc, dur } from './lib.js';
 
 const OFF = { mode: 'off', folder: '', this: null, peers: [], last_run: null, error: null };
@@ -20,6 +20,7 @@ export async function computersStatus() {
   c = { ...OFF, ...c, peers: c.peers || [], at: Date.now() };
   c.this = { id: '', name: (S.state && S.state.computer) || 'this computer', ...(c.this || {}) };
   S.cache.computers = c;
+  redrawLive();
   drawChip(c); // every fresh read redraws the chip, so a page's own read never leaves it behind a stale one
   return c;
 }
