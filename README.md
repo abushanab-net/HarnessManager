@@ -139,10 +139,23 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   this way says "continued from LAPTOP" under its title. `hrm resume-here <computer>/<tool>/<account>/<id>`
   and `hrm transcripts` do the same from a terminal.
 
-  **The hub.** Instead of a folder, point every computer at a small service you host on a VPS behind Caddy,
-  in Docker: it carries the journal, presence and transcripts (encrypted with a ring key the hub never sees)
-  and gives direct connections a rendezvous across networks. [deploy/hub/README.md](deploy/hub/README.md) sets
-  one up in ten lines; `hrm hub join | invite | status` does the joining from a terminal.
+  **A hub you host.** The second choice beside the folder: a small service on a VPS behind Caddy, in Docker
+  (`deploy/hub/`), that every computer pushes its journal to and pulls the others' from, with presence,
+  transcripts and the addresses the direct connection meets at, from any network and without a VPN. The first
+  computer joins with the hub's admin token (Settings › Computers › A hub you host › Join with a code…) and
+  makes the **ring key** that seals everything before it leaves: chunks, presence and transcripts reach the hub
+  as ciphertext the hub cannot open, and only the signed device records (names, ids, keys, project roots) are
+  plain. The key is shown once as the **recovery key**, 8 groups of 4 letters and digits for your password
+  manager; Show again sits in Settings behind a confirm. Every other computer joins with a one-time six-digit
+  code from Invite a computer… on a computer already there, and reads the hub either because it was paired
+  directly (the pairing carries the ring key) or after Enter recovery key…. While the app runs it keeps the hub's
+  events socket open and pulls on each change, falling back to a round every 30 s; a computer's card says "hub ·
+  connected", and with the direct connection on, paired computers meet at the addresses the hub holds
+  ("direct · rendezvous · connected") before trying mDNS. What the hub can see: who the computers are, how much
+  each sent and when. What it cannot: a single request, session, prompt or transcript. From a terminal: `hrm hub
+  join <url> --code <c> | --admin <t>`, `hrm hub invite`, `hrm hub status`, `hrm hub leave`, `hrm ring show`,
+  `hrm ring enter`.
+  [deploy/hub/README.md](deploy/hub/README.md) sets one up in ten lines.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 
