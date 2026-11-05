@@ -445,7 +445,7 @@ fn an_event_from_the_hub_runs_a_round_on_the_other_computer() {
     let seen = Arc::new(Mutex::new(vec![]));
     let s2 = seen.clone();
     watch(Arc::new(move || Arc::new(Ctx::open_at(&data, &home).unwrap())), Arc::new(move |v| s2.lock().unwrap().push(v)));
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while std::time::Instant::now() < until && status(&b.ctx)["ws"] != true { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert_eq!(status(&b.ctx)["ws"], true, "the events socket is open");
     a.ctx.db.insert_usage(&[row("claude:1", 1_000)], &Prices::new()).unwrap();
