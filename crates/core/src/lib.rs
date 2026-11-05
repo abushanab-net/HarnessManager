@@ -22,6 +22,8 @@ pub mod util;
 pub mod apps;
 pub mod backup;
 pub mod log;
+pub mod archive;
+pub mod restore;
 
 pub use ctx::Ctx;
 pub use model::*;

@@ -133,6 +133,9 @@ pub struct SessionMeta {
     /// A session continued here from another computer: that computer's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continued_from: Option<String>,
+    /// The transcript moved to the archive (`source_path` is the archived copy): readable, not resumable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 /// A transcript as typed blocks, grouped into turns (one user prompt and the answer to it).

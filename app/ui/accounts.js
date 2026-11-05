@@ -268,12 +268,13 @@ export function sessionRow(s) {
   const pc = syncOn(pcs) ? `<div class="pc" title="Ran on ${esc(s.device_name || nameOf(pcs, s.device))}">${cdot(pcs, s.device)}<span>${esc(s.device_name || nameOf(pcs, s.device))}</span></div>` : '';
   const cfrom = s.continued_from ? `<span class="cfrom" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span> · ` : '';
   return `<div class="srow ${pc ? 'withpc' : ''}" data-search="${esc(((s.title || '') + ' ' + (s.cwd || '') + ' ' + acctName(s.profile) + ' ' + (tool || '') + ' ' + (s.device_name || '')).toLowerCase())}" data-testid="session-${esc(s.id)}"><i class="sdot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : 'aria-hidden="true"'}></i>
-    <div class="t" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" role="button" tabindex="0"><b>${esc(s.title || 'Untitled session')}</b><span class="mono" title="${esc(s.cwd)}">${cfrom}${esc(where)}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</span></div>
+    <div class="t" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" role="button" tabindex="0"><b>${esc(s.title || 'Untitled session')}</b>${s.archived ? `<span class="pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}<span class="mono" title="${esc(s.cwd)}">${cfrom}${esc(where)}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</span></div>
     <div class="acct">${esc(acctName(s.profile))}</div><div>${toolPill(s.harness, tool)}</div>${pc}<div class="num mono">${fmt(s.tokens)}</div>
     <div class="when mono ${s.open || far ? 'live' : ''}">${far ? 'running on ' + esc(far) : s.open ? 'live' : esc(when(s.last_active_at))}</div>
     <div class="num">${remote ? (s.resumable === true ? `<button class="btn outline sm" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>`
         : `<span class="muted sm" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + (s.device_name || nameOf(pcs, s.device)))}</span>`)
       : s.open ? `<button class="btn outline sm" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>`
+      : s.archived ? ''
       : `<button class="btn outline sm" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`}</div></div>`;
 }
 

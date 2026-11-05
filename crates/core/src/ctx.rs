@@ -63,9 +63,16 @@ pub struct Settings {
     pub direct_connection: bool,
     /// The direct connection's port; 0: a free one is picked once and saved here.
     pub listen_port: u16,
+    /// Sessions older than this many days have their transcript moved to the archive; 0: never.
     pub archive_days: u32,
-    /// "" means `<sync_folder>/archive`.
+    /// A folder of the owner's choice for the archive; "" means none.
     pub archive_dir: String,
+    /// Archive copies also go to `<sync_folder>/archive/<device_id>/` when a folder is set.
+    pub archive_in_sync_folder: bool,
+    /// Every backup zip is also copied to `<sync_folder>/backups/<device_id>/`, keeping `backup_keep` of them.
+    pub backup_in_sync_folder: bool,
+    /// The zip also holds this computer's transcripts, compressed.
+    pub backup_transcripts: bool,
 }
 
 impl Default for Settings {
@@ -75,7 +82,8 @@ impl Default for Settings {
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
-            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new() }
+            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
+            archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false }
     }
 }
 

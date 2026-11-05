@@ -6,6 +6,7 @@ import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, 
 import { sessionRow } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, cdot, cdots, heardOn, transportLine } from './computers.js';
 import { resumeData, reasonShort } from './resume.js';
+import { welcomeBack } from './restore.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
@@ -377,11 +378,12 @@ view('session', async (sheet, params) => {
   const body = rv.mode === 'all' ? chatAll : run(picked, 'flat', 30, 10) || `<p class="empty">${rv.mode === 'changes' ? 'This session changed no files.' : 'Nothing failed.'}</p>`;
   sheet.innerHTML = `
     <div class="trow sesh"><div><a href="#sessions" class="crumb acT">← Sessions · ${esc(project)}</a><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1>
-        <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
+        <div class="smeta">${m.open ? `<span class="pill teal mono live">● LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="pill arch" data-testid="session-archived">archived</span>' : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span class="mono">${esc(m.model)}</span>` : ''}
           ${params.device ? `<span data-testid="session-from">ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
           <span>started ${esc(when(m.started_at))} · ${m.prompts} ${m.prompts === 1 ? 'turn' : 'turns'}</span><span class="mono">${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · $' + ss.cost.toFixed(2) : ''}</span></div></div>
       <div class="acts">${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}
         ${params.device ? (m.resumable === true ? `<button class="btn primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
+        : m.archived ? '<span class="muted" data-testid="resume-reason">archived: it can be read, not resumed</span>'
         : `<span class="splitb"><button data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button data-act="terminal-menu" aria-label="Choose terminal">${ic.caret}</button>` : ''}</span>`}
         <button class="iconbtn sq" data-act="session-menu" data-path="${esc(m.source_path)}" data-cwd="${esc(m.cwd)}" aria-label="More">${ic.dots}</button></div></div>
     <div class="ovkpis skpis">${[['Tokens', fmt(m.tokens)], ['Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—'], ['First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—'],
@@ -709,7 +711,7 @@ view('settings', async (sheet) => {
     ${row('Tours', '', 'The walkthrough each page shows the first time you open it. The ? at the top replays the tour of the page you are on.', '<button class="btn outline" data-act="guides-reset" data-testid="guides-reset">Show the tours again</button>')}
     <h5 class="sh5">Computers</h5>
     <div id="st-computers" data-testid="computers"><p class="muted">Reading computers…</p></div>
-    <h5 class="sh5">Backups</h5>
+    <h5 class="sh5">Backups and archive</h5>
     <div id="st-backups" data-testid="backups"><p class="muted">Reading backups…</p></div>`;
   // every section a card that folds; open by default, and its fields stay on the page while folded
   const [head, ...parts] = sheet.innerHTML.split('<h5 class="sh5">');
@@ -781,7 +783,7 @@ action('computers-set', async (el) => {
 });
 action('sync-folder-pick', async () => {
   const p = await pickFolder();
-  if (p) mutate(() => call('computers_set', { sync_mode: 'folder', sync_folder: p }), 'Syncing through ' + p);
+  if (p && await mutate(() => call('computers_set', { sync_mode: 'folder', sync_folder: p }), 'Syncing through ' + p) !== undefined) welcomeBack(p); // phase 4
 });
 action('sync-off', () => mutate(() => call('computers_set', { sync_mode: 'off' }), 'Sync is off; the folder keeps what was written'));
 action('computers-now', async () => {
@@ -814,17 +816,41 @@ document.addEventListener('presence', () => {
 
 const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 async function drawBackups(s) {
-  const b = await call('backups').catch(() => null);
+  const [b, ar] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null)]);
   const el = document.getElementById('st-backups');
   if (!b || !el) return;
+  // phase 4: the copy into the sync folder, transcripts in the zip, the archive's age and locations, Restore…
+  const folderOn = !!(S.cache.computers && S.cache.computers.mode === 'folder');
+  const days = s.archive_days ?? 30, loc = (ar && ar.locations) || [];
+  const stamp = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   el.innerHTML = `${row('Data folder', '', 'Accounts list (unless it lives elsewhere), settings, the usage database, backups and the log.', `<span class="mono muted" style="overflow-wrap:anywhere">${esc(b.data)}</span> <button class="btn outline" data-act="open-folder" data-path="${esc(b.data)}">${ic.folder} Open</button>`)}
-    ${row('Automatic backups', info('bk', 'A backup holds the account list, settings, what Harness Manager wrote into each tool, and the folders of the skills it manages. API keys and logins stay in Windows Credential Manager and are never in a backup.<br><b>Default: every 24 hours, keeping 10.</b>'), 'Made while the app runs, when the newest is older than this.',
+    ${row('Automatic backups', info('bk', 'A backup holds the account list, settings, what Harness Manager wrote into each tool, the folders of the skills it manages, and the history: every request, session, limit reading and tag, with the computer each came from, and the archived sessions. API keys and logins stay in Windows Credential Manager and are never in a backup.<br><b>Default: every 24 hours, keeping 10.</b>'), 'Made while the app runs, when the newest is older than this.',
       `<select class="input" data-act="set-now" data-key="backup_hours" style="max-width:170px" aria-label="Backup interval" data-testid="st-bkhours">${[[0, 'Off'], [6, 'Every 6 hours'], [12, 'Every 12 hours'], [24, 'Every 24 hours'], [168, 'Every week']].map(([v, l]) => `<option value="${v}" ${s.backup_hours === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
        <select class="input" data-act="set-now" data-key="backup_keep" style="max-width:130px" aria-label="Backups kept">${[3, 5, 10, 20, 50].map((v) => `<option value="${v}" ${s.backup_keep === v ? 'selected' : ''}>Keep ${v}</option>`).join('')}</select>`)}
+    ${row('Also in the sync folder', info('bkfolder', 'Every backup is also copied to <span class="mono">backups\\&lt;this computer&gt;</span> in the sync folder, keeping as many there as here, so a fresh computer finds its history beside the journal.<br><b>Default: on.</b>'), folderOn ? 'A copy of each backup goes beside the journal.' : 'A copy of each backup goes beside the journal, once a sync folder is chosen.', sw('backup_in_sync_folder', s.backup_in_sync_folder !== false, 'Copy backups there', 'st-bk-folder'))}
+    ${row('Include transcripts', info('bktr', 'The zip also holds this computer\'s session transcripts, compressed, so a restore brings the conversations back too. Backups get larger.<br><b>Default: off.</b>'), 'Put the session transcripts in each backup.', sw('backup_transcripts', !!s.backup_transcripts, 'Include transcripts', 'st-bk-transcripts'))}
     <div class="bklist"><div class="bkhead"><b>Backups</b> <span class="muted">${b.list.length} · ${kb(b.list.reduce((a, x) => a + x.size, 0))}</span><span class="acts"><button class="btn outline sm" data-act="backup-import" data-testid="backup-import">Import…</button><button class="btn outline sm" data-act="backup-export" data-testid="backup-export">Export…</button><button class="btn sm primary" data-act="backup-now" data-testid="backup-now">${ic.download} Back up now</button></span></div>
-      ${b.list.map((x) => `<div class="bkrow" data-testid="backup-${esc(x.label)}"><span class="mono">${esc(new Date(x.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }))}</span><span>${esc(x.label)}</span><span class="muted">${kb(x.size)}</span>
-        <span class="acts"><button class="iconbtn" data-act="backup-rename" data-name="${esc(x.name)}" data-label="${esc(x.label)}" title="Rename" aria-label="Rename">${ic.edit}</button><button class="iconbtn" data-act="backup-delete" data-name="${esc(x.name)}" title="Delete" aria-label="Delete">${ic.x}</button><button class="btn outline sm" data-act="backup-restore" data-name="${esc(x.name)}" data-testid="restore-${esc(x.label)}">${ic.refresh} Restore</button></span></div>`).join('') || '<p class="empty">No backups yet.</p>'}</div>`;
+      ${b.list.map((x) => `<div class="bkrow" data-testid="backup-${esc(x.label)}"><span class="mono">${esc(stamp(x.at))}</span><span>${esc(x.label)}</span><span class="muted">${kb(x.size)}</span>
+        <span class="acts"><button class="iconbtn" data-act="backup-rename" data-name="${esc(x.name)}" data-label="${esc(x.label)}" title="Rename" aria-label="Rename">${ic.edit}</button><button class="iconbtn" data-act="backup-delete" data-name="${esc(x.name)}" title="Delete" aria-label="Delete">${ic.x}</button><button class="btn outline sm" data-act="backup-restore" data-name="${esc(x.name)}" data-testid="restore-${esc(x.label)}">${ic.refresh} Restore</button></span></div>`).join('') || '<p class="empty">No backups yet.</p>'}
+      ${(b.in_sync_folder || []).length ? `<div class="bkhead"><b>In the sync folder</b> <span class="muted">${b.in_sync_folder.length} · every computer's</span></div>` + b.in_sync_folder.map((x) => `<div class="bkrow" data-testid="folder-backup-${esc(x.label)}"><span class="mono">${esc(stamp(x.at))}</span><span>${esc(x.label)} <span class="muted">· ${esc(x.device_name)}</span></span><span class="muted">${kb(x.size)}</span>
+        <span class="acts"><button class="btn outline sm" data-act="restore-src" data-zip="${esc(x.path)}">${ic.refresh} Restore…</button></span></div>`).join('') : ''}</div>
+    ${row('Archive sessions older than', info('arch', 'Transcripts of sessions older than this move from the tools\' folders into the archive, compressed by project and month, once a day while the app runs and with Archive now. Each copy is checked before the original is deleted. The session stays in the list with its numbers and stays readable; it cannot be resumed from the archive. Usage is never touched.<br><b>Default: 30 days.</b> Never keeps every transcript where its tool put it.'), 'Transcripts move from the tools\' folders into the archive, compressed. The session stays in the list and stays readable.',
+      `${seg('archive_days', days, [[0, 'Never'], [30, '30 days'], [90, '90 days'], [365, '1 year']], 'st-archive-days')}<input class="input mono" type="number" min="0" max="36500" id="st-archive-custom" value="${days}" style="max-width:80px" aria-label="Days" data-testid="st-archive-custom"><button class="btn outline sm" data-act="archive-days-custom" data-testid="st-archive-custom-save">days</button>`)}
+    ${row('Archive location', info('archloc', 'Where the copies go: the sync folder (<span class="mono">archive\\&lt;this computer&gt;</span>, so every computer and a fresh install can read them), a folder of your choice, or both.<br><b>Default: the sync folder.</b> With neither, nothing is archived.'), 'In the sync folder, a folder of your choice, or both.',
+      `<label class="switch"><input type="checkbox" data-act="set-now" data-key="archive_in_sync_folder" ${s.archive_in_sync_folder !== false ? 'checked' : ''} data-testid="st-archive-sync"> The sync folder${folderOn ? '' : ' (none chosen yet)'}</label>
+       <span class="inp mono ${s.archive_dir ? '' : 'muted'}" title="${esc(s.archive_dir)}" data-testid="st-archive-dir">${esc(s.archive_dir || 'No folder chosen')}</span><button class="btn outline sm" data-act="archive-dir-pick" data-testid="st-archive-dir-pick">${s.archive_dir ? 'Change…' : 'Choose…'}</button>${s.archive_dir ? '<button class="btn outline sm" data-act="archive-dir-clear" data-testid="st-archive-dir-clear">None</button>' : ''}`)}
+    ${row('Archive now', '', ar ? `${ar.archived} archived · ${kb(ar.bytes)}${loc.map((l) => ` · ${l.kind === 'sync_folder' ? 'sync folder' : 'folder'}: ${l.sessions}${l.on ? '' : ' (off)'}`).join('')}${ar.last && ar.last.at ? ` · last run ${esc(when(ar.last.at))}` : ''}` : 'Nothing archived yet.', `<button class="btn outline" data-act="archive-now" data-testid="archive-now">Archive now</button>`)}
+    ${row('Restore', info('restore', 'Merges the history in a backup (this computer\'s, or one in the sync folder) or in the sync folder itself into this computer: requests by their id, sessions, limit history, tags, other computers and archived transcripts. Nothing is counted twice; restoring again adds nothing. With a record of this computer\'s name in it, you can continue as that computer. Keys and logins are never in a backup.'), 'Merge a backup or the sync folder\'s history into this computer. Nothing is counted twice.', `<button class="btn outline" data-act="restore-pick" data-testid="restore-open">Restore…</button>`)}`;
 }
+action('archive-now', async () => {
+  const r = await attempt(() => call('archive_now'));
+  if (!r) return;
+  toast(r.why ? `Nothing archived: ${r.why}` : `${r.archived} ${r.archived === 1 ? 'session' : 'sessions'} moved to the archive`);
+  changed();
+});
+action('archive-days-custom', () => { const v = +document.getElementById('st-archive-custom').value; if (v >= 0) mutate(() => call('settings_set', { key: 'archive_days', value: Math.floor(v) }), 'Saved'); });
+action('archive-dir-pick', async () => { const p = await pickFolder(); if (p) mutate(() => call('settings_set', { key: 'archive_dir', value: p }), 'Saved'); });
+action('archive-dir-clear', () => mutate(() => call('settings_set', { key: 'archive_dir', value: '' }), 'Saved'));
 const restored = (r) => {
   const sk = r.restored.skills.length;
   toast(`Restored${sk ? `, with ${sk} skill ${sk === 1 ? 'folder' : 'folders'} put back` : ''}. The state before is kept as a backup named Before restore.`);
