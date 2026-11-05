@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Today: each computer sees only its own logs</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #eff4f5;
+      --color-ink:     #131416;
+      --color-muted:   #5d5f60;
+      --color-accent:  #1b6c80;
+      --font-sans:     'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+      --font-serif:    'IBM Plex Serif', Georgia, serif;
+      --font-mono:     'IBM Plex Mono', Consolas, ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* min-width == viewBox width keeps the type ramp; this wrapper scrolls the diagram, not the page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Illustrate</p>
+    <h1>Today: each computer sees only its own logs</h1>
+
+    <div class="diagram-container">
+    <!-- Self-contained SVG: every visual property is a presentation attribute; no CSS outside the svg is needed. -->
+    <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmx-today-title hmx-today-desc">
+      <title id="hmx-today-title">Today: each computer sees only its own logs</title>
+      <desc id="hmx-today-desc">Two computers each import their own tool logs and running processes into their own hm.db and window; only the profiles.json account list in OneDrive is shared between them.</desc>
+      <defs>
+        <marker id="hmx-today-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+        <marker id="hmx-today-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+        <marker id="hmx-today-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3f8fa5"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#eff4f5"/>
+
+      <!-- Zones -->
+      <rect x="40" y="128" width="336" height="392" rx="8" fill="rgba(19,20,22,0.02)" stroke="rgba(19,20,22,0.10)" stroke-width="0.8"/>
+      <rect x="168" y="132" width="80" height="12" rx="2" fill="#eff4f5"/>
+      <text class="eyebrow" x="208" y="141" fill="rgba(19,20,22,0.40)" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">DEVELOPMENTPC</text>
+
+      <rect x="584" y="128" width="336" height="392" rx="8" fill="rgba(19,20,22,0.02)" stroke="rgba(19,20,22,0.10)" stroke-width="0.8"/>
+      <rect x="728" y="132" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="eyebrow" x="752" y="141" fill="rgba(19,20,22,0.40)" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">LAPTOP</text>
+
+      <!-- Arrows (before nodes) -->
+      <!-- DEVELOPMENTPC: tool logs -> hm.db, running now -> hm.db, hm.db -> window -->
+      <path d="M128,232 V256 Q128,264 136,264 H176 Q184,264 184,272 V296" fill="none" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <path d="M288,232 V256 Q288,264 280,264 H240 Q232,264 232,272 V296" fill="none" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <line x1="208" y1="360" x2="208" y2="424" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <!-- LAPTOP -->
+      <path d="M672,232 V256 Q672,264 680,264 H720 Q728,264 728,272 V296" fill="none" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <path d="M832,232 V256 Q832,264 824,264 H784 Q776,264 776,272 V296" fill="none" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <line x1="752" y1="360" x2="752" y2="424" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-today-arrow)"/>
+      <!-- OneDrive profiles.json -> each hm.db (shared, dashed) -->
+      <path d="M400,328 H276" fill="none" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-today-arrow)"/>
+      <path d="M560,328 H684" fill="none" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-today-arrow)"/>
+
+      <!-- Arrow labels -->
+      <rect x="136" y="246" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="160" y="255" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">IMPORTS</text>
+      <rect x="680" y="246" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="704" y="255" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">IMPORTS</text>
+      <rect x="314" y="310" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="338" y="319" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SHARED</text>
+      <rect x="598" y="310" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="622" y="319" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">SHARED</text>
+
+      <!-- Nodes: DEVELOPMENTPC -->
+      <rect x="60" y="168" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="60" y="168" width="136" height="64" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="128" y="204" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">tool logs</text>
+      <text class="sublabel" x="128" y="220" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">jsonl · sqlite</text>
+
+      <rect x="220" y="168" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="220" y="168" width="136" height="64" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="288" y="204" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">running now</text>
+      <text class="sublabel" x="288" y="220" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">pids · router</text>
+
+      <rect x="140" y="296" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="140" y="296" width="136" height="64" rx="6" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/>
+      <text class="node-name" x="208" y="332" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">hm.db</text>
+      <text class="sublabel" x="208" y="348" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">usage · sessions</text>
+
+      <rect x="140" y="424" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="140" y="424" width="136" height="64" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/>
+      <text class="node-name" x="208" y="460" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">window</text>
+
+      <!-- Nodes: LAPTOP -->
+      <rect x="604" y="168" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="604" y="168" width="136" height="64" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="672" y="204" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">tool logs</text>
+      <text class="sublabel" x="672" y="220" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">jsonl · sqlite</text>
+
+      <rect x="764" y="168" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="764" y="168" width="136" height="64" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="832" y="204" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">running now</text>
+      <text class="sublabel" x="832" y="220" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">pids · router</text>
+
+      <rect x="684" y="296" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="684" y="296" width="136" height="64" rx="6" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/>
+      <text class="node-name" x="752" y="332" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">hm.db</text>
+      <text class="sublabel" x="752" y="348" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">usage · sessions</text>
+
+      <rect x="684" y="424" width="136" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="684" y="424" width="136" height="64" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/>
+      <text class="node-name" x="752" y="460" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">window</text>
+
+      <!-- Node: profiles.json in OneDrive (focal) -->
+      <rect x="400" y="288" width="160" height="80" rx="6" fill="#eff4f5"/>
+      <rect x="400" y="288" width="160" height="80" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/>
+      <text class="node-name" x="480" y="320" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">profiles.json</text>
+      <text class="node-name" x="480" y="335" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">in OneDrive</text>
+      <text class="sublabel" x="480" y="352" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">the account list</text>
+
+      <!-- Callout -->
+      <path d="M480,486 V452" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="480" cy="448" r="2" fill="#131416"/>
+      <text class="callout" x="480" y="500" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="middle">nothing else crosses</text>
+    </svg>
+    </div>
+  </div>
+</body>
+</html>

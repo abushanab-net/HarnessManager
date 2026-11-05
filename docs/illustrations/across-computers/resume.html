@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resume here: a session follows the project, as a fork</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #eff4f5;
+      --color-ink:     #131416;
+      --color-muted:   #5d5f60;
+      --color-accent:  #1b6c80;
+      --font-sans:     'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+      --font-serif:    'IBM Plex Serif', Georgia, serif;
+      --font-mono:     'IBM Plex Mono', Consolas, ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1200px; width: 100%; }
+    p.eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 960px; display: block; }
+    .diagram-container { width: 100%; overflow-x: auto; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Swimlane · Illustrate</p>
+    <h1>Resume here: a session follows the project, as a fork</h1>
+
+    <div class="diagram-container">
+    <svg class="hmx-resume" viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmx-resume-title hmx-resume-desc">
+      <title id="hmx-resume-title">Resume here: a session follows the project, as a fork</title>
+      <desc id="hmx-resume-desc">A Claude Code session that changes on LAPTOP becomes a journal entry; DEVELOPMENTPC maps the project to its own folder, materializes one copy and resumes it as a fork, so the original on LAPTOP is never written.</desc>
+      <style>
+        .hmx-resume .paper { fill: #eff4f5; }
+        .hmx-resume .lane-edge { stroke: #cdced1; stroke-width: 1; }
+        .hmx-resume .lane-rule { stroke: rgba(19,20,22,0.12); stroke-width: 1; }
+        .hmx-resume .eyebrow { font-family: 'IBM Plex Mono', Consolas, ui-monospace, monospace; font-size: 8px; font-weight: 500; letter-spacing: 0.18em; text-transform: none; fill: #5d5f60; }
+        .hmx-resume .arrow { fill: none; stroke: #5d5f60; stroke-width: 1.2; }
+        .hmx-resume .arrow-accent { fill: none; stroke: #1b6c80; stroke-width: 1.4; }
+        .hmx-resume .dashed { stroke-dasharray: 5,4; }
+        .hmx-resume .mask { fill: #eff4f5; }
+        .hmx-resume .arrow-label { font-family: 'IBM Plex Mono', Consolas, ui-monospace, monospace; font-size: 8px; font-weight: 500; letter-spacing: 0.12em; fill: #5d5f60; text-anchor: middle; }
+        .hmx-resume .arrow-label.focal { fill: #1b6c80; }
+        .hmx-resume .box { fill: #ffffff; stroke: #131416; stroke-width: 1; }
+        .hmx-resume .box.focal { fill: rgba(27,108,128,0.10); stroke: #1b6c80; }
+        .hmx-resume .box.note { fill: rgba(19,20,22,0.03); stroke: rgba(19,20,22,0.30); }
+        .hmx-resume .tag { fill: rgba(19,20,22,0.08); }
+        .hmx-resume .tag-text { font-family: 'IBM Plex Mono', Consolas, ui-monospace, monospace; font-size: 8px; font-weight: 500; fill: #131416; text-anchor: middle; }
+        .hmx-resume .node-name { font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 12px; font-weight: 600; fill: #131416; }
+        .hmx-resume .sublabel { font-family: 'IBM Plex Mono', Consolas, ui-monospace, monospace; font-size: 9px; fill: #5d5f60; }
+        .hmx-resume .callout { font-family: 'IBM Plex Serif', Georgia, serif; font-size: 14px; font-style: italic; fill: #131416; text-anchor: end; }
+        .hmx-resume .leader { fill: none; stroke: rgba(19,20,22,0.40); stroke-width: 1; stroke-dasharray: 4,3; }
+        .hmx-resume .dot { fill: #131416; }
+        .hmx-resume .legend-key { font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 9px; fill: #5d5f60; }
+      </style>
+      <defs>
+        <marker id="hmx-resume-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+        <marker id="hmx-resume-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+      </defs>
+
+      <rect class="paper" width="100%" height="100%"/>
+
+      <!-- Lanes -->
+      <line class="lane-edge" x1="40" y1="80" x2="920" y2="80"/>
+      <line class="lane-rule" x1="40" y1="220" x2="920" y2="220"/>
+      <line class="lane-rule" x1="40" y1="360" x2="920" y2="360"/>
+      <line class="lane-edge" x1="40" y1="500" x2="920" y2="500"/>
+      <line class="lane-edge" x1="160" y1="80" x2="160" y2="500"/>
+      <text class="eyebrow" x="56" y="153">LAPTOP</text>
+      <text class="eyebrow" x="56" y="293">journal</text>
+      <text class="eyebrow" x="56" y="433">DEVELOPMENTPC</text>
+
+      <!-- Arrows (drawn before nodes) -->
+      <line class="arrow" x1="316" y1="180" x2="316" y2="256" marker-end="url(#hmx-resume-arrow)"/>
+      <line class="arrow-accent" x1="316" y1="320" x2="316" y2="396" marker-end="url(#hmx-resume-arrow-accent)"/>
+      <line class="arrow" x1="424" y1="428" x2="456" y2="428" marker-end="url(#hmx-resume-arrow)"/>
+      <line class="arrow" x1="664" y1="428" x2="696" y2="428" marker-end="url(#hmx-resume-arrow)"/>
+      <line class="arrow dashed" x1="800" y1="396" x2="800" y2="180" marker-end="url(#hmx-resume-arrow)"/>
+
+      <!-- Arrow labels -->
+      <rect class="mask" x="326" y="211" width="70" height="12" rx="2"/>
+      <text class="arrow-label" x="361" y="220">ON CHANGE</text>
+      <rect class="mask" x="326" y="351" width="80" height="12" rx="2"/>
+      <text class="arrow-label focal" x="366" y="360">RESUME HERE</text>
+      <rect class="mask" x="810" y="282" width="88" height="12" rx="2"/>
+      <text class="arrow-label" x="854" y="291">NEVER WRITES</text>
+
+      <!-- 1 session changes (LAPTOP) -->
+      <rect class="box" x="176" y="116" width="208" height="64" rx="6"/>
+      <rect class="tag" x="184" y="122" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="192" y="131">1</text>
+      <text class="node-name" x="184" y="148">session changes</text>
+      <text class="sublabel" x="184" y="161">~/.claude/projects/</text>
+      <text class="sublabel" x="184" y="172">C--Users-sam-src-Bunyan/7f3a….jsonl</text>
+
+      <!-- 2 journal entry (journal, focal) -->
+      <rect class="box focal" x="216" y="256" width="208" height="64" rx="6"/>
+      <rect class="tag" x="224" y="262" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="232" y="271">2</text>
+      <text class="node-name" x="224" y="288">journal entry</text>
+      <text class="sublabel" x="224" y="301">meta + transcript, zstd,</text>
+      <text class="sublabel" x="224" y="312">encrypted if via a hub</text>
+
+      <!-- 3 map the project (DEVELOPMENTPC) -->
+      <rect class="box" x="216" y="396" width="208" height="64" rx="6"/>
+      <rect class="tag" x="224" y="402" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="232" y="411">3</text>
+      <text class="node-name" x="224" y="428">map the project</text>
+      <text class="sublabel" x="224" y="441">github.com/abushanab-net/bunyan</text>
+      <text class="sublabel" x="224" y="452">→ D:\Projects\abushanab-net\Bunyan</text>
+
+      <!-- 4 materialize one copy -->
+      <rect class="box" x="456" y="396" width="208" height="64" rx="6"/>
+      <rect class="tag" x="464" y="402" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="472" y="411">4</text>
+      <text class="node-name" x="464" y="428">materialize one copy</text>
+      <text class="sublabel" x="464" y="441">under this computer's</text>
+      <text class="sublabel" x="464" y="452">project folder</text>
+
+      <!-- 5 resume as a fork (focal) -->
+      <rect class="box focal" x="696" y="396" width="208" height="64" rx="6"/>
+      <rect class="tag" x="704" y="402" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="712" y="411">5</text>
+      <text class="node-name" x="704" y="428">resume as a fork</text>
+      <text class="sublabel" x="704" y="441">claude --resume &lt;path&gt;</text>
+      <text class="sublabel" x="704" y="452">--fork-session</text>
+
+      <!-- 6 original untouched (LAPTOP, note) -->
+      <rect class="box note" x="696" y="132" width="208" height="48" rx="6"/>
+      <rect class="tag" x="704" y="138" width="16" height="12" rx="2"/>
+      <text class="tag-text" x="712" y="147">6</text>
+      <text class="node-name" x="704" y="166">original untouched</text>
+
+      <!-- Callout -->
+      <text class="callout" x="920" y="40">only the conversation travels: no uncommitted files, attachments or shells</text>
+      <path class="leader" d="M 600 50 Q 540 180 428 272"/>
+      <circle class="dot" cx="426" cy="272" r="2"/>
+
+      <!-- Legend -->
+      <line class="lane-rule" x1="40" y1="528" x2="920" y2="528"/>
+      <text class="eyebrow" x="40" y="544">LEGEND</text>
+      <rect class="box" x="40" y="556" width="14" height="10" rx="2"/>
+      <text class="legend-key" x="60" y="564">Step</text>
+      <rect class="box focal" x="112" y="556" width="14" height="10" rx="2"/>
+      <text class="legend-key" x="132" y="564">What travels, what you get</text>
+      <rect class="box note" x="276" y="556" width="14" height="10" rx="2"/>
+      <text class="legend-key" x="296" y="564">Note</text>
+      <line class="arrow-accent" x1="348" y1="561" x2="376" y2="561" marker-end="url(#hmx-resume-arrow-accent)"/>
+      <text class="legend-key" x="384" y="564">Handoff to this computer</text>
+      <line class="arrow dashed" x1="528" y1="561" x2="556" y2="561" marker-end="url(#hmx-resume-arrow)"/>
+      <text class="legend-key" x="564" y="564">Guarantee, not a write</text>
+    </svg>
+    </div>
+  </div>
+</body>
+</html>

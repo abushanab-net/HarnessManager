@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Three ways two computers find each other</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --paper: #eff4f5; --ink: #131416; --muted: #5d5f60; --sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; --serif: 'IBM Plex Serif', Georgia, serif; --mono: 'IBM Plex Mono', Consolas, ui-monospace, monospace; }
+body { font-family: var(--sans); background: var(--paper); color: var(--ink); padding: 3rem 2rem; }
+.frame { max-width: 1000px; margin: 0 auto; }
+.eyebrow { font-family: var(--mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+h1 { font-family: var(--serif); font-size: 1.75rem; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 0.75rem; }
+.lede { color: var(--muted); max-width: 46rem; line-height: 1.5; margin-bottom: 1.5rem; }
+.scroll { overflow-x: auto; }
+svg { width: 100%; min-width: 960px; display: block; }
+@media print { svg { min-width: 0; } .scroll { overflow-x: visible; } }
+</style>
+</head>
+<body>
+<div class="frame">
+<p class="eyebrow">Architecture · Harness Manager</p>
+<h1>Three ways two computers find each other</h1>
+<p class="lede">On the home LAN they announce themselves; over the VPN they have stable names; anywhere else a hub tells each where the other can be reached. The connection they end up with is the same mutual TLS on every path.</p>
+<div class="scroll">
+<svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmx-discovery-title hmx-discovery-desc">
+<title id="hmx-discovery-title">Three ways two computers find each other</title>
+<desc id="hmx-discovery-desc">Harness Manager on DEVELOPMENTPC and LAPTOP find each other by announcing over mDNS on the home LAN, by direct TLS over a Tailscale VPN with stable names, or by registering with a hub that publishes addresses for a hole-punched connection with a relay as the fallback; the pairing trust is the same on every path.</desc>
+<defs>
+<marker id="hmx-discovery-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+<marker id="hmx-discovery-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+<marker id="hmx-discovery-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3f8fa5"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#eff4f5"/>
+
+<!-- (a) home LAN: announce to mDNS, then connect directly -->
+<line x1="200" y1="124" x2="352" y2="124" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="760" y1="124" x2="608" y2="124" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="200" y1="184" x2="760" y2="184" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-discovery-arrow)"/>
+<!-- (b) VPN: direct TLS through stable names (the preferred path) -->
+<line x1="200" y1="244" x2="352" y2="244" stroke="#1b6c80" stroke-width="1.4" marker-end="url(#hmx-discovery-arrow-accent)"/>
+<line x1="608" y1="244" x2="760" y2="244" stroke="#1b6c80" stroke-width="1.4" marker-end="url(#hmx-discovery-arrow-accent)"/>
+<!-- (c) hub: register, hole-punch, or fall back to the relay -->
+<line x1="200" y1="316" x2="760" y2="316" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="200" y1="372" x2="352" y2="372" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="760" y1="372" x2="608" y2="372" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="200" y1="456" x2="420" y2="456" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+<line x1="540" y1="456" x2="760" y2="456" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/>
+
+<!-- arrow labels -->
+<rect x="248" y="104" width="56" height="12" rx="2" fill="#eff4f5"/><text x="276" y="113" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ANNOUNCES</text>
+<rect x="656" y="104" width="56" height="12" rx="2" fill="#eff4f5"/><text x="684" y="113" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">ANNOUNCES</text>
+<rect x="448" y="164" width="64" height="12" rx="2" fill="#eff4f5"/><text x="480" y="173" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">DIRECT TLS</text>
+<rect x="244" y="224" width="64" height="12" rx="2" fill="#eff4f5"/><text x="276" y="233" fill="#1b6c80" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">DIRECT TLS</text>
+<rect x="652" y="224" width="64" height="12" rx="2" fill="#eff4f5"/><text x="684" y="233" fill="#1b6c80" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">DIRECT TLS</text>
+<rect x="448" y="296" width="64" height="12" rx="2" fill="#eff4f5"/><text x="480" y="305" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">HOLE-PUNCH</text>
+<rect x="248" y="352" width="56" height="12" rx="2" fill="#eff4f5"/><text x="276" y="361" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">REGISTERS</text>
+<rect x="656" y="352" width="56" height="12" rx="2" fill="#eff4f5"/><text x="684" y="361" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">REGISTERS</text>
+<rect x="290" y="436" width="40" height="12" rx="2" fill="#eff4f5"/><text x="310" y="445" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">RELAY</text>
+<rect x="630" y="436" width="40" height="12" rx="2" fill="#eff4f5"/><text x="650" y="445" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">RELAY</text>
+
+<!-- callout: trust does not depend on the path -->
+<text x="920" y="68" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="end">the pairing trust is the same on every path</text>
+<path d="M 732,76 Q 728,128 732,180" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="732" cy="184" r="2" fill="#131416"/>
+
+<!-- Node: DEVELOPMENTPC -->
+<rect x="40" y="96" width="160" height="392" rx="6" fill="#eff4f5"/><rect x="40" y="96" width="160" height="392" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/><rect x="48" y="104" width="28" height="12" rx="2" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="0.8"/><text x="62" y="113" fill="#131416" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PC</text><text x="120" y="296" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">DEVELOPMENTPC</text><text x="120" y="312" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">on the home LAN</text>
+<!-- Node: LAPTOP -->
+<rect x="760" y="96" width="160" height="392" rx="6" fill="#eff4f5"/><rect x="760" y="96" width="160" height="392" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/><rect x="768" y="104" width="28" height="12" rx="2" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="0.8"/><text x="782" y="113" fill="#131416" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PC</text><text x="840" y="296" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">LAPTOP</text><text x="840" y="312" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">at home or away</text>
+<!-- Node: mDNS / DNS-SD -->
+<rect x="352" y="96" width="256" height="56" rx="6" fill="#eff4f5"/><rect x="352" y="96" width="256" height="56" rx="6" fill="rgba(19,20,22,0.03)" stroke="rgba(19,20,22,0.30)" stroke-width="1"/><rect x="360" y="104" width="28" height="12" rx="2" fill="none" stroke="rgba(19,20,22,0.22)" stroke-width="0.8"/><text x="374" y="113" fill="#8a8c8d" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">LAN</text><text x="480" y="120" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">mDNS / DNS-SD</text><text x="480" y="136" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">_hrm._tcp · multicast on the home LAN</text>
+<!-- Node: VPN (focal) -->
+<rect x="352" y="216" width="256" height="56" rx="6" fill="#eff4f5"/><rect x="352" y="216" width="256" height="56" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/><rect x="360" y="224" width="28" height="12" rx="2" fill="none" stroke="rgba(27,108,128,0.50)" stroke-width="0.8"/><text x="374" y="233" fill="#1b6c80" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">VPN</text><text x="480" y="240" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">VPN</text><text x="480" y="256" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">Tailscale MagicDNS · stable names and IPs</text>
+<!-- Node: hub rendezvous (focal) -->
+<rect x="352" y="344" width="256" height="56" rx="6" fill="#eff4f5"/><rect x="352" y="344" width="256" height="56" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/><rect x="360" y="352" width="28" height="12" rx="2" fill="none" stroke="rgba(27,108,128,0.50)" stroke-width="0.8"/><text x="374" y="361" fill="#1b6c80" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">HUB</text><text x="480" y="368" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">hub rendezvous</text><text x="480" y="384" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">publishes each computer's addresses</text>
+<!-- Node: relay -->
+<rect x="420" y="432" width="120" height="48" rx="6" fill="#eff4f5"/><rect x="420" y="432" width="120" height="48" rx="6" fill="rgba(19,20,22,0.03)" stroke="rgba(19,20,22,0.30)" stroke-width="1"/><text x="480" y="454" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">relay</text><text x="480" y="470" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">when no direct path</text>
+
+<g id="hmx-discovery-legend">
+<line x1="40" y1="512" x2="920" y2="512" stroke="rgba(19,20,22,0.12)" stroke-width="0.8"/><text x="40" y="532" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="104" y="524" width="16" height="12" rx="2" fill="#ffffff" stroke="#131416" stroke-width="1"/><text x="128" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Computer</text>
+<rect x="192" y="524" width="16" height="12" rx="2" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/><text x="216" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Leaned toward</text>
+<rect x="312" y="524" width="16" height="12" rx="2" fill="rgba(19,20,22,0.03)" stroke="rgba(19,20,22,0.30)" stroke-width="1"/><text x="336" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Helper service</text>
+<line x1="440" y1="530" x2="468" y2="530" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-discovery-arrow)"/><text x="476" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Direct TLS</text>
+<line x1="560" y1="530" x2="588" y2="530" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-discovery-arrow)"/><text x="596" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Announce · register · relay</text>
+<line x1="776" y1="530" x2="804" y2="530" stroke="#1b6c80" stroke-width="1.4" marker-end="url(#hmx-discovery-arrow-accent)"/><text x="812" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Preferred path</text>
+</g>
+</svg>
+</div>
+</div>
+</body>
+</html>

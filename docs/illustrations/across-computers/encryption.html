@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A transcript's path through a hub, encrypted end to end</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #eff4f5;
+      --color-ink:     #131416;
+      --color-muted:   #5d5f60;
+      --color-accent:  #1b6c80;
+      --font-sans:     'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+      --font-serif:    'IBM Plex Serif', Georgia, serif;
+      --font-mono:     'IBM Plex Mono', Consolas, ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* min-width == viewBox width keeps the type ramp; this wrapper scrolls the diagram, not the page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Data flow · Illustrate</p>
+    <h1>A transcript's path through a hub, encrypted end to end</h1>
+
+    <div class="diagram-container">
+    <!-- Self-contained SVG: every visual property is a presentation attribute; no CSS outside the svg is needed. -->
+    <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmx-e2e-title hmx-e2e-desc">
+      <title id="hmx-e2e-title">A transcript's path through a hub, encrypted end to end</title>
+      <desc id="hmx-e2e-desc">A transcript on LAPTOP is encrypted with a device key, pushed to a hub that stores the blob without being able to read it, pulled by DEVELOPMENTPC, decrypted with its device key unwrapped by a recovery key held outside both computers, and materialized under that computer's project folder.</desc>
+      <defs>
+        <marker id="hmx-e2e-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+        <marker id="hmx-e2e-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+        <marker id="hmx-e2e-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3f8fa5"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#eff4f5"/>
+
+      <!-- Zones -->
+      <rect x="40" y="240" width="344" height="192" rx="8" fill="rgba(19,20,22,0.02)" stroke="rgba(19,20,22,0.10)" stroke-width="0.8"/>
+      <rect x="188" y="244" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="eyebrow" x="212" y="253" fill="rgba(19,20,22,0.40)" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">LAPTOP</text>
+
+      <rect x="576" y="240" width="344" height="192" rx="8" fill="rgba(19,20,22,0.02)" stroke="rgba(19,20,22,0.10)" stroke-width="0.8"/>
+      <rect x="708" y="244" width="80" height="12" rx="2" fill="#eff4f5"/>
+      <text class="eyebrow" x="748" y="253" fill="rgba(19,20,22,0.40)" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">DEVELOPMENTPC</text>
+
+      <!-- Arrows (before nodes): the transcript's path, left to right -->
+      <line x1="192" y1="336" x2="232" y2="336" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-e2e-arrow)"/>
+      <line x1="368" y1="336" x2="412" y2="336" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-e2e-arrow)"/>
+      <line x1="548" y1="336" x2="592" y2="336" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-e2e-arrow)"/>
+      <line x1="728" y1="336" x2="768" y2="336" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-e2e-arrow)"/>
+      <!-- recovery key unwraps the device key on each computer (dashed) -->
+      <path d="M392,144 H308 Q300,144 300,152 V288" fill="none" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-e2e-arrow)"/>
+      <path d="M568,144 H652 Q660,144 660,152 V288" fill="none" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmx-e2e-arrow)"/>
+
+      <!-- Arrow labels -->
+      <rect x="374" y="318" width="32" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="390" y="327" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PUSH</text>
+      <rect x="554" y="318" width="32" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="570" y="327" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PULL</text>
+      <rect x="326" y="126" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="350" y="135" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">UNWRAPS</text>
+      <rect x="586" y="126" width="48" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="610" y="135" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">UNWRAPS</text>
+
+      <!-- Step 1: transcript (LAPTOP) -->
+      <rect x="56" y="288" width="136" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="56" y="288" width="136" height="96" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="124" y="322" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">transcript</text>
+      <text class="sublabel" x="124" y="340" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">jsonl · zstd</text>
+
+      <!-- Step 2: encrypt (LAPTOP) -->
+      <rect x="232" y="288" width="136" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="232" y="288" width="136" height="96" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/>
+      <text class="node-name" x="300" y="322" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">encrypt</text>
+      <text class="sublabel" x="300" y="340" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">device key, AES-GCM</text>
+
+      <!-- Step 3: hub (focal) -->
+      <rect x="412" y="288" width="136" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="412" y="288" width="136" height="96" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/>
+      <text class="node-name" x="480" y="322" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">hub</text>
+      <text class="sublabel" x="480" y="340" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">stores the blob</text>
+      <text class="sublabel" x="480" y="352" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">and a manifest;</text>
+      <text class="sublabel" x="480" y="364" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">cannot read it</text>
+
+      <!-- Step 4: decrypt (DEVELOPMENTPC) -->
+      <rect x="592" y="288" width="136" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="592" y="288" width="136" height="96" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/>
+      <text class="node-name" x="660" y="322" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">decrypt</text>
+      <text class="sublabel" x="660" y="340" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">device key,</text>
+      <text class="sublabel" x="660" y="352" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">unwrapped by</text>
+      <text class="sublabel" x="660" y="364" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">the recovery key</text>
+
+      <!-- Step 5: materialized copy (DEVELOPMENTPC) -->
+      <rect x="768" y="288" width="136" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="768" y="288" width="136" height="96" rx="6" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/>
+      <text class="node-name" x="836" y="322" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">materialized copy</text>
+      <text class="sublabel" x="836" y="340" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">under this computer's</text>
+      <text class="sublabel" x="836" y="352" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">project folder</text>
+
+      <!-- Side node: recovery key (focal, held outside both computers) -->
+      <rect x="392" y="112" width="176" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="392" y="112" width="176" height="64" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/>
+      <text class="node-name" x="480" y="134" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">recovery key</text>
+      <text class="sublabel" x="480" y="150" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">held outside the computers,</text>
+      <text class="sublabel" x="480" y="162" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">e.g. a password manager</text>
+
+      <!-- Callout -->
+      <path d="M480,484 V400" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="480" cy="396" r="2" fill="#131416"/>
+      <text class="callout" x="480" y="498" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="middle">the hub sees sizes and times, never text</text>
+    </svg>
+    </div>
+  </div>
+</body>
+</html>

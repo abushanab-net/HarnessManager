@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pairing two computers once, with a six-digit code</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root { --paper: #eff4f5; --ink: #131416; --muted: #5d5f60; --sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; --serif: 'IBM Plex Serif', Georgia, serif; --mono: 'IBM Plex Mono', Consolas, ui-monospace, monospace; }
+body { font-family: var(--sans); background: var(--paper); color: var(--ink); padding: 3rem 2rem; }
+.frame { max-width: 1000px; margin: 0 auto; }
+.eyebrow { font-family: var(--mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.5rem; }
+h1 { font-family: var(--serif); font-size: 1.75rem; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 0.75rem; }
+.lede { color: var(--muted); max-width: 46rem; line-height: 1.5; margin-bottom: 1.5rem; }
+.scroll { overflow-x: auto; }
+svg { width: 100%; min-width: 960px; display: block; }
+@media print { svg { min-width: 0; } .scroll { overflow-x: visible; } }
+</style>
+</head>
+<body>
+<div class="frame">
+<p class="eyebrow">Sequence · Harness Manager</p>
+<h1>Pairing two computers once, with a six-digit code</h1>
+<p class="lede">One computer shows a short code, the other types it. The code itself never crosses the network; it only seeds a key exchange that fails on a wrong code. After that the two trust each other's certificates for good.</p>
+<div class="scroll">
+<svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmx-pairing-title hmx-pairing-desc">
+<title id="hmx-pairing-title">Pairing two computers once, with a six-digit code</title>
+<desc id="hmx-pairing-desc">Sequence of pairing LAPTOP with DEVELOPMENTPC once: DEVELOPMENTPC shows a six-digit code, LAPTOP types it, two PAKE rounds derive a shared secret without ever sending the code, both exchange device certificates for mutual TLS, and LAPTOP makes its first journal pull.</desc>
+<defs>
+<marker id="hmx-pairing-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+<marker id="hmx-pairing-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+<marker id="hmx-pairing-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3f8fa5"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="#eff4f5"/>
+
+<!-- lifelines: DEVELOPMENTPC at x=240, LAPTOP at x=600 -->
+<line x1="240" y1="104" x2="240" y2="488" stroke="rgba(19,20,22,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="600" y1="104" x2="600" y2="488" stroke="rgba(19,20,22,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+
+<!-- messages, time flows down -->
+<line x1="600" y1="192" x2="240" y2="192" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-pairing-arrow)"/>
+<line x1="240" y1="232" x2="600" y2="232" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-pairing-arrow)"/>
+<line x1="600" y1="324" x2="240" y2="324" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-pairing-arrow)"/>
+<line x1="240" y1="364" x2="600" y2="364" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-pairing-arrow)"/>
+<line x1="600" y1="456" x2="240" y2="456" stroke="#1b6c80" stroke-width="1.4" marker-end="url(#hmx-pairing-arrow-accent)"/>
+
+<!-- message labels -->
+<rect x="332" y="172" width="176" height="12" rx="2" fill="#eff4f5"/><text x="420" y="181" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PAKE ROUND 1 · CODE NEVER SENT</text>
+<rect x="380" y="212" width="80" height="12" rx="2" fill="#eff4f5"/><text x="420" y="221" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">PAKE ROUND 2</text>
+<rect x="352" y="304" width="136" height="12" rx="2" fill="#eff4f5"/><text x="420" y="313" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">DEVICE CERT · NAME · ID</text>
+<rect x="352" y="344" width="136" height="12" rx="2" fill="#eff4f5"/><text x="420" y="353" fill="#8a8c8d" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">DEVICE CERT · NAME · ID</text>
+<rect x="326" y="436" width="188" height="12" rx="2" fill="#eff4f5"/><text x="420" y="445" fill="#1b6c80" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">FIRST PULL · JOURNAL SINCE SEQ 0</text>
+
+<!-- notes -->
+<rect x="256" y="124" width="200" height="32" rx="4" fill="#eff4f5"/><rect x="256" y="124" width="200" height="32" rx="4" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/><text x="356" y="144" fill="#131416" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">shows 482 915 · valid 2 minutes</text>
+<rect x="200" y="256" width="440" height="32" rx="4" fill="#eff4f5"/><rect x="200" y="256" width="440" height="32" rx="4" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/><text x="420" y="276" fill="#131416" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">shared secret derived · a wrong code fails here</text>
+<rect x="200" y="388" width="440" height="32" rx="4" fill="#eff4f5"/><rect x="200" y="388" width="440" height="32" rx="4" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/><text x="420" y="408" fill="#131416" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">each stores the other's certificate · mutual TLS from now on</text>
+
+<!-- callout: revocation -->
+<text x="920" y="376" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="end">revoke a computer by deleting</text>
+<text x="920" y="394" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="end">its certificate on the others</text>
+<path d="M 708,400 Q 672,404 644,404" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="640" cy="404" r="2" fill="#131416"/>
+
+<!-- actors -->
+<rect x="140" y="48" width="200" height="56" rx="6" fill="#eff4f5"/><rect x="140" y="48" width="200" height="56" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/><rect x="148" y="56" width="28" height="12" rx="2" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="0.8"/><text x="162" y="65" fill="#131416" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PC</text><text x="240" y="74" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">DEVELOPMENTPC</text><text x="240" y="90" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">shows the code</text>
+<rect x="500" y="48" width="200" height="56" rx="6" fill="#eff4f5"/><rect x="500" y="48" width="200" height="56" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/><rect x="508" y="56" width="28" height="12" rx="2" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="0.8"/><text x="522" y="65" fill="#131416" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.08em">PC</text><text x="600" y="74" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">LAPTOP</text><text x="600" y="90" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">types the code</text>
+
+<g id="hmx-pairing-legend">
+<line x1="40" y1="512" x2="920" y2="512" stroke="rgba(19,20,22,0.12)" stroke-width="0.8"/><text x="40" y="532" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="104" y="524" width="16" height="12" rx="2" fill="#ffffff" stroke="#131416" stroke-width="1"/><text x="128" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Computer</text>
+<rect x="200" y="524" width="16" height="12" rx="2" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/><text x="224" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">What a side knows</text>
+<rect x="336" y="524" width="16" height="12" rx="2" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/><text x="360" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Where a wrong code fails</text>
+<line x1="512" y1="530" x2="540" y2="530" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmx-pairing-arrow)"/><text x="548" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">Message</text>
+<line x1="624" y1="530" x2="652" y2="530" stroke="#1b6c80" stroke-width="1.4" marker-end="url(#hmx-pairing-arrow-accent)"/><text x="660" y="533" fill="#5d5f60" font-size="9" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif">First sync after pairing</text>
+</g>
+</svg>
+</div>
+</div>
+</body>
+</html>
