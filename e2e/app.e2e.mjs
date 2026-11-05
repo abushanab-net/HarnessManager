@@ -193,7 +193,7 @@ try {
   const TOURED = ['home', 'accounts', 'account', 'projects', 'sessions', 'session', 'routing', 'mcp', 'skills', 'prompts', 'settings'];
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
   // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
-  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off');`, [TOURED]);
+  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off'); localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`, [TOURED]);
 
   await test('overview: key numbers, live routes, limits, reply timing, mix, events, health and the request log', async () => {
     await $('[data-testid=heatmap]');
@@ -1248,7 +1248,7 @@ description: Bulk skill ${i}
     const d = await exec(`return {
       name: document.getElementById('st-devname').value,
       folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('on'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
-      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubOff: document.querySelector('[data-testid=sync-hub] input').disabled && document.querySelector('[data-testid=sync-hub] button').disabled,
+      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubLive: !document.querySelector('[data-testid=sync-hub] [data-testid=hub-join]').disabled && !document.querySelector('[data-testid=sync-hub]').classList.contains('on'),
       direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
       transcripts: document.querySelector('[data-testid=st-transcripts]').checked, presence: document.querySelector('[data-testid=st-presence]').checked,
       pills: [...document.querySelectorAll('[data-testid=computers] .pill')].map((p) => p.textContent.trim()),
@@ -1258,9 +1258,9 @@ description: Bulk skill ${i}
     assert.ok(d.name, 'this computer has a name');
     assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
     assert.ok(d.folderText.includes('No folder'), 'no folder yet');
-    assert.ok(d.hub.includes('A hub you host') && d.hubOff, 'the hub card waits for phase 5');
+    assert.ok(d.hub.includes('A hub you host') && d.hubLive, 'the hub card is live, not chosen (phase 5)');
     assert.ok(!d.direct && !d.pair, 'the direct connection and pairing are live (phase 2)');
-    assert.ok(d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
+    assert.ok(!d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
     assert.ok(d.transcripts && d.presence, 'transcripts and presence default to on');
     assert.deepEqual(d.cards, [d.name], 'only this computer');
     assert.equal(d.syncNow, false, 'no Sync now while sync is off');
@@ -1582,6 +1582,126 @@ description: Bulk skill ${i}
     await $('[data-testid=sec-computers] [data-testid=st-transcripts]');
     await hasText('#tip-transcripts', 'Carried');
     await hasText('#tip-transcripts', '20 MB');
+  });
+
+  // ---- the hub (WP-9) ----
+  // "A hub you host" is live: the Join dialog (the address, a code or the admin token), the first-run choice with both
+  // cards, and an unreachable hub shown as the operation's own error. HRM_E2E_HUB=1 starts hrm-hub (target/debug) as a
+  // child process and joins it from the card, sees the recovery key once, invites a second data folder that joins with
+  // hrm hub join, and sees its session after Sync now.
+  await test('hub: the card is live, the Join dialog takes a code or the admin token, an unreachable hub is the error text, the first-run choice offers both cards', async () => {
+    await nav('#settings');
+    await $('[data-testid=sec-computers] [data-testid=hub-join]');
+    const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('on'), url: document.querySelector('[data-testid=hub-url]').textContent,
+      pills: [...document.querySelectorAll('[data-testid=sync-hub] .pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter]') }`);
+    assert.ok(!d.on && d.url.includes('Not joined') && !d.pills.length && !d.ring, JSON.stringify(d));
+    await click('[data-testid=hub-join]');
+    await $('[data-testid=hub-url-in]');
+    // the dialog checks the address and asks for a code or the token before any call
+    await page.fill('[data-testid=hub-url-in]', 'hub.example.com');
+    await click('[data-testid=hub-ok]');
+    await hasText('[data-testid=hub-error]', 'https://');
+    // a port nothing listens on: taken and released now (a fixed low port can hang on a filtered machine)
+    const net = await import('node:net');
+    const closed = await new Promise((r) => { const srv = net.createServer(); srv.listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => r(p)); }); });
+    await page.fill('[data-testid=hub-url-in]', `http://127.0.0.1:${closed}`);
+    await click('[data-testid=hub-ok]');
+    await hasText('[data-testid=hub-error]', 'six digits');
+    // the code is formatted as typed; a hub that does not answer is the operation's own error, and Join can be tried again
+    await page.type('[data-testid=hub-code]', '4829157');
+    assert.equal(await exec("return document.getElementById('hub-code').value"), '482 915');
+    await click('[data-testid=hub-ok]');
+    await waitFor(async () => { const t = (await exec("return document.querySelector('[data-testid=hub-error]')?.textContent || ''")).trim(); return t.length > 0 && !t.includes('six digits'); }, "the operation's error (nothing listens at 127.0.0.1:9)", 30000);
+    assert.equal(await exec("return document.getElementById('hub-ok').disabled"), false, 'Join can be tried again');
+    await shot('51-hub-join-dialog');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+    // the first-run choice: both cards, Not now closes it, the hub card opens the Join dialog
+    await exec(`return import('./computers.js').then((m) => m.firstRunDialog())`);
+    await $('[data-testid=firstrun-hub]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('#dialog-root .mcard b')].map((b) => b.textContent.trim())"), ['A shared folder', 'A hub you host']);
+    await shot('52-first-run-choice');
+    await click('[data-testid=firstrun-hub]');
+    await $('[data-testid=hub-url-in]');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+  });
+
+  if (process.env.HRM_E2E_HUB) await test('hub: joining from the card with the admin token, the recovery key once, Invite a computer, a second data folder joining with the code, its session after Sync now', async () => {
+    const hubExe = path.join(appDir, 'hrm-hub.exe');
+    assert.ok(fs.existsSync(hubExe), 'target/debug/hrm-hub.exe (cargo build --workspace with the hub crate)');
+    const hubPort = 19000 + (process.pid % 500), hubUrl = `http://127.0.0.1:${hubPort}`, hubData = path.join(sb, 'hub');
+    fs.mkdirSync(hubData, { recursive: true });
+    const hub = spawn(hubExe, [], { env: { ...process.env, HUB_ADMIN_TOKEN: 'e2e-admin', HUB_DATA: hubData, HUB_BIND: `127.0.0.1:${hubPort}` }, stdio: 'ignore' });
+    try {
+      await waitFor(() => fetch(hubUrl + '/health').then((r) => (r.ok ? true : null)).catch(() => null), 'the hub up', 30000);
+      // this computer joins with the admin token: the card turns on, and the recovery key is shown once
+      await nav('#settings');
+      await click('[data-testid=sec-computers] [data-testid=hub-join]');
+      await $('[data-testid=hub-url-in]');
+      await page.fill('[data-testid=hub-url-in]', hubUrl);
+      await page.fill('[data-testid=hub-admin]', 'e2e-admin');
+      await click('[data-testid=hub-ok]');
+      await $('[data-testid=ring-key]');
+      const key = (await text('[data-testid=ring-key]')).trim();
+      assert.match(key, /^([A-Z2-7]{4} ){7}[A-Z2-7]{4}$/, 'the recovery key: 8 groups of 4: ' + key);
+      await shot('53-recovery-key');
+      await click('[data-testid=ring-saved]');
+      await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the key dialog closed');
+      await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')"), 'the hub card chosen', 15000);
+      assert.ok((await text('[data-testid=hub-line]')).includes('joined'), 'the status line says joined');
+      assert.equal((await text('[data-testid=hub-url]')).trim(), hubUrl);
+      assert.ok(await exec("return !!document.querySelector('[data-testid=ring-show]') && !!document.querySelector('[data-testid=hub-invite]')"), 'Show again and Invite a computer… are there');
+      // Show again sits behind a confirm and shows the same key
+      await click('[data-testid=ring-show]');
+      await click('#confirm-ok');
+      await hasText('[data-testid=ring-key]', key);
+      await click('[data-testid=ring-saved]');
+      // Invite a computer…: a six-digit code
+      await click('[data-testid=hub-invite]');
+      await waitFor(async () => /\d{3} \d{3}/.test(await text('[data-testid=invite-body]')), 'a code in the dialog', 15000);
+      const code = (await text('[data-testid=invite-code]')).replace(/\D/g, '');
+      await shot('54-invite-code');
+      await page.keyboard.press('Escape');
+      // the second computer: its own data folder, a Claude session indexed there, joins with the code and the recovery key, pushes
+      const data3 = path.join(sb, 'data3'), home3 = path.join(sb, 'home3');
+      fs.mkdirSync(home3, { recursive: true });
+      write(path.join(data3, 'settings.json'), JSON.stringify({ theme: 'light', device_name: 'HUBPC' }));
+      const env3 = { ...env, HRM_HOME: data3, HRM_PROFILES_HOME: home3 };
+      const hrm3 = (...args) => execFileSync(path.join(appDir, 'hrm.exe'), args, { env: env3, encoding: 'utf8' });
+      const cwd3 = 'C:\\hubpc\\Projects\\platform-gitops', t = new Date().toISOString();
+      write(path.join(home3, '.claude', 'projects', 'p', 'hub-s5.jsonl'), jl([
+        { type: 'user', sessionId: 'hub-s5', cwd: cwd3, timestamp: t, message: { role: 'user', content: 'Renew the hub certificate' } },
+        { type: 'assistant', sessionId: 'hub-s5', cwd: cwd3, timestamp: t, message: { id: 'm5', model: 'claude-opus-5-5', usage: { input_tokens: 500, output_tokens: 60 }, content: [{ type: 'text', text: 'Renewed.' }] } },
+        { type: 'ai-title', aiTitle: 'Renew the hub certificate', sessionId: 'hub-s5' },
+      ]));
+      hrm3('init');
+      hrm3('sessions');
+      const joined = hrm3('hub', 'join', hubUrl, '--code', code);
+      assert.ok(joined.includes('joined ' + hubUrl), joined);
+      assert.ok(hrm3('hub', 'status').includes('missing'), 'no ring key on the second computer yet');
+      hrm3('ring', 'enter', key);
+      hrm3('sessions'); // listed with sync on, the sessions are journaled (indexed before the join, they were not)
+      hrm3('computers', 'now');
+      const id3 = JSON.parse(fs.readFileSync(path.join(data3, 'settings.json'), 'utf8')).device_id;
+      // Sync now here: the second computer's card through the hub, and its session
+      await click('[data-testid=computers-now]');
+      await waitFor(() => exec(`return !!document.querySelector('[data-testid=computer-${id3}]')`), 'the second computer\'s card', 30000);
+      await waitFor(async () => /hub/.test(await text(`[data-testid=computer-${id3}] [data-testid=transport]`).catch(() => '')), 'the card says hub');
+      assert.ok((await text('[data-testid=hub-line]')).includes('2 computers'), await text('[data-testid=hub-line]'));
+      await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+      await shot('55-hub-two-computers');
+      await nav('#sessions?days=all');
+      await waitFor(() => exec("return !!document.querySelector('[data-testid=session-hub-s5]')"), 'the session from the second computer', 30000);
+      await hasText('[data-testid=session-hub-s5] .pc', 'HUBPC');
+      await shot('55b-sessions-from-hub');
+      // a used code is refused; Stop syncing leaves the hub
+      assert.throws(() => hrm3('hub', 'join', hubUrl, '--code', code), /did not accept/);
+      await nav('#settings');
+      await click('[data-testid=hub-leave]');
+      await click('#confirm-ok');
+      await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')")), 'the hub card off after leaving', 15000);
+    } finally { hub.kill(); }
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

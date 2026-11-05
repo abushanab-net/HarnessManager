@@ -1274,3 +1274,7 @@ select.bare { border: 0; background: transparent; color: var(--t); font: inherit
 .bubble .linkb { color: var(--on-ink); }
 /* Resume here (phase 3): a session continued from another computer says so under its title */
 .srow .t .cfrom, .smeta [data-testid=session-from] { color: var(--ac); }
+/* The hub (phase 5): the recovery key in a dialog, and the hub card's status line */
+.ringkey { font-size: 19px; font-weight: 600; letter-spacing: 0.05em; text-align: center; padding: 12px 0 6px; color: var(--t); user-select: all; word-spacing: 0.3em; }
+.mcard .st { display: block; margin-top: 6px; font-size: 11px; }
+.mcard .st .err { font-weight: 600; }

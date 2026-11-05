@@ -58,9 +58,28 @@ fn source(ctx: &Ctx, h: &dyn Harness, p: &crate::registry::Profile, meta: &Value
 pub fn carry(ctx: &Ctx, root: &Path) -> Result<()> { carry_with_cap(ctx, root, CAP_BYTES) }
 
 pub fn carry_with_cap(ctx: &Ctx, root: &Path, cap: i64) -> Result<()> {
+    let dir = super::folder::mine(ctx, root);
+    carry_to(ctx, cap, &|_, file, bytes| write_atomic(&dir.join(file), bytes), &|_, file| Ok(std::fs::remove_file(dir.join(file))?))
+}
+
+/// The compressed bytes of one of this computer's own transcripts, as it is carried (the same zstd level, so
+/// the sha256 of the journal entry matches while the session is unchanged); for the peer transcript route.
+pub fn own_zst(ctx: &Ctx, harness_id: &str, profile: &str, id: &str) -> Result<Vec<u8>> {
+    let reg = ctx.registry()?;
+    let key = format!("{harness_id}/{profile}/{id}");
+    let json: String = ctx.db.with(|c| Ok(c.query_row("select json from sessions where key=? and device=?", [&key, &ctx.db.device], |r| r.get(0))?))?;
+    let meta: Value = serde_json::from_str(&json)?;
+    let (h, p) = (harness::by_id(harness_id).context("tool")?, reg.profiles.iter().find(|p| p.name == profile).context("account")?);
+    let src = source(ctx, h, p, &meta)?.context("nothing to carry")?;
+    Ok(zstd::encode_all(&src.bytes[..], 3)?)
+}
+
+/// The carry with any destination: `put(key, file, bytes)` stores a compressed transcript, `remove(key, file)` drops
+/// one at the cap (`key` is the journal key, `file` the path under this computer's folder).
+#[allow(clippy::type_complexity)]
+pub fn carry_to(ctx: &Ctx, cap: i64, put: &dyn Fn(&str, &str, &[u8]) -> Result<()>, remove: &dyn Fn(&str, &str) -> Result<()>) -> Result<()> {
     if !ctx.settings.sync_transcripts { return Ok(()); }
     let reg = ctx.registry()?;
-    let dir = super::folder::mine(ctx, root);
     // this computer's sessions as the journal knows them, with what was carried of each
     type Row = (String, String, Option<i64>, Option<String>);
     let rows: Vec<Row> = ctx.db.with(|c| {
@@ -98,7 +117,7 @@ pub fn carry_with_cap(ctx: &Ctx, root: &Path, cap: i64) -> Result<()> {
         };
         let file = format!("transcripts/{harness_id}/{profile}/{id}.{}.zst", src.ext);
         let packed = zstd::encode_all(&src.bytes[..], 3).context("compress the transcript")?;
-        write_atomic(&dir.join(&file), &packed)?;
+        put(&key, &file, &packed)?;
         let data = json!({"file": file, "bytes": packed.len(), "sha256": sha256_hex(&packed), "mtime": src.stamp, "source_rel": src.source_rel});
         ctx.db.with(|c| {
             c.execute("insert or replace into transcripts_out(key, file, mtime, bytes, sha256, skipped, at) values(?,?,?,?,?,null,?)", params![key, file, src.stamp, packed.len() as i64, data["sha256"].as_str(), now_ms()])?;
@@ -115,7 +134,7 @@ pub fn carry_with_cap(ctx: &Ctx, root: &Path, cap: i64) -> Result<()> {
             Ok(c.query_row("select key, file from transcripts_out where skipped is null order by mtime, at, key limit 1", [], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)
         })?;
         let Some((key, file)) = victim else { break };
-        if let Err(e) = std::fs::remove_file(dir.join(&file)) { crate::log::warn(&format!("transcripts: removing {file}: {e}")); }
+        if let Err(e) = remove(&key, &file) { crate::log::warn(&format!("transcripts: removing {file}: {e}")); }
         ctx.db.with(|c| {
             // the row stays, marked: the file is not carried again until the session changes
             c.execute("update transcripts_out set skipped='at the cap', bytes=0 where key=?", [&key])?;

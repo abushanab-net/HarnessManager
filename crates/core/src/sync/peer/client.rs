@@ -85,6 +85,48 @@ pub fn address_of(p: &Peer) -> Option<(String, u16)> {
     split.or_else(|| (p.port > 0).then(|| (a.trim_matches(['[', ']']).to_string(), p.port)))
 }
 
+/// Where a paired computer may answer, in the order tried: the hub's rendezvous addresses, mDNS, then the address
+/// the owner or the pairing gave; each as `(host, port, path)`.
+fn candidates(ctx: &Ctx, p: &Peer) -> Vec<(String, u16, &'static str)> {
+    let mut v: Vec<(String, u16, &'static str)> = crate::sync::hub::rendezvous_pairs(ctx, &p.id).into_iter().map(|(h, port)| (h, port, "rendezvous")).collect();
+    if let Some((ip, port)) = mdns::lookup(&p.id) { v.push((ip.to_string(), port, "mdns")); }
+    if let Some((h, port)) = address_of(p) { v.push((h, port, "address")); }
+    v
+}
+
+/// A paired computer greeted at the first place that answers: the client, its `hello` and how it was reached.
+fn reach(ctx: &Ctx, id: &identity::Identity, p: &Peer) -> Option<(Client, Value, &'static str)> {
+    let mut why = String::new();
+    for (host, port, path) in candidates(ctx, p) {
+        match Client::connect(id, &p.cert_pem, &host, port).and_then(|c| c.json("/v1/hello")?.context("no answer").map(|h| (c, h))) {
+            Ok((c, h)) => return Some((c, h, path)),
+            Err(e) => { why = format!("{host}:{port}: {e:#}"); crate::log::info(&format!("computers: {} at {host}:{port} did not answer: {e:#}", p.name)); }
+        }
+    }
+    // kept on the peer, so the card (and a failing test) can say why
+    if !why.is_empty() { let _ = ctx.db.with(|db| { db.execute("update peers set last_error=?1 where device_id=?2", params![why.chars().take(300).collect::<String>(), p.id])?; Ok(()) }); }
+    None
+}
+
+/// Another computer's transcript from any paired computer that answers and holds it (the origin itself, or one
+/// that fetched it): the compressed bytes when their sha256 is the journal entry's.
+pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &str, session: &str, sha: &str) -> Option<Vec<u8>> {
+    let id = identity::load(ctx).ok()?;
+    let peers = journal::peers(ctx).ok()?;
+    // the origin first, then the rest
+    let mut order: Vec<&Peer> = peers.iter().filter(|p| !p.cert_pem.is_empty()).collect();
+    order.sort_by_key(|p| p.id != origin);
+    for p in order {
+        let Some((c, _, _)) = reach(ctx, &id, p) else { continue };
+        match c.bytes(&format!("/v1/transcript/{origin}/{harness}/{profile}/{session}")) {
+            Ok(b) if crate::util::sha256_hex(&b) == sha => { crate::log::info(&format!("transcripts: {harness}/{profile}/{session} came from {}", p.name)); return Some(b); }
+            Ok(_) => crate::log::info(&format!("transcripts: {} holds another version of {harness}/{profile}/{session}", p.name)),
+            Err(_) => {}
+        }
+    }
+    None
+}
+
 /// One origin's chunks from a connected peer: since the cursor, the device record checked and learned, every
 /// chunk verified and applied. `Ok(false)` when the peer holds nothing of that origin.
 fn pull_origin(ctx: &Ctx, c: &Client, origin: &str) -> Result<bool> {
@@ -114,34 +156,13 @@ pub fn pull_all(ctx: &Ctx) {
     let me = ctx.settings.device_id.as_str();
     let mut via: Vec<(&Peer, Client, Value)> = vec![];
     for p in peers.iter().filter(|p| !p.cert_pem.is_empty()) {
-        // where to try, in order: what mDNS announced, then the address the owner gave (a VPN name)
-        let mut tries: Vec<(String, u16, &str)> = mdns::lookup(&p.id).map(|(ip, port)| (ip.to_string(), port, "mdns")).into_iter().collect();
-        if let Some((h, port)) = address_of(p) { if !tries.iter().any(|t| t.0 == h && t.1 == port) { tries.push((h, port, "address")); } }
-        if tries.is_empty() { continue; }
-        let mut last: Option<(String, u16, anyhow::Error)> = None;
-        let mut hello = None;
-        for (host, port, path) in tries {
-            match Client::connect(&id, &p.cert_pem, &host, port).and_then(|c| c.json("/v1/hello")?.context("no answer").map(|h| (c, h))) {
-                Ok(ch) => { hello = Some((ch, path)); break; }
-                Err(e) => last = Some((host, port, e)),
-            }
-        }
-        match hello.ok_or(()).map_err(|_| last.take().expect("a try was made")) {
-            Ok(((c, h), path)) => {
-                let _ = ctx.db.with(|db| {
-                    db.execute("update peers set connected=?1, last_seen=?1, path=?2, relayed_by='', last_error='', name=coalesce(?3, name), incarnation=coalesce(?4, incarnation), last_seq=max(coalesce(last_seq, 0), coalesce(?5, 0)), app_version=coalesce(?6, app_version) where device_id=?7",
-                        params![now_ms(), path, h["name"].as_str(), h["incarnation"].as_str(), h["last_seq"].as_i64(), h["app_version"].as_str(), p.id])?;
-                    Ok(())
-                });
-                via.push((p, c, h));
-            }
-            Err((host, port, e)) => {
-                // kept on the peer, so the card (and a failing test) can say why
-                let why = format!("{host}:{port}: {e:#}");
-                let _ = ctx.db.with(|db| { db.execute("update peers set last_error=?1 where device_id=?2", params![why.chars().take(300).collect::<String>(), p.id])?; Ok(()) });
-                crate::log::info(&format!("computers: {} at {host}:{port} did not answer: {e:#}", p.name));
-            }
-        }
+        let Some((c, h, path)) = reach(ctx, &id, p) else { continue };
+        let _ = ctx.db.with(|db| {
+            db.execute("update peers set connected=?1, last_seen=?1, path=?2, relayed_by='', last_error='', name=coalesce(?3, name), incarnation=coalesce(?4, incarnation), last_seq=max(coalesce(last_seq, 0), coalesce(?5, 0)), app_version=coalesce(?6, app_version) where device_id=?7",
+                params![now_ms(), path, h["name"].as_str(), h["incarnation"].as_str(), h["last_seq"].as_i64(), h["app_version"].as_str(), p.id])?;
+            Ok(())
+        });
+        via.push((p, c, h));
     }
     for (p, c, _) in &via {
         if let Err(e) = pull_origin(ctx, c, &p.id) { crate::log::warn(&format!("computers: pulling {}: {e:#}", p.name)); }

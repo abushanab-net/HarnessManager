@@ -120,6 +120,30 @@ enum Cmd {
     ResumeHere { session: String },
     /// Transcripts carried to the folder and known from the other computers
     Transcripts { #[command(flatten)] j: Json },
+    /// The hub you host: join it, invite a computer, its status
+    Hub { #[command(subcommand)] cmd: HubCmd },
+    /// The ring key the hub's data is sealed with: show the recovery key, or enter it
+    Ring { #[command(subcommand)] cmd: RingCmd },
+}
+
+#[derive(Subcommand)]
+enum HubCmd {
+    /// Join the hub at <url>: --code from a computer already on it, or --admin <token> for the first computer
+    Join { url: String, #[arg(long)] code: Option<String>, #[arg(long)] admin: Option<String> },
+    /// A one-time six-digit code for another computer, good for ten minutes
+    Invite,
+    /// Joined, computers, the last push and pull, the events socket
+    Status { #[command(flatten)] j: Json },
+    /// Leave the hub (what was merged from the others stays)
+    Leave,
+}
+
+#[derive(Subcommand)]
+enum RingCmd {
+    /// Print the recovery key: keep it in your password manager
+    Show,
+    /// Enter the recovery key shown on another computer (asked for when not given)
+    Enter { key: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -290,7 +314,7 @@ fn real_main(cli: Cli) -> Result<i32> {
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
-    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. } | Cmd::ResumeHere { .. }))
+    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. } | Cmd::ResumeHere { .. } | Cmd::Hub { .. } | Cmd::Ring { .. }))
         .then(|| ctx.lock_registry());
     if !matches!(cli.cmd, Cmd::Init { .. } | Cmd::Run { .. }) {
         let _l = ctx.lock_registry();
@@ -595,7 +619,7 @@ fn real_main(cli: Cli) -> Result<i32> {
                     let st = hrm_core::journal::status(&ctx)?;
                     if j.json { return print_json(&st["peers"]).map(|_| 0); }
                     for p in st["peers"].as_array().into_iter().flatten() {
-                        let how = if p["direct"] == true { if p["connected"] == true { format!("connected by {}", p["path"].as_str().unwrap_or("")) } else { "paired, not reached".into() } } else { "folder only".into() };
+                        let how = if p["direct"] == true { if p["connected"] == true { format!("connected by {}", p["path"].as_str().unwrap_or("")) } else { "paired, not reached".into() } } else if p["transport"] == "hub" { "through the hub".into() } else { "folder only".into() };
                         println!("{:<24} {:<38} {:<24} address {}", p["name"].as_str().unwrap_or(""), p["id"].as_str().unwrap_or(""), how, p["address"].as_str().filter(|a| !a.is_empty()).unwrap_or("-"));
                     }
                     return Ok(0);
@@ -672,6 +696,40 @@ fn real_main(cli: Cli) -> Result<i32> {
             println!("carried {} ({:.1} MB of {} MB); from the other computers {} known, {} fetched", st["carried"], st["bytes"].as_f64().unwrap_or(0.0) / 1048576.0, st["cap_bytes"].as_i64().unwrap_or(0) / 1048576, st["remote"], st["fetched"]);
             for s in st["skipped"].as_array().into_iter().flatten() { println!("  skipped {}  {}", s["key"].as_str().unwrap_or(""), s["why"].as_str().unwrap_or("")); }
         }
+        Cmd::Hub { cmd } => match cmd {
+            HubCmd::Join { url, code, admin } => {
+                let fresh = hrm_core::sync::hub::join(&ctx, &url, code.as_deref(), admin.as_deref())?;
+                let st = hrm_core::journal::round(&fresh)?;
+                let n = st["hub"]["devices"].as_i64().unwrap_or(1);
+                println!("joined {} ({n} {})", fresh.settings.hub_url, if n == 1 { "computer" } else { "computers" });
+                if let Some(e) = st["error"].as_str() { println!("  {e}"); }
+                if st["hub"]["ring"] == true && st["hub"]["ring_shown"] == false {
+                    println!("recovery key   {}\nKeep it in your password manager: a computer that is not paired with this one needs it to read the hub.", hrm_core::sync::hub::ring_show(&fresh)?);
+                }
+            }
+            HubCmd::Invite => {
+                let v = hrm_core::sync::hub::invite(&ctx)?;
+                println!("code     {}\ngood for ten minutes, for one computer: hrm hub join <url> --code {}", v["code"].as_str().unwrap_or(""), v["code"].as_str().unwrap_or(""));
+            }
+            HubCmd::Status { j } => {
+                let st = hrm_core::sync::hub::status(&ctx);
+                if j.json { return print_json(&st).map(|_| 0); }
+                let n = st["devices"].as_i64().unwrap_or(0);
+                println!("{}  {}", st["url"].as_str().filter(|u| !u.is_empty()).unwrap_or("no hub"), if st["joined"] == true { format!("joined, {n} {}", if n == 1 { "computer" } else { "computers" }) } else { "not joined".into() });
+                println!("  ring key   {}", if st["ring"] == true { "on this computer" } else { "missing: hrm ring enter" });
+                println!("  last push  {}   last pull  {}   events {}", fmt_reset(st["last_push"].as_i64()), fmt_reset(st["last_pull"].as_i64()), if st["ws"] == true { "live" } else { "polling" });
+                if let Some(e) = st["error"].as_str() { println!("  last run   {e}"); }
+            }
+            HubCmd::Leave => { hrm_core::sync::hub::leave(&ctx)?; println!("left the hub; what was merged from the other computers stays"); }
+        },
+        Cmd::Ring { cmd } => match cmd {
+            RingCmd::Show => println!("{}", hrm_core::sync::hub::ring_show(&ctx)?),
+            RingCmd::Enter { key } => {
+                let key = match key { Some(k) => k, None => { eprint!("recovery key: "); let mut l = String::new(); std::io::stdin().read_line(&mut l)?; l } };
+                hrm_core::sync::hub::ring_enter(&ctx, &key)?;
+                println!("the ring key is set{}", if ctx.settings.sync_mode == "hub" { "; the next round reads the hub" } else { "" });
+            }
+        },
     }
     Ok(0)
 }

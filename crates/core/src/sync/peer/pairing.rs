@@ -52,8 +52,9 @@ fn open(key: &[u8], s: &str) -> Result<Value> {
 pub fn payload(ctx: &Ctx) -> Result<Value> {
     let id = identity::load(ctx)?;
     let s = &ctx.settings;
+    // phase 5: the ring key rides along, so a paired computer can read the hub at once
     Ok(json!({"id": s.device_id, "name": s.device_name, "os": std::env::consts::OS, "incarnation": s.incarnation, "pubkey": id.pubkey(), "cert_pem": id.cert_pem,
-        "address_hint": format!("{}:{}", crate::util::hostname(), s.listen_port), "app_version": env!("CARGO_PKG_VERSION")}))
+        "address_hint": format!("{}:{}", crate::util::hostname(), s.listen_port), "app_version": env!("CARGO_PKG_VERSION"), "ring": crate::sync::hub::ring_for_pairing(ctx)}))
 }
 
 /// The other side, as a peer: paired now, reached at `address` (empty when found by mDNS).
@@ -70,6 +71,7 @@ pub fn store_peer(ctx: &Ctx, p: &Value, address: &str) -> Result<Value> {
         Ok(())
     })?;
     crate::log::info(&format!("computers: paired with {} ({id})", p["name"].as_str().unwrap_or("")));
+    crate::sync::hub::ring_adopt(ctx, &p["ring"]);
     Ok(json!({"id": id, "name": p["name"], "address": address}))
 }
 
