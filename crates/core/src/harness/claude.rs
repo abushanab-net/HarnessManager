@@ -231,6 +231,7 @@ impl Harness for Claude {
         let mut files = vec![];
         walk_files(&self.home(ctx, p).join("projects"), &|f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false), &mut files);
         let mut stored = 0;
+        let prices = crate::pricing::load(ctx);
         each_file_parallel(&files, |f| {
             let mut rows = vec![];
             // reply timing: each part of an answer is logged when it completes, under one message id; the request
@@ -274,7 +275,7 @@ impl Harness for Claude {
         }, |r: Result<(Vec<UsageRow>, Option<crate::harness::parse::NewCursor>)>| {
             match r {
                 Ok((rows, cursor)) => {
-                    stored += ctx.db.insert_usage(&rows)?;
+                    stored += ctx.db.insert_usage(&rows, &prices)?;
                     if let Some(c) = cursor { c.save(ctx)?; }
                 }
                 // one unreadable file (locked by another program) does not stop the rest; it is read next time
