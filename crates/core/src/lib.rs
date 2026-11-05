@@ -17,6 +17,7 @@ pub mod secrets;
 pub mod service;
 pub mod shared;
 pub mod sync;
+pub mod transcripts;
 pub mod util;
 pub mod apps;
 pub mod backup;
