@@ -4,8 +4,10 @@
 // core; until it is there, an "unknown operation" answer reads as "sync off, no peers", so every page draws as today.
 // Phase 2 adds the direct connection: the pairing dialog (computers_pair_start | cancel | join and the
 // computers-pairing event), the transport line of a computer card, and a 10 s tick while a peer is connected.
+// Phase 5 adds the hub: Join with a code…, Invite a computer…, the recovery key dialogs (hub_join | hub_invite |
+// ring_key_show | ring_key_enter), "hub · connected" and "rendezvous" on the cards, and the first-run choice.
 
-import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed } from './core.js';
+import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate } from './core.js';
 import { esc, dur } from './lib.js';
 
 const OFF = { mode: 'off', folder: '', this: null, peers: [], last_run: null, error: null };
@@ -28,12 +30,14 @@ export const computers = (c) => (c ? [c.this, ...c.peers] : []);
 export const nameOf = (c, id) => (computers(c).find((d) => d.id === id) || {}).name || id || '';
 /** Connected directly, or heard from (through any transport) within three minutes. */
 export const heardOn = (d, now) => !!(d.connected || (d.last_seen && now - d.last_seen < 180000));
-/** How a peer is reached now: "direct · mDNS · connected", "relayed through <name>", "folder · heard 40 s ago"… */
+/** How a peer is reached now: "direct · mDNS · connected", "direct · rendezvous · connected", "relayed through <name>",
+ *  "hub · connected", "folder · heard 40 s ago"… */
 export function transportLine(c, d) {
-  if (d.connected) return `direct · ${d.path === 'address' && d.address ? d.address : 'mDNS'} · connected`;
+  if (d.connected) return `direct · ${d.path === 'rendezvous' ? 'rendezvous' : d.path === 'address' && d.address ? d.address : 'mDNS'} · connected`;
   if (d.path === 'relay' && d.relayed_by) return `relayed through ${nameOf(c, d.relayed_by)}`;
-  if (d.direct && !heardOn(d, Date.now())) return 'not reachable · folder only';
-  return `folder · ${d.last_seen ? 'heard ' + ago(d.last_seen) : 'not heard from yet'}`;
+  const via = d.transport === 'hub' ? 'hub' : 'folder';
+  if (d.direct && !heardOn(d, Date.now())) return `not reachable · ${via} only`;
+  return `${via} · ${d.last_seen ? (via === 'hub' && heardOn(d, Date.now()) ? 'connected' : 'heard ' + ago(d.last_seen)) : 'not heard from yet'}`;
 }
 /** A computer's colour follows its place in the list: this one teal, then sand, iris, amber. */
 const colorIdx = (c, id) => Math.max(0, computers(c).findIndex((d) => d.id === id)) % 4;
@@ -154,4 +158,109 @@ if (ev) ev.listen('computers-pairing', (e) => {
     if (r.ok) setTimeout(() => { if (document.getElementById('pair-done')) closeDialog(); }, 1500);
   } else if (r.ok) toast(`Paired with ${(r.peer || {}).name || 'another computer'}`);
   if (r.ok) changed();
+});
+
+// ---------- the hub (phase 5): joining with a code, inviting, the recovery key ----------
+const hubOf = () => ((S.cache.computers || {}).hub || {});
+/** "ABCDEFGH…" -> "ABCD EFGH …": the recovery key as typed, in groups of four. */
+const fmtRing = (v) => String(v).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 32).replace(/(.{4})(?=.)/g, '$1 ');
+/** After a join: the recovery key once, on the computer that made the ring; the Enter dialog on one that has none. */
+function afterJoin(st) {
+  const h = (st && st.hub) || {};
+  if (h.ring && !h.ring_shown) ringShowDialog(true);
+  else if (h.joined && !h.ring) ringEnterDialog();
+}
+/** Join with a code…: the hub's address, and the code from another computer's Invite or the admin token for the first. */
+export function hubJoinDialog() {
+  const h = hubOf();
+  openDialog(`${dlgHead('Join a hub')}
+    <div class="df"><label for="hub-url">Address</label><div><input class="input mono" id="hub-url" value="${esc(h.url || '')}" placeholder="https://hub.example.com" autocomplete="off" aria-label="Hub address" data-testid="hub-url-in"><span class="hint">The address of the hub you host (deploy/hub in the repository sets one up in ten lines).</span></div></div>
+    <div class="df"><label for="hub-code">Code</label><div><input class="input mono" id="hub-code" inputmode="numeric" autocomplete="off" placeholder="482 915" maxlength="7" aria-label="The six-digit code" data-testid="hub-code"><span class="hint">The six digits from another computer's Settings › Computers › Invite a computer….</span></div></div>
+    <div class="df"><label for="hub-admin">Admin token</label><div><input class="input mono" id="hub-admin" type="password" autocomplete="off" aria-label="The hub's admin token" data-testid="hub-admin"><span class="hint">For the first computer only: the HUB_ADMIN_TOKEN of your hub. It makes the ring key, shown once as the recovery key.</span></div></div>
+    <div class="df" style="grid-template-columns:1fr"><p class="err" id="hub-error" data-testid="hub-error" hidden></p></div>
+    <div class="dfoot"><span class="kb">Enter</span> join <span class="kb">Esc</span> cancel<span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="hub-ok" data-testid="hub-ok">Join</button></span></div>`);
+  const code = document.getElementById('hub-code');
+  code.addEventListener('input', () => { code.value = fmtCode(code.value); });
+  for (const id of ['hub-url', 'hub-code', 'hub-admin']) document.getElementById(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('hub-ok').click(); });
+  document.getElementById('hub-ok').onclick = async () => {
+    const url = document.getElementById('hub-url').value.trim(), c = code.value.replace(/\D/g, ''), admin = document.getElementById('hub-admin').value.trim(), err = document.getElementById('hub-error'), btn = document.getElementById('hub-ok');
+    const fail = (t) => { err.textContent = t; err.hidden = false; if (btn.isConnected) btn.disabled = false; };
+    if (!/^https?:\/\//.test(url)) return fail('The address starts with https:// (or http:// on a private network).');
+    if (!admin && c.length !== 6) return fail('Enter the six digits from Invite a computer…, or the admin token for the first computer.');
+    btn.disabled = true; err.hidden = true;
+    try {
+      const st = await call('hub_join', { url, ...(admin ? { admin_token: admin } : { code: c }) });
+      closeDialog();
+      toast(`Joined ${url}`);
+      await changed();
+      afterJoin(st);
+    } catch (e) { fail(errText(e)); }
+  };
+}
+/** Invite a computer…: a one-time six-digit code, good for ten minutes, with the address to enter it at. */
+async function inviteDialog() {
+  openDialog(`${dlgHead('Invite a computer')}<div class="df" style="grid-template-columns:1fr"><div id="invite-body" data-testid="invite-body"><p class="muted">Asking the hub for a code…</p></div></div>
+    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Close</button></span></div>`);
+  const el = document.getElementById('invite-body');
+  try {
+    const r = await call('hub_invite');
+    if (!el.isConnected) return;
+    el.innerHTML = `<p>On the other computer, open Settings › Computers › A hub you host › Join with a code…, enter this address and type</p>
+      <div class="paircode mono" data-testid="invite-code">${esc(fmtCode(r.code))}</div>
+      <p class="hint">Good for ten minutes, for one computer. Address: <span class="mono" data-testid="invite-url">${esc(hubOf().url || '')}</span>. If that computer is not paired with this one, it will also ask for the recovery key.</p>`;
+  } catch (e) { if (el.isConnected) el.innerHTML = `<p class="err" data-testid="hub-error">${esc(errText(e))}</p>`; }
+}
+/** The recovery key, shown once at the first hub use (and again from Settings behind a confirm). */
+async function ringShowDialog(first = false) {
+  openDialog(`${dlgHead('Your recovery key')}<div class="df" style="grid-template-columns:1fr"><div id="ring-body" data-testid="ring-body"><p class="muted">Reading…</p></div></div>
+    <div class="dfoot"><span class="acts"><button class="btn primary" data-act="dialog-close" data-testid="ring-saved">I saved it in my password manager</button></span></div>`);
+  const el = document.getElementById('ring-body');
+  try {
+    const r = await call('ring_key_show');
+    if (!el.isConnected) return;
+    el.innerHTML = `<p>${first ? 'This computer made the ring key that seals everything it sends to the hub. ' : ''}Keep this recovery key in your password manager: a computer that is not paired with this one needs it to read the hub, and so does a fresh install.</p>
+      <div class="ringkey mono" data-testid="ring-key">${esc(r.key)}</div>
+      <p class="hint">Paired computers get the key with the pairing, without typing. The hub never sees it.</p>`;
+  } catch (e) { if (el.isConnected) el.innerHTML = `<p class="err" data-testid="hub-error">${esc(errText(e))}</p>`; }
+}
+/** Enter recovery key: the 8 groups of 4, typed or pasted; spaces, dashes and case do not matter. */
+function ringEnterDialog() {
+  openDialog(`${dlgHead('Enter the recovery key')}
+    <div class="df"><label for="ring-in">Recovery key</label><div><input class="input mono" id="ring-in" autocomplete="off" placeholder="ABCD EFGH IJKL MNOP QRST UVWX YZ23 4567" aria-label="The recovery key" data-testid="ring-in"><span class="hint">The 8 groups of 4 shown on the computer that first turned the hub on (Settings › Computers › Recovery key › Show again). Without it this computer cannot read the hub.</span></div></div>
+    <div class="df" style="grid-template-columns:1fr"><p class="err" id="ring-error" data-testid="ring-error" hidden></p></div>
+    <div class="dfoot"><span class="kb">Enter</span> save <span class="kb">Esc</span> cancel<span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="ring-ok" data-testid="ring-ok">Save</button></span></div>`);
+  const inp = document.getElementById('ring-in');
+  inp.addEventListener('input', () => { inp.value = fmtRing(inp.value); });
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('ring-ok').click(); });
+  document.getElementById('ring-ok').onclick = async () => {
+    const err = document.getElementById('ring-error'), btn = document.getElementById('ring-ok');
+    btn.disabled = true; err.hidden = true;
+    try { await call('ring_key_enter', { key: inp.value }); closeDialog(); toast('The ring key is set'); changed(); }
+    catch (e) { err.textContent = errText(e); err.hidden = false; if (btn.isConnected) btn.disabled = false; }
+  };
+}
+action('hub-join', hubJoinDialog);
+action('hub-invite', inviteDialog);
+action('ring-enter', ringEnterDialog);
+action('ring-show', async () => { if (await confirmDialog('Show the recovery key', 'Show the recovery key on screen? Anyone who reads it can read your hub.', 'Show', false)) ringShowDialog(); });
+action('hub-leave', async () => {
+  if (await confirmDialog('Stop syncing through the hub', 'Leave the hub? This computer\'s record and token go there; what was merged from the others stays here, and the ring key stays on this computer.', 'Leave')) mutate(() => call('hub_leave'), 'Left the hub');
+});
+
+// ---------- first run: "Add this computer to your others", with both cards ----------
+const FIRSTRUN_KEY = 'hm.firstrun';
+export function firstRunDialog() {
+  openDialog(`${dlgHead('Add this computer to your others')}<div class="df" style="grid-template-columns:1fr"><div><p>How should your computers sync? You can change this later in Settings › Computers.</p>
+    <div class="mcards"><div class="mcard" role="button" tabindex="0" data-act="firstrun-folder" data-testid="firstrun-folder"><i></i><div><b>A shared folder</b><span>Choose the folder you already sync between your computers. If another computer has used it, its history appears here at once.</span></div></div>
+    <div class="mcard" role="button" tabindex="0" data-act="firstrun-hub" data-testid="firstrun-hub"><i></i><div><b>A hub you host</b><span>Enter the hub's address and the six-digit code shown on a computer already joined, or its admin token for the first computer.</span></div></div></div></div></div>
+    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close" data-testid="firstrun-later">Not now</button></span></div>`);
+}
+action('firstrun-folder', async () => { closeDialog(); const p = await pickFolder(); if (p) mutate(() => call('computers_set', { sync_mode: 'folder', sync_folder: p }), 'Syncing through ' + p); });
+action('firstrun-hub', () => { closeDialog(); hubJoinDialog(); });
+// on the first start (no accounts yet), once, after the page is drawn and when no tour is in front of it
+document.addEventListener('rendered', () => {
+  const st = S.state;
+  if (!st || !st.first_run || !st.settings || st.settings.sync_mode !== 'off') return;
+  try { if (localStorage.getItem(FIRSTRUN_KEY)) return; localStorage.setItem(FIRSTRUN_KEY, '1'); } catch { return; }
+  if (!document.getElementById('dialog-root').innerHTML && !document.querySelector('.tour-pop')) firstRunDialog();
 });

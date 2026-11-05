@@ -208,7 +208,7 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
     if let Some(c) = &code { body["code"] = json!(c); } else { body["admin_token"] = json!(admin); }
     let r = Hub::at(&base, "")?.post_json("/v1/join", &body).map_err(|e| {
         let s = format!("{e:#}");
-        if s.contains("refused") { anyhow!("the hub did not accept the {}; check it and try again", if code.is_some() { "code" } else { "admin token" }) } else { e }
+        if s.starts_with("the hub refused this computer") { anyhow!("the hub did not accept the {}; check it and try again", if code.is_some() { "code" } else { "admin token" }) } else { e }
     })?;
     let tok = r["token"].as_str().filter(|t| !t.is_empty()).context("the hub answered without a token")?;
     write_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token", tok)?;
