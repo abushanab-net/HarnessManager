@@ -1,2 +1,4 @@
 # git hooks run under sh, which fails on CRLF line endings
 .githooks/* text eol=lf
+# the Oh My Pi fixture starts with a title slot of exactly 256 bytes, newline included
+crates/core/tests/fixtures/** text eol=lf
