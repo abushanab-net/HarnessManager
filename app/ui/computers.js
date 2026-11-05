@@ -18,6 +18,7 @@ export async function computersStatus() {
   c = { ...OFF, ...c, peers: c.peers || [], at: Date.now() };
   c.this = { id: '', name: (S.state && S.state.computer) || 'this computer', ...(c.this || {}) };
   S.cache.computers = c;
+  drawChip(c); // every fresh read redraws the chip, so a page's own read never leaves it behind a stale one
   return c;
 }
 export const syncOn = (c) => !!c && c.mode !== 'off';
