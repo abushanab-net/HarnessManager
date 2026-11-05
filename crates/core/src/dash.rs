@@ -67,8 +67,9 @@ pub fn spent_today(ctx: &Ctx, profile: &str) -> Result<f64> {
 /// Everything the Overview shows for the last `hours`, optionally for one tool; `scope` "here" keeps to this computer.
 pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&str>) -> Result<Value> {
     let now = now_ms();
-    let span = hours.max(1) * 3_600_000;
-    let since = now - span;
+    // 0 hours is today since local midnight; the period before is as long as today has been so far
+    let since = crate::util::since_hours(hours);
+    let span = (now - since).max(60_000);
     let reg = ctx.registry()?;
     let billed: HashSet<&str> = reg.profiles.iter().filter(|p| p.kind != Kind::Subscription).map(|p| p.name.as_str()).collect();
     let caps = caps(ctx, &reg);

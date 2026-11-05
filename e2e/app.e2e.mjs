@@ -250,7 +250,7 @@ try {
     await hasText('[data-testid=kpi-tokens]', '5 requests');
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('00c-overview-panels');
-    await click('[data-testid=range-24h]');
+    await click('[data-testid=range-today]');
   });
 
   await test('sidebar: Setup folds and stays as left, a page inside opens it, the pinned projects fold', async () => {

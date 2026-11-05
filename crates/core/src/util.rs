@@ -72,6 +72,13 @@ pub fn read_json(path: &Path) -> Option<serde_json::Value> {
 
 pub fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
 
+/// The start of a window `hours` long ending now; 0 hours is today, since this computer's local midnight.
+pub fn since_hours(hours: i64) -> i64 {
+    if hours > 0 { return now_ms() - hours * 3_600_000; }
+    chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(chrono::Local).single()).map(|d| d.timestamp_millis()).unwrap_or_else(now_ms)
+}
+
+
 /// A random id in the UUID v4 form, from the OS-seeded hasher (no extra dependency needed for an id).
 pub fn uuid4() -> String {
     let h = crate::service::random_token();

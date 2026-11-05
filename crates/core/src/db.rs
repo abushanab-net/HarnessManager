@@ -129,6 +129,11 @@ impl Db {
             conn.execute("insert or replace into kv values('migrated:device', '1')", [])?;
             if n > 0 { crate::log::info(&format!("{n} rows stamped as this computer's ({device})")); }
         }
+        // a row written without a computer (seen once after an update) belongs to this one
+        if !device.is_empty() {
+            conn.execute("update usage set device=?1 where device=''", [device])?;
+            conn.execute("update sessions set device=?1 where device=''", [device])?;
+        }
         Ok(Db { conn: Mutex::new(conn), device: device.into(), journal })
     }
 

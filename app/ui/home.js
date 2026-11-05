@@ -8,9 +8,9 @@ import { computersStatus, syncOn, computers, nameOf, cdot, cdots, splitBar, tile
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google', pi: 'Pi', omp: 'Oh My Pi' };
-const RANGES = [['24h', 24], ['7d', 168], ['30d', 720]];
+const RANGES = [['today', 0], ['7d', 168], ['30d', 720]], RANGE_LABEL = { today: 'Today', '7d': '7d', '30d': '30d' };
 // device: the Activity grid's own computer ('' is every computer added up)
-const st = { harness: '', range: '24h', metric: 'tokens', rows: null, total: 0, log: false, device: '' };
+const st = { harness: '', range: 'today', metric: 'tokens', rows: null, total: 0, log: false, device: '' };
 const money = (c, digits = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }));
 const secs = (ms) => (ms == null ? '—' : (ms / 1000).toFixed(1));
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -357,7 +357,7 @@ view('home', async (sheet) => {
       <div class="acts">
         <div class="toolfilter" role="group" aria-label="Tool"><a class="${!st.harness ? 'on' : ''}" data-act="home-tool" data-v="" data-testid="tool-all">All</a>
           ${tools.map((h) => `<a class="${st.harness === h.id ? 'on' : ''}" data-act="home-tool" data-v="${h.id}" data-testid="tool-${h.id}">${esc(h.label)}</a>`).join('')}</div>
-        ${syncOn(pcs) ? scopeSeg() : ''}<span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${r}</a>`).join('')}</span>
+        ${syncOn(pcs) ? scopeSeg() : ''}<span class="seg3" role="group" aria-label="Time range">${RANGES.map(([r]) => `<a class="${st.range === r ? 'on' : ''} mono" data-act="home-range" data-v="${r}" data-testid="range-${r}">${RANGE_LABEL[r]}</a>`).join('')}</span>
         ${best ? `<button class="btn primary" data-act="start" data-name="${esc(best.name)}" data-testid="start-best">${ic.play} Start ${esc(best.label)}</button>` : ''}</div></div>
     ${kpis(k, ps, risks, d, pcs)}
     <section class="panel ovroutes"><div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><span class="muted mono sm">particles = tokens per second, last 5 minutes, updated each minute</span></div>
@@ -385,7 +385,7 @@ action('home-more', async (el) => {
   if (el.disabled) return;
   el.disabled = true;
   const base = st.rows;
-  const days = Math.round(RANGES.find((r) => r[0] === st.range)[1] / 24);
+  const days = Math.max(1, Math.round(RANGES.find((r) => r[0] === st.range)[1] / 24));
   const r = await attempt(() => call('requests', { days, hours: RANGES.find((x) => x[0] === st.range)[1], harness: st.harness, limit: 50, offset: base.length }));
   el.disabled = false;
   if (!r || st.rows !== base) return; // the list was redrawn (another filter) while this page loaded

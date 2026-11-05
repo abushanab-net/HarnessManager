@@ -195,7 +195,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let days = a["days"].as_i64();
             let h = a["harness"].as_str().filter(|s| !s.is_empty());
             let scope = a["scope"].as_str();
-            let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
+            let since = a["hours"].as_i64().map(hrm_core::util::since_hours);
             let (total, rows) = service::request_log_since(ctx, days, since, h, scope, a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
             json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows},
                    "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h, scope)?, "activity": service::activity(ctx, h, scope)?})
@@ -203,7 +203,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         // the last five minutes of traffic, here and on the other computers
         "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
-            let since = a["hours"].as_i64().map(|x| hrm_core::util::now_ms() - x * 3_600_000);
+            let since = a["hours"].as_i64().map(hrm_core::util::since_hours);
             let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["scope"].as_str(), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
             json!({"total": total, "rows": rows})
         }

@@ -634,7 +634,7 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
         let here = devices.iter().any(|d| d.0 == ctx.db.device);
         let devices = devices.into_iter().map(|(id, name, sessions, tokens)| serde_json::json!({"id": id, "name": name, "sessions": sessions, "tokens": tokens})).collect();
         ProjectStat { pinned: pins.contains(&g.key), tags: ptags.get(&g.key).cloned().unwrap_or_default(), key: g.key, name: g.name, root: g.root, remote: g.remote, sessions: g.sessions.len(), tokens: g.tokens, cost,
-            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open).count(), series, devices, here }
+            priced_share: if all > 0 { priced as f64 / all as f64 } else { 0.0 }, accounts, last_active_at: g.last_active_at, live: g.sessions.iter().filter(|s| s.open || s.open_elsewhere).count(), series, devices, here }
     }).collect())
 }
 
