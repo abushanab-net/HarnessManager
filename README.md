@@ -111,6 +111,12 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   filter (a session open elsewhere says "running on <name>"), project cards show which computers have the
   repository, and a chip in the top bar shows which computers were heard from in the last three minutes.
   With sync off, nothing changes. `hrm computers status | now | set` does the same from a terminal.
+- **Direct connection, on screen:** Settings › Computers has a Direct connection switch and Pair a computer…,
+  which shows a six-digit code on one computer and takes it on the other (with an address for a computer on
+  another network). Each computer's card then says how it is reached ("direct · mDNS · connected", "relayed
+  through LAPTOP", "folder · heard 40 s ago"), keeps an address you can change, and has Forget; Running now
+  and the chip follow presence every ten seconds. `hrm computers pair | join | forget | peers | serve` do the
+  same from a terminal.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 

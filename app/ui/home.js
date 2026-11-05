@@ -315,6 +315,16 @@ function limitsPanel(burn, ps, now) {
 }
 
 // ---------- the page ----------
+/** The Running now panel: every session open on any computer (live.running), with the computer's name. */
+const runningNow = (running, pcs, now) => (running.length ? `<section class="panel" data-testid="running-now"><div class="ph"><h2>Running now</h2><span class="muted mono sm">${running.length} ${running.length === 1 ? 'session' : 'sessions'} on your computers</span></div>
+      ${running.map((r) => `<div class="runrow">${cdot(pcs, r.device)}<b>${esc(r.project_name || r.project || (r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder')}</b><span class="muted">${esc(nameOf(pcs, r.device))} · ${esc(acctName(r.profile))} · ${esc(TOOL[r.harness] || r.harness || '')}</span><span class="mono muted">${r.started_at ? dur(now - r.started_at) : ''}</span></div>`).join('')}</section>` : '');
+// presence from a connected computer arrives every 10 s: only the Running now panel is drawn again, in place
+document.addEventListener('presence', async (e) => {
+  const sec = document.querySelector('[data-testid=running-now]');
+  if (S.route.view !== 'home' || !sec || document.getElementById('dialog-root').innerHTML) return;
+  const d = await call('live').catch(() => null);
+  if (d && S.route.view === 'home' && sec.isConnected) sec.outerHTML = runningNow(d.live.running || [], e.detail, d.now) || '<span data-testid="running-now" hidden></span>';
+});
 view('home', async (sheet) => {
   sheet.className = 'sheet';
   const hours = RANGES.find((r) => r[0] === st.range)[1];
@@ -353,8 +363,7 @@ view('home', async (sheet) => {
     <section class="panel ovroutes"><div class="ph"><h2>Live routes <span class="mono acT">${topo.tps >= 1 ? Math.round(topo.tps) : topo.tps.toFixed(1)} tok/s now</span></h2><span class="muted mono sm">particles = tokens per second, last 5 minutes, updated each minute</span></div>
       ${topo.empty ? '<p class="empty">Add an account to see its route.</p>' : `<div class="topowrap">${topo.html}</div>`}
       <div class="legend"><span><i class="lc"></i>Subscription login, straight to the provider</span><span><i class="la"></i>API key, through the local router</span><span><i class="lr"></i>Paused, or a login that needs renewing</span>${topo.peers ? `<span><i class="lp"></i>Traffic from another computer</span><span>${cdots(pcs, computers(pcs).map((x) => x.id))} in use on ${esc(computers(pcs).map((x) => x.name).join(', '))}</span>` : ''}<span>Click a card to open it</span></div></section>
-    ${running.length ? `<section class="panel" data-testid="running-now"><div class="ph"><h2>Running now</h2><span class="muted mono sm">${running.length} ${running.length === 1 ? 'session' : 'sessions'} on your computers</span></div>
-      ${running.map((r) => `<div class="runrow">${cdot(pcs, r.device)}<b>${esc(r.project_name || r.project || (r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder')}</b><span class="muted">${esc(nameOf(pcs, r.device))} · ${esc(acctName(r.profile))} · ${esc(TOOL[r.harness] || r.harness || '')}</span><span class="mono muted">${r.started_at ? dur(now - r.started_at) : ''}</span></div>`).join('')}</section>` : ''}
+    ${runningNow(running, pcs, now)}
     ${limitsPanel(burn, ps, now)}
     <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2><span class="acts">${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[['', 'All'], ...computers(pcs).map((x) => [x.id, x.name])].map(([v, l]) => `<a class="${pc.dev === v ? 'on' : ''}" data-act="home-device" data-v="${esc(v)}" data-testid="activity-pc-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}<span class="muted mono sm">daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : (st.metric === 'cost' ? 'cost' : st.metric) + (pc ? ' · all computers' : '')}</span></span></div><div class="hmwrap"></div>${busiest(o.heatmap, st.metric)}</section>
     <section class="panel" style="padding-bottom:6px"><div class="ph"><h2>${st.log ? 'Request log' : 'Latest replies'} <span class="muted mono sm">${d.requests.total.toLocaleString()}</span></h2>
