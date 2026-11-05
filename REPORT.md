@@ -1,6 +1,6 @@
 # WP-9a: the hub service and its deployment
 
-Branch `feature/hub-service`, five commits, not pushed. Everything in the brief is built and tested; the
+Branch `feature/hub-service`, five commits plus this report, not pushed. Everything in the brief is built and tested; the
 image builds on this computer.
 
 ## What was built, by file
