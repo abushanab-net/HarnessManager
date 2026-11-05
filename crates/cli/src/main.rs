@@ -120,6 +120,32 @@ enum Cmd {
     ResumeHere { session: String },
     /// Transcripts carried to the folder and known from the other computers
     Transcripts { #[command(flatten)] j: Json },
+    /// Make a backup now (the account list, settings, the history; never keys or logins)
+    Backup {
+        /// Also this computer's session transcripts, compressed
+        #[arg(long)] with_transcripts: bool,
+        #[command(flatten)] j: Json,
+    },
+    /// Merge the history in a backup zip or a sync folder into this computer; nothing is counted twice
+    Restore {
+        /// A backup zip, or the sync folder
+        source: PathBuf,
+        /// Continue as the computer named in it: its id, a new incarnation
+        #[arg(long)] adopt: bool,
+        /// Only say what it holds
+        #[arg(long)] preview: bool,
+        #[command(flatten)] j: Json,
+    },
+    /// Old transcripts out of the tools' folders into the archive; the sessions stay listed and readable
+    Archive { #[command(subcommand)] cmd: ArchiveCmd },
+}
+
+#[derive(Subcommand)]
+enum ArchiveCmd {
+    /// How many sessions are archived, where, and when the step last ran
+    Status { #[command(flatten)] j: Json },
+    /// Run the step now with the archive_days setting
+    Now { #[command(flatten)] j: Json },
 }
 
 #[derive(Subcommand)]
@@ -671,6 +697,38 @@ fn real_main(cli: Cli) -> Result<i32> {
             if j.json { return print_json(&st).map(|_| 0); }
             println!("carried {} ({:.1} MB of {} MB); from the other computers {} known, {} fetched", st["carried"], st["bytes"].as_f64().unwrap_or(0.0) / 1048576.0, st["cap_bytes"].as_i64().unwrap_or(0) / 1048576, st["remote"], st["fetched"]);
             for s in st["skipped"].as_array().into_iter().flatten() { println!("  skipped {}  {}", s["key"].as_str().unwrap_or(""), s["why"].as_str().unwrap_or("")); }
+        }
+        Cmd::Backup { with_transcripts, j } => {
+            let b = hrm_core::backup::create_with(&ctx, "Manual", with_transcripts)?;
+            if j.json { return print_json(&b).map(|_| 0); }
+            println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with_transcripts { ", with transcripts" } else { "" });
+        }
+        Cmd::Restore { source, adopt, preview, j } => {
+            let src = hrm_core::restore::Source::of_path(&source)?;
+            let v = if preview { hrm_core::restore::preview(&ctx, &src)? } else { hrm_core::restore::run(&ctx, &src, adopt)? };
+            if j.json { return print_json(&v).map(|_| 0); }
+            if preview {
+                println!("{} requests, {} tokens, {} sessions, {} accounts with limit history, {} archived transcripts, newest {}", v["requests"], fmt_tokens(v["tokens"].as_i64().unwrap_or(0)), v["sessions"], v["accounts"], v["archived"], fmt_reset(v["newest"].as_i64()));
+                for c in v["computers"].as_array().into_iter().flatten() { println!("  {:<24} {} requests, {} sessions", c["name"].as_str().unwrap_or(""), c["requests"], c["sessions"]); }
+                if let Some(n) = v["this"]["name"].as_str() { println!("  {n} is this computer's name: --adopt continues as it"); }
+            } else {
+                println!("Restored: {} requests, {} sessions, {} limit readings, {} tags, {} computers, {} archived transcripts, {} accounts added{}", v["usage"], v["sessions"], v["quota"], v["tags"], v["peers"], v["archived"], v["profiles"],
+                    if v["adopted"] == true { format!("; this computer continues as {}", v["device"]["name"].as_str().unwrap_or("")) } else { String::new() });
+            }
+        }
+        Cmd::Archive { cmd } => {
+            let (v, j) = match cmd {
+                ArchiveCmd::Status { j } => (hrm_core::archive::status(&ctx)?, j),
+                ArchiveCmd::Now { j } => (hrm_core::archive::archive_now(&ctx)?, j),
+            };
+            if j.json { return print_json(&v).map(|_| 0); }
+            if v.get("locations").is_some() {
+                println!("{} archived ({:.1} MB); sessions older than {} days{}", v["archived"], v["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, v["days"], if v["days"] == 0 { " (never)" } else { "" });
+                for l in v["locations"].as_array().into_iter().flatten() { println!("  {:<12} {} ({} sessions, {:.1} MB){}", l["kind"].as_str().unwrap_or(""), l["path"].as_str().unwrap_or(""), l["sessions"], l["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, if l["on"] == false { ", off" } else { "" }); }
+                if let Some(at) = v["last"]["at"].as_i64() { println!("  last run {}: {} moved", fmt_reset(Some(at)), v["last"]["archived"]); }
+            } else {
+                println!("{} sessions moved to the archive ({:.1} MB){}", v["archived"], v["bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0, v["why"].as_str().map(|w| format!("; {w}")).unwrap_or_default());
+            }
         }
     }
     Ok(0)

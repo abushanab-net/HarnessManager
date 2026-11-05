@@ -72,6 +72,9 @@ pub trait Harness: Sync + Send {
     }
     /// `materialize` is implemented: a session of this tool from another computer can be resumed here.
     fn resumes_elsewhere(&self) -> bool { false }
+    /// The files that belong to a session in the tool's folder, the transcript first: the archive compresses the
+    /// first and deletes them all. The default is the transcript alone.
+    fn archive_paths(&self, _ctx: &Ctx, _p: &Profile, s: &SessionMeta) -> Vec<PathBuf> { vec![PathBuf::from(&s.source_path)] }
 }
 
 pub fn all() -> &'static [&'static dyn Harness] {
