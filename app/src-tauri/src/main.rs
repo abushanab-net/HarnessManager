@@ -17,9 +17,16 @@ struct AppState {
     ctx: Mutex<Arc<Ctx>>,
     first_run: Mutex<Option<Value>>,
     settings_mtime: Mutex<Option<std::time::SystemTime>>,
+    /// The direct connection's listener, mDNS and pairing; set once the window exists to tell.
+    peers: std::sync::OnceLock<Arc<hrm_core::sync::peer::Runtime>>,
 }
 
 impl AppState {
+    fn peers(&self) -> Result<&Arc<hrm_core::sync::peer::Runtime>> { self.peers.get().context("the direct connection is not up yet") }
+
+    /// Settings were saved by a core function: take them on the next call.
+    fn refresh(&self) { *self.settings_mtime.lock().unwrap() = None; }
+
     /// The context, reopened when settings.json changed on disk (for example through `hrm settings`).
     fn ctx(&self) -> Arc<Ctx> {
         let mut cur = self.ctx.lock().unwrap();
@@ -63,7 +70,8 @@ fn sync_soft(ctx: &Ctx) -> Value {
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
     "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
-    "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now"];
+    "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
+    "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
     let ctx = state.ctx();
@@ -235,11 +243,19 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "computers_status" => hrm_core::journal::status(ctx)?,
         "computers_now" => hrm_core::journal::round(ctx)?,
         "computers_set" => {
-            let fresh = Arc::new(hrm_core::journal::configure(&ctx.data, &ctx.home, a)?);
+            let mut fresh = Arc::new(hrm_core::journal::configure(&ctx.data, &ctx.home, a)?);
+            // the listener follows the setting at once (and may pick and save its port)
+            if let Some(p) = state.peers.get() { fresh = p.ensure(&fresh)?; }
             *state.ctx.lock().unwrap() = fresh.clone();
             *state.settings_mtime.lock().unwrap() = None;
-            if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
+            if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
         }
+        // the direct connection: pairing with a six-digit code, the computers paired
+        "computers_pair_start" => { let v = state.peers()?.pair_start(&state.ctx(), opt(a, "host").as_deref())?; state.refresh(); v }
+        "computers_pair_cancel" => state.peers()?.pair_cancel(ctx)?,
+        "computers_pair_join" => { let v = state.peers()?.pair_join(&state.ctx(), &s(a, "code")?, opt(a, "host").as_deref())?; state.refresh(); v }
+        "computers_forget" => hrm_core::sync::peer::forget(ctx, &s(a, "id")?)?,
+        "computers_set_peer" => hrm_core::sync::peer::set_peer(ctx, &s(a, "id")?, a["address"].as_str(), a["name"].as_str())?,
         // tags: free text on sessions ("session", key profile/id) and projects ("project", the project key)
         "tag_set" => {
             let tags: Vec<String> = a["tags"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
@@ -705,7 +721,7 @@ fn main() {
     hrm_core::util::adopt_shell_path();
     let ctx = Arc::new(Ctx::open().unwrap_or_else(|e| fatal(&format!("Harness Manager could not start:\n\n{e:#}"))));
     let first = { let _l = ctx.lock_registry(); hrm_core::import::first_run(&ctx).ok().flatten().map(|r| serde_json::to_value(r).unwrap()) };
-    let state = Arc::new(AppState { ctx: Mutex::new(ctx), first_run: Mutex::new(first), settings_mtime: Mutex::new(None) });
+    let state = Arc::new(AppState { ctx: Mutex::new(ctx), first_run: Mutex::new(first), settings_mtime: Mutex::new(None), peers: std::sync::OnceLock::new() });
     let mut builder = tauri::Builder::default();
     // one copy runs: opening it again (Start menu, a shortcut) shows the window the tray keeps. The tests' copy
     // skips this, so they can run while the installed app sits in the tray.
@@ -744,7 +760,7 @@ fn main() {
                 let _ = service::refresh_quotas(&ctx, false);
                 if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
                 // across computers: out with what is new here, in with what the others published
-                if ctx.settings.sync_mode == "folder" {
+                if hrm_core::journal::on(&ctx) {
                     match hrm_core::journal::round(&ctx) {
                         Ok(v) => { let _ = handle.emit("computers", v); }
                         Err(e) => hrm_core::log::warn(&format!("computers: {e:#}")),
@@ -761,6 +777,25 @@ fn main() {
                 if let Err(e) = hrm_core::journal::presence_tick(&st2.ctx()) { hrm_core::log::warn(&format!("presence: {e:#}")); }
                 std::thread::sleep(std::time::Duration::from_secs(60));
             });
+            // the direct connection: the listener while it is on, the paired computers pulled every ten seconds
+            let (h3, st3) = (app.handle().clone(), state.clone());
+            let on_event: hrm_core::sync::peer::OnEvent = Arc::new(move |name, v| { let _ = h3.emit(name, v); });
+            match hrm_core::sync::peer::Runtime::new(std::net::Ipv4Addr::UNSPECIFIED.into(), on_event) {
+                Ok(rt) => {
+                    let rt = Arc::new(rt);
+                    let _ = state.peers.set(rt.clone());
+                    let h4 = app.handle().clone();
+                    std::thread::spawn(move || loop {
+                        let ctx = st3.ctx();
+                        rt.tick(&ctx);
+                        if ctx.settings.direct_connection {
+                            if let Ok(v) = hrm_core::journal::status(&st3.ctx()) { let _ = h4.emit("computers", v); }
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(10));
+                    });
+                }
+                Err(e) => hrm_core::log::warn(&format!("computers: the direct connection could not start: {e:#}")),
+            }
             let mut win = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .title("Harness Manager")
                 .inner_size(1280.0, 820.0)
