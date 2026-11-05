@@ -453,5 +453,8 @@ fn an_event_from_the_hub_runs_a_round_on_the_other_computer() {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while std::time::Instant::now() < until && count(&b.ctx, "select count(*) from usage") == 0 { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert_eq!(count(&b.ctx, "select count(*) from usage"), 1, "the chunk event made B pull");
+    // the status callback comes after the round that applied the chunk
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < until && seen.lock().unwrap().is_empty() { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert!(!seen.lock().unwrap().is_empty(), "the status was told");
 }
