@@ -828,7 +828,7 @@ try {
     await click('[data-testid=t-mcp-fs-codex]');
     await waitFor(() => fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8').includes('[mcp_servers.fs]'), 'fs in config.toml');
     await shot('11-mcp');
-    assert.equal(await exec(`const t = document.querySelector('[data-testid=mcp-matrix]'); return t.tHead.rows[0].cells[document.querySelector('[data-testid=t-mcp-fs-codex]').closest('td').cellIndex].title`), 'Codex: 1 servers', 'the Codex count follows the tick');
+    await waitFor(async () => (await exec(`const t = document.querySelector('[data-testid=mcp-matrix]'); return t.tHead.rows[0].cells[document.querySelector('[data-testid=t-mcp-fs-codex]').closest('td').cellIndex].title`)) === 'Codex: 1 servers', 'the Codex count follows the tick');
     await click('[data-testid=t-mcp-fs-codex]');
     await waitFor(() => !fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8').includes('[mcp_servers.fs]'), 'fs removed from config.toml');
     // edit as JSON: the form's server comes out as Claude Code writes it, and goes back in
