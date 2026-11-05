@@ -161,3 +161,122 @@ the README that it is gated until it documents its session store.
 - Commits on the package's branch with clear messages; **no push**; a `REPORT.md` at the worktree root:
   what was built, what was skipped, test results verbatim (counts), and anything the merge must know.
 - Nothing outside the package's paths is edited without saying so in `REPORT.md`.
+
+
+---
+
+## Phase 2: the direct connection (contract, 5 Nov 2026)
+
+Delivers: each computer has an identity (a key pair and a self-signed certificate), two computers pair once
+with a six-digit code, they find each other by mDNS on the same network or by an address (the owner's VPN
+is Pangolin, so a stable host name or IP per computer), talk over mutual TLS, pull each other's journal
+chunks with cursors, relay chunks of computers they both know, and share presence every ten seconds. The
+folder transport keeps working underneath; a computer reachable neither directly nor through a relay is
+still merged through the folder, just not live.
+
+| Package | Owns (only these paths) | Branch | Account |
+|---|---|---|---|
+| WP-5 peer core: identity, pairing, discovery, TLS listener and client, pull and relay, presence, ops, CLI, Rust tests | `crates/core/src/sync/**` (new `peer/` modules), `crates/core/src/{journal.rs,db.rs,ctx.rs,secrets.rs,dash.rs,service.rs}`, `crates/core/Cargo.toml`, `crates/cli/**`, `app/src-tauri/src/main.rs`, `app/src-tauri/Cargo.toml`, `Cargo.lock`, README "Computers" paragraph | `feature/peers-core` | claude-main |
+| WP-6 UI: Direct connection switch, Pair dialog, computer cards with transport and address, Forget, chip; e2e with `hrm computers pair` as the second peer | `app/ui/**`, `e2e/app.e2e.mjs` (appended tests, one named block), README screens | `feature/peers-ui` | samykabu-personal |
+
+Suggested crates (the core package verifies they build together with axum 0.8 / tokio / reqwest-rustls
+already in the workspace): `rcgen` (self-signed certificate from an Ed25519 key), `rustls` +
+`axum-server` with `tls-rustls` (the listener with a client-certificate verifier that accepts only paired
+certificates), `reqwest` with `rustls-tls` and `identity` for the client side (pin the peer's certificate
+as the only root), `ed25519-dalek` (chunk signatures), `spake2` (the code exchange), `chacha20poly1305` or
+`aes-gcm` (the pairing payload), `mdns-sd` (advertise and browse `_hrm._tcp.local.`). Fewer is better;
+replace any that does not fit, and say so in the report.
+
+### Identity and storage
+
+- `device_id` and `incarnation` stay as in phase 1. New at first use: an Ed25519 key pair; the private key
+  in Windows Credential Manager under `hrm:device-key` (see `secrets.rs`; never in `settings.json`, which
+  backups carry), the certificate (self-signed, CN = device_id, 10 years) at `<data>/device.crt`, and
+  `pubkey` (base64) in `device.json` and in every `hello`.
+- `peers` gains: `address text` (host or host:port the owner or pairing gave; may be empty), `cert_pem text`,
+  `pubkey text`, `paired_at integer`, `last_pull integer`, `path text` ("mdns" | "address" | "relay" | ""),
+  `connected integer`, `relayed_by text`. A peer with an empty `cert_pem` is folder-only (phase 1) and is
+  never connected to.
+- Chunks are signed: the manifest's `chunks[]` (folder) and the `/v1/chunks` answer (direct) carry
+  `sig` = base64 Ed25519 signature by the origin over the UTF-8 bytes of `"<incarnation>-<from>-<to>:<sha256>"`.
+  A chunk whose `sig` does not verify against the origin's `pubkey` is skipped (logged). Received chunks
+  are kept under `<data>/journal-cache/<origin>/<file>` so they can be relayed; the cache is pruned to the
+  last 50 MB per origin, oldest first, never below the newest chunk.
+- Settings: `direct_connection bool` (phase 1 field, now honoured), `listen_port u16` (0 = choose a free
+  port once and save it).
+
+### Listener (mutual TLS, only paired certificates), on `listen_port`
+
+```
+GET /v1/hello                                   -> {id, name, incarnation, last_seq, app_version, pubkey}
+GET /v1/chunks/{origin}?incarnation=X&since=N  -> {origin, incarnation, chunks:[{file, from, to, sha256, sig, bytes}], device: <origin's device.json or null>}
+GET /v1/chunk/{origin}/{file}                   -> the chunk bytes (own chunks from the outbox store, others' from journal-cache)
+GET /v1/presence                                -> the presence.json shape of the folder contract, computed now
+```
+
+`{origin}` may be the server itself or any peer whose chunks it holds (relay). A requester trusts a
+relayed origin only if it already has that origin's `pubkey` (paired directly, or carried in the `device`
+record the relayer returns and signed by that origin: `device.json` gains `sig` over its own canonical
+JSON without the `sig` field).
+
+### Pulling, presence, discovery
+
+- Every refresh tick and every 10 s while `direct_connection` is on: for each paired peer, find it
+  (mDNS answer for its id, else `address`), `hello`, then for every origin known (the peer itself and every
+  origin in `peers`) pull chunks since the cursor, verify and apply with the phase 1 merge, then fetch
+  `/v1/presence` and store it where the folder's `presence.json` goes. `connected` = a `hello` succeeded
+  in the last 30 s; `path` = how it was reached.
+- mDNS: advertise `_hrm._tcp.local.` with TXT `id`, `name`, `port`, `pairing` (1 while a code is shown).
+  Browse continuously while direct connection is on; resolve by `id`.
+- Relay: an unreachable peer is pulled from any connected peer that lists it in `/v1/chunks`; `path` =
+  "relay" and `relayed_by` = that peer's id.
+- The hub (phase 5) will add rendezvous and relay over the internet; nothing here should assume a hub.
+
+### Pairing
+
+- `computers_pair_start` picks a six-digit code (CSPRNG), starts a plain-HTTP pairing route on a second
+  ephemeral port for two minutes, advertises `pairing=1` with that port, and returns
+  `{code, expires_at, host_hint: "<device_name>:<pairing port>", port}`. `computers_pair_cancel` stops it.
+- `computers_pair_join {code, host?}` on the other computer: find the pairing computer by mDNS
+  (`pairing=1`), or use `host` (`name:port`); run SPAKE2 with the code as the password (identities: the
+  two device ids, the joiner as A), derive a key, exchange encrypted payloads `{id, name, incarnation,
+  pubkey, cert_pem, address_hint, app_version}` both ways, verify each decrypts, store the peer on both
+  sides with `paired_at` and `address` = the host used (empty for mDNS). A wrong code fails at decryption:
+  three failures or two minutes end the pairing. The result is the `computers_status` shape; the app emits
+  `computers-pairing` with `{ok, peer?, error?}` on both sides.
+- `computers_forget {id}` deletes the peer's row and certificate (its merged rows stay); the other side
+  learns of it when its next `hello` is refused.
+- `computers_set_peer {id, address?, name?}` edits a peer's address (a VPN name) or display name.
+
+### Ops and CLI (added to the phase 1 ones)
+
+```
+computers_status: this gains {port, pubkey, pairing: {code, expires_at, host_hint} | null};
+                  peers gain {address, path, connected, last_pull, paired_at, relayed_by, direct: bool}
+computers_set: + direct_connection, listen_port
+computers_pair_start | computers_pair_cancel | computers_pair_join {code, host?} | computers_forget {id} | computers_set_peer {id, address?, name?}
+hrm computers pair [--host]            prints the code and the host hint, waits up to two minutes, prints the peer's name on success
+hrm computers join <code> [--host <name:port>]
+hrm computers forget <id or name>
+hrm computers peers [--json]
+hrm computers serve --seconds <n>      runs the listener (and mDNS) for n seconds without the app: for tests and headless use
+```
+
+### Tests
+
+- Rust, in `crates/core` (two or three `Ctx` in temp folders, loopback, random ports): pairing with the
+  right code stores both peers; a wrong code fails and stores nothing; after pairing A's chunks reach B
+  over TLS and apply once; B's presence reaches A within a poll; a connection from an unpaired certificate
+  is refused; `forget` makes the next `hello` fail; C unreachable by A is pulled through B (relay) with its
+  signature verified; a tampered chunk is skipped.
+- Window (WP-6, appended under `// ---- direct connection (WP-6) ----`): start `hrm computers pair` in a
+  second data folder as a child process (read the code and host from its stdout), turn Direct connection on
+  in Settings, open Pair a computer, enter the code and host, assert the card shows "direct" and connected,
+  that a session seeded in the second folder's profile appears in Sessions after Sync now, and that Forget
+  removes the card. The second data folder reuses the e2e's env with its own `HRM_HOME`.
+
+### Definition of done
+
+As phase 1 (build, `cargo test --workspace`, clippy, line endings, commits on the branch, no push,
+`REPORT.md` with verbatim test lines, the exact op shapes, and the merge notes). The core package must
+also report the chosen crates and their licences, and the Windows firewall behaviour it observed.
