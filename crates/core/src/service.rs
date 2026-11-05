@@ -530,16 +530,20 @@ pub fn grouped_sessions(ctx: &Ctx, f: &SessionFilter, by: &str) -> Result<Vec<Pr
             }
             "account" => (s.profile.clone(), s.profile.clone(), String::new(), None),
             "tool" => (s.harness.clone(), harness::by_id(&s.harness).map(|h| h.label().to_string()).unwrap_or_default(), String::new(), None),
+            // a session from another computer keeps the project key it was journaled with: its folder is not here
+            _ if s.device != ctx.db.device && !s.project_key.is_empty() => (s.project_key.clone(), s.project_name.clone(), String::new(), None),
             _ => {
                 let i = res.resolve(&s.cwd);
                 (i.key, i.name, i.root, i.remote)
             }
         };
         let gi = *index.entry(key.clone()).or_insert_with(|| {
-            groups.push(ProjectGroup { key, name, root, remote, tokens: 0, last_active_at: 0, sessions: vec![] });
+            groups.push(ProjectGroup { key, name, root: root.clone(), remote: remote.clone(), tokens: 0, last_active_at: 0, sessions: vec![] });
             groups.len() - 1
         });
         let g = &mut groups[gi];
+        // the group may have been opened by a remote session before a local one brought the folder
+        if g.root.is_empty() && !root.is_empty() { g.root = root; g.remote = remote; }
         g.tokens += s.tokens;
         g.last_active_at = g.last_active_at.max(s.last_active_at);
         g.sessions.push(s);
