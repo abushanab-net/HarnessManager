@@ -1353,7 +1353,7 @@ description: Bulk skill ${i}
     await nav('#projects?days=all');
     const card = () => exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops'))?.querySelector('[data-testid=pcard-pcs]')?.outerHTML || ''");
     await waitFor(card, 'the repository card with its computers');
-    assert.equal((await card()).match(/class="cdot/g).length, 2, 'a dot per computer that has the repository');
+    assert.equal((await card()).match(/<i class="cdot /g).length, 2, 'a dot per computer that has the repository');
     assert.ok(!(await card()).includes('not cloned'), 'this computer has it');
     await shot('19f-projects-computers');
   });
