@@ -72,7 +72,8 @@ const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", 
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
     "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
-    "session_resume_here", "session_fetch", "transcripts_status"];
+    "session_resume_here", "session_fetch", "transcripts_status",
+    "hub_join", "hub_leave", "hub_invite", "hub_status", "ring_key_show", "ring_key_enter"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
     let ctx = state.ctx();
@@ -639,6 +640,20 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"path": t.path, "bytes": t.bytes})
         }
         "transcripts_status" => hrm_core::transcripts::status(ctx)?,
+        // the hub (phase 5): joining with a code or the admin token, inviting, leaving, the recovery key
+        "hub_join" | "hub_leave" => {
+            let fresh = Arc::new(if op == "hub_join" { hrm_core::sync::hub::join(ctx, &s(a, "url")?, opt(a, "code").as_deref(), opt(a, "admin_token").as_deref())? } else { hrm_core::sync::hub::leave(ctx)? });
+            *state.ctx.lock().unwrap() = fresh.clone();
+            *state.settings_mtime.lock().unwrap() = None;
+            if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
+        }
+        "hub_invite" => hrm_core::sync::hub::invite(ctx)?,
+        "hub_status" => hrm_core::sync::hub::status(ctx),
+        "ring_key_show" => json!({"key": hrm_core::sync::hub::ring_show(ctx)?}),
+        "ring_key_enter" => {
+            hrm_core::sync::hub::ring_enter(ctx, &s(a, "key")?)?;
+            if ctx.settings.sync_mode == "hub" { hrm_core::journal::round(ctx)? } else { hrm_core::journal::status(ctx)? }
+        }
         other => bail!("unknown operation {other}"),
     })
 }
@@ -808,6 +823,9 @@ fn main() {
                 }
                 Err(e) => hrm_core::log::warn(&format!("computers: the direct connection could not start: {e:#}")),
             }
+            // the hub's events socket while the app runs (phase 5): a round on each change, the window told
+            let (h5, st5) = (app.handle().clone(), state.clone());
+            hrm_core::sync::hub::watch(Arc::new(move || st5.ctx()), Arc::new(move |v| { let _ = h5.emit("computers", v); }));
             let mut win = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
                 .title("Harness Manager")
                 .inner_size(1280.0, 820.0)
