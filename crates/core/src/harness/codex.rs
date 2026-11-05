@@ -260,6 +260,11 @@ impl Harness for Codex {
         Ok(stored)
     }
 
+    fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
+        let home = self.home(ctx, p);
+        [home.join("sessions"), home.join("archived_sessions")].into_iter().filter(|d| d.is_dir()).collect()
+    }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let mut out = vec![];
         let mut todo = vec![];
@@ -270,12 +275,12 @@ impl Harness for Codex {
             match cached.get(&key) {
                 Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
                 // a rollout still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) => {
+                Some((_, _, meta)) if !parse_now() => {
                     out.push(stale(meta, mtime));
                     let name = p.name.clone();
                     refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
                 }
-                None => todo.push((f, mtime, len)),
+                _ => todo.push((f, mtime, len)),
             }
         }
         each_file_parallel_sig(&todo, |f, mtime, len| {

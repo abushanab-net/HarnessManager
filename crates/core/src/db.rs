@@ -77,16 +77,59 @@ pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, rese
     Ok(true)
 }
 
+/// The upper bound of the keys starting with `prefix` (its last byte, always an ASCII `|` here, stepped up): a
+/// range the primary key answers, where `like` would scan every row.
+pub fn prefix_end(prefix: &str) -> String {
+    let mut b = prefix.as_bytes().to_vec();
+    if let Some(l) = b.last_mut() { *l += 1; }
+    String::from_utf8_lossy(&b).into_owned()
+}
+
 /// The journal key of a session: `<harness>/<profile>/<id>`.
 pub fn session_key(m: &SessionMeta) -> String { format!("{}/{}/{}", m.harness, m.profile, m.id) }
 
 /// A session as the other computers know it: by its journal key, newest `last_active_at` wins.
 pub fn upsert_session(c: &Connection, key: &str, m: &SessionMeta, device: &str) -> rusqlite::Result<usize> {
-    c.execute("insert into sessions(key, profile, harness, path, mtime, len, json, device) values(?,?,?,?,?,0,?,?)
-        on conflict(key) do update set profile=excluded.profile, harness=excluded.harness, path=excluded.path, mtime=excluded.mtime, json=excluded.json, device=excluded.device
-        where excluded.mtime > sessions.mtime",
-        params![key, m.profile, m.harness, m.source_path, m.last_active_at, serde_json::to_string(m).unwrap_or_default(), device])
+    c.execute(&format!("insert into sessions(key, profile, harness, path, mtime, len, json, device, {COLS}) values(?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?)
+        on conflict(key) do update set profile=excluded.profile, harness=excluded.harness, path=excluded.path, mtime=excluded.mtime, json=excluded.json, device=excluded.device,
+        id=excluded.id, title=excluded.title, cwd=excluded.cwd, started_at=excluded.started_at, last_active_at=excluded.last_active_at, tokens=excluded.tokens,
+        project_key=excluded.project_key, project_name=excluded.project_name
+        where excluded.mtime > sessions.mtime"),
+        params![key, m.profile, m.harness, m.source_path, m.last_active_at, serde_json::to_string(m).unwrap_or_default(), device,
+            m.id, m.title, m.cwd, m.started_at, m.last_active_at, m.tokens, m.project_key, m.project_name])
 }
+
+/// The columns of `sessions` the pages filter and sort on, promoted out of the JSON (the index, WP-10).
+pub const COLS: &str = "id, title, cwd, started_at, last_active_at, tokens, project_key, project_name";
+
+/// The promoted columns of every row from its JSON: once at the migration, and for rows written before it.
+pub fn promote_columns(c: &Connection) -> rusqlite::Result<usize> {
+    c.execute("update sessions set id = coalesce(json_extract(json, '$.id'), ''), title = coalesce(json_extract(json, '$.title'), ''), cwd = coalesce(json_extract(json, '$.cwd'), ''),
+        started_at = coalesce(json_extract(json, '$.started_at'), 0), last_active_at = coalesce(json_extract(json, '$.last_active_at'), 0), tokens = coalesce(json_extract(json, '$.tokens'), 0),
+        project_key = coalesce(json_extract(json, '$.project_key'), ''), project_name = coalesce(json_extract(json, '$.project_name'), '') where last_active_at = 0", [])
+}
+
+/// The index's search table and the triggers that keep it in step with `sessions` (external content: it holds
+/// only the words, by rowid; `insert or replace` elsewhere is safe because `recursive_triggers` is on).
+const INDEX_SCHEMA: &str = r#"
+create index if not exists sessions_dev_active on sessions(device, last_active_at);
+create index if not exists sessions_proj_active on sessions(project_key, last_active_at);
+create index if not exists usage_device_project on usage(device, project);
+create index if not exists usage_day_project on usage(day, project);
+create table if not exists project_index(key text primary key, name text not null, root text not null, remote text);
+create virtual table if not exists sessions_fts using fts5(title, cwd, profile, content='sessions', content_rowid='rowid');
+"#;
+
+/// The triggers that keep the search table in step; made after the first build of the table.
+const INDEX_TRIGGERS: &str = r#"
+create trigger if not exists sessions_fts_ai after insert on sessions begin
+  insert into sessions_fts(rowid, title, cwd, profile) values (new.rowid, new.title, new.cwd, new.profile); end;
+create trigger if not exists sessions_fts_ad after delete on sessions begin
+  insert into sessions_fts(sessions_fts, rowid, title, cwd, profile) values ('delete', old.rowid, old.title, old.cwd, old.profile); end;
+create trigger if not exists sessions_fts_au after update of title, cwd, profile on sessions begin
+  insert into sessions_fts(sessions_fts, rowid, title, cwd, profile) values ('delete', old.rowid, old.title, old.cwd, old.profile);
+  insert into sessions_fts(rowid, title, cwd, profile) values (new.rowid, new.title, new.cwd, new.profile); end;
+"#;
 
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
@@ -134,6 +177,21 @@ impl Db {
             conn.execute("update usage set device=?1 where device=''", [device])?;
             conn.execute("update sessions set device=?1 where device=''", [device])?;
         }
+        // the index (WP-10): the pages read the sessions table, so its filter and sort columns leave the JSON
+        for (col, ty) in [("id", "text not null default ''"), ("title", "text not null default ''"), ("cwd", "text not null default ''"), ("started_at", "integer not null default 0"),
+            ("last_active_at", "integer not null default 0"), ("tokens", "integer not null default 0"), ("project_key", "text not null default ''"), ("project_name", "text not null default ''"), ("open", "integer not null default 0")] {
+            let has: bool = conn.prepare("select 1 from pragma_table_info('sessions') where name = ?")?.exists([col])?;
+            if !has { conn.execute_batch(&format!("alter table sessions add column {col} {ty};"))?; }
+        }
+        conn.pragma_update(None, "recursive_triggers", "on")?;
+        crate::archive::tables(&conn)?;
+        conn.execute_batch(INDEX_SCHEMA)?;
+        let done: bool = conn.prepare("select 1 from kv where k = 'migrated:index'")?.exists([])?;
+        if !done {
+            promote_columns(&conn)?;
+            conn.execute_batch("insert into sessions_fts(sessions_fts) values('rebuild'); insert or replace into kv values('migrated:index', '1');")?;
+        }
+        conn.execute_batch(INDEX_TRIGGERS)?;
         Ok(Db { conn: Mutex::new(conn), device: device.into(), journal })
     }
 
@@ -253,8 +311,8 @@ impl Db {
     /// The cached records of one account's session files, by key: one query instead of one per file.
     pub fn sessions_cached_for(&self, prefix: &str) -> Result<std::collections::HashMap<String, (i64, i64, SessionMeta)>> {
         self.with(|c| {
-            let mut st = c.prepare("select key, mtime, len, json from sessions where key like ?1 || '%'")?;
-            let rows = st.query_map([prefix], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
+            let mut st = c.prepare("select key, mtime, len, json from sessions where key >= ?1 and key < ?2")?;
+            let rows = st.query_map([prefix, &prefix_end(prefix)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
             let mut out = std::collections::HashMap::new();
             for (key, mtime, len, json) in rows.flatten() {
                 if let Ok(m) = serde_json::from_str::<SessionMeta>(&json) { out.insert(key, (mtime, len, m)); }
@@ -282,10 +340,14 @@ impl Db {
         })
     }
 
+    /// A scan's cache row (keyed `<harness>|<profile>|<file>`), with the file's signature; the project and `open`
+    /// columns the index resolved stay as they are.
     pub fn put_session(&self, key: &str, m: &SessionMeta, mtime: i64, len: i64) -> Result<()> {
         self.with(|c| {
-            c.execute("insert or replace into sessions(key, profile, harness, path, mtime, len, json, device) values(?,?,?,?,?,?,?,?)",
-                params![key, m.profile, m.harness, m.source_path, mtime, len, serde_json::to_string(m)?, self.device])?;
+            c.execute(&format!("insert into sessions(key, profile, harness, path, mtime, len, json, device, {COLS}) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'','')
+                on conflict(key) do update set profile=excluded.profile, harness=excluded.harness, path=excluded.path, mtime=excluded.mtime, len=excluded.len, json=excluded.json, device=excluded.device,
+                id=excluded.id, title=excluded.title, cwd=excluded.cwd, started_at=excluded.started_at, last_active_at=excluded.last_active_at, tokens=excluded.tokens"),
+                params![key, m.profile, m.harness, m.source_path, mtime, len, serde_json::to_string(m)?, self.device, m.id, m.title, m.cwd, m.started_at, m.last_active_at, m.tokens])?;
             Ok(())
         })
     }

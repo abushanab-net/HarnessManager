@@ -57,6 +57,9 @@ pub trait Harness: Sync + Send {
     fn quota(&self, _ctx: &Ctx, _p: &Profile) -> Option<Quota> { None }
     /// Store usage rows added since the last import, each file's rows before its cursor; returns rows stored.
     fn import_usage(&self, _ctx: &Ctx, _p: &Profile) -> Result<usize> { Ok(0) }
+    /// The folders the tool writes sessions into for this profile (the watcher watches them; a changed file under
+    /// one belongs to the profile). Only folders that exist.
+    fn session_dirs(&self, _ctx: &Ctx, _p: &Profile) -> Vec<PathBuf> { vec![] }
     /// Sessions active since `since` (epoch ms); files untouched since then are skipped unread.
     fn sessions(&self, _ctx: &Ctx, _p: &Profile, _since: i64) -> Result<Vec<SessionMeta>> { Ok(vec![]) }
     fn transcript(&self, _ctx: &Ctx, _p: &Profile, _s: &SessionMeta) -> Result<Transcript> { anyhow::bail!("sessions are not readable for {}", self.label()) }

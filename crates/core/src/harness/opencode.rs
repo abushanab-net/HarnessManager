@@ -122,6 +122,8 @@ impl Harness for OpenCode {
         Ok(stored)
     }
 
+    fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> { vec![self.data_dir(ctx, p)].into_iter().filter(|d| d.is_dir()).collect() }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let Some(db) = self.open_db(ctx, p) else { return Ok(vec![]) };
         let path = self.data_dir(ctx, p).join("opencode.db").display().to_string();

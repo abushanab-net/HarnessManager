@@ -24,15 +24,16 @@ find.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && S.route.view !== 'accounts' && !S.pageFind) { go('sessions', { q: find.value }); find.value = ''; }
 });
 
-// the backend imports usage in the background and says when it is done
+// the backend imports usage in the background, and the folder watcher refreshes the index, and both say when done
 const ev = window.__TAURI__ && window.__TAURI__.event;
+let redraw;
 if (ev) ev.listen('refreshed', () => {
   S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
   if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
   else if (S.route.view === 'projects') refreshProjects(); // the tiles and rows take the new numbers where they are
-  else render();
+  else { clearTimeout(redraw); redraw = setTimeout(render, 250); } // a session being written refreshes often: one redraw per burst
 });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes

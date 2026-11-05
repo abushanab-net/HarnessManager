@@ -171,6 +171,11 @@ impl Harness for Agy {
         }
     }
 
+    fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
+        if !p.main { return vec![]; }
+        [self.root(ctx).join("antigravity-cli"), self.root(ctx).join("antigravity")].into_iter().filter(|d| d.is_dir()).collect()
+    }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         // conversations are shared by every Antigravity profile; they are listed under the main one
         if !p.main { return Ok(vec![]); }
