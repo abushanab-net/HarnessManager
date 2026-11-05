@@ -1,3 +1,6 @@
 /* the Harness brand: Inter for words, JetBrains Mono for numbers (both SIL Open Font License, latin, variable weight) */
 @font-face{font-family:"Inter";font-style:normal;font-weight:400 700;font-display:swap;src:url(fonts/Inter-latin.woff2) format("woff2")}
 @font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:400 700;font-display:swap;src:url(fonts/JetBrainsMono-latin.woff2) format("woff2")}
+/* the VektraGrid brand's display face: EB Garamond (SIL Open Font License, latin, variable weight), upright and italic */
+@font-face{font-family:"EB Garamond";font-style:normal;font-weight:400 800;font-display:swap;src:url(fonts/EBGaramond-latin.woff2) format("woff2")}
+@font-face{font-family:"EB Garamond";font-style:italic;font-weight:400 800;font-display:swap;src:url(fonts/EBGaramond-latin-italic.woff2) format("woff2")}

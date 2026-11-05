@@ -70,7 +70,7 @@ view('sessions', async (sheet, params) => {
   const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
   sheet.className = 'sheet';
   const wk = 'sessions:' + JSON.stringify(params);
-  if (!warmPage(sheet, wk)) sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
+  if (!warmPage(sheet, wk)) sheet.innerHTML = `<div class="crumb">Sessions</div><h1>Reading sessions…</h1>`;
   let [ans, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   S.cache.tags = tlist;
   drawPins(plist);
@@ -114,7 +114,7 @@ view('sessions', async (sheet, params) => {
         <div class="pstats" data-testid="project-stats"><span><b>${money(cur.cost)}</b> at list prices</span><span><b>${fmt(cur.tokens)}</b> tokens</span><span><b>${cur.sessions}</b> ${cur.sessions === 1 ? 'session' : 'sessions'}</span><span><b>${(cur.accounts || []).length}</b> ${(cur.accounts || []).length === 1 ? 'account' : 'accounts'}</span>${cur.live ? `<span class="acT"><b>${cur.live}</b> running</span>` : ''}</div></div>
       <div class="acts"><button class="iconbtn sq" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge">${ic.dots}</button>
         ${cur.root ? `<button class="btn primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">${ic.play} New session</button>` : ''}</div></div>`
-    : `<div class="trow sesshead"><div><h1>Sessions</h1><p class="find" data-testid="sessions-finding">Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.${running.length ? ` <b>${running.length} running now</b>: open one to follow it live.` : ''}</p></div>
+    : `<div class="trow sesshead"><div><div class="crumb">Sessions${days !== 'all' ? ' · ' + days + ' days' : ''}${syncOn(pcs) ? ' · ' + computers(pcs).length + ' computers' : ''}</div><h1 data-testid="sessions-finding">${running.length ? `<span class="w">${running.length} ${running.length === 1 ? 'session is' : 'sessions are'} running now</span>; open one to follow it live.` : `Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.`}</h1><p class="find">${total} ${total === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' in ' + days + ' days' : ''} across ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}. Tokens are counted from the logs; costs are at list prices, so ≈.</p></div>
       <div class="acts"><span class="muted mono sm" data-testid="sessions-count">${total} ${total === 1 ? 'session' : 'sessions'}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${groups.length} ${group === 'project' ? (groups.length === 1 ? 'project' : 'projects') : 'groups'}</span>
       <button class="btn primary" data-act="session-new" data-testid="session-new">${ic.play} New session</button></div></div>`;
   // a project's view has no rail of other projects: its own accounts and tags are chips in the bar, and a panel
@@ -188,10 +188,10 @@ view('projects', async (sheet, params) => {
   pj.days = params.days || '7'; pj.sort = params.sort || 'active'; pj.metric = params.metric || 'tokens'; pj.per = +params.per || 10; pj.page = +params.page || 0;
   sheet.className = 'sheet';
   if (!pj.list || pj.fetched !== pj.days) {
-    if (!sheet.querySelector('#pj-rows')) sheet.innerHTML = `<h1>Projects</h1><p class="find">Reading projects…</p>`;
+    if (!sheet.querySelector('#pj-rows')) sheet.innerHTML = `<div class="crumb">Projects</div><h1>Reading projects…</h1>`;
     await fetchProjects();
   }
-  sheet.innerHTML = `<div class="trow"><div><h1>Projects</h1><p class="find">${pj.list.length} ${pj.list.length === 1 ? 'project' : 'projects'} ran in ${pj.days === 'all' ? 'all time' : 'the last ' + pj.days + ' days'}. A project is a folder your tools ran in: click one for its sessions; pin, tag or rename it from its icons. Cost is at API list prices.</p></div>
+  sheet.innerHTML = `<div class="trow"><div><div class="crumb">Projects · ${pj.days === 'all' ? 'all time' : pj.days + ' days'}</div><h1>${pj.list.length} ${pj.list.length === 1 ? 'project' : 'projects'} ran in ${pj.days === 'all' ? 'all time' : 'the last ' + pj.days + ' days'}${pj.list.filter((p) => p.live).length ? `; <span class="w">${pj.list.filter((p) => p.live).length}</span> ${pj.list.filter((p) => p.live).length === 1 ? 'has' : 'have'} a session open now` : ''}.</h1><p class="find">A project is a folder your tools ran in: click one for its sessions; pin, tag or rename it from its icons. Cost is at API list prices, so ≈.</p></div>
       <div class="acts"><span class="seg3">${[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([v, l]) => `<a class="${pj.days === v ? 'on' : ''} mono" data-act="p-set" data-k="days" data-v="${v}" data-testid="pdays-${v}">${l}</a>`).join('')}</span>
         <span class="seg3" id="pj-sort"></span></div></div>
     <section class="ovkpis acctk" id="pj-tiles" data-testid="project-tiles"></section>
@@ -505,7 +505,7 @@ view('routing', async (sheet) => {
     return `${k ? '<span class="arr" aria-hidden="true">→</span>' : ''}<span class="pchip ${tone}"><b>${esc(pname(id))}</b><small class="mono">${esc(state)}</small></span>`;
   }).join('');
   sheet.innerHTML = `
-    <div class="trow"><div><h1>API keys &amp; routing</h1><p class="find">Keys live only in Windows Credential Manager. The local router sends routed accounts to providers, moves to the next one when a provider fails, and pauses one that keeps failing. Subscription logins never pass through it.</p></div>
+    <div class="trow"><div><div class="crumb">API keys &amp; routing</div><h1>${r.running ? `The router is up on :${r.port}: ${x.requests.toLocaleString()} ${x.requests === 1 ? 'request' : 'requests'} in 24 h${nPaused ? `; <span class="w">${nPaused} ${nPaused === 1 ? 'provider is' : 'providers are'} paused</span>` : x.errors ? `, ${x.errors} ${x.errors === 1 ? 'error' : 'errors'}` : ''}.` : 'The local router is stopped.'}</h1><p class="find">Keys live only in Windows Credential Manager. The local router sends routed accounts to providers, moves to the next one when a provider fails, and pauses one that keeps failing. Subscription logins never pass through it.</p></div>
       <div class="acts"><button class="btn" data-act="provider-add" data-testid="provider-add">Add provider</button><button class="btn primary" data-act="route-add" data-testid="route-add" ${r.providers.length ? '' : 'disabled'}>Add route</button></div></div>
     <section class="panel rcard"><div class="rl"><i class="sdot ${r.running ? 'live' : ''}"></i><div><h2 data-testid="router-state">Local router · ${r.running ? 'running' : 'stopped'}</h2>
         <div class="mono muted sm">127.0.0.1:${r.port} · token required · ${r.routes.length} ${r.routes.length === 1 ? 'route' : 'routes'} · ${r.routed_profiles.length} ${r.routed_profiles.length === 1 ? 'account uses' : 'accounts use'} it</div>
@@ -653,9 +653,9 @@ view('prompts', async (sheet) => {
   const tool = (hs.find((h) => h.id === promptTool) || { label: promptTool }).label;
   const first = (b) => (b || '').split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || 'Empty';
   const where = live ? `Writes to <span class="mono">${esc(live.path)}</span> · every ${esc(tool)} account follows it` : `No profile of ${esc(tool)} yet`;
-  sheet.innerHTML = `<div class="trow"><div><h1>System prompts</h1><p class="find">The instructions each tool reads when it starts: CLAUDE.md for Claude Code, AGENTS.md for Codex and OpenCode, GEMINI.md for Antigravity. Keep several here and choose which one is in the file; what the file held before is saved first, so nothing is lost.</p></div>
+  sheet.innerHTML = `<div class="trow"><div><div class="crumb">System prompts</div><h1>The instructions each tool reads when it starts.</h1><p class="find">CLAUDE.md for Claude Code, AGENTS.md for Codex and OpenCode, GEMINI.md for Antigravity. Keep several here and choose which one is in the file; what the file held before is saved first, so nothing is lost.</p></div>
       <div class="acts"><button class="btn primary" data-act="prompt-new" data-testid="prompt-new">New prompt</button></div></div>
-    <div class="tabs2">${hs.map((h) => `<a class="${h.id === promptTool ? 'on' : ''}" data-act="prompt-tool" data-v="${h.id}" title="${esc(h.label)} reads ${FILE[h.id] || 'its prompt file'}">${esc(h.label)}</a>`).join('')}</div>
+    <div class="tabs2">${hs.map((h) => `<a class="${h.id === promptTool ? 'on' : ''}" data-act="prompt-tool" data-v="${h.id}" title="${esc(h.label)} reads ${FILE[h.id] || 'its prompt file'}">${toolIcon(h.id, 13)} ${esc(h.label)}</a>`).join('')}</div>
     <div class="pgrid"><div class="plist">
       <a class="${!sel ? 'on' : ''}" data-act="prompt-sel" data-id=""><span><b>The file now</b><small>${esc(live ? first(live.body) : 'not there yet')}</small></span><span class="pill mono">live</span></a>
       ${list.map((p) => `<a class="${sel && sel.id === p.id ? 'on' : ''}" data-act="prompt-sel" data-id="${esc(p.id)}" data-testid="prompt-${esc(p.id)}"><span><b>${esc(p.title)}</b><small>${esc(first(p.body))}</small></span>${p.enabled ? '<span class="pill teal mono">enabled</span>' : ''}</a>`).join('')}</div>
@@ -695,8 +695,9 @@ view('settings', async (sheet) => {
   const s = st.settings;
   // the sign-in entry and the choice of terminal are Windows things; macOS opens Terminal
   const win = !st.os || st.os === 'windows';
-  sheet.innerHTML = `<h1>Settings</h1><p class="find">Saved as you change them, for this computer. Keys and logins are never in these files or in backups.</p>
+  sheet.innerHTML = `<div class="crumb">Settings</div><h1>Saved as you change them, for this computer.</h1><p class="find">Keys and logins are never in these files or in backups.</p>
     <h5 class="sh5">Appearance</h5>
+    ${row('Theme', info('brand', '<b>Harness (the default):</b> porcelain and night, Inter.<br><b>VektraGrid:</b> ivory and deep green, Garamond headings; deep teal leads, plum marks the router, sand gold is the warning.'), 'The look of this window; light and dark follow the choice below.', seg('brand', s.brand || 'hm', [['hm', 'Harness'], ['vg', 'VektraGrid']], 'st-brand'))}
     ${row('Light and dark', info('theme', '<b>System (the default):</b> follows the light or dark setting of Windows or macOS.<br><b>Light</b> or <b>Dark</b>: always that.'), 'The colours of this window.', seg('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))}
     ${row('Limits shown as', info('quota', '<b>Left (the default):</b> how much of each limit you still have, as the tools show it.<br><b>Used:</b> how much has gone.'), 'What is left of each limit, or what is used.', seg('quota_display', s.quota_display, [['left', 'Left'], ['used', 'Used']], 'st-quota'))}
     ${row('Moving routes' + NEW, info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live particles on Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))}
@@ -955,7 +956,7 @@ view('cli', async (sheet) => {
   const ex = [['hrm list', 'accounts, plans, limits, tokens, open consoles'], ['hrm start work-max --cwd D:\\Projects\\my-app', 'a new terminal, in that folder'],
     ['hrm quota work-max --live', 'limits straight from Anthropic'], ['hrm sessions --group project --json', "every tool's sessions, for scripts"]];
   const w = Math.max(...ex.map((e) => e[0].length)) + 2;
-  sheet.innerHTML = `<h1>CLI reference</h1><p class="find"><span class="mono">hrm</span> does everything this window does. Add <span class="mono">--json</span> to any command for scripts.</p>
+  sheet.innerHTML = `<div class="crumb">CLI reference</div><h1><span class="mono">hrm</span> does everything this window does.</h1><p class="find">Add <span class="mono">--json</span> to any command for scripts.</p>
     <pre class="panel cliex mono">${ex.map(([c, d]) => `${esc(c.padEnd(w))}<span class="muted"># ${esc(d)}</span>`).join('\n')}</pre>
     <div class="cligrid">${CLI.map(([g, rows]) => `<section class="panel"><h2>${esc(g)}</h2>${rows.map(([c, d]) => `<div class="clir"><span class="mono acT">${esc(c)}</span><span>${esc(d)}</span></div>`).join('')}</section>`).join('')}</div>`;
 });

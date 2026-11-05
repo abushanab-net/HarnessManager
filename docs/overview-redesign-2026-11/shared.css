@@ -1,0 +1,108 @@
+/* Overview redesign, November 2026: the review page, the screen simulator, and the shared foundation
+   every variation is built on (one spacing scale in rem, one type scale, container queries). */
+
+/* ---------- the foundation: the same numbers on every computer ---------- */
+:root {
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+  /* spacing: one scale, nothing in between */
+  --s1: .25rem; --s2: .5rem; --s3: .75rem; --s4: 1rem; --s5: 1.5rem; --s6: 2rem; --s7: 3rem;
+  /* type: fixed for reading sizes, fluid (by the sheet's width) only for headings and key numbers */
+  --fs-xs: .75rem; --fs-sm: .8125rem; --fs-md: .875rem; --fs-lg: 1rem; --fs-xl: 1.25rem;
+  --fs-h1: clamp(1.375rem, 1.05rem + 1.1cqi, 1.875rem);
+  --fs-kpi: clamp(1.5rem, 1.05rem + 1.4cqi, 2.5rem);
+  --r1: 4px; --r2: 8px; --r3: 12px;
+  /* brand */
+  --teal: #0F6E7A; --indigo: #273C75; --iris: #6D5BD0; --sand: #C8A45A;
+}
+
+/* ---------- the review page ---------- */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body.page { margin: 0; background: #E9EEF1; color: #0F1E26; font: 15px/1.55 var(--sans); font-variant-numeric: tabular-nums; }
+body.page > main { max-width: 1720px; margin: 0 auto; padding: 48px 32px 120px; }
+.page .intro { max-width: 78ch; }
+.page h1.ttl { font-size: 2.6rem; line-height: 1.08; letter-spacing: -.02em; font-weight: 600; margin: 0 0 14px; }
+.page h2.sec { font-size: 1.5rem; letter-spacing: -.01em; margin: 72px 0 6px; font-weight: 600; }
+.page h3 { font-size: 1.05rem; margin: 26px 0 6px; }
+.page p { margin: 8px 0; }
+.page .lede { font-size: 1.12rem; color: #33464F; }
+.page .muted { color: #5A6B74; }
+.page a { color: var(--teal); }
+.page code, .page .mono { font-family: var(--mono); font-size: .86em; }
+.page .toc { display: flex; gap: 8px 22px; flex-wrap: wrap; margin: 22px 0 0; font-size: 14px; }
+.page .toc a { text-decoration: none; font-weight: 500; }
+
+/* the references */
+.refs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 18px; }
+.ref { background: #fff; border: 1px solid #D4DDE2; border-radius: 12px; padding: 16px 18px 14px; display: grid; gap: 6px; align-content: start; position: relative; }
+.ref .rk { position: absolute; top: 14px; right: 16px; font: 600 12px var(--mono); color: #7A8A92; }
+.ref b { font-size: 1rem; padding-right: 26px; }
+.ref .by { font-size: 13px; color: #5A6B74; }
+.ref .take { font-size: 13.5px; }
+.ref .take em { font-style: normal; font-weight: 600; color: var(--teal); }
+.ref .src { font-size: 12.5px; }
+.ref .who { display: inline-block; font: 600 11px var(--mono); padding: 2px 7px; border-radius: 5px; background: #E3F1F2; color: #0F6E7A; margin-right: 6px; }
+.ref .who.astra { background: #EFECFB; color: #4B3C9E; }
+.ref .who.both { background: #FDF3DB; color: #7A5A12; }
+.runners { font-size: 13.5px; margin-top: 12px; color: #33464F; }
+.panel2 { background: #fff; border: 1px solid #D4DDE2; border-radius: 12px; padding: 18px 22px; margin-top: 16px; }
+.panel2 h3 { margin-top: 4px; }
+.cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 1000px) { .cols2 { grid-template-columns: 1fr; } }
+.fixlist { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+.fixlist li { margin: 6px 0; }
+.tokens { display: flex; gap: 10px; align-items: flex-end; margin: 12px 0 4px; flex-wrap: wrap; }
+.tokens div { display: grid; gap: 4px; justify-items: center; font: 11px var(--mono); color: #5A6B74; }
+.tokens i { display: block; background: var(--teal); border-radius: 2px; opacity: .85; }
+
+/* a variation */
+.var { margin-top: 80px; }
+.var > header { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 14px; }
+.var > header h2 { margin: 0; font-size: 1.9rem; letter-spacing: -.015em; }
+.var > header .tag { font: 600 12px var(--mono); color: #5A6B74; display: block; margin-bottom: 4px; }
+.var > header p { margin: 4px 0 0; max-width: 76ch; color: #33464F; }
+.ctl { margin-left: auto; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; background: #fff; border: 1px solid #CBD5DB; border-radius: 9px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; font: 500 13px var(--sans); padding: 5px 11px; border-radius: 6px; cursor: pointer; color: #33464F; }
+.seg button.on { background: #0F1E26; color: #fff; }
+.seg button:focus-visible, .pbtn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+select.scr { font: 500 13px var(--sans); padding: 7px 10px; border-radius: 9px; border: 1px solid #CBD5DB; background: #fff; }
+.pbtn { font: 500 13px var(--sans); padding: 7px 12px; border-radius: 9px; border: 1px solid #CBD5DB; background: #fff; cursor: pointer; color: #0F1E26; }
+.pbtn:hover { background: #F3F6F8; }
+.pbtn.dark { background: #0F1E26; color: #fff; border-color: #0F1E26; }
+.why { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 14px 0 0; font-size: 13.5px; }
+.why div { background: #fff; border: 1px solid #D4DDE2; border-radius: 10px; padding: 12px 14px; }
+.why b { display: block; margin-bottom: 4px; font-size: 13px; }
+@media (max-width: 1000px) { .why { grid-template-columns: 1fr; } }
+
+/* the screen simulator: the app is laid out at the logical size a Windows display gives it, then scaled to fit */
+.stage { position: relative; width: 100%; border-radius: 14px; overflow: hidden; background: #0B1418; box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, 0 30px 80px -30px rgba(12, 30, 38, .45); }
+.stage .screen { position: absolute; top: 0; left: 0; transform-origin: 0 0; overflow: hidden; }
+.stage .dims { position: absolute; right: 10px; bottom: 8px; z-index: 5; font: 11px var(--mono); color: rgba(255,255,255,.75); background: rgba(0,0,0,.45); padding: 3px 8px; border-radius: 6px; pointer-events: none; }
+.stage:fullscreen { border-radius: 0; background: #000; }
+
+/* feedback */
+.fb { margin-top: 16px; background: #fff; border: 1px solid #D4DDE2; border-radius: 12px; padding: 16px 20px; display: grid; grid-template-columns: 260px 1fr; gap: 14px 24px; }
+.fb h4 { margin: 0 0 8px; font-size: 14px; }
+.fb .verdict { display: grid; gap: 6px; font-size: 14px; }
+.fb .verdict label, .fb .parts label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.fb .parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 16px; font-size: 13.5px; }
+.fb textarea, .final textarea { width: 100%; min-height: 84px; font: 14px/1.5 var(--sans); padding: 10px 12px; border: 1px solid #CBD5DB; border-radius: 9px; resize: vertical; color: inherit; }
+.fb .full { grid-column: 1 / -1; }
+@media (max-width: 900px) { .fb { grid-template-columns: 1fr; } }
+.final { margin-top: 80px; background: #0F1E26; color: #E7F0F2; border-radius: 16px; padding: 28px 32px; }
+.final h2 { margin: 0 0 8px; color: #fff; }
+.final label { display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 14.5px; }
+.final .pick { display: flex; gap: 22px; flex-wrap: wrap; margin: 10px 0 16px; }
+.final textarea { background: #13262E; border-color: #2A4048; color: #E7F0F2; }
+.final .row { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+.final .saved { font: 12px var(--mono); color: #8FB3BA; }
+#out { display: none; width: 100%; min-height: 180px; margin-top: 12px; font: 12.5px/1.5 var(--mono); background: #081419; color: #CFE6EA; border: 1px solid #2A4048; border-radius: 9px; padding: 12px; }
+
+/* ---------- inside every simulated app: the shared shell skeleton ---------- */
+.app { position: absolute; inset: 0; container-type: inline-size; container-name: app; font: var(--fs-md)/1.45 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.app * { box-sizing: border-box; }
+.app button { font: inherit; color: inherit; }
+.app .mono { font-family: var(--mono); }
+.app :focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .app *, .app *::before, .app *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; } }

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview redesign: three directions</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="shared.css">
+<link rel="stylesheet" href="a.css">
+<link rel="stylesheet" href="b.css">
+<link rel="stylesheet" href="c.css">
+</head>
+<body class="page">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review · 5 November 2026</p>
+    <h1 class="ttl">The Overview, three ways, built to look the same on every computer</h1>
+    <p class="lede">Each direction below is the real Overview with real-shaped data, in light and dark, running live. Switch the screen to see it as each of your computers lays it out: Windows hands the app 1920, 1536 or 1280 pixels of width depending on the display scale, and that is where today's spacing drifts. Mark what you want to keep under each one; your answers stay in this browser until you copy them.</p>
+    <nav class="toc"><a href="#refs">The references</a><a href="#drift">Why it drifts</a><a href="#A">A, Blueprint</a><a href="#B">B, Orbit</a><a href="#C">C, Runway</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <h2 class="sec" id="refs">The five references, agreed with Astra</h2>
+  <p class="muted" style="max-width:80ch">Claude searched Dribbble, Behance, Muzli's 2026 collection and shipped products, and opened each candidate at full size in a browser. Codex (Astra) ran the same search independently, then the two lists were argued down to five. Astra could not open Dribbble or Behance, so it ranked from Claude's descriptions and its own reading of the shipped products. Both of its own Dribbble picks were dropped once Claude looked at them.</p>
+  <div class="refs">
+    <article class="ref"><span class="rk">1</span><b>KERNL, Infrastructure Operations</b><span class="by">Latera Peoples · Dribbble</span>
+      <p class="take">A network map drafted like a technical drawing: hatched boxes, leader-line callouts, mono annotations, a "needs attention" count and a "next 60 minutes" schedule beside it. <em>Feeds A.</em></p>
+      <span class="src"><span class="who both">both</span><a href="https://dribbble.com/shots/27797422-KERNL-Infrastructure-Operations-Dashboard">dribbble.com/shots/27797422</a></span></article>
+    <article class="ref"><span class="rk">2</span><b>Pulser, DevOps Dashboard Concept</b><span class="by">Hammermann · Dribbble</span>
+      <p class="take">The best light theme found. Panels are cells of one grid that share 1 px lines, so there are no floating margins to drift. Mono figures, dotted meters, a server table with inline trends. <em>Feeds A, C and the foundation.</em></p>
+      <span class="src"><span class="who both">both</span><a href="https://dribbble.com/shots/27494813-DevOps-Dashboard-Concept">dribbble.com/shots/27494813</a></span></article>
+    <article class="ref"><span class="rk">3</span><b>Observability for the AI Gateway</b><span class="by">Vercel · shipped product, June 2025</span>
+      <p class="take">Requests by model, time to first token, duration, tokens and cost per request, then a searchable table. The shipped benchmark for our request log, and for calm density that still reads after the novelty wears off. <em>Feeds C and every table.</em></p>
+      <span class="src"><span class="who astra">Astra</span><a href="https://vercel.com/changelog/observability-added-to-ai-gateway-alpha">vercel.com/changelog</a></span></article>
+    <article class="ref"><span class="rk">4</span><b>Linear dashboards and the calmer interface</b><span class="by">Linear · Oct 2025 and Mar 2026</span>
+      <p class="take">Aligned small multiples, numbers with a comparison beside them, and surfaces generated from a base colour, an accent and a contrast level, so light and dark stay in step. <em>Feeds C's restraint.</em></p>
+      <span class="src"><span class="who astra">Astra</span><a href="https://linear.app/now/dashboards-best-practices">linear.app/now/dashboards-best-practices</a> · <a href="https://linear.app/changelog/2026-03-12-ui-refresh">2026 refresh</a></span></article>
+    <article class="ref"><span class="rk">5</span><b>Orbit, AI Agent Ops desktop app</b><span class="by">Dude Studios · Behance</span>
+      <p class="take">The closest subject: "mission control" for AI agents on the desktop. An orbital graph of agents around a core, an incidents rail, cost spikes told as a story. Astra ranked it last: pretty geometry can suggest links that do not exist. <em>Feeds B, held to real hops.</em></p>
+      <span class="src"><span class="who">Claude</span><a href="https://www.behance.net/gallery/256689847/Orbit-AI-Agent-Ops-Desktop-App-UI-UX">behance.net/gallery/256689847</a></span></article>
+  </div>
+  <p class="runners"><b>Borrowed for single motifs:</b> GPUWise by Sheikh Shovon (<a href="https://dribbble.com/shots/27849318-AI-Fleet-Performance-GPU-Analytics-Platform">dot-matrix trends, the week-by-hour grid</a>), CLUST by Hatypo Studio (<a href="https://dribbble.com/shots/27783789-Network-Topology-Dashboard">callouts on links, the health matrix</a>), Synergy Codes (<a href="https://dribbble.com/shots/26605027-Network-topology-mapper">right-angle route lines</a>), Grafana 12 (<a href="https://grafana.com/blog/dynamic-dashboards-grafana-12/">panels that regroup by available width</a>).<br>
+  <b>Looked at and left out:</b> Orix Creative's "Relay" and Delbueno's "Constellation" (Astra's first round; generic cards and donuts once seen at full size), and the AI-usage shots such as Unflip's "Promptly" and Dawid Jankowski's usage dashboard (on topic, but templated).</p>
+  <div class="panel2"><h3>Where Astra changed the plan</h3>
+    <div class="cols2"><ul class="fixlist">
+      <li><b>Every instrument says how it knows.</b> Astra's strongest point: a quota bar, a moving bead and a run-out time each make a promise. All three directions now mark values as measured (solid, with the time they were read), estimated (≈, dashed, "at this pace") or not read yet (—). Nothing missing is drawn as zero.</li>
+      <li><b>Orbit is held to real hops.</b> Its rings are the four steps a token actually takes (account, tool, router, provider), not an invented hierarchy, and every limit arc names its window.</li></ul>
+      <ul class="fixlist"><li><b>No decorative motion.</b> Blueprint dropped its sweeping scan line. What moves is traffic, a change you made, or a limit getting close.</li>
+      <li><b>Runway separates the two times.</b> The reset is measured; the run-out is an estimate with a band around it. The headline says which is which.</li>
+      <li><b>Three different jobs.</b> Blueprint helps you understand the setup, Orbit follows live activity, Runway plans the capacity you have left.</li></ul></div></div>
+
+  <h2 class="sec" id="drift">Why it looks different on each computer</h2>
+  <div class="cols2">
+    <div class="panel2"><h3>What the current CSS does</h3><ul class="fixlist">
+      <li><b>Display scale changes the width the app gets, not just its sharpness.</b> A 1920 screen at 150% gives WebView2 1280 pixels to lay out. The fixed widths (228 px sidebar, 420 px search pushed 120 px right, the 230 px limits label column, six fixed account columns, the route map's 160/128/150/160 px boxes) take a bigger share at 1280 than at 1920, so everything else squeezes.</li>
+      <li><b>Spacing is chosen per component.</b> The sheet pads 22/24 px, cells 10/14 or 12/14, gaps 14, 16, 18, 20, 22 and 24. Nothing ties them together, so two pages never quite line up.</li>
+      <li><b>Eleven type sizes</b> from 10.5 to 28 px, all fixed, including half pixels that render differently at 125%.</li>
+      <li><b>Five media queries look at the window, not at the sheet</b>, so a page breaks at a different point depending on the sidebar and the scale.</li>
+      <li><b>The route map's canvas</b> redraws for theme and width only, so moving the window between monitors with different scales leaves it soft.</li></ul></div>
+    <div class="panel2"><h3>The foundation all three directions share</h3>
+      <div class="tokens"></div>
+      <ul class="fixlist">
+      <li><b>One spacing scale in rem:</b> 4, 8, 12, 16, 24, 32, 48. Cells pad 16, groups sit 24 apart, the sheet pads 24 by 32. Nothing in between.</li>
+      <li><b>Five reading sizes, fixed:</b> 12, 13, 14, 16, 20. Only the page title and the key numbers are fluid (<code>clamp()</code> against the sheet's width), so tables never shrink.</li>
+      <li><b>Container queries on the sheet:</b> the page rearranges by the room it actually has (below 70 rem and 56 rem), whatever the scale, the screen or the sidebar. The sidebar folds to icons only under 75 rem of app width.</li>
+      <li><b>Groups are blocks of shared hairlines</b> (from Pulser), so internal spacing cannot drift.</li>
+      <li><b>Graphics are measured, not positioned with calc():</b> the route maps lay out for the width they get and redraw when the scale changes.</li></ul></div>
+  </div>
+
+  <!-- ===================== A ===================== -->
+  <section class="var" id="A" data-theme="light">
+    <header><div><span class="tag">Direction A · from KERNL and Pulser</span><h2>Blueprint</h2>
+      <p>Your setup as a technical drawing. Every token's route is drafted with right-angle lines and callouts, limits are dimension lines from now to the reset, and a rail says what needs you. Light is drafting paper with teal ink; dark is a cyanotype.</p></div>
+      <div class="ctl"><span class="seg"><button data-theme-btn="light" class="on">Light</button><button data-theme-btn="dark">Dark</button></span><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>The drafted route map: hover any box to trace every hop its tokens take; the hottest route, a paused provider and an expired login carry callouts.</div>
+      <div><b>Measured against estimated</b>Limits show what is used (solid gauge) and when it resets (solid dimension line), then the estimate at this pace (dashed tick, ≈, the red cross where it runs out).</div>
+      <div><b>Motion</b>Routes draw in once when the page opens, then square beads travel each line as fast as its traffic. Nothing else moves.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="vA" data-k="vA" value="Take this direction">Take this direction</label><label><input type="radio" name="vA" data-k="vA" value="Take parts of it">Take parts of it</label><label><input type="radio" name="vA" data-k="vA" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whatever direction wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="pA" value="A: drafted route map with callouts">Drafted route map with callouts</label>
+        <label><input type="checkbox" data-k="pA" value="A: Needs attention rail">Needs attention rail</label>
+        <label><input type="checkbox" data-k="pA" value="A: Next resets schedule">Next resets schedule</label>
+        <label><input type="checkbox" data-k="pA" value="A: limits as dimension lines">Limits as dimension lines</label>
+        <label><input type="checkbox" data-k="pA" value="A: shared-hairline cells">Shared-hairline cells</label>
+        <label><input type="checkbox" data-k="pA" value="A: plotted trends with yesterday dashed">Trends with yesterday dashed</label>
+        <label><input type="checkbox" data-k="pA" value="A: cyanotype dark theme">Cyanotype dark theme</label>
+        <label><input type="checkbox" data-k="pA" value="A: drafting-paper light theme">Drafting-paper light theme</label></div></div>
+      <div class="full"><h4>Comments on Blueprint</h4><textarea data-k="cA" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <!-- ===================== B ===================== -->
+  <section class="var" id="B" data-theme="dark">
+    <header><div><span class="tag">Direction B · from Orbit, CLUST and GPUWise</span><h2>Orbit</h2>
+      <p>Live activity as a scene. This computer sits at the centre; the rings are the real hops, accounts, then tools, then the router, with providers on the outside. Tokens fly along the hops they take, and each account wears its limit as an arc. Drag to turn it. Dark is the night sky; light is porcelain with ink lines.</p></div>
+      <div class="ctl"><span class="seg"><button data-theme-btn="light">Light</button><button data-theme-btn="dark" class="on">Dark</button></span><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>The orbital route map, drawn in WebGL behind HTML labels that stay sharp and readable. Hover a body to isolate its path; drag to rotate.</div>
+      <div><b>Measured against estimated</b>Each account's arc is the used share of its tightest window (solid) and its forecast at the reset (faint), with the window's name and reset under the label.</div>
+      <div><b>Motion</b>Particles move in proportion to the last five minutes of traffic. A paused provider flickers red. Still mode draws one frame.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="vB" data-k="vB" value="Take this direction">Take this direction</label><label><input type="radio" name="vB" data-k="vB" value="Take parts of it">Take parts of it</label><label><input type="radio" name="vB" data-k="vB" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whatever direction wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="pB" value="B: orbital route map">Orbital route map</label>
+        <label><input type="checkbox" data-k="pB" value="B: limit arcs around each account">Limit arcs around each account</label>
+        <label><input type="checkbox" data-k="pB" value="B: readouts floating on the scene">Readouts on the scene</label>
+        <label><input type="checkbox" data-k="pB" value="B: dot-matrix trends">Dot-matrix trends</label>
+        <label><input type="checkbox" data-k="pB" value="B: the year clock (radial activity)">The year clock</label>
+        <label><input type="checkbox" data-k="pB" value="B: WebGL sky in the background">WebGL sky behind it</label>
+        <label><input type="checkbox" data-k="pB" value="B: porcelain light theme">Porcelain light theme</label>
+        <label><input type="checkbox" data-k="pB" value="B: night dark theme">Night dark theme</label></div></div>
+      <div class="full"><h4>Comments on Orbit</h4><textarea data-k="cB" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <!-- ===================== C ===================== -->
+  <section class="var" id="C" data-theme="light">
+    <header><div><span class="tag">Direction C · from Vercel, Linear and Pulser</span><h2>Runway</h2>
+      <p>Capacity over time first. The headline is the answer, the hero is a seven-day runway with one lane per account, and you can drag "now" forward to see what happens at today's pace. Routes become a single flow strip; requests become a ledger. Calm, in both themes.</p></div>
+      <div class="ctl"><span class="seg"><button data-theme-btn="light" class="on">Light</button><button data-theme-btn="dark">Dark</button></span><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="why"><div><b>The one bold thing</b>The runway: drag the "now" handle into the week and every lane, the headline and the key numbers project forward, with an uncertainty band that widens the further you look.</div>
+      <div><b>Measured against estimated</b>Left of now is measured; right of now is an estimate, drawn as a band, never as a hard line. Resets are measured and marked as flags.</div>
+      <div><b>Motion</b>Only the flow strip moves, and only as fast as its traffic. Dragging animates in answer to your hand.</div></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="vC" data-k="vC" value="Take this direction">Take this direction</label><label><input type="radio" name="vC" data-k="vC" value="Take parts of it">Take parts of it</label><label><input type="radio" name="vC" data-k="vC" value="Not this one">Not this one</label></div></div>
+      <div><h4>Keep these, whatever direction wins</h4><div class="parts">
+        <label><input type="checkbox" data-k="pC" value="C: the finding as the headline">The finding as the headline</label>
+        <label><input type="checkbox" data-k="pC" value="C: runway with forecast bands">Runway with forecast bands</label>
+        <label><input type="checkbox" data-k="pC" value="C: drag now into the future">Drag "now" into the future</label>
+        <label><input type="checkbox" data-k="pC" value="C: token flow strip">Token flow strip</label>
+        <label><input type="checkbox" data-k="pC" value="C: small-multiple key numbers">Small-multiple key numbers</label>
+        <label><input type="checkbox" data-k="pC" value="C: Vercel-style request ledger">Request ledger</label>
+        <label><input type="checkbox" data-k="pC" value="C: graphite dark theme">Graphite dark theme</label>
+        <label><input type="checkbox" data-k="pC" value="C: white light theme">White light theme</label></div></div>
+      <div class="full"><h4>Comments on Runway</h4><textarea data-k="cC" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="final" id="answers">
+    <h2>Which direction goes to every page?</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">After this, every page is redesigned in the chosen direction and reviewed together on one page like this one, before any code changes in the app.</p>
+    <div class="pick">
+      <label><input type="radio" name="pick" data-k="pick" value="A, Blueprint">A, Blueprint</label><label><input type="radio" name="pick" data-k="pick" value="B, Orbit">B, Orbit</label>
+      <label><input type="radio" name="pick" data-k="pick" value="C, Runway">C, Runway</label><label><input type="radio" name="pick" data-k="pick" value="A mix of the parts I ticked">A mix of the parts I ticked</label></div>
+    <div class="pick"><span style="color:#9FBFC5">Lead with:</span>
+      <label><input type="radio" name="lead" data-k="lead" value="light">Light</label><label><input type="radio" name="lead" data-k="lead" value="dark">Dark</label><label><input type="radio" name="lead" data-k="lead" value="both equal">Both equally</label></div>
+    <textarea data-k="foundation" placeholder="On the shared foundation (spacing, type, how it adapts to each computer)"></textarea>
+    <textarea data-k="general" style="margin-top:10px" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="data.js"></script>
+<script src="a.js"></script>
+<script src="b.js"></script>
+<script src="c.js"></script>
+<script>
+  // the spacing scale, drawn to size
+  document.querySelector('.tokens').innerHTML = [4, 8, 12, 16, 24, 32, 48].map((n) => `<div><i style="width:${n}px;height:${n}px"></i>${n}</div>`).join('');
+  for (const k of ['A', 'B', 'C']) if (HM.variations[k]) HM.mount(document.getElementById(k), k);
+  HM.feedback();
+</script>
+</body>
+</html>

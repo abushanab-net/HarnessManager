@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Overview, round six: the clock and the attention beside the dial</title>
+<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../shared.css">
+<link rel="stylesheet" href="../round2/theme.css">
+<style>
+  .app .brand .mark { display: none; }
+  .app .brand .mark.hm { display: grid; }
+  /* the harnesses' official icons, beside their names */
+  .app .ticon { display: inline-flex; vertical-align: -2px; margin-right: 5px; flex: none; }
+  .app .ticon svg { width: 100%; height: 100%; display: block; }
+  .app .lb .ticon { vertical-align: -1px; margin-right: 4px; }
+  /* the scene: the finding and small readouts float top-left; the dial has the rest */
+  .app .scene.dial { min-height: 40rem; }
+  .app .ov.l { width: 32rem; padding: var(--s4); display: grid; grid-template-columns: minmax(0, 1fr) 12rem; gap: 0 var(--s4); align-items: start; }
+  .app .ov.l h1 { font-size: clamp(1rem, .85rem + .6cqi, 1.25rem); line-height: 1.3; margin: 2px 0; }
+  .app[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem); line-height: 1.22; }
+  .app .ov.l .basis { font-size: 10.5px; }
+  .app .ov.l .rds { display: grid; grid-template-columns: 1fr; gap: 4px; border-top: 0; padding-top: 2px; }
+  .app .ov.l .rd { display: flex; align-items: center; gap: var(--s2); }
+  .app .ov.l .rd label { width: 3.4rem; font-size: 10.5px; color: var(--m); display: block; }
+  .app .ov.l .rd strong { font-size: 1rem; width: 3.6rem; }
+  .app .ov.l .rd svg { margin: 0; }
+  .app .ov.l .rd b.d { margin-left: auto; white-space: nowrap; }
+  .app .ov.l .rng { display: flex; gap: 2px; margin-bottom: 3px; }
+  .app .ov.l .rng button { font: 500 10.5px var(--sans); color: var(--m); background: transparent; border: 0; border-radius: 999px; padding: 1px 7px; cursor: pointer; }
+  .app .ov.l .rng button.on { color: var(--ink); background: var(--acS); }
+  .app .ov.b { right: 15rem; }
+  /* the top row: the scene, and beside it the year clock with the attention cards under it */
+  .app .hero { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: var(--s3); align-items: stretch; }
+  .app .aside { display: grid; grid-template-rows: auto 1fr; gap: var(--s3); min-width: 0; }
+  .app .attn { display: grid; grid-template-rows: auto; gap: var(--s2); align-content: start; }
+  /* the panels below */
+  .app .row2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: var(--s3); margin-top: var(--s3); }
+  .app .pn { background: var(--panel); border: 1px solid var(--line); border-radius: var(--rad); padding: var(--s4); min-width: 0; }
+  .app .pn h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+  .app .ph { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s3); }
+  .app .ph span { font: var(--fs-xs) var(--mono); color: var(--m); }
+  .app .ph .r { margin-left: auto; }
+  .app .ph a.lnk { color: var(--ac); font-size: var(--fs-sm); cursor: pointer; }
+  .app .rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: var(--s3) var(--s2); }
+  .app .ring { display: grid; justify-items: center; text-align: center; gap: 2px; }
+  .app .ring svg { display: block; }
+  .app .ring b { font-size: var(--fs-sm); font-weight: 600; }
+  .app .ring small { font: var(--fs-xs) var(--mono); color: var(--m); }
+  .app .ring small.warn { color: var(--warn); } .app .ring small.neg { color: var(--neg); }
+  .app .runs div { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: var(--s2); align-items: center; padding: 7px 0; border-top: 1px solid var(--line2); font-size: var(--fs-sm); }
+  .app .runs div:first-child { border-top: 0; }
+  .app .runs i { width: 8px; height: 8px; border-radius: 50%; }
+  .app .runs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app .runs small { color: var(--m); }
+  .app .runs time { font: var(--fs-xs) var(--mono); color: var(--m); }
+  .app .clock { display: grid; place-items: center; }
+  .app .clock svg { display: block; width: 100%; max-width: 16rem; height: auto; }
+  .app table.rep { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  .app table.rep th { text-align: left; font-weight: 500; color: var(--m); font-size: var(--fs-xs); padding: 0 var(--s2) var(--s2); white-space: nowrap; }
+  .app table.rep td { padding: 0 var(--s2); height: 2.5rem; border-top: 1px solid var(--line2); white-space: nowrap; }
+  .app table.rep .n { text-align: right; font-family: var(--mono); font-size: var(--fs-xs); }
+  .app table.rep .tm { font: var(--fs-xs) var(--mono); color: var(--m); }
+  .app table.rep tr:hover td { background: var(--line2); }
+  .app .chip { display: inline-flex; gap: 6px; align-items: center; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--line2); font-size: var(--fs-xs); }
+  .app .chip i { width: 6px; height: 6px; border-radius: 50%; }
+  .app .wide { margin-top: var(--s3); }
+  /* quiet labels and selection */
+  .app .lb span { display: none; }
+  .app .lb.lit span, .app .lb span.warn, .app .lb span.neg { display: block; }
+  .app .lb.dim span { display: none; }
+  .app .map.measuring .lb span { display: block; }
+  .app [data-node] { cursor: pointer; transition: opacity .25s; outline: 0; }
+  .app [data-node].dim { opacity: .45; }
+  .app [data-node]:focus-visible > :first-child { stroke: var(--ac); stroke-width: 2; }
+  .app path.e { transition: opacity .25s; }
+  .app path.e.dim { opacity: .14 !important; }
+  .app .lb.dim { opacity: .6; }
+  /* narrow sheet (1280 at 150%): the side column goes under the scene, clock and attention side by side */
+  @container sheet (max-width: 70rem) { .app .ov.l { width: 29rem; grid-template-columns: minmax(0, 1fr) 11rem; } .app .hero { grid-template-columns: 1fr; } .app .aside { grid-template-rows: none; grid-template-columns: 1fr 1fr; } }
+  @container sheet (max-width: 56rem) { .app .aside, .app .row2 { grid-template-columns: 1fr; } }
+  /* wide sheet (1920 at 100%): the dial was limited by height, not width, so the scene grows and the clock with it */
+  @container sheet (min-width: 90rem) { .app .scene.dial { min-height: 48rem; } .app .clock svg { max-width: none; } }
+  .themebar { position: sticky; top: 0; z-index: 20; background: rgba(233, 238, 241, .92); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid #D4DDE2; }
+  .themebar .lbl { font-size: 13px; color: #5A6B74; }
+  .sw { display: inline-grid; grid-template-columns: 1fr 1fr; width: 28px; height: 18px; border-radius: 4px; overflow: hidden; margin-right: 6px; vertical-align: -4px; border: 1px solid rgba(0,0,0,.15); }
+  .sw i { display: block; }
+  .said { background: #fff; border: 1px solid #D4DDE2; border-left: 4px solid #0F6E7A; border-radius: 10px; padding: 14px 18px; margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font-size: 14px; }
+  .said div { display: grid; grid-template-columns: 9rem 1fr; gap: 6px 12px; align-content: start; }
+  .said b { color: #0F6E7A; font-weight: 600; }
+  @media (max-width: 1000px) { .said { grid-template-columns: 1fr; } }
+  .secfb { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+  .secfb > div { background: #fff; border: 1px solid #D4DDE2; border-radius: 10px; padding: 12px 14px; }
+  .secfb h4 { margin: 0 0 6px; font-size: 14px; }
+  .secfb label { display: block; font-size: 13.5px; margin: 3px 0; cursor: pointer; }
+  .secfb textarea { width: 100%; min-height: 60px; margin-top: 6px; font: 13px/1.45 var(--sans); padding: 8px 10px; border: 1px solid #CBD5DB; border-radius: 8px; resize: vertical; }
+  @media (max-width: 1000px) { .secfb { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body class="page" data-fbkey="hm-overview-redesign-2026-11-round6">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review, round six · 6 November 2026</p>
+    <h1 class="ttl">The year clock and the attention cards beside the dial</h1>
+    <p class="lede">Everything you marked Good is unchanged. The two things you asked to move: the year clock now sits beside the dial on the right, and the attention cards sit under it as a column. Below them, limits as rings and running now share a row; the latest replies close the page. Scroll inside the app to see it all; the stage shows the first screen of each computer.</p>
+    <nav class="toc"><a href="#said">What changed</a><a href="#overview">The Overview</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <div class="themebar"><span class="lbl">Theme for the whole page</span>
+    <span class="seg">
+      <button data-brand-btn="hm" data-mode-btn="light" class="on"><span class="sw"><i style="background:#F5F8F9"></i><i style="background:#0E7E88"></i></span>Harness light</button>
+      <button data-brand-btn="hm" data-mode-btn="dark"><span class="sw"><i style="background:#08161B"></i><i style="background:#3FD6CF"></i></span>Harness dark</button>
+      <button data-brand-btn="vg" data-mode-btn="light"><span class="sw"><i style="background:#FAF7F2"></i><i style="background:#0F6863"></i></span>VektraGrid light</button>
+      <button data-brand-btn="vg" data-mode-btn="dark"><span class="sw"><i style="background:#0B1F1D"></i><i style="background:#D4B064"></i></span>VektraGrid dark</button>
+    </span></div>
+
+  <h2 class="sec" id="said">What you ticked, and what changed</h2>
+  <div class="said">
+    <div><b>Activity</b><span>"have it set beside the dial scene on the right": the year clock is a 19rem column to the right of the scene, the same height as the dial.</span>
+      <b>Attention</b><span>"make it a side on right under activity": the three cards stack under the year clock in that column, the header on top.</span>
+      <b>The dial</b><span>Gives the column its 19rem and keeps the rest. On a 1920 at 100% it is still the whole height; at 1536 (125%) it is about the size of round three. At 1280 (150%) the sheet is too narrow for a column, so the clock and the cards go under the scene side by side and the dial has the full width again.</span></div>
+    <div><b>Below</b><span>Limits as rings and running now share one row; the latest replies close the page. Both unchanged inside.</span>
+      <b>Readouts</b><span>Now have a range: Today (hourly, against yesterday at this hour), 7 d and 30 d (against the period before), All (nothing to compare with, so no change shown).</span>
+      <b>Icons</b><span>Every harness shows its official icon (the app's own icons folder): on the dial's tool ring, in the limits, in running now and in the replies.</span>
+      <b>Unchanged</b><span>The dial scene, the finding, the rings, the running list, the replies table, the Harness mark, the four themes.</span></div>
+  </div>
+
+  <section class="var" id="overview">
+    <header><div><span class="tag">The Overview · round six</span><h2>Overview</h2>
+      <p>Scroll inside the app for the whole page. Hover, focus or click a body on the dial to trace it; Escape returns to the finding's route.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="secfb">
+      <div><h4>The dial scene</h4><label><input type="radio" name="s1" data-k="s1" value="Good">Good</label><label><input type="radio" name="s1" data-k="s1" value="Change">Change (say what)</label><textarea data-k="c1" placeholder="The dial, the finding, the readouts"></textarea></div>
+      <div><h4>Attention column</h4><label><input type="radio" name="s2" data-k="s2" value="Good">Good</label><label><input type="radio" name="s2" data-k="s2" value="Change">Change (say what)</label><textarea data-k="c2" placeholder=""></textarea></div>
+      <div><h4>Limits as rings</h4><label><input type="radio" name="s3" data-k="s3" value="Good">Good</label><label><input type="radio" name="s3" data-k="s3" value="Change">Change (say what)</label><textarea data-k="c3" placeholder=""></textarea></div>
+      <div><h4>Running now</h4><label><input type="radio" name="s4" data-k="s4" value="Good">Good</label><label><input type="radio" name="s4" data-k="s4" value="Change">Change (say what)</label><textarea data-k="c4" placeholder=""></textarea></div>
+      <div><h4>Activity, the year clock</h4><label><input type="radio" name="s5" data-k="s5" value="Good">Good</label><label><input type="radio" name="s5" data-k="s5" value="Change">Change (say what)</label><textarea data-k="c5" placeholder=""></textarea></div>
+      <div><h4>Latest replies</h4><label><input type="radio" name="s6" data-k="s6" value="Good">Good</label><label><input type="radio" name="s6" data-k="s6" value="Change">Change (say what)</label><textarea data-k="c6" placeholder=""></textarea></div>
+    </div>
+  </section>
+
+  <section class="final" id="answers">
+    <h2>Decision</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">Approve the Overview and every other page gets this direction on one review page; or one more round on the Overview.</p>
+    <div class="pick">
+      <label><input type="radio" name="pick" data-k="pick" value="Approve the Overview, go to all pages">Approve the Overview, go to all pages</label>
+      <label><input type="radio" name="pick" data-k="pick" value="One more round on the Overview">One more round on the Overview</label></div>
+    <textarea data-k="general" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="../data.js"></script>
+<script src="../round2/logos.js"></script>
+<script src="../round2/tool-icons.js"></script>
+<script src="../round2/page.js"></script>
+<script src="page6.js"></script>
+<script src="dial.js"></script>
+<script>
+  H2.themePicker();
+  H2.mount(document.getElementById('overview'), 'dial');
+  // the form: one verdict and comment per section
+  (function () {
+    const KEY = document.body.dataset.fbkey; let draft = {};
+    try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const saved = document.getElementById('saved'), save = () => { localStorage.setItem(KEY, JSON.stringify(draft)); saved.textContent = 'Saved in this browser ' + new Date().toLocaleTimeString(); };
+    document.querySelectorAll('[data-k]').forEach((x) => { const k = x.dataset.k; if (x.type === 'radio') { x.checked = draft[k] === x.value; x.addEventListener('change', () => { draft[k] = x.value; save(); }); } else { x.value = draft[k] || ''; x.addEventListener('input', () => { draft[k] = x.value; save(); }); } });
+    const names = ['The dial scene', 'Attention column', 'Limits as rings', 'Running now', 'Activity, the year clock', 'Latest replies'];
+    const text = () => { const out = ['# The Overview, round six: my answers', '']; names.forEach((n, i) => { out.push(`## ${n}`, `Verdict: ${draft['s' + (i + 1)] || '(none)'}`); if (draft['c' + (i + 1)]) out.push('Comments: ' + draft['c' + (i + 1)]); out.push(''); }); out.push('## Decision', draft.pick || '(none)'); if (draft.general) out.push('Anything else: ' + draft.general); return out.join('\n'); };
+    const box = document.getElementById('out');
+    document.getElementById('copy').addEventListener('click', async () => { box.style.display = 'block'; box.value = text(); box.select(); try { await navigator.clipboard.writeText(box.value); saved.textContent = 'Copied. Paste it into the chat with Claude.'; } catch (e) { document.execCommand('copy'); saved.textContent = 'Copied (or select the text below and copy it).'; } });
+    document.getElementById('dl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text()], { type: 'text/markdown' })); a.download = 'overview-round6-answers.md'; a.click(); });
+    document.getElementById('clear').addEventListener('click', () => { if (!window.confirm('Clear every answer on this page?')) return; draft = {}; save(); location.reload(); });
+  })();
+</script>
+</body>
+</html>

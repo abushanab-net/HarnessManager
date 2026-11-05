@@ -168,10 +168,17 @@ async function renderNow() {
 /** The tools the user shows (Apps > Show); hidden ones are left out of every page. */
 export const shownTools = (st) => st.harnesses.filter((h) => !((st.settings && st.settings.hidden_tools) || []).includes(h.id));
 
-/** Light, dark, or as Windows is (the stylesheet reads data-theme). */
+/** The brand (Harness or VektraGrid) and light or dark; "system" follows Windows or macOS, and changes with it.
+ * The stylesheet reads html[data-brand][data-theme], always one of the four. */
+const dark = window.matchMedia('(prefers-color-scheme: dark)');
+let themeSetting = 'system';
+const setTheme = () => { document.documentElement.dataset.theme = themeSetting === 'system' ? (dark.matches ? 'dark' : 'light') : themeSetting; };
+dark.addEventListener('change', setTheme);
 export function applyTheme(st) {
   if (!st || !st.settings) return;
-  document.documentElement.dataset.theme = st.settings.theme || 'system';
+  themeSetting = st.settings.theme || 'system';
+  document.documentElement.dataset.brand = st.settings.brand === 'vg' ? 'vg' : 'hm';
+  setTheme();
 }
 
 /** The live count in the side menu and the strip in the top bar: this computer's running sessions plus every other computer's, from their presence. */

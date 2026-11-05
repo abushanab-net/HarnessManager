@@ -195,9 +195,12 @@ try {
   // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
   await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off'); localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`, [TOURED]);
 
-  await test('overview: key numbers, live routes, limits, reply timing, mix, events, health and the request log', async () => {
+  await test('overview: the finding, the readouts, the dial, the year clock, limits as rings, reply timing and the request log', async () => {
     await $('[data-testid=heatmap]');
-    assert.equal(await exec("return document.querySelectorAll('[data-testid=heatmap] rect.hm').length"), 371, '53 weeks of days');
+    assert.equal(await exec("return document.querySelectorAll('[data-testid=heatmap] .hm').length"), 371, '53 weeks of days on the year clock');
+    // the finding leads; the basis under it counts the requests of the range
+    await hasText('[data-testid=finding]', 'codex-main');
+    await hasText('[data-testid=basis]', '5 requests');
     // the latest replies, as the design shows them; Request log opens the whole log
     await hasText('[data-testid=latest-replies]', 'claude-opus-5-5');
     await click('[data-testid=request-log-open]');
@@ -207,16 +210,13 @@ try {
       return [...t.querySelectorAll('thead th.num')].map((th) => Math.abs(th.getBoundingClientRect().right - r.children[th.cellIndex].getBoundingClientRect().right));`);
     assert.ok(off.length === 7 && off.every((d) => d < 1), 'number headers aligned: ' + off);
     await $('[data-testid=request-log] [data-testid=ttft]');
-    const fill = () => exec("const w = document.querySelector('.hmwrap'); return document.querySelector('[data-testid=heatmap]').getBoundingClientRect().width / w.clientWidth");
-    assert.ok((await fill()) > 0.9, 'the heatmap fills its card');
-    // a wider window (maximized): it redraws to fill the new width
-    await exec("document.querySelector('.hmwrap').style.width = '1800px'; window.dispatchEvent(new Event('resize'))");
-    await waitFor(async () => (await fill()) > 0.9, 'the heatmap grows with the window');
-    await exec("document.querySelector('.hmwrap').style.width = ''; window.dispatchEvent(new Event('resize'))");
-    await waitFor(async () => Math.abs((await fill()) - 1) < 0.1 && (await exec("return document.querySelector('[data-testid=heatmap]').getBoundingClientRect().width <= document.querySelector('.hmwrap').clientWidth")), 'redrawn for the card again');
-    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] rect.hm:not([data-l=\"0\"])').length")) > 0, 'today shaded');
+    // the year clock fits its panel and is drawn for its width
+    const fits = () => exec("const w = document.querySelector('.hmwrap'); const r = document.querySelector('[data-testid=heatmap]').getBoundingClientRect(); return r.width > 100 && r.width <= w.clientWidth + 1");
+    assert.ok(await fits(), 'the year clock fits its panel');
+    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] .hm:not([data-l=\"0\"])').length")) > 0, 'today shaded');
+    // the readouts: tokens, cost at list prices, the share read from cache
     await hasText('[data-testid=kpi-cost]', '$0.01');
-    await hasText('[data-testid=kpi-tokens]', '5 requests');
+    await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
     await hasText('#today-cost', 'Today $');
@@ -228,27 +228,28 @@ try {
     await click('[data-testid=tool-agy]');
     await hasText('[data-testid=request-log]', 'No replies in this range.');
     await click('[data-testid=tool-all]');
-    // the other sections, each from real data
-    await $('[data-testid=kpi-risk]');
-    await $('[data-testid=routes]');
-    const topo = await exec(`const t = document.querySelector('[data-testid=routes]');
-      return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), gl: !!t.querySelector('canvas').getContext('webgl'), w: t.querySelector('canvas').width };`);
-    assert.ok(topo.nodes.includes('a:codex-main') && topo.nodes.includes('t:codex') && topo.nodes.includes('v:OpenAI'), 'account, tool and provider cards: ' + topo.nodes);
-    assert.ok(topo.gl && topo.w > 0, 'routes drawn with WebGL');
-    // no card runs into the next one in its column, however long its text
-    const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] [data-node]')].map((n) => n.getBoundingClientRect());
-      return r.filter((a, i) => r.some((b, j) => j !== i && Math.abs(a.left - b.left) < 2 && a.top < b.top && a.bottom > b.top + 0.5)).length;`);
-    assert.equal(overlaps, 0, 'route cards do not overlap');
+    // the dial: computers at the docks, accounts, tools, providers as bodies with their routes, drawn as SVG
+    await $('[data-testid=routes] svg');
+    const dial = await exec(`const t = document.querySelector('[data-testid=routes]');
+      return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), routes: t.querySelectorAll('path.e').length, labels: t.querySelectorAll('.lb').length };`);
+    assert.ok(dial.nodes.includes('a:codex-main') && dial.nodes.includes('t:codex') && dial.nodes.includes('v:OpenAI'), 'account, tool and provider bodies: ' + dial.nodes);
+    assert.ok(dial.routes > 0 && dial.labels === dial.nodes.length, 'every body has a route and a label');
+    // no label runs into another, however long its text
+    const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] .lb')].map((n) => n.getBoundingClientRect());
+      return r.filter((a, i) => r.some((b, j) => j !== i && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)).length;`);
+    assert.equal(overlaps, 0, 'labels do not overlap');
     await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
     await shot('00b-overview-routes');
+    // limits as rings: codex-main's week has 79% left
     await hasText('[data-testid=limits]', 'codex-main');
-    await hasText('[data-testid=limits]', '79% left');
+    assert.equal(await exec("return document.querySelector('[data-testid=ring-codex-main] svg text').textContent"), '79%', 'the ring says what is left');
     await hasText('[data-testid=activity]', 'Activity, 53 weeks');
-    // a range picks the period; the cards follow
+    await $('[data-testid=attention]');
+    // a range picks the period; the readouts follow
     await click('[data-testid=range-7d]');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('on')")), '7 days picked');
-    await hasText('[data-testid=kpi-tokens]', '5 requests');
-    await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
+    await hasText('[data-testid=basis]', '5 requests');
+    await exec("document.querySelector('[data-testid=limits]').scrollIntoView()");
     await shot('00c-overview-panels');
     await click('[data-testid=range-today]');
   });
@@ -476,7 +477,7 @@ try {
     await click('.sesshead [data-act=project-pin]');
     await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned from the header');
     await nav('#sessions');
-    await hasText('#sheet h1', 'Sessions');
+    await hasText('#sheet .crumb', 'Sessions');
     await $('[data-testid=rail-live]'); // the title shows while the list loads; the rail comes with the list
     assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
   });
@@ -628,7 +629,7 @@ try {
     assert.ok(md.includes('What changed'));
   });
 
-  await test('the window follows the Mission Control design in the Harness theme', async () => {
+  await test('the window follows the approved design in the Harness theme', async () => {
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
     await page.mouse.move(2, 2); // no hover colour on the button being measured
@@ -646,18 +647,18 @@ try {
         primary: cs('.btn.primary').backgroundColor,
         chips: [...document.querySelectorAll('.fbar .toolfilter a')].map((a) => a.textContent.trim()),
       };`);
-    assert.equal(d.frame, 'rgb(245, 247, 250)', 'the brand light ground');
+    assert.equal(d.frame, 'rgb(227, 234, 236)', 'the porcelain ground');
     assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the ground');
     assert.equal(d.sheetRadius, '0px', 'no framed sheet');
     assert.equal(d.sheetShadow, 'none', 'no shadow on the page');
-    assert.equal(d.side, 232, 'sidebar width');
-    assert.equal(d.top, 64, 'top bar height');
+    assert.equal(d.side, 216, 'sidebar 13.5rem');
+    assert.equal(d.top, 52, 'top bar 3.25rem');
     assert.ok(d.navActive !== 'rgba(0, 0, 0, 0)' && d.navActive !== d.frame, 'the active item is shaded: ' + d.navActive);
     assert.equal(d.navLabel, 'Accounts');
     assert.ok(d.font.includes('Inter') && d.inter, 'Inter loaded');
     assert.ok(d.mark, 'the Interlocking H in the sidebar');
     assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'accounts grouped by tool, one card each');
-    assert.equal(d.primary, 'rgb(15, 110, 122)', 'the primary button in brand teal');
+    assert.equal(d.primary, 'rgb(14, 126, 136)', 'the primary button in the accent');
     assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool');
     // a tool chip shows only that tool; a group header folds its accounts away
     await click('[data-testid=chip-codex]');
@@ -669,8 +670,8 @@ try {
     await $('[data-testid=row-claude-main]');
     await click('[data-testid=add-account]');
     const dlg = await exec("const s = getComputedStyle(document.querySelector('.dlg')); return { radius: s.borderTopLeftRadius, tab: getComputedStyle(document.querySelector('.dseg a.on')).boxShadow };");
-    assert.equal(dlg.radius, '16px', 'Add account is a dialog over the list');
-    assert.ok(dlg.tab.includes('rgb(15, 110, 122)'), 'teal underline on the selected tab');
+    assert.equal(dlg.radius, '12px', 'Add account is a dialog over the list');
+    assert.ok(dlg.tab.includes('rgb(14, 126, 136)'), 'the accent under the selected tab');
     await exec("document.querySelector('[data-act=dialog-close]').click()");
     await nav('#session?profile=claude-main&id=s-main-1');
     await $('[data-testid=chat]');
@@ -680,45 +681,45 @@ try {
     assert.ok(r.resume.startsWith('Resume in'));
   });
 
-  // The design pages (Main, PartNav, PartTopbar, PartHeader, PartKpis, PartBurn) set these sizes; the window must use the same.
+  // The approved foundation (docs/overview-redesign-2026-11): rem spacing 4/8/12/16/24, reading sizes fixed, headings in
+  // clamp(), round controls; the window must use the same.
   await test('measurements match the design pages', async () => {
-    await nav('#home');
-    await $('[data-testid=limits]');
+    await nav('#account?name=claude-main');
+    await $('.ovk');
     const d = await exec(`
       const cs = (el) => getComputedStyle(el), q = (s) => document.querySelector(s);
       const box = (s) => q(s).getBoundingClientRect();
       const sheet = cs(q('#sheet')), h1 = cs(q('#sheet h1')), panel = cs(q('.panel')), ph2 = cs(q('.panel h2')), kpi = cs(q('.ovk')), kv = cs(q('.ovk strong'));
-      const nav = q('nav.nav a'), btn = q('.ovhead .btn.primary'), seg = cs(q('.ovhead .seg3'));
+      const nav = q('nav.nav a'), btn = q('.btn.primary'), seg = cs(q('.tabs2') ? q('.seg3') || q('.tabs2') : q('.seg3'));
       return {
-        side: box('aside.side').width, top: box('header.top').height, padTop: sheet.paddingTop, padLeft: sheet.paddingLeft,
-        h1: [h1.fontSize, h1.fontWeight], body: [cs(document.body).fontSize, cs(document.body).fontFamily.split(',')[0]],
+        side: box('aside.side').width, top: box('header.top').height, padTop: sheet.paddingTop, padLeft: sheet.paddingLeft, gap: sheet.rowGap,
+        h1: [h1.fontWeight, h1.fontFamily.split(',')[0].replace(/"/g, ''), parseFloat(h1.fontSize)], body: [cs(document.body).fontSize, cs(document.body).fontFamily.split(',')[0]],
         panel: [panel.borderTopLeftRadius, panel.paddingTop, panel.paddingLeft], h2: [ph2.fontSize, ph2.fontWeight],
-        kpi: [kpi.borderTopLeftRadius, kpi.paddingTop, kpi.paddingLeft, kpi.paddingBottom], kv: [kv.fontSize, kv.fontWeight, kv.fontFamily.split(',')[0]],
+        kpi: [kpi.borderTopLeftRadius, kpi.paddingTop, kpi.paddingLeft], kv: [kv.fontWeight, kv.fontFamily.split(',')[0].replace(/"/g, '')],
         nav: [nav.getBoundingClientRect().height, cs(nav).borderTopLeftRadius], btn: [btn.getBoundingClientRect().height, cs(btn).borderTopLeftRadius],
-        seg: [seg.borderTopLeftRadius, seg.paddingTop], search: [box('.search').height, cs(q('.search')).borderTopLeftRadius],
+        search: [box('.search').height, cs(q('.search')).borderTopLeftRadius],
         gaps: (() => { const k = [...document.querySelectorAll('.ovk')].map((e) => e.getBoundingClientRect()); return Math.round(k[1].left - k[0].right); })(),
       };`);
-    assert.equal(d.side, 232, 'sidebar 232 px');
-    assert.equal(d.top, 64, 'top bar 64 px');
-    assert.deepEqual([d.padTop, d.padLeft], ['28px', '40px'], 'page padding 28 / 40');
-    assert.deepEqual(d.h1, ['34px', '600'], 'page title 34 px, 600');
+    assert.equal(d.side, 216, 'sidebar 13.5rem');
+    assert.equal(d.top, 52, 'top bar 3.25rem');
+    assert.deepEqual([d.padTop, d.padLeft, d.gap], ['16px', '24px', '16px'], 'page padding 16 / 24, parts 16 apart');
+    assert.ok(d.h1[0] === '600' && d.h1[1] === 'Inter' && d.h1[2] >= 17.6 && d.h1[2] <= 23.2, 'the finding: Inter 600, between 1.1rem and 1.45rem: ' + d.h1);
     assert.deepEqual([d.body[0], d.body[1].replace(/"/g, '')], ['14px', 'Inter'], 'body 14 px Inter');
-    assert.deepEqual(d.panel, ['16px', '18px', '20px'], 'cards: radius 16, padding 18 / 20');
-    assert.deepEqual(d.h2, ['18px', '600'], 'card titles 18 px, 600');
-    assert.deepEqual(d.kpi, ['14px', '14px', '16px', '12px'], 'number cards: radius 14, padding 14 / 16 / 12');
-    assert.deepEqual([d.kv[0], d.kv[1], d.kv[2].replace(/"/g, '')], ['26px', '600', 'JetBrains Mono'], 'numbers 26 px, 600, JetBrains Mono');
-    assert.equal(d.gaps, 12, '12 px between number cards');
-    assert.deepEqual(d.nav, [38, '9px'], 'nav items 38 px, radius 9');
-    assert.deepEqual(d.btn, [40, '10px'], 'buttons 40 px, radius 10');
-    assert.deepEqual(d.seg, ['10px', '3px'], 'segments: radius 10, padding 3');
-    assert.deepEqual(d.search, [40, '10px'], 'search 40 px, radius 10');
+    assert.deepEqual(d.panel, ['12px', '16px', '16px'], 'panels: radius 12, padding 16');
+    assert.deepEqual(d.h2, ['14px', '600'], 'panel titles 14 px, 600');
+    assert.deepEqual(d.kpi, ['12px', '12px', '16px'], 'tiles: radius 12, padding 12 / 16');
+    assert.deepEqual(d.kv, ['400', 'Inter'], 'key numbers: Inter, light weight');
+    assert.equal(d.gaps, 12, '12 px between tiles');
+    assert.deepEqual(d.nav, [34, '7px'], 'nav items 2.125rem, radius 7');
+    assert.deepEqual(d.btn, [32, '999px'], 'buttons 2rem, round');
+    assert.deepEqual(d.search, [34, '7px'], 'search 2.125rem, radius 7');
   });
 
   // Each page has the design page's sections, in its order: the titles of the design (rendered from the canvas)
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Live routes', 'Limits', 'Activity, 53 weeks', 'Latest replies'],
+      '#home': ['Overview', 'Activity, 53 weeks', 'Limits', 'Running now', 'Latest replies'],
       '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'By model'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
@@ -735,11 +736,11 @@ try {
     await $('[data-testid=limits]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
-      const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
+      const before = await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''");
       await nav(h);
-      await waitFor(async () => (await exec("return document.querySelector('#sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
+      await waitFor(async () => (await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
       await waitFor(async () => {
-        const got = await exec("return [...document.querySelectorAll('#sheet h1, #sheet h2')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
+        const got = await exec("return [...document.querySelectorAll('#sheet .crumb, #sheet h1, #sheet h2')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
         let i = 0;
         for (const g of got) if (i < titles.length && g.startsWith(titles[i])) i++;
         return i === titles.length;
@@ -749,7 +750,7 @@ try {
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
     const counts = await exec("return [...document.querySelectorAll('.sset')].map((s) => s.querySelectorAll('.frow').length)");
-    assert.deepEqual(counts.slice(0, 7), [3, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them (less the Classic choice and the two Overview rows)');
+    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
@@ -1031,7 +1032,7 @@ description: Bulk skill ${i}
   await test('appearance: dark theme, limits as used, and a hidden tool left out of the pages', async () => {
     await nav('#settings');
     await click('[data-testid=st-theme] a[data-v=dark]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(10, 15, 19)', 'the page turns near-black');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(4, 14, 18)', 'the page turns to night');
     await shot('17-dark-settings');
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
@@ -1054,21 +1055,21 @@ description: Bulk skill ${i}
       await shot('18-dark-' + n);
       // the design's measurements on every page: page padding, title, and every card's corners
       const m = await exec(`const cs = (e) => getComputedStyle(e), sh = cs(document.getElementById('sheet')), h1 = cs(document.querySelector('#sheet h1'));
-        const cards = [...document.querySelectorAll('#sheet .panel, #sheet .acg, #sheet .grp, #sheet .tcard, #sheet .apgroup, #sheet .mcpmain, #sheet .sset, #sheet .plist, #sheet .peditor')];
-        return { gap: sh.rowGap, pad: [sh.paddingTop, sh.paddingLeft], h1: [h1.fontSize, h1.fontWeight], cards: cards.length, radius: [...new Set(cards.map((c) => cs(c).borderTopLeftRadius))] };`);
-      assert.deepEqual(m.pad, ['28px', '40px'], n + ': page padding 28 / 40');
-      assert.equal(m.gap, n === 'session' ? '20px' : '24px', n + ': the page parts sit 24 px apart (a session 20 px), as drawn');
-      assert.deepEqual(m.h1, [n === 'session' ? '30px' : '34px', '600'], n + ': title as drawn (34 px, a session 30 px), 600');
+        const cards = [...document.querySelectorAll('#sheet .panel, #sheet .acg, #sheet .grp, #sheet .tcard, #sheet .apgroup, #sheet .mcpmain, #sheet .sset, #sheet .plist')];
+        return { gap: sh.rowGap, pad: [sh.paddingTop, sh.paddingLeft], h1: h1.fontWeight, cards: cards.length, radius: [...new Set(cards.map((c) => cs(c).borderTopLeftRadius))] };`);
+      assert.deepEqual(m.pad, ['16px', '24px'], n + ': page padding 16 / 24');
+      assert.equal(m.gap, '16px', n + ': the page parts sit 16 px apart, as drawn');
+      assert.equal(m.h1, '600', n + ': the finding, 600');
       assert.ok(m.cards > 0, n + ': drawn in cards');
-      assert.deepEqual(m.radius, ['16px'], n + ': card corners 16 px');
+      assert.deepEqual(m.radius, ['12px'], n + ': card corners 12 px');
       // card padding, table rows and type as the design pages set them
       const want = {
-        sessions: [['.grp .gh', 'padding', '14px 20px'], ['.srow', 'padding', '12px 20px'], ['.grp .gh h2.gname', 'fontSize', '18px']],
-        session: [['.panel', 'padding', '18px 20px']], account: [['.panel', 'padding', '18px 20px']],
-        routing: [['.panel', 'padding', '18px 20px']], apps: [['.panel', 'padding', '18px 20px']],
-        mcp: [['.mcpmain', 'padding', '0px'], ['.mcpmain th', 'padding', '12px 6px 12px 20px'], ['.mcpmain .mn b', 'font', '15px/700']],
-        skills: [['.tcard:has(> .sklist)', 'padding', '0px'], ['.sklist td', 'padding', '14px 6px 14px 20px'], ['.sklist .mn b', 'fontWeight', '700']],
-        prompts: [['.pgrid > div:last-child', 'padding', '18px 20px']], cli: [['.cliex', 'padding', '16px 20px'], ['.cligrid .panel', 'padding', '16px 20px']],
+        sessions: [['.grp .gh', 'padding', '12px 16px'], ['.srow', 'padding', '8px 16px'], ['.grp .gh h2.gname', 'fontSize', '14px']],
+        session: [['.panel', 'padding', '16px']], account: [['.panel', 'padding', '16px']],
+        routing: [['.panel', 'padding', '16px']], apps: [['.panel', 'padding', '16px']],
+        mcp: [['.mcpmain', 'padding', '0px'], ['.mcpmain th', 'padding', '12px 6px 12px 16px'], ['.mcpmain .mn b', 'font', '13px/600']],
+        skills: [['.tcard:has(> .sklist)', 'padding', '0px'], ['.sklist td', 'padding', '12px 6px 12px 16px'], ['.sklist .mn b', 'fontWeight', '600']],
+        prompts: [['.pgrid > div:last-child', 'padding', '16px']], cli: [['.cliex', 'padding', '12px 16px'], ['.cligrid .panel', 'padding', '16px']],
       }[n] || [];
       for (const [sel, prop, v] of want) {
         const got = await exec(`const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return 'missing'; const c = getComputedStyle(e);
@@ -1078,10 +1079,17 @@ description: Bulk skill ${i}
     }
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).padding"), '0px 20px 4px', 'settings sections: padding as drawn');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).maxWidth"), '960px', 'settings: at most a 1040 px column (960 inside its padding), as drawn');
+    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).padding"), '0px 16px 4px', 'settings sections: padding as drawn');
+    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).maxWidth"), '960px', 'settings: at most a 60rem column, as drawn');
     await click('[data-testid=st-theme] a[data-v=light]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(245, 247, 250)', 'light again');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(227, 234, 236)', 'light again');
+    // the VektraGrid theme: ivory ground, EB Garamond headings from the app's own font file; Harness again after
+    await click('[data-testid=st-brand] a[data-v=vg]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(239, 233, 222)', 'the ivory ground');
+    await waitFor(async () => exec(`return document.fonts.check('20px "EB Garamond"') && getComputedStyle(document.querySelector('#sheet h1')).fontFamily.includes('EB Garamond')`), 'EB Garamond loaded for the headings');
+    await shot('17f-vektragrid-settings');
+    await click('[data-testid=st-brand] a[data-v=hm]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(227, 234, 236)', 'Harness again');
     await click('[data-testid=st-quota] a[data-v=used]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).quota_display === 'used', 'saved');
     await nav('#accounts');
@@ -1274,7 +1282,7 @@ description: Bulk skill ${i}
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
     await $('[data-testid=limits]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], [data-testid=running-now], .ovk .split, .tn .cdots')")), 'the Overview is as before');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc, .ov.b .sq')")), 'the Overview is as before: no computer switch, no computer dots');
     await nav('#sessions');
     await $('[data-testid=group]');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .srow .pc, .srow.withpc')")), 'Sessions as before');
@@ -1817,7 +1825,7 @@ description: Bulk skill ${i}
     ]));
     await waitFor(() => exec("return !!document.querySelector('[data-testid=session-s-watched-1]')"), 'the new session on the page without a reload', 2000);
     console.log(`     indexed and drawn in ${Date.now() - t0} ms`);
-    assert.ok((await exec("return document.querySelector('#sheet h1').textContent")).includes('Sessions'), 'still the Sessions page');
+    assert.ok((await exec("return document.querySelector('#sheet .crumb').textContent")).includes('Sessions'), 'still the Sessions page');
     const st = JSON.parse(hrm('index', 'status', '--json'));
     assert.ok(st.watcher === true && st.sessions >= 5 && st.tools.some((x) => x.harness === 'claude'), JSON.stringify(st));
     // the search: a word of the title, through the top bar and the CLI

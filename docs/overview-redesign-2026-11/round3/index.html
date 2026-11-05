@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The orbital route map, round three: your comments applied</title>
+<link rel="stylesheet" href="../fonts.css">
+<link rel="stylesheet" href="../shared.css">
+<link rel="stylesheet" href="../round2/theme.css">
+<style>
+  /* the Harness Manager mark in every theme */
+  .app .brand .mark { display: none; }
+  .app .brand .mark.hm { display: grid; }
+  /* quiet labels: a name until the route is selected or something is wrong */
+  .app .lb span { display: none; }
+  .app .lb.lit span, .app .lb span.warn, .app .lb span.neg { display: block; }
+  .app .lb.dim span { display: none; }
+  .app [data-node] { cursor: pointer; transition: opacity .25s; outline: 0; }
+  .app [data-node].dim { opacity: .45; }
+  .app [data-node]:focus-visible > :first-child { stroke: var(--ac); stroke-width: 2; }
+  .app path.e { transition: opacity .25s; }
+  .app path.e.dim { opacity: .14 !important; }
+  .app .lb.dim { opacity: .6; }
+  /* labels are spaced as if their detail line were showing, so a selected route never lands on a neighbour */
+  .app .map.measuring .lb span { display: block; }
+  .themebar { position: sticky; top: 0; z-index: 20; background: rgba(233, 238, 241, .92); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid #D4DDE2; }
+  .themebar .lbl { font-size: 13px; color: #5A6B74; }
+  .sw { display: inline-grid; grid-template-columns: 1fr 1fr; width: 28px; height: 18px; border-radius: 4px; overflow: hidden; margin-right: 6px; vertical-align: -4px; border: 1px solid rgba(0,0,0,.15); }
+  .sw i { display: block; }
+  .said { background: #fff; border: 1px solid #D4DDE2; border-left: 4px solid #0F6E7A; border-radius: 10px; padding: 14px 18px; margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font-size: 14px; }
+  .said div { display: grid; grid-template-columns: 9rem 1fr; gap: 6px 12px; align-content: start; }
+  .said b { color: #0F6E7A; font-weight: 600; }
+  .said .you { color: #33464F; font-style: italic; display: block; margin-bottom: 4px; }
+  @media (max-width: 1000px) { .said { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body class="page">
+<main>
+  <section class="intro">
+    <p class="mono muted">Harness Manager · design review, round three · 6 November 2026</p>
+    <h1 class="ttl">The two circle maps, with your comments applied</h1>
+    <p class="lede">Transit is out. Route Atlas and Horizon Dial stay, each refactored on your two comments, and each now carrying the parts you ticked from the other. The Harness Manager mark is in every theme, and all four themes stay.</p>
+    <nav class="toc"><a href="#said">What changed</a><a href="#atlas">Route Atlas</a><a href="#dial">Horizon Dial</a><a href="#answers">Your answers</a></nav>
+  </section>
+
+  <div class="themebar"><span class="lbl">Theme for the whole page</span>
+    <span class="seg">
+      <button data-brand-btn="hm" data-mode-btn="light" class="on"><span class="sw"><i style="background:#F5F8F9"></i><i style="background:#0E7E88"></i></span>Harness light</button>
+      <button data-brand-btn="hm" data-mode-btn="dark"><span class="sw"><i style="background:#08161B"></i><i style="background:#3FD6CF"></i></span>Harness dark</button>
+      <button data-brand-btn="vg" data-mode-btn="light"><span class="sw"><i style="background:#FAF7F2"></i><i style="background:#0F6863"></i></span>VektraGrid light</button>
+      <button data-brand-btn="vg" data-mode-btn="dark"><span class="sw"><i style="background:#0B1F1D"></i><i style="background:#D4B064"></i></span>VektraGrid dark</button>
+    </span></div>
+
+  <h2 class="sec" id="said">What you said, and what changed</h2>
+  <div class="said">
+    <div><b>Atlas</b><span><span class="you">"text looks crowded and hard to read with so many details."</span>Every label is now a name only. The second line (the limit windows, the version, the first-reply time) appears only on the selected route and on anything that needs attention (Antigravity's expired login, Groq paused). The finding's route is selected when the page opens, which you ticked under Dial, so the page opens showing Codex Pro's detail and nothing else's. Hover, focus or click another body to read its detail; Escape returns to the finding.</span>
+      <b>Dial</b><span><span class="you">"the circle is very big, it overlays and obscures part of the tokens dots on the left."</span>The dial now sizes itself so that its outer label ring passes under the readouts on the left and under the attention cards on the right, whatever the screen. The three docks moved in toward the centre of the baseline, since you ticked "computers at the centre" too. Same quiet labels as Atlas.</span></div>
+    <div><b>Logo</b><span>The Harness Manager mark in every theme, including both VektraGrid themes.</span>
+      <b>Themes</b><span>All four stay, switched at the top of this page.</span>
+      <b>Transit</b><span>Dropped.</span>
+      <b>Not changed</b><span>The rings as hops, the corridors between rings, the half circle on its baseline, the limit arcs, the readouts, the attention cards. The headline still wraps to five lines in its column; say if you want it shorter.</span></div>
+  </div>
+
+  <section class="var" id="atlas">
+    <header><div><span class="tag">Route Atlas · refactored</span><h2>Route Atlas</h2>
+      <p>The full circle, rings as hops, computers at the centre, corridors between rings; now names only, with the finding's route selected on open.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v1" data-k="v1" value="This one">This one</label><label><input type="radio" name="v1" data-k="v1" value="Closer, but">Closer, but (see comments)</label><label><input type="radio" name="v1" data-k="v1" value="Not this one">Not this one</label></div></div>
+      <div><h4>Is the crowding fixed?</h4><div class="parts">
+        <label><input type="checkbox" data-k="p1" value="Atlas: readable now">Readable now</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: still too much on the selected route">Still too much on the selected route</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: show more by default">Show more by default</label>
+        <label><input type="checkbox" data-k="p1" value="Atlas: the circle should be bigger">The circle should be bigger</label></div></div>
+      <div class="full"><h4>Comments on Route Atlas</h4><textarea data-k="c1" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="var" id="dial">
+    <header><div><span class="tag">Horizon Dial · refactored</span><h2>Horizon Dial</h2>
+      <p>The half circle on its baseline with the computer docks near the centre, sized to clear the readouts; the finding's route selected on open; names only until selected.</p></div>
+      <div class="ctl"><span class="seg"><button data-motion-btn="on" class="on">Motion</button><button data-motion-btn="off">Still</button></span><select class="scr" aria-label="Screen"></select><button class="pbtn" data-full>Full screen</button></div></header>
+    <div class="stage"></div>
+    <div class="fb"><div><h4>Your verdict</h4><div class="verdict">
+      <label><input type="radio" name="v2" data-k="v2" value="This one">This one</label><label><input type="radio" name="v2" data-k="v2" value="Closer, but">Closer, but (see comments)</label><label><input type="radio" name="v2" data-k="v2" value="Not this one">Not this one</label></div></div>
+      <div><h4>Is the size right?</h4><div class="parts">
+        <label><input type="checkbox" data-k="p2" value="Dial: clear of the readouts now">Clear of the readouts now</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: now too small">Now too small</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: docks should spread out again">Docks should spread out again</label>
+        <label><input type="checkbox" data-k="p2" value="Dial: readable now">Readable now</label></div></div>
+      <div class="full"><h4>Comments on Horizon Dial</h4><textarea data-k="c2" placeholder="What works, what does not, what to change"></textarea></div></div>
+  </section>
+
+  <section class="final" id="answers">
+    <h2>Decision</h2>
+    <p style="color:#9FBFC5;margin:0 0 6px">The chosen map goes into the Overview; then every page gets the redesign on one review page before any app code changes.</p>
+    <div class="pick"><span style="color:#9FBFC5">The map:</span>
+      <label><input type="radio" name="pick" data-k="pick" value="Route Atlas">Route Atlas</label><label><input type="radio" name="pick" data-k="pick" value="Horizon Dial">Horizon Dial</label><label><input type="radio" name="pick" data-k="pick" value="One more round">One more round (see comments)</label></div>
+    <textarea data-k="general" placeholder="Anything else"></textarea>
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn" id="dl">Download as a file</button><button class="pbtn" id="clear" style="background:transparent;color:#9FBFC5;border-color:#2A4048">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script src="../data.js"></script>
+<script src="../round2/logos.js"></script>
+<script src="../round2/page.js"></script>
+<script src="page3.js"></script>
+<script src="atlas.js"></script>
+<script src="dial.js"></script>
+<script>
+  H2.themePicker();
+  for (const k of ['atlas', 'dial']) H2.mount(document.getElementById(k), k);
+  H2.feedback([['1', 'Route Atlas'], ['2', 'Horizon Dial']]);
+</script>
+</body>
+</html>

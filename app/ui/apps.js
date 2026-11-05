@@ -12,7 +12,7 @@ const kindOf = (c, a) => (KIND[c.kind] || c.kind) + (c.kind === 'native' && a.au
 
 view('apps', async (sheet) => {
   sheet.className = 'sheet';
-  sheet.innerHTML = '<div class="trow"><div><h1>Apps</h1><p class="find">Reading each tool\'s version…</p></div></div>';
+  sheet.innerHTML = '<div class="trow"><div><div class="crumb">Apps</div><h1>Reading each tool\'s version…</h1></div></div>';
   const [d, me] = await Promise.all([call('apps'), call('self_latest').catch(() => null)]);
   const st = S.state || (await call('state'));
   const hidden = st.settings.hidden_tools || [];
@@ -45,7 +45,7 @@ view('apps', async (sheet) => {
         <span class="go"><button class="btn sm" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(c.path)}" data-kind="${esc(kindOf(c, a))}">Remove…</button></span><span></span></div>`).join('')}`;
   };
   const head = '<div class="apr aph2"><span>Tool</span><span>Installed</span><span>Newest</span><span>Installed by</span><span></span><span>Show</span></div>';
-  sheet.innerHTML = `<h1>Apps</h1><p class="find">The tools on this computer, every copy of each, how it was installed, and the newest version its vendor offers. Installs and updates open in a terminal so you can see what they do.</p>
+  sheet.innerHTML = `<div class="crumb">Apps${d.latest ? ' · checked ' + hm(d.latest.at) : ''}</div><h1>The tools on this computer, every copy of each, and the newest version its vendor offers.</h1><p class="find">How each was installed; installs and updates open in a terminal so you can see what they do.</p>
     <div class="acts lead">${d.latest ? `<span class="muted sm">Checked ${hm(d.latest.at)}</span>` : ''}<button class="btn" data-act="apps-check" data-testid="apps-check">Check for updates</button></div>
     ${warn}
     <div class="apgroup" data-testid="apps-installed">${installed.length ? head + installed.map(row).join('') : '<p class="empty">None of the tools is installed yet: install one below.</p>'}</div>
