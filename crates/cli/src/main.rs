@@ -116,6 +116,10 @@ enum Cmd {
     Computers { #[command(subcommand)] cmd: ComputersCmd },
     /// Open the desktop app
     Open,
+    /// Resume a session from another computer here, as a fork: <computer>/<tool>/<account>/<session id>
+    ResumeHere { session: String },
+    /// Transcripts carried to the folder and known from the other computers
+    Transcripts { #[command(flatten)] j: Json },
 }
 
 #[derive(Subcommand)]
@@ -266,7 +270,7 @@ fn real_main(cli: Cli) -> Result<i32> {
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
-    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. }))
+    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. } | Cmd::ResumeHere { .. }))
         .then(|| ctx.lock_registry());
     if !matches!(cli.cmd, Cmd::Init { .. } | Cmd::Run { .. }) {
         let _l = ctx.lock_registry();
@@ -577,6 +581,21 @@ fn real_main(cli: Cli) -> Result<i32> {
                 println!("  {:<24} {:<8} {:<8} seen {}  applied {}/{}  {} running", p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""),
                     fmt_reset(p["last_seen"].as_i64()), p["applied_seq"], p["last_seq"], p["running"].as_array().map(|r| r.len()).unwrap_or(0));
             }
+        }
+        Cmd::ResumeHere { session } => {
+            let parts: Vec<&str> = session.splitn(4, '/').collect();
+            let [computer, harness, profile, id] = parts[..] else { bail!("give <computer>/<tool>/<account>/<session id>") };
+            // the computer by name or id
+            let names = hrm_core::journal::device_names(&ctx);
+            let device = names.iter().find(|(id, n)| *id == computer || n.eq_ignore_ascii_case(computer)).map(|(id, _)| id.clone()).with_context(|| format!("no computer named {computer}"))?;
+            let r = hrm_core::transcripts::resume_here(&ctx, &device, harness, profile, id)?;
+            println!("Resumed {id} from {computer} in {}: {}", r["cwd"].as_str().unwrap_or(""), r["note"].as_str().unwrap_or(""));
+        }
+        Cmd::Transcripts { j } => {
+            let st = hrm_core::transcripts::status(&ctx)?;
+            if j.json { return print_json(&st).map(|_| 0); }
+            println!("carried {} ({:.1} MB of {} MB); from the other computers {} known, {} fetched", st["carried"], st["bytes"].as_f64().unwrap_or(0.0) / 1048576.0, st["cap_bytes"].as_i64().unwrap_or(0) / 1048576, st["remote"], st["fetched"]);
+            for s in st["skipped"].as_array().into_iter().flatten() { println!("  skipped {}  {}", s["key"].as_str().unwrap_or(""), s["why"].as_str().unwrap_or("")); }
         }
     }
     Ok(0)
