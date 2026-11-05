@@ -124,6 +124,7 @@ impl Harness for PiLike {
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
         let mut stored = 0;
+        let prices = crate::pricing::load(ctx);
         let files = self.session_files(ctx, p);
         // whole files, as Codex: the header (session id, cwd) is on line 1 and the files are small
         type Parsed = Option<(Vec<UsageRow>, String, i64, u64)>;
@@ -137,7 +138,7 @@ impl Harness for PiLike {
         }, |r| {
             match r {
                 Ok(Some((rows, key, mtime, len))) => {
-                    stored += ctx.db.insert_usage(&rows)?;
+                    stored += ctx.db.insert_usage(&rows, &prices)?;
                     ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")?;
                 }
                 Ok(None) => {}
