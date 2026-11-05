@@ -9,6 +9,7 @@ import './mcp.js';
 import './skills.js';
 import './apps.js';
 import './guide.js';
+import './computers.js';
 
 document.documentElement.dataset.theme = 'dark';
 document.getElementById('brand-mark').innerHTML = brandMark(28);

@@ -98,6 +98,15 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
   formats. Subscription logins never pass through it.
 - **Backups:** automatic and manual, of the account list, settings, what Harness Manager wrote into each
   tool, and the skills it manages. Backups never hold keys or logins.
+- **Across computers, on screen:** Settings › Computers names this computer and picks a shared folder
+  (OneDrive, Google Drive, an SMB share or a NAS) that your other computers also sync; a card per computer
+  shows when it was last heard from and how much of its history has arrived, and Sync now runs a round at
+  once. With sync on, the Overview adds every computer up and gets an "All computers · This computer"
+  switch beside the period, each tile splits its number by computer, the Activity grid switches between all
+  computers and one, Live routes dot each account with the computers it runs on, Sessions gain a Computer
+  column and filter (a session open elsewhere says "running on <name>"), project cards show which computers
+  have the repository, and a chip in the top bar shows which computers were heard from in the last three
+  minutes. With sync off, nothing changes.
 - **Desktop comforts:** closes to the tray, launches at sign-in, dark or light or as Windows is, a
   diagnostic log, and a guided tour of each page.
 
