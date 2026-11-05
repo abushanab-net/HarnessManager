@@ -1,0 +1,24 @@
+[package]
+name = "hrm-hub"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws"] }
+axum-server = "0.8.0"
+base64 = "0.23.1"
+ed25519-dalek = "3.0.0"
+getrandom = "0.3"
+hex = "0.4.3"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.10.9"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+
+[dev-dependencies]
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+tempfile = "3.27.0"
+tokio-tungstenite = "0.29"
