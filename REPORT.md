@@ -158,7 +158,7 @@ cargo clippy --workspace: no warning in the new code (the pre-existing ones: sor
 manual_contains, chunks_exact_to_as_chunks, result_large_err in the router, the empty format string at cli main.rs:483).
 
 cd e2e && HRM_E2E_SYNC=1 HRM_E2E_PEERS=1 node app.e2e.mjs   (after cargo build --workspace)
-47 passed, 0 failed; screenshots in D:\Projectsbushanab-net\HarnessManager-wtackup\e2e\.work\shots
+47 passed, 0 failed; screenshots in D:\Projects\abushanab-net\HarnessManager-wt\backup\e2e\.work\shots
 (the first full run had 46 passed, 1 failed: my test's assertion on the CLI's plural ("1 sessions moved") and a
 backspace byte that a patch script had put in the regex; both fixed, the single test passed, and the whole suite
 was run again for the line above. The worktree's e2e had no node_modules: `npm ci` first.)
@@ -185,7 +185,7 @@ $ hrm restore <missing>
 error: ...
 ope is not a folder or a zip                                                exit 1
 $ hrm restore <a folder that is not a sync folder>
-error: ...rch is not a sync folder (no devices, backups or archive in it)             exit 1
+error: ...\arch is not a sync folder (no devices, backups or archive in it)             exit 1
 ```
 
 The core tests cover: the zip's ten entries with the usage row's `device` and the device record, and the transcript
