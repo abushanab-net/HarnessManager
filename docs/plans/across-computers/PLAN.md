@@ -280,3 +280,122 @@ hrm computers serve --seconds <n>      runs the listener (and mDNS) for n second
 As phase 1 (build, `cargo test --workspace`, clippy, line endings, commits on the branch, no push,
 `REPORT.md` with verbatim test lines, the exact op shapes, and the merge notes). The core package must
 also report the chosen crates and their licences, and the Windows firewall behaviour it observed.
+
+
+---
+
+## Phase 3: resume here (contract, 5 Nov 2026; runs in parallel with phase 2)
+
+Delivers: a session from another computer can be read here and resumed here as a fork, in this computer's
+clone of the same repository, with the original untouched. Transcripts travel through the folder transport
+in this phase; the direct-connection route for them (`GET /v1/transcript/...`) is a small follow-up after
+phase 2 merges, so nothing here touches `crates/core/src/sync/peer/`.
+
+| Package | Owns (only these paths) | Branch | Account |
+|---|---|---|---|
+| WP-7 resume here, core and UI | new `crates/core/src/transcripts.rs` and `crates/core/src/sync/transcripts.rs`; `crates/core/src/harness/{mod,claude,codex,opencode,pi,omp,agy}.rs` (a new trait method and `resume_args` only); `crates/core/src/launch.rs`; `crates/core/src/service.rs` (new functions only, plus the remote-transcript read); `crates/core/src/journal.rs` (one publish hook, one merge hook, both small and at the end of the existing functions); `app/src-tauri/src/main.rs` (new ops only); `crates/cli/src/main.rs` (new subcommands only); `app/ui/accounts.js` (`sessionRow` and the resume actions), the session-reading dialog wherever it lives, a new `app/ui/resume.js` for the dialog; `e2e/app.e2e.mjs` (one appended block); fixtures under `crates/core/tests/fixtures/` | `feature/resume-here` | sabushanab-resal |
+
+Phase 2's packages own `journal.rs`'s signing and the peer modules, `db.rs`, the Computers section of
+`views.js` and `computers.js`. Do not edit those regions; a new table or column needed here goes in
+`transcripts.rs` through `ctx.db.with(...)` with its own `create table if not exists`.
+
+### Transcripts in the folder
+
+- On every publish round, with `sync_transcripts` on: for each of this computer's sessions whose source
+  file changed since it was last carried, copy the source compressed with zstd (the workspace already reads
+  `.zst`) to `devices/<id>/transcripts/<harness>/<profile>/<session id>.<ext>.zst` (Claude Code and Pi /
+  Oh My Pi: the `.jsonl`; Codex: the rollout, plus its sidecar files if any; OpenCode: the JSON from
+  `opencode session export <id>` or `opencode export <id>`, whichever the installed version has;
+  Antigravity: nothing), and record a journal entry `op: "transcript", key: "<harness>/<profile>/<id>",
+  data: {file, bytes, sha256, mtime, source_rel}` (`source_rel` = the path relative to the tool's home,
+  so the receiver knows where the tool would look for it). Caps: a transcript over 20 MB is skipped
+  (logged, `data.skipped: "too big"`), and the folder holds at most 200 MB per computer: the oldest
+  transcripts by `mtime` are deleted first (their journal entries get `op: "tombstone"`).
+- On merge, a remote transcript entry is stored (table `transcripts(device, key, file, bytes, sha256,
+  mtime, source_rel, fetched_at)`), but the file is fetched only when needed: reading the session here, or
+  resuming it. Fetched copies live under `<data>/transcripts/<origin>/<harness>/<profile>/` and are kept
+  until the entry is tombstoned.
+- `session` (the transcript-reading op) for a row whose `device` is not this computer reads the fetched copy
+  (fetching first, with the status text "fetching from the folder" surfaced to the UI as a toast), through
+  the same parser the tool's own sessions use.
+
+### Materializing and resuming
+
+A new `Harness` method, with a default that returns "resuming elsewhere is not available for <tool>":
+
+```
+fn materialize(&self, ctx, p: &Profile, local_root: &Path, t: &FetchedTranscript) -> Result<Materialized>
+   // Materialized { launch_args: Vec<String>, cwd: PathBuf, new_session_id: Option<String>, note: String }
+```
+
+- Claude Code: write one copy to `<home>/projects/<cwd encoded the Claude way: [\\/:] -> "-">/<id>.jsonl`
+  under this computer's `local_root`; never two copies (if one exists, reuse it); launch
+  `claude --resume <absolute path> --fork-session` in `local_root`. Do not rewrite the file's contents.
+- Codex: copy the rollout, with its original file name, under `<home>/sessions/YYYY/MM/DD/` taken from
+  the name; launch `codex -C <local_root> resume <id>`.
+- OpenCode: `opencode session import <file> --directory <local_root>` if the installed version has it,
+  else `opencode import <file>`; launch `opencode --session <id>` in `local_root`.
+- Pi / Oh My Pi: copy into `<home>/sessions/<cwd encoded the tool's way>/<original name>`; launch
+  `pi --session <path>` / `omp --resume <id>` in `local_root`.
+- Antigravity: the default (not available).
+
+`session_resume_here {device, harness, profile, id}`: the project's `local_root` here is the root this
+computer knows for the session's `project_key` (this computer's `device.json` roots, or `projects`); if
+none, the error is "not cloned here: open <project> once on this computer"; if no profile of that name and
+tool exists here, "no account <profile> for <tool> on this computer"; if the session is `open_elsewhere`,
+"running on <name>: wait until it ends". Otherwise fetch the transcript, materialize, and launch through
+the existing terminal launcher (what `resume` does today), with `Materialized.launch_args`. Record the
+fork: `sessions` of this computer gets, once the tool writes its new file, nothing special; instead the
+materialized copy's key is written to `kv` as `forked:<harness>/<profile>/<id>` = `{from: <device>, at}`,
+and `sessions` rows whose id matches a forked copy carry `continued_from: <device name>` in the op answer.
+A second "Resume here" on the same session reuses the copy and launches again.
+
+### Ops and CLI
+
+```
+session            {profile, id, device?}      -> as today; with device = another computer it reads the fetched transcript
+session_resume_here {device, harness, profile, id} -> {ok, cwd, args, note} | error text above
+session_fetch      {device, harness, profile, id} -> {path, bytes}   (fetch without launching: the Read action)
+transcripts_status  -> {carried: n, bytes, cap_bytes, skipped: [{key, why}], remote: n, fetched: n}
+hrm resume-here <computer>/<harness>/<profile>/<id>     (computer = name or id)
+hrm transcripts [--json]
+```
+
+`sessions` rows from another computer gain `resumable: true | "<reason>"` (the three error texts, or
+`true`), computed cheaply from the roots and profiles known here.
+
+### UI
+
+- Sessions list: a row from another computer shows **Resume here** when `resumable === true`, else the
+  reason in muted text ("not cloned here", "no account work here", "running on LAPTOP"). Reading such a
+  session (the title click) fetches then opens the transcript as for a local one, with the "fetching from
+  the folder" toast.
+- The Resume-here dialog (per the mock in the analysis page): the session's title, project, account and
+  tool, where it last ran and when, the local folder it opens in, "opens as a new session that continues
+  from the <name> transcript; the <name> copy stays as it is", "only the conversation comes across: files
+  changed since, attachments and running shells do not; pull the branch first", Cancel / Resume here.
+- A session that was continued from another computer shows "continued from LAPTOP" under its title.
+- Settings › Computers: the Carry transcripts row's info popover states the caps and the "carried N ·
+  M MB" count from `transcripts_status` (a one-line addition inside the existing row; the Computers section
+  itself belongs to phase 2).
+
+### Tests
+
+- Rust: transcripts are carried on publish (zstd, sha256, journal entry), skipped over the cap, pruned at
+  200 MB with tombstones; a remote entry is stored on merge and fetched on demand once; `materialize` for
+  Claude Code (encoded folder name on Windows and Linux paths, one copy only), Codex (date folder from the
+  name), Pi and Oh My Pi (encoded folder), OpenCode (the import command chosen), Antigravity (the default
+  error); `session_resume_here` errors for the three cases, and its launch args for each tool.
+- Window (appended under `// ---- resume here (WP-7) ----`): seed a second computer's journal with a
+  session entry and a transcript entry plus the compressed transcript file in the sync folder (the
+  phase 1 test shows how to seed a device; copy its helper, do not change it), with the project key of the
+  sandbox's repository; Sync now; the row shows Resume here; reading it shows the transcript text; Resume
+  here launches the fake `claude` with `--resume <path ending in the id>.jsonl --fork-session` (the sandbox
+  records launches in `runs.jsonl`, see how other tests read it) in the repository folder; a row whose
+  project is not here shows "not cloned here".
+
+### Definition of done
+
+As phase 1: build, `cargo test --workspace`, clippy, the whole window suite green (`cargo build
+--workspace` first), line endings, commits on the branch, no push, `REPORT.md` with verbatim test lines,
+the op shapes, every line touched in shared files, and the merge notes.
