@@ -444,6 +444,10 @@ fn real_main(cli: Cli) -> Result<i32> {
                 ProviderCmd::List { j } => {
                     if j.json { return print_json(&reg.providers).map(|_| 0); }
                     for p in &reg.providers { println!("{:<16} {:<10} {}  [{}]", p.id, p.format, p.base_url, p.models.join(", ")); }
+                    // presets not added yet, with the command that adds them
+                    for p in hrm_core::registry::provider_presets().into_iter().filter(|p| !reg.providers.iter().any(|q| q.id == p.id)) {
+                        println!("{:<16} {:<10} {}  [{}]  preset: hrm provider add {} --base-url {} --format {} --models {}", p.id, p.format, p.base_url, p.models.join(", "), p.id, p.base_url, p.format, p.models.join(","));
+                    }
                     return Ok(0);
                 }
                 ProviderCmd::Add { id, base_url, format, models, name } => {
