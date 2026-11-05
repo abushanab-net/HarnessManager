@@ -314,7 +314,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "session_stats" => hrm_core::dash::session_stats(ctx, &s(a, "profile")?, &s(a, "id")?)?,
         "account_stats" => hrm_core::dash::account_stats(ctx, &s(a, "name")?)?,
         "limits_extra" => json!({"forecast": hrm_core::dash::forecasts(ctx, hrm_core::util::now_ms())?, "caps": hrm_core::dash::caps(ctx, &ctx.registry()?)}),
-        "self_latest" => ctx.db.kv_get("self:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null),
+        // a record written by the version before an update offers the version now running: not an offer
+        "self_latest" => ctx.db.kv_get("self:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).filter(|v| v["current"] == env!("CARGO_PKG_VERSION")).unwrap_or(Value::Null),
         "sync_last" => ctx.db.kv_get("sync:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null),
         "mcp_last_import" => ctx.db.kv_get("mcp:last_import")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null),
         "mcp_import" => {
@@ -618,17 +619,16 @@ async fn self_update(app: &tauri::AppHandle, install: bool) -> Result<Value> {
     Ok(json!({"current": current, "version": up.version, "notes": up.body}))
 }
 
-/// Look for a new Harness Manager at launch and then once a day; the window offers it.
+/// Look for a new Harness Manager at launch and then every hour; the window offers it, or drops an old offer.
 /// The tests' copy looks only when they give it a release to find.
 fn watch_self_update(app: tauri::AppHandle) {
     if std::env::var("HRM_DEVTOOLS_PORT").is_ok() && std::env::var("HRM_UPDATE_URL").is_err() { return; }
     std::thread::spawn(move || loop {
         match tauri::async_runtime::block_on(self_update(&app, false)) {
-            Ok(v) if v.get("version").is_some() => { let _ = app.emit("self-update", v); }
-            Ok(_) => {}
+            Ok(v) => { let _ = app.emit("self-update", v); }
             Err(e) => hrm_core::log::warn(&format!("update check: {e:#}")),
         }
-        std::thread::sleep(std::time::Duration::from_secs(24 * 3600));
+        std::thread::sleep(std::time::Duration::from_secs(3600));
     });
 }
 

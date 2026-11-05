@@ -675,7 +675,7 @@ view('settings', async (sheet) => {
     ${win ? row('Terminal', info('term', '<b>Windows Terminal</b> (the default): Start and Resume open a new Windows Terminal window running the account.<br><b>Console window</b>: the classic console, for computers without Windows Terminal or if you prefer it.'), 'Where Start and Resume open a console.',
       seg('terminal', s.terminal, [['wt', 'Windows Terminal'], ['console', 'Console']], 'st-term')) : ''}
     <h5 class="sh5">Updates</h5>
-    ${row('Harness Manager', '', selfUpd && selfUpd.version ? `Version <b>${esc(selfUpd.version)}</b> is available; you have ${esc(st.version)}.${selfUpd.notes ? ' ' + esc(selfUpd.notes) : ''}` : `Version ${esc(st.version)}. New versions are looked for at launch and once a day.`,
+    ${row('Harness Manager', '', selfUpd && selfUpd.version ? `Version <b>${esc(selfUpd.version)}</b> is available; you have ${esc(st.version)}.${selfUpd.notes ? ' ' + esc(selfUpd.notes) : ''}` : `Version ${esc(st.version)}. New versions are looked for at launch and every hour.`,
       selfUpd && selfUpd.version ? '<button class="btn primary" data-act="self-install" data-testid="self-install">Update and restart</button>' : '<button class="btn outline" data-act="self-check" data-testid="self-check">Check for updates</button>')}
     ${row('New versions of your tools', info('upd', 'Asks each vendor for the newest Claude Code, Codex, OpenCode and Antigravity CLI when Harness Manager starts; Apps in the sidebar shows how many have one.<br><b>Default: off.</b> Apps &gt; Check for updates looks at any time.'), 'Look for newer versions of the tools when the app starts.', sw('check_updates_at_launch', s.check_updates_at_launch, 'Check at launch', 'st-updcheck'))}
     <h5 class="sh5">Usage and limits</h5>
@@ -767,8 +767,10 @@ action('self-check', async () => {
 action('self-install', async (el) => {
   el.disabled = true;
   el.textContent = 'Updating…';
-  // on success the app restarts, so only a failure comes back
-  if (!(await attempt(() => call('self_update_install')))) { el.disabled = false; el.textContent = 'Update and restart'; }
+  // on success the app restarts, so only a failure comes back, or "nothing newer" when the offer was out of date
+  const v = await attempt(() => call('self_update_install'));
+  if (!v) { el.disabled = false; el.textContent = 'Update and restart'; return; }
+  if (!v.version) { setSelfUpdate(v); toast(`Harness Manager ${v.current} is the newest version`); render(); }
 });
 action('set-now', async (el) => {
   // a switch's state, a segment's value, or a dropdown's choice (numbers as numbers)

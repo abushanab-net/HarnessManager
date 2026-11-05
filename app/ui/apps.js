@@ -50,7 +50,7 @@ view('apps', async (sheet) => {
     ${warn}
     <div class="apgroup" data-testid="apps-installed">${installed.length ? head + installed.map(row).join('') : '<p class="empty">None of the tools is installed yet: install one below.</p>'}</div>
     ${missing.length ? `<h2 class="sech">Not installed · ${missing.length}</h2><div class="apgroup" data-testid="apps-missing">${head}${missing.map(row).join('')}</div>` : ''}
-    <section class="panel apme"><div><h2>Harness Manager</h2><p class="muted">${esc(st.version)}${me && me.version ? ` · ${esc(me.version)} is available: Settings › Updates installs it` : me ? ' · the newest' : ''}. It checks at launch and once a day, and installs signed updates only.</p></div>
+    <section class="panel apme"><div><h2>Harness Manager</h2><p class="muted">${esc(st.version)}${me && me.version ? ` · ${esc(me.version)} is available: Settings › Updates installs it` : me ? ' · the newest' : ''}. It checks at launch and every hour, and installs signed updates only.</p></div>
       <span class="pill ${me && me.version ? 'warn' : 'teal'} mono">${me && me.version ? 'update available' : me ? 'up to date' : 'not checked yet'}</span></section>`;
   S.cache.apps = d.apps;
 });

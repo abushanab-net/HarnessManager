@@ -53,7 +53,7 @@ Silent install on Windows:
 & ".\Harness.Manager_1.0.0_x64-setup.exe" /S /D="$env:LOCALAPPDATA\Harness Manager"
 ```
 
-The app updates itself: it checks for a new version at launch and once a day, and installs only updates
+The app updates itself: it checks for a new version at launch and every hour, and installs only updates
 signed by the release key.
 
 ## Quick start
