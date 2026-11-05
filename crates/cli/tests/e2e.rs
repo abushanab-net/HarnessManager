@@ -153,8 +153,9 @@ fn harnesses_and_first_run_detect_main_profiles() {
     std::fs::create_dir_all(e.home.join(".claude")).unwrap();
     std::fs::create_dir_all(e.home.join(".codex")).unwrap();
     let hs = e.json(&["harnesses"]);
-    assert_eq!(hs.as_array().unwrap().len(), 4);
-    assert!(hs.as_array().unwrap().iter().all(|h| h["installed"] == true));
+    assert_eq!(hs.as_array().unwrap().len(), 6);
+    // the four fake tools are on PATH; Pi and Oh My Pi are whatever this computer has
+    assert!(hs.as_array().unwrap().iter().filter(|h| !matches!(h["id"].as_str(), Some("pi" | "omp"))).all(|h| h["installed"] == true));
     let agy = hs.as_array().unwrap().iter().find(|h| h["id"] == "agy").unwrap();
     assert_eq!(agy["caps"]["parallel_accounts"], false);
     let list = e.json(&["list"]);

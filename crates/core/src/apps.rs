@@ -80,9 +80,24 @@ const AGY: Installer = Installer {
     npm: &[], winget: "", brew: "--cask antigravity-cli", scoop: "", choco: "",
     self_update: "", auto_updates: true,
 };
+// Pi and Oh My Pi ship on npm only (the first Pi package name is deprecated in favour of the second, both still install)
+const PI: Installer = Installer {
+    win_dirs: &[], unix_dirs: &[],
+    win_install: "", unix_install: "",
+    site: "https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent",
+    npm: &["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"], winget: "", brew: "", scoop: "", choco: "",
+    self_update: "", auto_updates: false,
+};
+const OMP: Installer = Installer {
+    win_dirs: &[], unix_dirs: &[],
+    win_install: "", unix_install: "",
+    site: "https://omp.sh/docs",
+    npm: &["@oh-my-pi/pi-coding-agent"], winget: "", brew: "", scoop: "", choco: "",
+    self_update: "", auto_updates: false,
+};
 
 fn installer(id: &str) -> Option<&'static Installer> {
-    match id { "claude" => Some(&CLAUDE), "codex" => Some(&CODEX), "opencode" => Some(&OPENCODE), "agy" => Some(&AGY), _ => None }
+    match id { "claude" => Some(&CLAUDE), "codex" => Some(&CODEX), "opencode" => Some(&OPENCODE), "agy" => Some(&AGY), "pi" => Some(&PI), "omp" => Some(&OMP), _ => None }
 }
 
 /// One file of a tool on this computer.
@@ -307,6 +322,10 @@ pub fn newest(id: &str, installed: Option<&str>) -> Result<String> {
             let v = json(http(&format!("https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{platform}.json"))?)?;
             v["version"].as_str().map(String::from).context("no version in the manifest")
         }
+        "pi" | "omp" => {
+            let v = json(http(&format!("https://registry.npmjs.org/{}/latest", installer(id).and_then(|i| i.npm.first()).unwrap_or(&"")))?)?;
+            v["version"].as_str().map(String::from).context("no version in the answer")
+        }
         _ => bail!("no version source for {id}"),
     }
 }
@@ -442,6 +461,8 @@ mod tests {
         assert_eq!(cmd("claude", &CLAUDE, c(Kind::Npm, "x", Some("@anthropic-ai/claude-code"))), "npm install -g @anthropic-ai/claude-code@latest");
         assert_eq!(cmd("claude", &CLAUDE, c(Kind::Native, r"C:\u\claude.exe", None)), "\"C:\\u\\claude.exe\" update");
         assert_eq!(cmd("opencode", &OPENCODE, c(Kind::Scoop, "x", None)), "scoop update opencode");
+        assert_eq!(cmd("pi", &PI, c(Kind::Npm, "x", Some("@mariozechner/pi-coding-agent"))), "npm install -g @mariozechner/pi-coding-agent@latest", "an older Pi package name updates in place");
+        assert_eq!(install_methods(&OMP).iter().map(|m| m.id.as_str()).filter(|i| *i != "npm").count(), 0, "Oh My Pi installs with npm only");
         // Codex has no update command: the installer runs again; Antigravity's refuses an existing file, so it is removed first
         let codex = cmd("codex", &CODEX, c(Kind::Native, "x", None));
         assert!(codex.contains("chatgpt.com/codex/install"), "{codex}");
