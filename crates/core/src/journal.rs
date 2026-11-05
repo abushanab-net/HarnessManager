@@ -94,7 +94,8 @@ pub fn backfill(ctx: &Ctx) -> Result<usize> {
 
 fn backfill_if_needed(ctx: &Ctx) -> Result<()> {
     let done = ctx.db.kv_get("journal:backfilled")?.as_deref() == Some("1");
-    let (outbox, usage): (i64, i64) = ctx.db.with(|c| Ok(c.query_row("select (select count(*) from outbox), (select count(*) from usage)", [], |r| Ok((r.get(0)?, r.get(1)?)))?))?;
+    // this computer's own rows: merged ones must not trigger a backfill (which would journal merged tags as ours)
+    let (outbox, usage): (i64, i64) = ctx.db.with(|c| Ok(c.query_row("select (select count(*) from outbox), (select count(*) from usage where device = ?)", [&ctx.db.device], |r| Ok((r.get(0)?, r.get(1)?)))?))?;
     if !done || (outbox == 0 && usage > 0) { backfill(ctx)?; }
     Ok(())
 }
@@ -102,6 +103,8 @@ fn backfill_if_needed(ctx: &Ctx) -> Result<()> {
 /// Unpublished entries as signed chunk files in the local store, then its manifest: readers only ever see whole
 /// chunks. The store's manifest is the water line; a store lost with the data folder is simply made again.
 pub fn publish(ctx: &Ctx) -> Result<()> {
+    // the refresh round, the 10 s tick and the hub's events thread all publish: one at a time
+    let _one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
     let me = &ctx.settings.device_id;
     let inc = &ctx.settings.incarnation;
     let published = store::manifest(ctx, me).filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
@@ -302,6 +305,8 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
         let root = if ctx.settings.sync_mode == "folder" { Some(folder::root(ctx)?) } else { None };
         // phase 3: changed transcripts go into the folder with their entries, in this round's chunks
         if let Some(root) = &root { if let Err(e) = crate::sync::transcripts::carry(ctx, root) { crate::log::warn(&format!("transcripts: {e:#}")); } }
+        // phase 5: the same carry, to the hub
+        if ctx.settings.sync_mode == "hub" { if let Err(e) = crate::sync::hub::carry(ctx) { crate::log::warn(&format!("transcripts: {e:#}")); } }
         publish(ctx)?;
         if let Some(root) = &root {
             mirror(ctx, root)?;
@@ -309,6 +314,7 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
             folder::write_presence(ctx, root)?;
             merge(ctx, root)?;
         }
+        if ctx.settings.sync_mode == "hub" { crate::sync::hub::round(ctx)?; }
         if ctx.settings.direct_connection { peer::pull_all(ctx); }
         Ok(())
     })();
@@ -320,8 +326,11 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
 
 /// `presence.json` alone, once a minute while the app runs.
 pub fn presence_tick(ctx: &Ctx) -> Result<()> {
-    if ctx.settings.sync_mode != "folder" { return Ok(()); }
-    folder::write_presence(ctx, &folder::root(ctx)?)
+    match ctx.settings.sync_mode.as_str() {
+        "folder" => folder::write_presence(ctx, &folder::root(ctx)?),
+        "hub" => crate::sync::hub::push_presence(ctx),
+        _ => Ok(()),
+    }
 }
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
@@ -365,7 +374,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
         "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty()})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
         "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
-        "last_run": last["at"], "error": last["error"], "peers": peers}))
+        "last_run": last["at"], "error": last["error"], "peers": peers, "hub": crate::sync::hub::status(ctx)}))
 }
 
 /// Change the Computers settings from `{device_name?, sync_mode?, sync_folder?, sync_transcripts?, sync_presence?,
@@ -381,11 +390,11 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
         s.device_name = n.into();
     }
     if let Some(f) = a["sync_folder"].as_str() { s.sync_folder = f.trim().trim_end_matches(['/', '\\']).into(); }
+    if let Some(u) = a["hub_url"].as_str() { s.hub_url = if u.trim().is_empty() { String::new() } else { crate::sync::hub::normalize_url(u)? }; }
     if let Some(m) = a["sync_mode"].as_str() {
         match m {
-            "off" | "folder" => s.sync_mode = m.into(),
-            "hub" => bail!("the hub comes with a later version; choose a folder for now"),
-            _ => bail!("the mode is off or folder"),
+            "off" | "folder" | "hub" => s.sync_mode = m.into(),
+            _ => bail!("the mode is off, folder or hub"),
         }
     }
     if let Some(b) = a["sync_transcripts"].as_bool() { s.sync_transcripts = b; }
@@ -399,6 +408,7 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
         let p = Path::new(&s.sync_folder);
         if s.sync_folder.is_empty() || !p.is_absolute() || !p.is_dir() { bail!("choose an existing folder (its full path) to sync through"); }
     }
+    if s.sync_mode == "hub" && (s.hub_url.is_empty() || crate::sync::hub::token(&ctx).is_none()) { bail!("join a hub first: Join with a code… on the hub card"); }
     ctx.save_settings()?;
     if on(&ctx) != before { ctx.db.kv_set("journal:backfilled", "0")?; }
     Ctx::open_at(data, home)

@@ -54,7 +54,7 @@ pub struct Materialized {
 }
 
 /// Where a fetched copy lives: `<data>/transcripts/<origin>/<harness>/<profile>/<file without .zst>`.
-fn local_path(ctx: &Ctx, device: &str, harness: &str, profile: &str, file: &str) -> PathBuf {
+pub(crate) fn local_path(ctx: &Ctx, device: &str, harness: &str, profile: &str, file: &str) -> PathBuf {
     let name = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or("transcript");
     ctx.data.join("transcripts").join(device).join(harness).join(profile).join(name.strip_suffix(".zst").unwrap_or(name))
 }
@@ -73,8 +73,15 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
     let path = local_path(ctx, device, harness, profile, &file);
     if fetched_at.is_none() || !path.exists() {
         if file.contains("..") || Path::new(&file).is_absolute() { bail!("transcript entry names a path outside the folder"); }
-        let src = folder::root(ctx)?.join("devices").join(device).join(&file);
-        let raw = std::fs::read(&src).with_context(|| format!("read {} (waiting for the sync service?)", src.display()))?;
+        // a connected computer first (phase 2's route), then the hub or the folder
+        let raw = match crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, &sha) {
+            Some(b) => b,
+            None if ctx.settings.sync_mode == "hub" => crate::sync::hub::fetch_transcript(ctx, device, &key).context("fetch the transcript from the hub")?,
+            None => {
+                let src = folder::root(ctx)?.join("devices").join(device).join(&file);
+                std::fs::read(&src).with_context(|| format!("read {} (waiting for the sync service?)", src.display()))?
+            }
+        };
         if sha256_hex(&raw) != sha { bail!("the transcript in the folder does not match its journal entry yet; try again after the next sync"); }
         let plain = zstd::decode_all(&raw[..]).context("decompress the transcript")?;
         write_atomic(&path, &plain)?;
