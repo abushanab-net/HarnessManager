@@ -1,6 +1,6 @@
 // Sessions, the reading view, usage, routing, MCP servers, skills, prompts, settings and the CLI reference.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme, drawPins, notice } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, fit, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, pickFolder, saveFile, pickFile, shownTools, applyTheme, drawPins, notice, warmPage, keepPage } from './core.js';
 import { resetGuides } from './guide.js';
 import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, bars } from './lib.js';
 import { sessionRow } from './accounts.js';
@@ -66,7 +66,8 @@ view('sessions', async (sheet, params) => {
   if (!S.state) await call('state').then((s) => (S.state = s));
   const filter = { harness: null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null };
   sheet.className = 'sheet';
-  sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
+  const wk = 'sessions:' + JSON.stringify(params);
+  if (!warmPage(sheet, wk)) sheet.innerHTML = `<h1>Sessions</h1><p class="find">Reading sessions…</p>`;
   let [groups, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope: pc === 'here' ? 'here' : 'all' }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   S.cache.tags = tlist;
   drawPins(plist);
@@ -135,6 +136,7 @@ view('sessions', async (sheet, params) => {
   };
   S.pageFind = narrow;
   narrow(find.value);
+  keepPage(sheet, wk);
 });
 action('s-set', (el) => sq({ [el.dataset.k]: el.dataset.v }));
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });

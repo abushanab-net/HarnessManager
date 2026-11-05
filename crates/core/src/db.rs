@@ -161,6 +161,8 @@ impl Db {
 
     /// Store usage rows read here, each with its cost at today's list prices (frozen; `price_rev` names the table).
     pub fn insert_usage(&self, rows: &[UsageRow], prices: &crate::pricing::Prices) -> Result<usize> {
+        // an unchanged file brings nothing: no transaction, no disk sync (this was most of a refresh's time)
+        if rows.is_empty() { return Ok(0); }
         let rev = (!prices.is_empty()).then(|| crate::pricing::rev(prices));
         self.with(|c| {
             let tx = c.transaction()?;
@@ -203,6 +205,15 @@ impl Db {
         })
     }
 
+    /// Every cursor of one account, by file path: one query per import instead of one per file.
+    pub fn cursors_for(&self, profile: &str) -> Result<std::collections::HashMap<String, (i64, i64, i64, String)>> {
+        self.with(|c| {
+            let mut st = c.prepare("select path, offset, mtime, len, tail from cursors where profile = ?")?;
+            let rows = st.query_map([profile], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?;
+            Ok(rows.flatten().collect())
+        })
+    }
+
     pub fn cursor(&self, path: &str) -> Result<Option<(i64, i64, i64, String)>> {
         self.with(|c| {
             Ok(c.query_row("select offset, mtime, len, tail from cursors where path=?", [path], |r| {
@@ -236,6 +247,38 @@ impl Db {
         self.with(|c| {
             let s: Option<String> = c.query_row("select json from sessions where key=? and mtime=? and len=?", params![key, mtime, len], |r| r.get(0)).optional()?;
             Ok(s.and_then(|s| serde_json::from_str(&s).ok()))
+        })
+    }
+
+    /// The cached records of one account's session files, by key: one query instead of one per file.
+    pub fn sessions_cached_for(&self, prefix: &str) -> Result<std::collections::HashMap<String, (i64, i64, SessionMeta)>> {
+        self.with(|c| {
+            let mut st = c.prepare("select key, mtime, len, json from sessions where key like ?1 || '%'")?;
+            let rows = st.query_map([prefix], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
+            let mut out = std::collections::HashMap::new();
+            for (key, mtime, len, json) in rows.flatten() {
+                if let Ok(m) = serde_json::from_str::<SessionMeta>(&json) { out.insert(key, (mtime, len, m)); }
+            }
+            Ok(out)
+        })
+    }
+
+    /// This computer's sessions into the journal, in one transaction, only those whose activity moved since
+    /// their last record (one statement per session was a second on every page open).
+    pub fn journal_sessions(&self, list: &[SessionMeta]) -> Result<()> {
+        if !self.journal || list.is_empty() { return Ok(()); }
+        self.with(|c| {
+            let known: std::collections::HashMap<String, i64> = c.prepare("select key, mtime from sessions where device = ? and key like '%/%'")?
+                .query_map([&self.device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            let tx = c.transaction()?;
+            for m in list {
+                let key = session_key(m);
+                if known.get(&key).map(|t| *t >= m.last_active_at).unwrap_or(false) { continue; }
+                if upsert_session(&tx, &key, m, &self.device)? == 0 { continue; }
+                crate::journal::record(&tx, "session", &key, &serde_json::to_value(m)?)?;
+            }
+            tx.commit()?;
+            Ok(())
         })
     }
 

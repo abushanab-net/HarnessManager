@@ -11,7 +11,7 @@ use super::{base_env, Harness, ItemPaths};
 use crate::launch::{resolve_program, LaunchSpec};
 use crate::model::*;
 use crate::registry::{Kind, Profile};
-use crate::util::{file_sig, now_ms, read_json, truncate, walk_files};
+use crate::util::{now_ms, read_json, truncate};
 use crate::Ctx;
 
 pub struct Claude;
@@ -58,13 +58,20 @@ impl Claude {
         Ok(q)
     }
 
-    fn session_files(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
+    fn session_files(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
         let mut out = vec![];
         let root = self.home(ctx, p).join("projects");
         let Ok(rd) = std::fs::read_dir(&root) else { return out };
         for d in rd.flatten() {
             if let Ok(files) = std::fs::read_dir(d.path()) {
-                out.extend(files.flatten().map(|f| f.path()).filter(|f| f.extension().map(|e| e == "jsonl").unwrap_or(false)));
+                for f in files.flatten() {
+                    let path = f.path();
+                    if !path.extension().map(|e| e == "jsonl").unwrap_or(false) { continue; }
+                    if let Ok(m) = f.metadata() {
+                        let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+                        out.push((path, mtime, m.len()));
+                    }
+                }
             }
         }
         out
@@ -229,16 +236,19 @@ impl Harness for Claude {
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
         let mut files = vec![];
-        walk_files(&self.home(ctx, p).join("projects"), &|f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false), &mut files);
+        crate::util::walk_files_sig(&self.home(ctx, p).join("projects"), &|f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false), &mut files);
         let mut stored = 0;
         let prices = crate::pricing::load(ctx);
-        each_file_parallel(&files, |f| {
+        // every cursor of the account in one query, and each file's size and time from the directory listing:
+        // a file that did not change is never opened (opening 8,000 files was most of a refresh)
+        let cursors = ctx.db.cursors_for(&p.name)?;
+        each_file_parallel_sig(&files, |f, mtime, len| {
             let mut rows = vec![];
             // reply timing: each part of an answer is logged when it completes, under one message id; the request
             // went out at the last user line (prompt or tool result). shortcut: an answer cut by a refresh mid-reply
             // has no start in the second read and shows no timing.
             let (mut sent, mut parts): (i64, std::collections::HashMap<String, (i64, i64, i64)>) = (0, Default::default());
-            let cursor = for_new_lines(ctx, &p.name, f, |line| {
+            let cursor = for_new_lines_sig(ctx, &p.name, f, mtime, len, cursors.get(&f.display().to_string()).cloned(), |line| {
                 if !line.contains("\"usage\"") {
                     if line.contains("\"type\":\"user\"") { sent = crate::harness::parse::line_ts(line).unwrap_or(sent); }
                     return;
@@ -289,17 +299,22 @@ impl Harness for Claude {
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let mut out = vec![];
         let mut todo = vec![];
-        for f in self.session_files(ctx, p) {
-            let Some((mtime, len)) = file_sig(&f) else { continue };
+        let cached = ctx.db.sessions_cached_for(&format!("claude|{}|", p.name))?;
+        for (f, mtime, len) in self.session_files(ctx, p) {
             if mtime < since { continue; }
             let key = format!("claude|{}|{}", p.name, f.display());
-            match ctx.db.session_cached(&key, mtime, len as i64)? {
-                Some(m) => out.push(m),
-                None => todo.push(f),
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a session still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) => {
+                    out.push(stale(meta, mtime));
+                    let name = p.name.clone();
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, &name, f, false).meta));
+                }
+                None => todo.push((f, mtime, len)),
             }
         }
-        each_file_parallel(&todo, |f| {
-            let (mtime, len) = file_sig(f)?;
+        each_file_parallel_sig(&todo, |f, mtime, len| {
             let text = std::fs::read_to_string(f).ok()?;
             Some((mtime, len, parse_session(&text, &p.name, f, false).meta))
         }, |r| {
