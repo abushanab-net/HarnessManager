@@ -68,7 +68,7 @@ const TOURS = {
   settings: [
     ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
     ['[data-testid=settings-save]', 'Save', 'These settings belong to this computer.'],
-    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in the folder.'],
+    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
     ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
     ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
     ['[data-testid=guides-reset]', 'Tours', 'Shows every page\'s tour again. The ? at the top replays the tour of the page you are on.'],
