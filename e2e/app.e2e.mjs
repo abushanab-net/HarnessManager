@@ -1259,8 +1259,8 @@ description: Bulk skill ${i}
     assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
     assert.ok(d.folderText.includes('No folder'), 'no folder yet');
     assert.ok(d.hub.includes('A hub you host') && d.hubOff, 'the hub card waits for phase 5');
-    assert.ok(d.direct && d.pair, 'the direct connection and pairing wait for phase 2');
-    assert.ok(d.pills.includes('phase 5') && d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
+    assert.ok(!d.direct && !d.pair, 'the direct connection and pairing are live (phase 2)');
+    assert.ok(d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
     assert.ok(d.transcripts && d.presence, 'transcripts and presence default to on');
     assert.deepEqual(d.cards, [d.name], 'only this computer');
     assert.equal(d.syncNow, false, 'no Sync now while sync is off');
@@ -1408,6 +1408,119 @@ description: Bulk skill ${i}
     await $('[data-testid=row-pi-main]');
     await $('[data-testid=row-omp-main]');
     await shot('40-pi-omp');
+  });
+
+  // ---- direct connection (WP-6) ----
+  // Phase 2's operations (computers_pair_start | cancel | join, computers_forget, computers_set_peer, the new fields of
+  // computers_status and the computers-pairing event) are built in parallel; without them the dialog shows their
+  // "unknown operation" answer as its error text, which the first test checks. HRM_E2E_PEERS=1 pairs with a second
+  // data folder through hrm computers pair, as the contract's Window test describes.
+  await test('direct connection: the switch without its pill, the dialog with both tabs, the code input, and an unknown operation shown as the error text', async () => {
+    await nav('#settings');
+    await $('[data-testid=sec-computers] [data-testid=pair]');
+    const d = await exec(`return { direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
+      pills: [...document.querySelectorAll('[data-testid=computers] .pill')].map((p) => p.textContent.trim()), port: document.querySelector('[data-testid=listen-port]').textContent, change: !!document.querySelector('[data-testid=listen-port-change]') }`);
+    assert.ok(!d.direct && !d.pair, 'the switch and Pair are live');
+    assert.ok(!d.pills.includes('phase 2'), d.pills.join(','));
+    assert.ok(d.port && d.change, 'the listen port and Change… sit in the popover');
+    // the port: Change… in the popover opens a small dialog; 0 means a free port
+    await page.hover('[data-testid=tip-direct]');
+    await click('[data-testid=listen-port-change]');
+    await $('[data-testid=lp-v]');
+    await page.fill('[data-testid=lp-v]', '0');
+    await click('[data-testid=lp-ok]');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the port dialog closed');
+    await $('[data-testid=sec-computers] [data-testid=pair]');
+    await click('[data-testid=pair]');
+    await $('[data-testid=pair-tabs]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] a')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
+    // Show a code asks computers_pair_start; without the peer core the answer is the error, in the dialog
+    await hasText('[data-testid=pair-show-body]', 'unknown operation');
+    await shot('41-pair-show-code');
+    await click('[data-testid=pair-enter]');
+    await $('[data-testid=pair-code-in]');
+    const code = async (t) => { await page.fill('[data-testid=pair-code-in]', ''); await page.type('[data-testid=pair-code-in]', t); return exec("return document.getElementById('pair-code-in').value"); };
+    assert.equal(await code('4829157'), '482 915', 'six digits at most, a space after three');
+    assert.equal(await code('ab12c'), '12', 'digits only');
+    // too short: no call; six digits: the operation's own error text
+    await click('[data-testid=pair-join]');
+    await hasText('[data-testid=pair-error]', 'six digits');
+    await code('482915');
+    await page.fill('[data-testid=pair-host]', 'laptop:7777');
+    await click('[data-testid=pair-join]');
+    await hasText('[data-testid=pair-error]', 'unknown operation');
+    assert.equal(await exec("return document.getElementById('pair-join').disabled"), false, 'Pair can be tried again');
+    await shot('41b-pair-enter-code');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+  });
+
+  if (process.env.HRM_E2E_PEERS) await test('direct connection: pairing with a second computer run by hrm computers pair, the card direct and connected, its session after Sync now, Forget', async () => {
+    // the second computer: its own data folder and profiles home, the same fake tools, the direct connection on
+    const data2 = path.join(sb, 'data2'), home2 = path.join(sb, 'home2');
+    fs.mkdirSync(home2, { recursive: true });
+    write(path.join(data2, 'settings.json'), JSON.stringify({ theme: 'light', device_name: 'LAPTOP', direct_connection: true }));
+    const env2 = { ...env, HRM_HOME: data2, HRM_PROFILES_HOME: home2 };
+    const hrm2 = (...args) => execFileSync(path.join(appDir, 'hrm.exe'), args, { env: env2, encoding: 'utf8' });
+    // a session in the second computer's Claude profile, indexed there so its journal carries it
+    const cwd2 = 'C:\\laptop\\Projects\\platform-gitops', t = new Date().toISOString();
+    write(path.join(home2, '.claude', 'projects', 'p', 'laptop-s9.jsonl'), jl([
+      { type: 'user', sessionId: 'laptop-s9', cwd: cwd2, timestamp: t, message: { role: 'user', content: 'Rotate the staging certificates' } },
+      { type: 'assistant', sessionId: 'laptop-s9', cwd: cwd2, timestamp: t, message: { id: 'm9', model: 'claude-opus-5-5', usage: { input_tokens: 500, output_tokens: 60 }, content: [{ type: 'text', text: 'Rotated.' }] } },
+      { type: 'ai-title', aiTitle: 'Rotate the staging certificates', sessionId: 'laptop-s9' },
+    ]));
+    hrm2('init');
+    hrm2('sessions');
+    const id2 = JSON.parse(fs.readFileSync(path.join(data2, 'settings.json'), 'utf8')).device_id;
+    assert.ok(id2, 'the second computer has an id');
+    // the second computer shows a code and waits up to two minutes; its stdout gives the code and the host hint
+    const pair = spawn(path.join(appDir, 'hrm.exe'), ['computers', 'pair'], { env: env2, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    pair.stdout.on('data', (b) => { out += b; });
+    pair.stderr.on('data', (b) => { out += b; });
+    const m = await waitFor(() => out.match(/\b(\d{3}) ?(\d{3})\b/), 'the code on stdout: ' + out, 30000);
+    const code = m[1] + m[2], host = (out.match(/[\w.-]+:\d{2,5}/) || [])[0];
+    assert.ok(host, 'the host hint on stdout: ' + out);
+    let serve;
+    try {
+      // this computer: the switch on, then Enter a code with the code and the host
+      await nav('#settings');
+      await $('[data-testid=st-direct]');
+      if (!(await exec("return document.querySelector('[data-testid=st-direct]').checked"))) {
+        await click('[data-testid=st-direct]');
+        await waitFor(() => exec("return document.querySelector('[data-testid=st-direct]')?.checked"), 'the direct connection on');
+      }
+      await click('[data-testid=pair]');
+      await click('[data-testid=pair-enter]');
+      await page.type('[data-testid=pair-code-in]', code);
+      await page.fill('[data-testid=pair-host]', host);
+      await click('[data-testid=pair-join]');
+      await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed after pairing (page: ' + (await exec("return document.getElementById('dialog-root').innerText").catch(() => '')) + ')', 30000);
+      // pair ends by printing this computer's name; then the second computer serves (listener and mDNS) for the rest
+      await waitFor(() => pair.exitCode !== null, 'hrm computers pair ended', 30000);
+      const myName = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).device_name;
+      assert.ok(out.includes(myName), `pair printed this computer's name (${myName}): ${out}`);
+      serve = spawn(path.join(appDir, 'hrm.exe'), ['computers', 'serve', '--seconds', '150'], { env: env2, stdio: 'ignore' });
+      const card = `[data-testid=computer-${id2}]`;
+      await $(card);
+      await waitFor(async () => /direct .* connected/.test(await text(card + ' [data-testid=transport]').catch(() => '')), 'the card shows direct and connected', 45000);
+      await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+      await shot('42-paired-connected');
+      const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, on: el.querySelectorAll('.cdot.on').length }`);
+      assert.ok(!chip.hidden && chip.on === 2, 'the chip: both computers on: ' + JSON.stringify(chip));
+      // the second computer's session arrives after Sync now
+      await click('[data-testid=computers-now]');
+      await nav('#sessions?days=all');
+      await waitFor(() => exec("return !!document.querySelector('[data-testid=session-laptop-s9]')"), 'the session from the second computer', 30000);
+      await hasText('[data-testid=session-laptop-s9] .pc', 'LAPTOP');
+      await shot('42b-sessions-from-peer');
+      // Forget: a confirm, then the card is gone
+      await nav('#settings');
+      await click(`[data-testid=forget-${id2}]`);
+      await click('#confirm-ok');
+      await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid=computer-${id2}]')`)), 'the card removed', 15000);
+      await shot('42c-forgotten');
+    } finally { if (serve) serve.kill(); if (pair.exitCode === null) pair.kill(); }
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
