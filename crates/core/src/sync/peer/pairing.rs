@@ -64,7 +64,7 @@ pub fn store_peer(ctx: &Ctx, p: &Value, address: &str) -> Result<Value> {
     if p["cert_pem"].as_str().map(|c| identity::pem_to_der(c).is_err()).unwrap_or(true) { bail!("the payload has no certificate"); }
     ctx.db.with(|c| {
         c.execute("insert into peers(device_id, name, os, app_version, incarnation, cert_pem, pubkey, paired_at, address, port, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'direct')
-            on conflict(device_id) do update set name=?2, os=?3, app_version=?4, incarnation=?5, cert_pem=?6, pubkey=?7, paired_at=?8, address=?9, port=?10",
+            on conflict(device_id) do update set name=?2, os=?3, app_version=?4, incarnation=?5, cert_pem=?6, pubkey=?7, paired_at=?8, address=?9, port=?10, transport='direct'",
             params![id, p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""), p["incarnation"].as_str().unwrap_or(""),
                 p["cert_pem"].as_str().unwrap_or(""), p["pubkey"].as_str().unwrap_or(""), now_ms(), address, port])?;
         Ok(())
