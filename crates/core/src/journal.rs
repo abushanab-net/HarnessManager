@@ -150,8 +150,11 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         "tombstone" => match e.key.split_once('/').context("tombstone key")? {
             ("session", k) => { tx.execute("delete from sessions where key=?", [k])?; }
             ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
+            ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
             (other, _) => bail!("tombstone of {other}"),
         },
+        // phase 3: the entry is stored, the file fetched when the session is read or resumed here
+        "transcript" => crate::sync::transcripts::apply(tx, device, e)?,
         other => bail!("unknown op {other}"),
     }
     Ok(())
@@ -229,6 +232,8 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
         if ctx.settings.sync_mode != "folder" { bail!("sync is off"); }
         let root = folder::root(ctx)?;
         backfill_if_needed(ctx)?;
+        // phase 3: changed transcripts go into the folder with their entries, in this round's chunks
+        if let Err(e) = crate::sync::transcripts::carry(ctx, &root) { crate::log::warn(&format!("transcripts: {e:#}")); }
         publish(ctx, &root)?;
         folder::write_device(ctx, &root)?;
         folder::write_presence(ctx, &root)?;

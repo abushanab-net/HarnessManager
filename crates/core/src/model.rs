@@ -127,6 +127,12 @@ pub struct SessionMeta {
     pub device_name: String,
     #[serde(default)]
     pub open_elsewhere: bool,
+    /// A session from another computer: `true`, or why it cannot be resumed here (set by the session service).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumable: Option<serde_json::Value>,
+    /// A session continued here from another computer: that computer's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continued_from: Option<String>,
 }
 
 /// A transcript as typed blocks, grouped into turns (one user prompt and the answer to it).
