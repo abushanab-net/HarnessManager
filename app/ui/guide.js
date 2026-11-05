@@ -13,6 +13,7 @@ const TOURS = {
     ['aside.side nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
     ['.ovkpis', 'Key numbers', 'Usage of every account against the period before, read from each tool\'s own logs on this computer; nothing is sent anywhere. Cost is what the tokens would cost at API list prices: subscriptions are not billed per token.'],
     ['.ovhead .acts', 'Tool and period', 'Show one tool or all of them, for the last 24 hours, 7 days or 30 days.'],
+    ['[data-testid=scope]', 'All computers, or this one', 'With sync on, every number here adds up your computers; This computer shows only what ran here. Each tile splits its number by computer, and the Activity grid has its own switch.'],
     ['[data-testid=routes]', 'Live routes', 'Each account, the tool it runs and where its requests go. Pulses show the tokens of the last five minutes; red is a paused provider or an account not logged in.'],
     ['[data-testid=limits]', 'Limits', 'Every open limit on a seven-day line, tightest first: the bar runs to its reset, the fill is what is used, amber from where it runs out at this pace.'],
     ['[data-testid=request-log]', 'Every model call', 'Newest first, with its account, model, tokens, cost and reply timing.'],
@@ -67,6 +68,7 @@ const TOURS = {
   settings: [
     ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
     ['[data-testid=settings-save]', 'Save', 'These settings belong to this computer.'],
+    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in the folder.'],
     ['[data-testid=guides-reset]', 'Tours', 'Shows every page\'s tour again. The ? at the top replays the tour of the page you are on.'],
   ],
 };
