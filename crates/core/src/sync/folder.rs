@@ -39,8 +39,9 @@ pub fn read_manifest(dir: &Path) -> Option<Value> { read_json(&dir.join("manifes
 
 pub fn write_manifest(dir: &Path, m: &Value) -> Result<()> { write_atomic(&dir.join("manifest.json"), serde_json::to_string_pretty(m)?.as_bytes()) }
 
-/// `device.json`: who this computer is and where its projects live, so "resume here" can map them later.
-pub fn write_device(ctx: &Ctx, root: &Path) -> Result<()> {
+/// `device.json`: who this computer is, where its projects live (so "resume here" can map them later), and its
+/// key, signed by it so the record stands alone wherever it travels.
+pub fn device_record(ctx: &Ctx) -> Result<Value> {
     let reg = ctx.registry()?;
     let dirs: Vec<String> = ctx.db.with(|c| {
         let mut st = c.prepare("select distinct project from usage where device = ? and project <> ''")?;
@@ -53,9 +54,14 @@ pub fn write_device(ctx: &Ctx, root: &Path) -> Result<()> {
         let info = res.resolve(&d);
         roots.entry(info.key).or_insert(json!(info.root));
     }
-    let v = json!({"id": ctx.settings.device_id, "name": ctx.settings.device_name, "os": std::env::consts::OS, "app_version": env!("CARGO_PKG_VERSION"),
+    let mut v = json!({"id": ctx.settings.device_id, "name": ctx.settings.device_name, "os": std::env::consts::OS, "app_version": env!("CARGO_PKG_VERSION"),
         "incarnation": ctx.settings.incarnation, "roots": roots, "updated_at": now_ms()});
-    write_atomic(&mine(ctx, root).join("device.json"), serde_json::to_string_pretty(&v)?.as_bytes())
+    crate::sync::peer::identity::load(ctx)?.sign_record(&mut v);
+    Ok(v)
+}
+
+pub fn write_device(ctx: &Ctx, root: &Path) -> Result<()> {
+    write_atomic(&mine(ctx, root).join("device.json"), serde_json::to_string_pretty(&device_record(ctx)?)?.as_bytes())
 }
 
 /// What runs here now and the last five minutes' pace, for the other computers' live views.
