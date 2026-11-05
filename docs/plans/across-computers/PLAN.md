@@ -399,3 +399,190 @@ hrm transcripts [--json]
 As phase 1: build, `cargo test --workspace`, clippy, the whole window suite green (`cargo build
 --workspace` first), line endings, commits on the branch, no push, `REPORT.md` with verbatim test lines,
 the op shapes, every line touched in shared files, and the merge notes.
+
+
+---
+
+## Phase 4: backup, archive and a fresh computer (contract, 5 Nov 2026)
+
+Delivers: a backup that also holds the history, a restore that merges it, an archive that moves old
+transcripts out of the tools' folders while sessions stay listed and readable, both the sync folder and a
+folder of the owner's choice as places for archive and backups, and "Welcome back" on a fresh install.
+
+| Package | Owns (only these paths) | Branch | Account |
+|---|---|---|---|
+| WP-8 backup, archive, restore, Welcome back; core and UI | `crates/core/src/backup.rs`, new `crates/core/src/archive.rs` and `crates/core/src/restore.rs`, `crates/core/src/ctx.rs` (settings fields only), `crates/core/src/service.rs` (archived sessions in the list: one function and one call), `crates/core/src/harness/mod.rs` (one trait method `archive_paths` with a default), harness modules (that method only), `crates/cli/src/main.rs` (new subcommands and flags only), `app/src-tauri/src/main.rs` (new ops only, appended), `app/ui/views.js` (the Backups section only, renamed "Backups and archive", and the Welcome back dialog), new `app/ui/restore.js`, `app/ui/app.css` (appended), `e2e/app.e2e.mjs` (one appended block), README | `feature/backup-archive` | samykabu-personal |
+
+### Settings (per computer)
+
+```
+archive_days           u32   default 30; 0 = never
+archive_in_sync_folder bool  default true   (archive copies go to <sync_folder>/archive/<device_id>/ when a folder is set)
+archive_dir            string default ""    (a folder of the owner's choice; "" = none; both may be on)
+backup_in_sync_folder  bool  default true   (every backup zip is also copied to <sync_folder>/backups/<device_id>/, keeping backup_keep of them)
+backup_transcripts     bool  default false  (the zip also holds this computer's transcripts, compressed)
+```
+
+### The backup grows
+
+The zip adds `history/usage.jsonl` (every usage row with `device`, `cost_usd`, `price_rev`),
+`history/sessions.jsonl` (the session rows: cache, mirror and merged, each with its `device`),
+`history/quota_hist.jsonl`, `history/tags.jsonl`, `history/peers.json` (names, ids, certificates and
+addresses, never keys), `history/device.json` (this computer's id, name, incarnation, pubkey), and, with
+`backup_transcripts`, `transcripts/<harness>/<profile>/<id>.<ext>.zst`. Keys and logins stay out, as today.
+`hrm backup --with-transcripts`.
+
+### Restore is a merge
+
+`restore_preview {zip | folder}` reads a zip, or a sync folder (its `devices/*` journals and
+`backups/*`), and answers counts: computers, requests, tokens, sessions, accounts with limit history,
+archived transcripts, the newest date, and whether a device record carries this computer's name.
+`restore_run {zip | folder, adopt: bool}` merges: usage by `request_id` (the existing rule), sessions by key
+(newest `last_active_at`), quota points when they differ from the last, tags only where this computer has
+none for that key, peers added when unknown. With `adopt`, this computer takes the restored device id and
+name (new incarnation, so its sequence starts again and the others see a continuation); without it, it keeps
+its own id and the restored computer stays a separate past computer. If the restored id is already a live
+peer (another computer answers to it), `adopt` is refused with "another computer uses this identity".
+Restoring twice adds nothing. `hrm restore <zip|folder> [--adopt]`.
+
+### The archive
+
+Every day (and `archive_now`): for each session of this computer older than `archive_days` by
+`last_active_at`, not open, with a transcript the tool keeps as a file (Claude Code, Codex, Pi, Oh My Pi;
+OpenCode through its export; Antigravity never): compress it to `<archive root>/<project name or
+"no-folder">/<YYYY-MM>/<harness>-<profile>-<id>.<ext>.zst` plus `.json` with the session's meta, in every
+enabled archive location, verify the sha256 of each copy, then delete the original from the tool's folder
+(the `archive_paths` trait method says which files belong to a session; the default returns the source file
+alone). The session row keeps its meta with `archived: true` and `source_path` pointing at the first archive
+copy; `sessions()` lists archived sessions from the table (they no longer come from the scan), `transcript`
+reads the archived copy, and `resume` on an archived session says "archived: it can be read, not resumed"
+(materializing it back is not in this phase). Usage rows are untouched. `archive_status` answers counts and
+bytes per location; `hrm archive status | now`.
+
+### Welcome back
+
+When a sync folder is chosen (the phase 1 chooser) or at first launch when `sync_folder` is already set and
+`journal:backfilled` is absent, the app calls `restore_preview {folder}`; if the folder holds any history, the
+dialog "Welcome back" shows the counts and "Restore and continue as <name>" (adopt, when a device record with
+this computer's name exists) / "Restore as a new computer" / "Start fresh". The same preview and dialog run
+from Settings › Backups and archive › Restore… for a zip (the list of this computer's backups and the sync
+folder's) or a folder.
+
+### Ops, CLI, UI
+
+```
+restore_preview {zip?, folder?}            restore_run {zip?, folder?, adopt}
+archive_status                              archive_now
+backups (existing) gains {in_sync_folder:[...]}; backup_create gains {transcripts: bool}
+hrm backup [--with-transcripts] · hrm restore <zip|folder> [--adopt] · hrm archive status | now
+```
+
+Settings › Backups and archive: Automatic backups (existing) + "Also in the sync folder" switch + "Include
+transcripts" switch; "Archive sessions older than" segment (Never · 30 days · 90 days · 1 year) with a small
+"custom" input; "Archive location": the sync folder switch and the chosen folder with Choose…; "Archive now"
+with the status line; Restore… opening the dialog above. Sessions: an "archived" pill on the row, readable,
+no Resume. The Welcome back dialog.
+
+### Tests
+
+Rust: the zip holds the history files; a restore into an empty database reproduces the counts and a second
+restore adds nothing; adopt takes the id and a new incarnation, and is refused for a live peer's id;
+the archive moves only old, closed sessions, verifies before deleting, writes both locations, keeps the
+session listed and readable, and respects `archive_days = 0`. Window (appended under
+`// ---- backup, archive and welcome back (WP-8) ----`): the section's rows; `hrm archive now` with a tiny
+age on a seeded old session shows the pill and the transcript still reads; Restore… from a backup zip made
+in the test shows the preview and merges; choosing a sync folder seeded with another computer's journal (the
+phase 1 helper) shows Welcome back and restoring lists its sessions.
+
+
+---
+
+## Phase 5: the hub (contract, 5 Nov 2026)
+
+Delivers: "A hub you host" as the second choice in Settings: a small service on a VPS behind Caddy, in
+Docker, that every computer pushes its journal to and pulls the others' from, with presence fan-out, a
+rendezvous for direct connections across networks, encrypted transcripts, and a recovery key. The folder
+and the direct connection keep working as before; a computer uses one of folder or hub, plus direct.
+
+| Package | Owns (only these paths) | Branch | Account |
+|---|---|---|---|
+| WP-9a the hub service and its deployment | new crate `crates/hub` (binary `hrm-hub`), `deploy/hub/**` (compose, Caddyfile, env example, README), a workflow job that builds and pushes the image on tag (self-hosted runners), `Cargo.toml` workspace members | `feature/hub-service` | sabushanab-resal |
+| WP-9b the client transport, the ring key, the UI | new `crates/core/src/sync/hub.rs`, `crates/core/src/sync/peer/**` (the transcript route follow-up only), `crates/core/src/journal.rs` (the hub branch of `round`), `crates/core/src/secrets.rs`, `ctx.rs` (settings), `app/src-tauri/src/main.rs` (ops only), `crates/cli/src/main.rs` (subcommands only), `app/ui/computers.js`, the Computers section of `app/ui/views.js`, `app/ui/app.css` (appended), `e2e/app.e2e.mjs` (one appended block), README | `feature/hub-client` | claude-main |
+
+### The service (WP-9a)
+
+One Rust binary, axum, plain HTTP on `0.0.0.0:8787` inside the container (Caddy terminates TLS with
+Let's Encrypt on 443 and proxies to it), SQLite on the volume at `/data/hub.db` (one owner, a few
+computers: SQLite is enough and has nothing to operate; the diagram's Postgres is not needed), blobs on
+the volume under `/data/blobs/<origin>/`. Configuration by environment: `HUB_ADMIN_TOKEN` (bootstraps the
+first computer), `HUB_DATA=/data`, `HUB_MAX_BLOB_MB=64`, `HUB_RETAIN_MB=2048` (oldest chunks beyond this are
+dropped per origin, never the newest). Every request carries `Authorization: Bearer <token>`; tokens are
+per computer, minted at join, stored hashed.
+
+```
+POST /v1/join                 {code | admin_token, device: <signed device.json>}  -> {token, devices:[...]}
+POST /v1/invite               -> {code, expires_at}        a one-time six-digit code valid 10 minutes, made by a joined computer
+GET  /v1/devices              -> [<device.json records, with their last_seen and last_seq>]
+PUT  /v1/devices/{id}         <signed device.json>         own only (the token's id)
+GET  /v1/chunks/{origin}?since=N  -> {origin, incarnation, chunks:[{file, from, to, sha256, sig, bytes, enc:true}]}
+PUT  /v1/chunks/{origin}/{file}   body = the encrypted chunk; headers X-From, X-To, X-Sha256 (of the plaintext), X-Sig; own origin only
+GET  /v1/chunk/{origin}/{file}    -> the bytes
+PUT  /v1/presence             <the presence.json shape, encrypted>     GET /v1/presence -> {<id>: {at, blob}}
+PUT  /v1/transcripts/{origin}/{key}   encrypted bytes + X-Sha256 + X-Bytes;   GET the same; DELETE own only
+GET  /v1/rendezvous           -> {<id>: {addresses:[...], at}}   PUT /v1/rendezvous {addresses:[...]} own only
+GET  /v1/events  (WebSocket)  -> one message per change: {kind: "presence"|"chunks"|"device", id}
+DELETE /v1/devices/{id}       own, or admin token: forgets a computer and its token
+```
+
+The hub never sees a key: chunks, presence and transcripts arrive encrypted (see the ring key). It stores
+sizes, times and the signed device records, which are plaintext by design (names, ids, pubkeys, roots).
+`deploy/hub/`: `docker-compose.yml` (caddy + hrm-hub + two named volumes), `Caddyfile` (one site,
+`reverse_proxy hrm-hub:8787`), `.env.example` (`HUB_DOMAIN`, `HUB_ADMIN_TOKEN`), `README.md` (a VPS in
+ten lines: DNS, compose up, the admin token, the first join), a `Dockerfile` (multi-stage, distroless or
+alpine). The workflow job builds the image on the self-hosted runners and pushes `ghcr.io/abushanab-net/
+hrm-hub:<tag>` on a release tag. Tests: the service in-process (axum `oneshot` or a bound port): join with
+the admin token then with an invite code, a wrong code refused, own-origin checks, retention, the WebSocket
+event on a chunk put.
+
+### The client, the ring key and the UI (WP-9b)
+
+- **Ring key**: a 32-byte symmetric key, made on the first computer that turns the hub on, stored in
+  Credential Manager as `hrm:ring-key`, carried to other computers inside the phase 2 pairing payload (so
+  paired computers already share it) or typed as the **recovery key** (the key as 8 groups of 4 base32
+  characters, shown once in a dialog with "I saved it in my password manager" to confirm; "Show again" is
+  available in Settings behind a confirm). Chunks, presence and transcripts going to the hub are
+  ChaCha20-Poly1305 with a random nonce prefixed; the folder stays plain, as decided.
+- **Transport**: `sync_mode = "hub"`, `hub_url`, the token in Credential Manager (`hrm:hub-token`). The
+  round: push unpublished chunks (encrypted) and the signed device record; pull every device's chunks since
+  the cursor (decrypt, verify, apply with the phase 1 merge); push and pull presence; keep the WebSocket
+  open while the app runs and run a pull on each event (fallback: poll every 30 s). Transcripts: carried to
+  the hub like to the folder (phase 3's carry gets a second destination); fetched on demand.
+- **Rendezvous**: with direct connection on and the hub on, the computer publishes its reachable addresses
+  (LAN IPs with the listen port, plus `address` if the owner set one) and tries the others' before mDNS;
+  `path` = "rendezvous" when reached that way. Hole punching is not attempted: a computer that cannot reach
+  a peer directly pulls through the hub, which is the relay.
+- **The transcript route over the direct connection** (phase 2's follow-up): `GET
+  /v1/transcript/{origin}/{harness}/{profile}/{id}` on the peer listener, served from the fetched copies and
+  own files; phase 3's fetch tries a connected peer before the folder or the hub.
+- **Ops and CLI**: `computers_set {sync_mode: "hub", hub_url}`; `hub_join {url, code | admin_token}`;
+  `hub_invite` -> {code, expires_at}; `hub_status` -> {url, joined, devices, last_push, last_pull, ws:
+  bool, error}; `ring_key_show` (behind the UI's confirm) and `ring_key_enter {key}`; `hrm hub join <url>
+  --code <c> | --admin <t>`, `hrm hub invite`, `hrm hub status`, `hrm ring show | enter`.
+- **UI**: the "A hub you host" card becomes live: address field, "Join with a code…" (dialog: the code
+  from another computer's "Invite a computer…" button on its card header, or the admin token for the first
+  computer), status line (joined · N computers · live); the recovery key dialog at first hub use; "Enter
+  recovery key" on a computer that has no ring key; the computer cards' transport line gains "hub ·
+  connected" and "rendezvous"; Settings › Computers › Invite a computer…. The first-run "Add this computer
+  to your others" dialog (phase 1 mock) offers both cards.
+
+### Tests
+
+WP-9b Rust: with the hub crate started in-process from its library (WP-9a exposes `hub::serve(config) ->
+addr`; agree on this signature: `pub async fn serve(cfg: hub::Config) -> Result<(SocketAddr, Handle)>`),
+two `Ctx` join, A pushes and B pulls and applies once, presence round-trips, a tampered chunk is skipped,
+a computer without the ring key cannot read and gets "enter the recovery key", rendezvous addresses flow.
+Window (appended under `// ---- the hub (WP-9) ----`): start `hrm-hub` as a child process on a free port
+with an admin token, join from the Settings card, see "joined", seed a second computer by joining with
+`hrm hub join` from a second data folder and pushing its journal (`hrm computers now`), Sync now shows its
+sessions; the recovery key dialog appears once; Invite yields a code that the second folder can join with.
+WP-9a's tests are its own; both packages build the whole workspace.
