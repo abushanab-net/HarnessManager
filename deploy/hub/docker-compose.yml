@@ -1,0 +1,23 @@
+# The hub behind Caddy: `cp .env.example .env`, fill it in, `docker compose up -d`.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment: { HUB_DOMAIN: "${HUB_DOMAIN}" }
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [hrm-hub]
+  hrm-hub:
+    image: ghcr.io/abushanab-net/hrm-hub:${HUB_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN}"
+      HUB_MAX_BLOB_MB: "${HUB_MAX_BLOB_MB:-64}"
+      HUB_RETAIN_MB: "${HUB_RETAIN_MB:-2048}"
+    volumes:
+      - hub-data:/data
+volumes:
+  caddy-data:
+  hub-data:
