@@ -586,3 +586,73 @@ with an admin token, join from the Settings card, see "joined", seed a second co
 `hrm hub join` from a second data folder and pushing its journal (`hrm computers now`), Sync now shows its
 sessions; the recovery key dialog appears once; Invite yields a code that the second folder can join with.
 WP-9a's tests are its own; both packages build the whole workspace.
+
+
+---
+
+## Performance: the index as the source, a folder watcher (contract, 5 Nov 2026)
+
+Decided after the measurements in `docs/performance-2026-11.html`. 1.6.2 removed the per-file waste (no
+empty transactions, Codex read from a cursor, one cache query per account, journaling in one transaction,
+one scan per render, warm pages). This package makes the pages independent of the number of session files:
+they read the `sessions` table; the filesystem is touched only by a background refresh, which a folder
+watcher triggers within a second of a change and a periodic walk backs up.
+
+| Package | Owns (only these paths) | Branch | Account |
+|---|---|---|---|
+| WP-10 index-first reads and the watcher | `crates/core/src/service.rs` (sessions, grouped_sessions, projects), new `crates/core/src/index.rs` and `crates/core/src/watch.rs`, `crates/core/src/db.rs` (new queries, indexes, FTS), the harness modules' `sessions()` (they become the index refresh, not the read path), `app/src-tauri/src/main.rs` (the background loop and new ops), `crates/cli/src/main.rs` (`hrm index`), `app/ui/views.js` (Sessions page paging and search against the ops), `app/ui/core.js` (the `changed` handling for the index), `e2e/app.e2e.mjs` (appended block, and the seeds that must wait for the index), README | `feature/index-reads` | the account with the nearest weekly reset and room left (check `hrm list` and `hrm quota`) |
+
+### The index
+
+- The `sessions` table is the source the pages read. Its rows are what the harness scans produce today
+  (per-file cache rows for this computer, mirror rows, merged rows from other computers), with the columns
+  the pages filter and sort on promoted out of the JSON: `last_active_at`, `started_at`, `project_key`,
+  `title`, `cwd`, `tokens`, `open` (this computer's running sessions, refreshed by the presence tick), and
+  an index on `(device, last_active_at)` and `(project_key, last_active_at)`. Search uses an FTS5 table
+  over `title`, `cwd` and `profile`, kept in step by the refresh (FTS5 is in the bundled SQLite; check
+  `rusqlite` features).
+- `index::refresh(ctx, scope)` is the only code that walks the tool folders: it runs the harness scans
+  (which stay as they are, writing their cache rows), resolves projects, stamps devices, journals changes
+  (the phase 1 rules), updates the promoted columns and the FTS rows, and records `index:refreshed_at`.
+  Scope: `All` (the periodic walk) or `Paths(Vec<PathBuf>)` (what the watcher saw: only those files are
+  re-read, from their cursors).
+- The read path: `service::sessions`, `grouped_sessions`, `projects` and the `sessions`/`projects` ops
+  query the table, with `limit`/`offset` and a `total`, and never call a harness scan. Their answers keep
+  today's shapes; the Sessions page sends paging (`per` 50 by default, `page`) and the search string, and
+  draws from the answer instead of filtering client-side; the group folds request their rows on open.
+- Freshness: after a refresh the app emits `changed` as today (the pages redraw in place through the
+  warm-page path); the first launch with an empty table runs a refresh at once and the pages show
+  "reading sessions…" only then.
+
+### The watcher
+
+- `watch.rs` on the `notify` crate (debounced, 500 ms): the session folders of every profile
+  (`<home>/projects`, `<home>/sessions`, the OpenCode and Antigravity databases' folders), restarted when
+  profiles are added or removed. Events become `index::refresh(ctx, Paths)`; a burst coalesces. If the
+  watcher cannot be set up (a network drive, OneDrive placeholders) it logs once and the periodic walk
+  stays the only refresh.
+- The periodic walk (today's refresh tick) stays as the safety net, every refresh interval; the usage
+  import keeps its cursors and runs in the same tick.
+- `hrm index status` (rows, last refresh, watcher on or off, per tool) and `hrm index refresh [--all]`.
+
+### Tests
+
+- Rust: the index answers the same list as a direct scan on fixtures; paging and totals; the FTS search;
+  a changed file re-read by `Paths` updates one row and nothing else; a removed file drops its row;
+  `refresh(All)` after the fixtures are swapped converges. The watcher: a test that writes a file under a
+  watched temp folder and sees the row within two seconds (skip with a note if the platform's notify is
+  unreliable in CI).
+- Window: the whole suite green with every flag on. The seeds that write session files and then open a
+  page must wait for the index (`hrm index refresh` after seeding, or a `waitFor` on the row), not for
+  the page to scan; list every seed you changed in the report. A new block `// ---- index and watcher
+  (WP-10) ----`: seed a file, see it on the Sessions page within two seconds without a page reload; the
+  search box finds a session by a word of its title; paging shows 50 rows and a next page.
+- Measure before and after with `cargo run -p hrm-core --example timing` on the real data of the computer
+  the package runs on (read-only is fine: run `sessions`/`projects` only) and put both numbers in the
+  report.
+
+### Definition of done
+
+As the phases: build, `cargo test --workspace`, clippy, the window suite with every flag on, line
+endings, commits on the branch, no push, `REPORT.md` with verbatim test lines, the before/after
+timings, every seed changed, and the merge notes.

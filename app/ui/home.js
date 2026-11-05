@@ -1,7 +1,7 @@
 // Overview: the whole setup at a glance. Key numbers against the period before, live routes drawn with WebGL, every
 // limit on a seven-day line, the activity grid, and the latest replies or the request log.
 
-import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools } from './core.js';
+import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools, warmPage, keepPage } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill, ic } from './lib.js';
 import { findings, limitRows } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, cdot, cdots, splitBar, tileSplit, scope, scopeSeg } from './computers.js';
@@ -327,6 +327,8 @@ document.addEventListener('presence', async (e) => {
 });
 view('home', async (sheet) => {
   sheet.className = 'sheet';
+  const wk = 'home:' + JSON.stringify([st.range, st.harness, st.device, st.log, scope()]);
+  warmPage(sheet, wk);
   const hours = RANGES.find((r) => r[0] === st.range)[1];
   const days = Math.round(hours / 24);
   // scope: every computer added up, or this one only; the sync core answers the same shape either way
@@ -374,6 +376,7 @@ view('home', async (sheet) => {
   fit(sheet.querySelector('.hmwrap'), (w) => heatmap(o.heatmap, st.metric, w, pc));
   const host = sheet.querySelector('.topo');
   if (host) startTopo(host, topo.edges, !s.moving_routes);
+  keepPage(sheet, wk);
 });
 
 action('home-metric', (el) => { st.metric = el.dataset.v; render(); });

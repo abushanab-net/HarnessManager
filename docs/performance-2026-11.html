@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why pages are slow to open, and how to fix it</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root { --sans: "Inter", "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; --g: #f5f7fa; --s: #fff; --b: #dde3ec; --ru: #eef2f7; --sub: #f8fafc; --t: #0f172a; --m: #56607a; --ac: #0f6e7a; --ac-b: #bcdfe1; --act: #e3f1f2; --warn: #d97706; --warnT: #92400e; --warn-b: #fcd9a0; --neg: #dc2626; --negT: #b91c1c; --iris: #6d5bd0; --iris-bg: #efecfb; }
+* { box-sizing: border-box; } body { margin: 0; background: var(--g); color: var(--t); font: 14px/1.5 var(--sans); }
+main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+h1 { font-size: 26px; margin: 0 0 6px; } h2 { font-size: 20px; margin: 40px 0 10px; padding-top: 18px; border-top: 1px solid var(--b); } h3 { font-size: 15px; margin: 20px 0 8px; }
+p { margin: 6px 0; } ul { margin: 6px 0; padding-left: 22px; } li { margin: 3px 0; } .lead { color: var(--m); max-width: 84ch; } .mono { font-family: var(--mono); } .muted { color: var(--m); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--s); border: 1px solid var(--b); border-radius: 10px; overflow: hidden; margin: 10px 0; }
+th { text-align: left; background: var(--sub); color: var(--m); font-weight: 500; font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--b); }
+td { padding: 8px 10px; border-bottom: 1px solid var(--ru); vertical-align: top; } td.num { text-align: right; font-family: var(--mono); white-space: nowrap; }
+td.bad { color: var(--negT); font-weight: 600; } td.ok { color: var(--ac); font-weight: 600; } td.part { color: var(--warnT); font-weight: 600; }
+.note { background: var(--s); border: 1px solid var(--ac-b); border-left: 4px solid var(--ac); border-radius: 10px; padding: 10px 14px; margin: 14px 0; font-size: 13px; }
+.note.warn { border-color: var(--warn-b); border-left-color: var(--warn); }
+.tag { font: 600 11px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; padding: 2px 7px; margin-right: 8px; vertical-align: 2px; }
+.bar { display: inline-block; height: 10px; background: var(--ac); border-radius: 3px; vertical-align: middle; margin-right: 6px; } .bar.bad { background: var(--neg); } .bar.warn { background: var(--warn); }
+.q { display: grid; grid-template-columns: 28px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--ru); }
+.q .n { font: 600 12px var(--mono); color: var(--iris); background: var(--iris-bg); border-radius: 6px; text-align: center; line-height: 22px; height: 22px; }
+.q .qt { font-size: 14px; margin-bottom: 6px; } .q .opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.q .opts label { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--b); border-radius: 999px; background: var(--s); font-size: 13px; cursor: pointer; }
+.q .opts label:has(input:checked) { background: var(--act); border-color: var(--ac-b); font-weight: 500; } .q .opts input { margin: 0; accent-color: var(--ac); }
+.q .other input { width: 100%; max-width: 520px; font: 13px var(--sans); border: 1px solid var(--b); border-radius: 8px; padding: 6px 10px; margin-top: 6px; }
+.cbox textarea, #out { width: 100%; font: 13px/1.45 var(--sans); color: var(--t); background: var(--s); border: 1px solid var(--b); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.btn { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--b); background: var(--s); font: 500 13px var(--sans); cursor: pointer; } .btn.primary { background: var(--ac); color: #fff; border-color: var(--ac); }
+.fbar { display: flex; gap: 8px; align-items: center; margin: 14px 0 8px; } #copied { font-size: 12px; color: var(--ac); }
+</style>
+</head>
+<body><main>
+<h1>Why pages are slow to open, and how to fix it</h1>
+<p class="lead">Measured on this computer's real data on 5 November 2026: 8 accounts, 8,362 Claude Code session files (4.9 GB), 2,767 Codex rollouts (3.1 GB), 8,382 sessions in the index, 296,000 usage rows. The question was whether the pages are slow because every open scans the logs, and whether an index that is updated only on change would fix it. The answer: the index already exists and the per-file signature (size and time) already does what a hash would do; the time goes elsewhere, and most of it is one bug.</p>
+
+<h2>What was measured</h2>
+<table><thead><tr><th>Step</th><th>Time</th><th>What it does</th><th>Verdict</th></tr></thead><tbody>
+<tr><td>Usage import, Claude main account, warm (29 new rows)</td><td class="num"><span class="bar bad" style="width:180px"></span>36.1 s</td><td>Walks the 8,362 files; for each one, asks the database for its cursor, sees it unchanged, and <b>still opens a write transaction and commits it with zero rows</b>. Each commit is a disk sync: about 4 ms times 8,362 files.</td><td class="bad">the bug</td></tr>
+<tr><td>Usage import, Codex, warm (16 new rows)</td><td class="num"><span class="bar warn" style="width:16px"></span>3.2 s</td><td>A rollout that is still being written (145 MB today) is re-read <b>whole</b> every refresh, because Codex files are read without a cursor.</td><td class="part">wasteful</td></tr>
+<tr><td>Other six accounts' import</td><td class="num">0.4 s</td><td>Small folders.</td><td class="ok">fine</td></tr>
+<tr><td>Session listing, Codex</td><td class="num"><span class="bar warn" style="width:14px"></span>2.8 s</td><td>2,582 files: a file stat and <b>one database query per file</b> to find the cached record (a lock taken and released 2,582 times).</td><td class="part">wasteful</td></tr>
+<tr><td>Session listing, Claude</td><td class="num">0.8 s</td><td>4,944 files, the same per-file query.</td><td class="part">wasteful</td></tr>
+<tr><td>Session listing, Antigravity</td><td class="num">0.7 s</td><td>Reads its summaries database.</td><td class="part">could be cached</td></tr>
+<tr><td>The Sessions page (service, warm)</td><td class="num">2.0 s</td><td>The scans above, then for each of the 8,362 sessions a project lookup and a journal upsert (another write statement per session).</td><td class="part">wasteful</td></tr>
+<tr><td>The Projects page (warm)</td><td class="num">2.6 s</td><td>Runs the whole Sessions scan again, then groups.</td><td class="part">duplicated</td></tr>
+<tr><td>Overview queries (tiles, grid, replies)</td><td class="num">0.3 s + 0.3 s</td><td>SQL over 296,000 rows.</td><td class="ok">fine</td></tr>
+<tr><td>Searching on a page</td><td class="num">instant once loaded</td><td>Client-side over the fetched list; slow only because the fetch is slow.</td><td class="ok">fine</td></tr>
+</tbody></table>
+<div class="note warn"><b>Why switching tabs feels worse than these numbers.</b> The app refreshes usage every five minutes in the background, and that refresh is the 36-second import above. The database is behind one lock, so a page opened during those 36 seconds waits for each file's empty commit to finish before its own query runs. A tab switch that lands during a refresh can take ten seconds and more for nothing. The Sessions page also opens two full scans (sessions and projects) and the sidebar's pinned projects open a third at start-up.</div>
+
+<h2>Is it the scanning? Is hashing the answer?</h2>
+<ul>
+<li>The scan itself is cheap: stat-ing 11,000 files is about 0.3 seconds. What costs is what the code does <i>per file</i> afterwards: a lock, a query, and for the import a write transaction, 8,362 times.</li>
+<li>Hashing file contents would be slower than today, since it means reading every file (8 GB) on each refresh. The current signature, size plus modification time with a 32-byte tail check, is the right cheap "hash"; it correctly reports that nothing changed. The problem is that the code then does the expensive thing anyway.</li>
+<li>An index already exists: the <span class="mono">sessions</span> and <span class="mono">cursors</span> tables. The pages just do not read from it directly; they rebuild the list from the filesystem on every open and consult the index one row at a time.</li>
+</ul>
+
+<h2>Options</h2>
+<h3><span class="tag">1</span>Fix the per-file waste (hours)</h3>
+<ul>
+<li>No transaction when a file brought no rows: the 36-second import becomes about one second. One line.</li>
+<li>Read Codex rollouts from a cursor like Claude's, so an active 145 MB rollout is read from where it was left: 3 seconds become milliseconds.</li>
+<li>Load the cached session records in <b>one</b> query per account (a map by file path), then stat the files: the per-file lock and query go away. 2.8 seconds become about 0.2.</li>
+<li>Journal a session only when its activity time moved, decided in memory against that map: 8,362 write statements become a handful.</li>
+<li>One scan per render: the Sessions page and the sidebar use the result the Projects page just computed (a short-lived cache keyed by the refresh generation).</li>
+</ul>
+<p><b>Expected:</b> Sessions page from about 6 s to under 1 s warm; Projects the same; the refresh from 40 s to about 2 s, so a tab switch during a refresh no longer waits. <b>Risk:</b> low; the tests cover import counts and the cursor logic.</p>
+
+<h3><span class="tag">2</span>Read the pages from the index, scan only in the background (days)</h3>
+<p>What you described. The <span class="mono">sessions</span> table becomes the source the pages read: SQL with paging, sorting and filtering, including the search (an FTS5 index over title and folder for very large histories). The filesystem is touched only by the background refresh, which updates the index and emits the existing <span class="mono">changed</span> event, and the pages refresh in place. A page open is then one query of tens of milliseconds regardless of how many files exist.</p>
+<p><b>Expected:</b> every page opens in well under half a second, and the time stops growing with the number of sessions. <b>Risk:</b> medium: the ordering of "what is open now" and the first paint after start-up (before the first scan) need care; the e2e suite that seeds files and expects them on the page must wait for the refresh instead of a page open.</p>
+
+<h3><span class="tag">3</span>Watch the folders instead of polling (days, after 2)</h3>
+<p>A file watcher on the tool folders (the <span class="mono">notify</span> crate) updates the index within a second of a file change and re-reads only that file, from its cursor. The five-minute refresh stays as the safety net. Usage, sessions and live routes then follow the tools in real time, and the periodic full walk disappears.</p>
+<p><b>Expected:</b> near-instant freshness and a quieter disk. <b>Risk:</b> medium: watchers on Windows can drop events under load and need the periodic walk as a fallback; OneDrive-backed folders generate noise.</p>
+
+<h3><span class="tag">4</span>Keep pages warm in the window (hours, after 1)</h3>
+<p>Switching tabs today re-fetches everything. Keep the last answer of each page in memory and show it at once, then refresh it in the background and redraw if it changed; virtualize the long session lists so 8,000 rows do not sit in the DOM. This makes a switch feel instant even before option 2 lands.</p>
+
+<h3><span class="tag">5</span>Shrink what is scanned (optional)</h3>
+<p>The archive from phase 4 moves old transcripts out of the tool folders; with a 30-day archive age the live folders hold a few hundred files instead of 11,000, and every scan shrinks with them. This is already built; it only needs the setting turned on.</p>
+
+<h2>Recommendation</h2>
+<table><thead><tr><th>Option</th><th>Gain</th><th>Effort</th><th>Risk</th><th>When</th></tr></thead><tbody>
+<tr><td>1 · fix the per-file waste</td><td class="ok">refresh 40 s to 2 s; pages 6 s to 1 s</td><td>hours</td><td>low</td><td>now, as 1.6.2</td></tr>
+<tr><td>4 · warm pages in the window</td><td class="ok">switches feel instant</td><td>hours</td><td>low</td><td>with 1</td></tr>
+<tr><td>2 · pages read the index</td><td class="ok">pages stop scaling with file count</td><td>days</td><td>medium</td><td>next, one package</td></tr>
+<tr><td>3 · folder watcher</td><td class="part">freshness in a second</td><td>days</td><td>medium</td><td>with 2</td></tr>
+<tr><td>5 · archive age on</td><td class="part">fewer files everywhere</td><td>a switch</td><td>none</td><td>whenever you like</td></tr>
+</tbody></table>
+<div class="note"><b>Do 1 and 4 first.</b> They remove the bug that makes everything feel slow and cost hours, not days. Then 2 and 3 together as one package, run the same way as the other phases, which is the design you had in mind: the database is the index, updated only when a file changes, and the pages never wait for the filesystem.</div>
+
+<h2>After option 1, measured the same way (1.6.2)</h2>
+<p class="lead">The cause turned out to be one primitive more than the empty transactions: on Windows, Rust's file metadata call opens a handle per file, about half a millisecond each with the antivirus looking on, and every refresh and page open made two of those per file across 11,000 files. The directory listing already carries size and time, so the walks now use that, nothing opens a file that did not change, and a session still being written shows its cached record while the file is parsed again in the background.</p>
+<table><thead><tr><th>Step (warm, same data)</th><th>Before</th><th>After</th></tr></thead><tbody>
+<tr><td>Usage import, Claude main account</td><td class="num">36.1 s</td><td class="num ok">0.2 s</td></tr>
+<tr><td>Usage import, Codex</td><td class="num">3.2 s</td><td class="num ok">0.1 s</td></tr>
+<tr><td>Session listing, Codex (2,582 files, one being written)</td><td class="num">2.8 s</td><td class="num ok">0.05 s</td></tr>
+<tr><td>Session listing, Claude (4,944 files)</td><td class="num">0.8 s</td><td class="num ok">0.09 s</td></tr>
+<tr><td>The Sessions page (service)</td><td class="num">2.0 s</td><td class="num part">1.1 s</td></tr>
+<tr><td>The Projects page</td><td class="num">2.6 s</td><td class="num part">2.0 s</td></tr>
+<tr><td>The five-minute refresh, in all</td><td class="num">about 40 s</td><td class="num ok">under 1 s</td></tr>
+</tbody></table>
+<p>What is left in the two pages is the work on the records themselves (resolving each session's repository, the tags, the other computers' rows, the usage sums per project), which option 2 moves to the background and the index. Pages also keep their last markup now, so a tab switch shows the page at once and refreshes it in place.</p>
+
+<h2 id="feedback">Your call</h2>
+<div id="form"></div>
+<div class="cbox"><label for="c-general">Anything else</label><textarea id="c-general" data-comment="general" rows="3" placeholder="Other symptoms, pages that feel slowest, priorities…"></textarea></div>
+<div class="fbar"><button class="btn primary" id="copy">Copy my answers</button><button class="btn" id="clear">Clear the draft</button><span id="copied"></span></div>
+<textarea id="out" rows="6" readonly aria-label="Your answers as text"></textarea>
+</main>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const Q = [
+  ['Start with option 1 (the per-file waste) and 4 (warm pages) now, as 1.6.2?', ['Yes, go ahead', 'Changes first (say them in the box)'], 'Yes, go ahead'],
+  ['Then option 2 and 3 (the index as the source, a folder watcher) as one package?', ['Yes, run it the same way as the phases', 'Option 2 only, no watcher', 'Not now'], 'Yes, run it the same way as the phases'],
+  ['Turn the archive on (option 5) to shrink the live folders?', ['Yes, 30 days', 'Yes, 90 days', 'No'], 'Yes, 30 days'],
+];
+const KEY = 'hm.perf.feedback'; let draft = {};
+try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(draft)); } catch {} };
+document.getElementById('form').innerHTML = Q.map(([t, opts, def], i) => `<div class="q"><span class="n">${i + 1}</span><div><div class="qt">${esc(t)}</div><div class="opts">${opts.map((o) => `<label><input type="radio" name="q${i}" value="${esc(o)}" ${(draft['q' + i] || def) === o ? 'checked' : ''}> ${esc(o)}</label>`).join('')}<label><input type="radio" name="q${i}" value="__other" ${draft['q' + i] && !opts.includes(draft['q' + i]) ? 'checked' : ''}> Other</label></div><div class="other"><input type="text" data-other="q${i}" placeholder="Or say what you want instead" value="${draft['q' + i] && !opts.includes(draft['q' + i]) ? esc(draft['q' + i]) : ''}"></div></div></div>`).join('');
+document.querySelectorAll('[data-comment]').forEach((t) => { t.value = draft['c:' + t.dataset.comment] || ''; t.addEventListener('input', () => { draft['c:' + t.dataset.comment] = t.value; save(); }); });
+document.getElementById('form').addEventListener('change', (e) => { const r = e.target.closest('input[type=radio]'); if (!r) return; const other = document.querySelector(`[data-other="${r.name}"]`); draft[r.name] = r.value === '__other' ? (other.value || '') : r.value; save(); });
+document.getElementById('form').addEventListener('input', (e) => { const o = e.target.closest('[data-other]'); if (!o) return; draft[o.dataset.other] = o.value; document.querySelector(`input[name="${o.dataset.other}"][value="__other"]`).checked = true; save(); });
+const answers = () => { const lines = ['Feedback, performance (' + new Date().toLocaleString() + ')', '']; Q.forEach(([t, opts, def], i) => { const v = draft['q' + i] || def; lines.push(`${i + 1}. ${t} ${v}${v === def ? '' : ' (changed)'}`); }); if ((draft['c:general'] || '').trim()) lines.push('', 'Comments: ' + draft['c:general'].trim()); return lines.join('\n'); };
+document.getElementById('copy').onclick = async () => { const text = answers(); document.getElementById('out').value = text; try { await navigator.clipboard.writeText(text); document.getElementById('copied').textContent = 'Copied. Paste it into the chat.'; } catch { document.getElementById('copied').textContent = 'The clipboard was refused here: select the text below and copy it.'; document.getElementById('out').select(); } };
+document.getElementById('clear').onclick = () => { draft = {}; save(); location.reload(); };
+</script>
+</body>
+</html>

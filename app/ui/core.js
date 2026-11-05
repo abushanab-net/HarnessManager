@@ -191,6 +191,10 @@ export function redrawLive() {
   }
 }
 
+/** A page's last markup, shown at once while fresh data is read; the view calls keep() after it draws. */
+export function warmPage(sheet, key) { const h = S.cache.html && S.cache.html[key]; if (!h) return false; sheet.innerHTML = h; return true; }
+export function keepPage(sheet, key) { (S.cache.html ||= {})[key] = sheet.innerHTML; }
+
 export async function loadState() {
   S.state = await call('state');
   applyTheme(S.state);

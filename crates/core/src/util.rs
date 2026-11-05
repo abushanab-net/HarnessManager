@@ -176,6 +176,25 @@ pub fn file_sig(path: &Path) -> Option<(i64, u64)> {
     Some((mtime, m.len()))
 }
 
+/// `walk_files` with each file's modification time (ms) and size, taken from the directory listing: on Windows a
+/// metadata call opens the file (half a millisecond each with the antivirus looking on), the listing is free.
+pub fn walk_files_sig(dir: &Path, keep: &dyn Fn(&Path) -> bool, out: &mut Vec<(PathBuf, i64, u64)>) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() => walk_files_sig(&p, keep, out),
+            Ok(_) if keep(&p) => {
+                if let Ok(m) = e.metadata() {
+                    let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+                    out.push((p, mtime, m.len()));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Collect files under `dir` whose name satisfies `keep`, recursively.
 pub fn walk_files(dir: &Path, keep: &dyn Fn(&Path) -> bool, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };

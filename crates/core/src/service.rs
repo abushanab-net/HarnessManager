@@ -468,6 +468,7 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             out.push(s);
         }
     }
+    let mut to_journal: Vec<SessionMeta> = vec![];
     for p in &reg.profiles {
         if f.harness.as_deref().map(|h| h != p.harness).unwrap_or(false) { continue; }
         if f.profile.as_deref().map(|x| x != p.name).unwrap_or(false) { continue; }
@@ -491,8 +492,8 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             s.open_elsewhere = elsewhere.contains(&s.id);
             s.device = ctx.db.device.clone();
             s.device_name = ctx.settings.device_name.clone();
-            // the other computers learn of it here, once its project is known
-            if let Err(e) = ctx.db.journal_session(&s) { crate::log::warn(&format!("journal: session {}: {e:#}", s.id)); }
+            // the other computers learn of it here, once its project is known (recorded in one go below)
+            to_journal.push(s.clone());
             s.continued_from = forks.get(&crate::db::session_key(&s)).and_then(|d| names.get(d).cloned());
             if f.open == Some(true) && !s.open { continue; }
             s.tags = stags.get(&format!("{}/{}", s.profile, s.id)).cloned().unwrap_or_default();
@@ -509,6 +510,7 @@ pub fn sessions(ctx: &Ctx, f: &SessionFilter) -> Result<Vec<SessionMeta>> {
             s
         }).filter(|s| keep(s)));
     }
+    if let Err(e) = ctx.db.journal_sessions(&to_journal) { crate::log::warn(&format!("journal: sessions: {e:#}")); }
     out.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(out)
 }

@@ -22,7 +22,7 @@ use super::{base_env, Harness, ItemPaths};
 use crate::launch::{resolve_program, LaunchSpec};
 use crate::model::*;
 use crate::registry::{Kind, Profile};
-use crate::util::{file_sig, read_json, truncate, walk_files, write_atomic};
+use crate::util::{file_sig, read_json, truncate, write_atomic};
 use crate::Ctx;
 
 pub struct PiLike {
@@ -47,9 +47,9 @@ pub static PI: PiLike = PiLike {
 };
 
 impl PiLike {
-    fn session_files(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
+    fn session_files(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
         let mut out = vec![];
-        walk_files(&self.home(ctx, p).join("sessions"), &|f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false), &mut out);
+        crate::util::walk_files_sig(&self.home(ctx, p).join("sessions"), &|f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false), &mut out);
         out
     }
 
@@ -125,7 +125,7 @@ impl Harness for PiLike {
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
         let mut stored = 0;
         let prices = crate::pricing::load(ctx);
-        let files = self.session_files(ctx, p);
+        let files: Vec<PathBuf> = self.session_files(ctx, p).into_iter().map(|t| t.0).collect();
         // whole files, as Codex: the header (session id, cwd) is on line 1 and the files are small
         type Parsed = Option<(Vec<UsageRow>, String, i64, u64)>;
         each_file_parallel(&files, |f| -> Result<Parsed> {
@@ -152,17 +152,22 @@ impl Harness for PiLike {
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let mut out = vec![];
         let mut todo = vec![];
-        for f in self.session_files(ctx, p) {
-            let Some((mtime, len)) = file_sig(&f) else { continue };
+        let cached = ctx.db.sessions_cached_for(&format!("{}|{}|", self.id, p.name))?;
+        for (f, mtime, len) in self.session_files(ctx, p) {
             if mtime < since { continue; }
             let key = format!("{}|{}|{}", self.id, p.name, f.display());
-            match ctx.db.session_cached(&key, mtime, len as i64)? {
-                Some(m) => out.push(m),
-                None => todo.push(f),
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a session still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) => {
+                    out.push(stale(meta, mtime));
+                    let (id, name) = (self.id, p.name.clone());
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, id, &name, f, false).meta));
+                }
+                None => todo.push((f, mtime, len)),
             }
         }
-        each_file_parallel(&todo, |f| {
-            let (mtime, len) = file_sig(f)?;
+        each_file_parallel_sig(&todo, |f, mtime, len| {
             let text = std::fs::read_to_string(f).ok()?;
             Some((mtime, len, parse_session(&text, self.id, &p.name, f, false).meta))
         }, |r| {
@@ -202,7 +207,7 @@ impl Harness for PiLike {
         if procs.is_empty() { return vec![]; }
         let now = crate::util::now_ms();
         let norm = |s: &str| crate::projects::normalize(s).to_lowercase();
-        let mut recent: Vec<(i64, PathBuf)> = self.session_files(ctx, p).into_iter().filter_map(|f| file_sig(&f).map(|(m, _)| (m, f))).filter(|(m, _)| now - m < 120_000).collect();
+        let mut recent: Vec<(i64, PathBuf)> = self.session_files(ctx, p).into_iter().map(|(f, m, _)| (m, f)).filter(|(m, _)| now - m < 120_000).collect();
         recent.sort_by_key(|r| std::cmp::Reverse(r.0));
         let mut out = vec![];
         for (m, f) in recent {

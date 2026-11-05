@@ -12,18 +12,18 @@ use super::{base_env, Harness, ItemPaths};
 use crate::launch::{resolve_program, LaunchSpec};
 use crate::model::*;
 use crate::registry::{Kind, Profile};
-use crate::util::{file_sig, read_json, truncate, walk_files};
+use crate::util::{read_json, truncate};
 use crate::Ctx;
 
 pub struct Codex;
 
 impl Codex {
-    fn rollouts(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
+    fn rollouts(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
         let home = self.home(ctx, p);
         let mut out = vec![];
         let keep = |f: &Path| f.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("rollout-") && (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))).unwrap_or(false);
-        walk_files(&home.join("sessions"), &keep, &mut out);
-        walk_files(&home.join("archived_sessions"), &keep, &mut out);
+        crate::util::walk_files_sig(&home.join("sessions"), &keep, &mut out);
+        crate::util::walk_files_sig(&home.join("archived_sessions"), &keep, &mut out);
         out
     }
 }
@@ -142,7 +142,7 @@ impl Harness for Codex {
     }
 
     fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> {
-        let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().filter_map(|f| file_sig(&f).map(|(m, _)| (m, f))).collect();
+        let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).collect();
         files.sort_by(|a, b| b.0.cmp(&a.0));
         for (_, f) in files.into_iter().take(5) {
             let Ok(text) = read_text(&f) else { continue };
@@ -159,17 +159,34 @@ impl Harness for Codex {
     }
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
+        use rusqlite::OptionalExtension;
         let mut stored = 0;
         let prices = crate::pricing::load(ctx);
         let files = self.rollouts(ctx, p);
-        each_file_parallel(&files, |f| -> Result<Option<(Vec<UsageRow>, String, i64, u64)>> {
-            let mut rows = vec![];
-            let Some((mtime, len)) = file_sig(f) else { return Ok(None) };
+        let cursors = ctx.db.cursors_for(&p.name)?;
+        type Read = Option<(Vec<UsageRow>, Option<crate::harness::parse::NewCursor>, (String, i64, u64))>;
+        each_file_parallel_sig(&files, |f, mtime, len| -> Result<Read> {
             let key = f.display().to_string();
-            if let Some((_, m, l, _)) = ctx.db.cursor(&key)? {
-                if m == mtime && l == len as i64 { return Ok(None); }
-            }
-            let text = read_text(f)?;
+            let compressed = f.extension().map(|e| e == "zst").unwrap_or(false);
+            // a plain rollout that grew is read from where the last import stopped, with its first line (the
+            // session_meta) read again so the session id and folder are known; a compressed one, archived and
+            // never growing, is read whole when its size or time changed
+            let (text, cursor) = if compressed {
+                if let Some((_, m, l, _)) = cursors.get(&key) { if *m == mtime && *l == len as i64 { return Ok(None); } }
+                (read_text(f)?, None)
+            } else {
+                let mut tail = String::new();
+                let Some(cur) = for_new_lines_sig(ctx, &p.name, f, mtime, len, cursors.get(&key).cloned(), |line| { tail.push_str(line); tail.push('\n'); })? else { return Ok(None) };
+                let mut buf = String::new();
+                {
+                    use std::io::BufRead;
+                    let mut first = String::new();
+                    if std::io::BufReader::new(std::fs::File::open(f)?).read_line(&mut first).is_ok() { buf.push_str(&first); if !first.ends_with('\n') { buf.push('\n'); } }
+                }
+                buf.push_str(&tail);
+                (buf, Some(cur))
+            };
+            let mut rows = vec![];
             let (mut model, mut cwd, mut sid) = (String::new(), String::new(), String::new());
             // reply timing: a request starts at the user's message or a tool's output; its first item done is the first reply
             let (mut start, mut first): (Option<i64>, Option<i64>) = (None, None);
@@ -222,13 +239,18 @@ impl Harness for Codex {
                     _ => {}
                 }
             }
-            Ok(Some((rows, key, mtime, len)))
+            // new lines that began mid-turn carry no turn_context: the session's last stored model stands in
+            if !sid.is_empty() && rows.iter().any(|r| r.model == "codex") {
+                let last: Option<String> = ctx.db.with(|c| Ok(c.query_row("select model from usage where session_id = ? order by ts desc limit 1", [&sid], |r| r.get(0)).optional()?))?;
+                if let Some(m) = last { for r in rows.iter_mut().filter(|r| r.model == "codex") { r.model = m.clone(); } }
+            }
+            Ok(Some((rows, cursor, (key, mtime, len))))
         }, |r| {
             match r {
                 // rows first, then the cursor: an interrupted import reads this file again
-                Ok(Some((rows, key, mtime, len))) => {
+                Ok(Some((rows, cursor, (key, mtime, len)))) => {
                     stored += ctx.db.insert_usage(&rows, &prices)?;
-                    ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")?;
+                    match cursor { Some(c) => c.save(ctx)?, None => ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")? }
                 }
                 Ok(None) => {}
                 Err(e) => crate::log::warn(&format!("usage import for {}: {e:#}", p.name)),
@@ -241,17 +263,22 @@ impl Harness for Codex {
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let mut out = vec![];
         let mut todo = vec![];
-        for f in self.rollouts(ctx, p) {
-            let Some((mtime, len)) = file_sig(&f) else { continue };
+        let cached = ctx.db.sessions_cached_for(&format!("codex|{}|", p.name))?;
+        for (f, mtime, len) in self.rollouts(ctx, p) {
             if mtime < since { continue; }
             let key = format!("codex|{}|{}", p.name, f.display());
-            match ctx.db.session_cached(&key, mtime, len as i64)? {
-                Some(m) => out.push(m),
-                None => todo.push(f),
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a rollout still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) => {
+                    out.push(stale(meta, mtime));
+                    let name = p.name.clone();
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
+                }
+                None => todo.push((f, mtime, len)),
             }
         }
-        each_file_parallel(&todo, |f| {
-            let (mtime, len) = file_sig(f)?;
+        each_file_parallel_sig(&todo, |f, mtime, len| {
             let text = read_text(f).ok()?;
             Some((mtime, len, parse_rollout(&text, &p.name, f, false).meta))
         }, |r| {
@@ -294,7 +321,7 @@ impl Harness for Codex {
         if procs.is_empty() { return vec![]; }
         let now = crate::util::now_ms();
         let norm = |s: &str| crate::projects::normalize(s).to_lowercase();
-        let mut recent: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().filter_map(|f| file_sig(&f).map(|(m, _)| (m, f))).filter(|(m, _)| now - m < 120_000).collect();
+        let mut recent: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).filter(|(m, _)| now - m < 120_000).collect();
         recent.sort_by(|a, b| b.0.cmp(&a.0));
         let mut out = vec![];
         for (m, f) in recent {

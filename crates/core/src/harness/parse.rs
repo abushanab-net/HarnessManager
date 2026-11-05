@@ -6,16 +6,23 @@ use std::path::Path;
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::model::SessionMeta;
 use crate::util::{file_sig, truncate};
 use crate::Ctx;
 
 /// Run `work` on every file using all cores, biggest files first, and hand each result to `store` (on this
 /// thread, one at a time) as soon as it is ready. Reading and parsing are the slow part: gigabytes of logs on a
 /// first run. Each file's rows and cursor travel together, so its rows are still written before its cursor.
-pub fn each_file_parallel<T: Send>(files: &[std::path::PathBuf], work: impl Fn(&Path) -> T + Sync, mut store: impl FnMut(T) -> Result<()>) -> Result<()> {
+pub fn each_file_parallel<T: Send>(files: &[std::path::PathBuf], work: impl Fn(&Path) -> T + Sync, store: impl FnMut(T) -> Result<()>) -> Result<()> {
+    let sized: Vec<(std::path::PathBuf, i64, u64)> = files.iter().map(|f| (f.clone(), 0, std::fs::metadata(f).map(|m| m.len()).unwrap_or(0))).collect();
+    each_file_parallel_sig(&sized, |f, _, _| work(f), store)
+}
+
+/// `each_file_parallel` for files whose size and time the walk already gave: no metadata call per file.
+pub fn each_file_parallel_sig<T: Send>(files: &[(std::path::PathBuf, i64, u64)], work: impl Fn(&Path, i64, u64) -> T + Sync, mut store: impl FnMut(T) -> Result<()>) -> Result<()> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let mut order: Vec<usize> = (0..files.len()).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(std::fs::metadata(&files[i]).map(|m| m.len()).unwrap_or(0)));
+    order.sort_by_key(|&i| std::cmp::Reverse(files[i].2));
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(16).min(files.len().max(1));
     let next = AtomicUsize::new(0);
     let (tx, rx) = std::sync::mpsc::sync_channel::<T>(n * 2);
@@ -26,7 +33,8 @@ pub fn each_file_parallel<T: Send>(files: &[std::path::PathBuf], work: impl Fn(&
                 let k = next.fetch_add(1, Ordering::Relaxed);
                 let Some(&i) = order.get(k) else { break };
                 // a failed store dropped the receiver: stop instead of parsing the rest for nothing
-                if tx.send(work(&files[i])).is_err() { break; }
+                let (p, m, l) = &files[i];
+                if tx.send(work(p, *m, *l)).is_err() { break; }
             });
         }
         drop(tx);
@@ -103,10 +111,41 @@ impl NewCursor {
 /// A file that shrank or whose bytes before the cursor changed is read again from the start; usage ids
 /// are deduplicated, so a re-read never double counts. Compressed files are re-read whole when their size
 /// or time changes.
-pub fn for_new_lines(ctx: &Ctx, profile: &str, path: &Path, mut f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
+pub fn for_new_lines(ctx: &Ctx, profile: &str, path: &Path, f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
+    let cur = ctx.db.cursor(&path.display().to_string())?;
+    for_new_lines_with(ctx, profile, path, cur, f)
+}
+
+/// `for_new_lines` with the cursor already looked up (an import fetches all of an account's cursors in one query).
+pub fn for_new_lines_with(ctx: &Ctx, profile: &str, path: &Path, cur: Option<(i64, i64, i64, String)>, f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
     let Some((mtime, len)) = file_sig(path) else { return Ok(None) };
+    for_new_lines_sig(ctx, profile, path, mtime, len, cur, f)
+}
+
+/// A changed session's last cached record, dated by the file: shown now while the file is parsed again later.
+pub fn stale(meta: &SessionMeta, mtime: i64) -> SessionMeta {
+    let mut m = meta.clone();
+    m.last_active_at = m.last_active_at.max(mtime);
+    m
+}
+
+/// Parse a session file on a background thread and refresh its cached record; a file already being parsed is
+/// left alone. A page open then costs no parse of the session still being written (145 MB rollouts were seen).
+pub fn refresh_session_later(ctx: &Ctx, key: String, path: std::path::PathBuf, mtime: i64, len: u64, parse: impl Fn(&Path) -> Option<SessionMeta> + Send + 'static) {
+    static BUSY: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+    { let mut b = BUSY.lock().unwrap_or_else(|e| e.into_inner()); if !b.get_or_insert_with(Default::default).insert(key.clone()) { return; } }
+    let (data, home) = (ctx.data.clone(), ctx.home.clone());
+    std::thread::spawn(move || {
+        if let (Some(meta), Ok(ctx)) = (parse(&path), Ctx::open_at(&data, &home)) {
+            if meta.started_at != 0 || !meta.id.is_empty() { let _ = ctx.db.put_session(&key, &meta, mtime, len as i64); }
+        }
+        BUSY.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).remove(&key);
+    });
+}
+
+/// `for_new_lines_with` with the file's size and time already known (from the directory listing).
+pub fn for_new_lines_sig(_ctx: &Ctx, profile: &str, path: &Path, mtime: i64, len: u64, cur: Option<(i64, i64, i64, String)>, mut f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
     let key = path.display().to_string();
-    let cur = ctx.db.cursor(&key)?;
     let compressed = path.extension().map(|e| e == "zst").unwrap_or(false);
     if let Some((_, m, l, _)) = &cur {
         if *m == mtime && *l == len as i64 {
