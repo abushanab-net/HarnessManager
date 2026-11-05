@@ -60,6 +60,32 @@ pub struct Provider {
     pub models: Vec<String>,
 }
 
+/// Endpoints whose shape is known, offered ready to add (the key is still the user's). DeepSeek, from
+/// api-docs.deepseek.com (Nov 2026): Chat Completions at the root, the Anthropic Messages API under
+/// `/anthropic` (for Claude Code routes), the same two models and `DEEPSEEK_API_KEY` on both.
+pub fn provider_presets() -> Vec<Provider> {
+    let models = || vec!["deepseek-flash".to_string(), "deepseek-v4-pro".to_string()];
+    vec![
+        Provider { id: "deepseek".into(), name: "DeepSeek".into(), base_url: "https://api.deepseek.com".into(), format: "openai".into(), models: models() },
+        Provider { id: "deepseek-anthropic".into(), name: "DeepSeek (Anthropic format)".into(), base_url: "https://api.deepseek.com/anthropic".into(), format: "anthropic".into(), models: models() },
+    ]
+}
+
+#[cfg(test)]
+mod preset_tests {
+    #[test]
+    fn deepseek_presets_cover_both_wire_formats_with_the_same_models() {
+        let p = super::provider_presets();
+        let ds = p.iter().find(|x| x.id == "deepseek").unwrap();
+        let an = p.iter().find(|x| x.id == "deepseek-anthropic").unwrap();
+        assert_eq!((ds.format.as_str(), ds.base_url.as_str()), ("openai", "https://api.deepseek.com"));
+        assert_eq!((an.format.as_str(), an.base_url.as_str()), ("anthropic", "https://api.deepseek.com/anthropic"));
+        assert_eq!(ds.models, an.models);
+        assert_eq!(ds.models, vec!["deepseek-flash", "deepseek-v4-pro"]);
+        for m in &ds.models { assert!(crate::pricing::find(&crate::pricing::parse_catalog(&serde_json::json!({})), m).is_some(), "{m} has a price"); }
+    }
+}
+
 /// A route: providers tried in order (failover), or merged into one model list (aggregate).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Route {

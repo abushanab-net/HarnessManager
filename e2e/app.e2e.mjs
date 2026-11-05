@@ -28,7 +28,7 @@ fs.mkdirSync(shots, { recursive: true });
 const sb = fs.mkdtempSync(path.join(os.tmpdir(), 'hrm-e2e-'));
 const home = path.join(sb, 'home'), data = path.join(sb, 'data'), bin = path.join(sb, 'bin');
 for (const d of [home, data, bin]) fs.mkdirSync(d, { recursive: true });
-for (const t of ['claude', 'codex', 'opencode', 'agy']) fs.copyFileSync(path.join(target, 'fakeharness.exe'), path.join(bin, `${t}.exe`));
+for (const t of ['claude', 'codex', 'opencode', 'agy', 'pi', 'omp']) fs.copyFileSync(path.join(target, 'fakeharness.exe'), path.join(bin, `${t}.exe`));
 const prefix = `HRMTEST-app-${process.pid}`;
 const runLog = path.join(sb, 'runs.jsonl'), termLog = path.join(sb, 'terminal.jsonl');
 const pricing = path.join(sb, 'pricing.json');
@@ -60,7 +60,7 @@ const env = {
   HRM_HOME: data, HRM_PROFILES_HOME: home, HRM_CRED_PREFIX: prefix, HRM_AGY_CRED: `${prefix}-agylive`,
   HRM_TERMINAL_LOG: termLog, HRM_PRICING_FILE: pricing, FAKE_RUN_LOG: runLog, FAKE_WAIT_CODE: '1', FAKE_EMAIL: 'alex@example.com',
   ...(process.env.HRM_E2E_APP_DIR ? {} : { HRM_EXE: path.join(target, 'hrm.exe') }),
-  HRM_BIN_CLAUDE: path.join(bin, 'claude.exe'), HRM_BIN_CODEX: path.join(bin, 'codex.exe'), HRM_BIN_OPENCODE: path.join(bin, 'opencode.exe'), HRM_BIN_AGY: path.join(bin, 'agy.exe'),
+  HRM_BIN_CLAUDE: path.join(bin, 'claude.exe'), HRM_BIN_CODEX: path.join(bin, 'codex.exe'), HRM_BIN_OPENCODE: path.join(bin, 'opencode.exe'), HRM_BIN_AGY: path.join(bin, 'agy.exe'), HRM_BIN_PI: path.join(bin, 'pi.exe'), HRM_BIN_OMP: path.join(bin, 'omp.exe'),
 };
 delete env.CLAUDE_CONFIG_DIR; delete env.ANTHROPIC_API_KEY; delete env.CODEX_HOME;
 const hrm = (...args) => execFileSync(path.join(appDir, 'hrm.exe'), args, { env, encoding: 'utf8' });
@@ -656,9 +656,9 @@ try {
     assert.equal(d.navLabel, 'Accounts');
     assert.ok(d.font.includes('Inter') && d.inter, 'Inter loaded');
     assert.ok(d.mark, 'the Interlocking H in the sidebar');
-    assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity'], 'accounts grouped by tool, one card each');
+    assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'accounts grouped by tool, one card each');
     assert.equal(d.primary, 'rgb(15, 110, 122)', 'the primary button in brand teal');
-    assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'], 'a chip for each tool');
+    assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool');
     // a tool chip shows only that tool; a group header folds its accounts away
     await click('[data-testid=chip-codex]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .acg').length")) === 1, 'only Codex');
@@ -1356,6 +1356,58 @@ description: Bulk skill ${i}
     assert.equal((await card()).match(/<i class="cdot /g).length, 2, 'a dot per computer that has the repository');
     assert.ok(!(await card()).includes('not cloned'), 'this computer has it');
     await shot('19f-projects-computers');
+  });
+
+  // ---- Pi and Oh My Pi (WP-1) ----
+  await test('Pi and Oh My Pi: seeded sessions appear in the window and in hrm sessions and hrm usage', async () => {
+    const t = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    const usage = (i, o, cr) => ({ input: i, output: o, cacheRead: cr, cacheWrite: 0, totalTokens: i + o + cr, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+    const reply = (content, i, o, cr, began, model) => ({ role: 'assistant', content, api: 'anthropic-messages', provider: 'anthropic', model, usage: usage(i, o, cr), stopReason: 'stop', timestamp: began });
+    // Pi names the folder after the path with / \ : replaced by -, wrapped in --
+    const piDir = path.join(home, '.pi', 'agent', 'sessions', `--${repo.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`);
+    write(path.join(piDir, `${iso(t).replace(/[:.]/g, '-')}_pi-e2e-1.jsonl`), jl([
+      { type: 'session', version: 3, id: 'pi-e2e-1', timestamp: iso(t), cwd: repo },
+      { type: 'message', id: 'u1', parentId: null, timestamp: iso(t + 1000), message: { role: 'user', content: 'Rotate the Longhorn backup credentials', timestamp: t + 1000 } },
+      { type: 'message', id: 'a1', parentId: 'u1', timestamp: iso(t + 4000), message: reply([{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'kubectl -n longhorn get secret' } }], 700, 50, 100, t + 2000, 'claude-opus-5-5') },
+      { type: 'message', id: 'r1', parentId: 'a1', timestamp: iso(t + 4100), message: { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [{ type: 'text', text: 'minio-creds   Opaque' }], isError: false, timestamp: t + 4100 } },
+      { type: 'message', id: 'a2', parentId: 'r1', timestamp: iso(t + 6000), message: reply([{ type: 'text', text: 'Rotated.' }], 800, 20, 700, t + 5000, 'claude-opus-5-5') },
+    ]));
+    // Oh My Pi: a folder under home is `-<relative>`, and a 256-byte title slot comes before the header
+    const slot = (pad) => JSON.stringify({ type: 'title', v: 1, title: 'Pin the ArgoCD image', updatedAt: iso(t), pad });
+    const titleLine = slot(' '.repeat(255 - slot('').length)) + '\n';
+    assert.equal(Buffer.byteLength(titleLine), 256);
+    const ompDir = path.join(home, '.omp', 'agent', 'sessions', `-${path.relative(home, repo).replace(/[/\\:]/g, '-')}`);
+    write(path.join(ompDir, `${iso(t).replace(/[:.]/g, '-')}_omp-e2e-1.jsonl`), titleLine + jl([
+      { type: 'session', version: 3, id: 'omp-e2e-1', timestamp: iso(t), cwd: repo },
+      { type: 'message', id: 'u1', parentId: null, timestamp: iso(t + 1000), message: { role: 'user', content: 'Pin the ArgoCD image to a digest', timestamp: t + 1000 } },
+      { type: 'message', id: 'a1', parentId: 'u1', timestamp: iso(t + 3000), message: reply([{ type: 'text', text: 'Pinned.' }], 400, 30, 0, t + 1500, 'gpt-6') },
+      { type: 'model_usage', id: 'm1', parentId: 'a1', timestamp: iso(t + 3500), purpose: 'title', api: 'openai-completions', provider: 'openai', model: 'gpt-6', usage: usage(100, 8, 0), stopReason: 'stop' },
+    ]));
+    // the tools' homes exist now: init adds their main profiles, as the first run does for installed tools
+    hrm('init');
+    const hs = hrm('harnesses');
+    assert.ok(hs.includes('pi ') && hs.includes('Oh My Pi'), `hrm harnesses lists both:\n${hs}`);
+    const names = JSON.parse(hrm('list', '--json')).map((p) => p.name);
+    assert.ok(names.includes('pi-main') && names.includes('omp-main'), `main profiles added: ${names}`);
+    const u = JSON.parse(hrm('usage', '--json'));
+    assert.equal(u.by_profile['pi-main'].reduce((a, b) => a + b, 0), 1570, 'Pi: input + output of both replies');
+    assert.equal(u.by_profile['omp-main'].reduce((a, b) => a + b, 0), 538, 'Oh My Pi: the reply and the title call');
+    // the app rescans sessions on its own schedule; the listing is read until both are there (briefly)
+    let sessions = '';
+    for (let i = 0; i < 20 && !(sessions.includes('pi-e2e-1') && sessions.includes('omp-e2e-1')); i++) { if (i) await sleep(500); sessions = hrm('sessions'); }
+    const logFile = path.join(data, 'logs', 'harness-manager.log');
+    const diag = () => `${sessions} | accounts now: ${JSON.parse(hrm('list', '--json')).map((p) => p.name)} | log: ${fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n').slice(-6).join(' | ') : '-'}`.replace(/\s+/g, ' ');
+    assert.ok(sessions.includes('Rotate the Longhorn backup credentials') && sessions.includes('pi-e2e-1'), diag());
+    assert.ok(sessions.includes('Pin the ArgoCD image') && sessions.includes('omp-e2e-1'), diag());
+    await nav('#sessions');
+    await $('[data-testid=session-pi-e2e-1]');
+    await hasText('[data-testid=session-pi-e2e-1]', 'Rotate the Longhorn');
+    await hasText('[data-testid=session-omp-e2e-1]', 'Pin the ArgoCD image');
+    await nav('#accounts');
+    await $('[data-testid=row-pi-main]');
+    await $('[data-testid=row-omp-main]');
+    await shot('40-pi-omp');
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

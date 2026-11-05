@@ -6,7 +6,7 @@ import { esc, fmt, hm, when, dur, avatar, toolPill, toolIcon, ic, md, diffHtml, 
 import { sessionRow } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, cdot, cdots } from './computers.js';
 
-const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity' };
+const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
 // ---------- tags ----------
 // a tag's colour follows its place in the list (oldest first), so it never changes
@@ -628,7 +628,7 @@ view('prompts', async (sheet) => {
   const list = d.prompts.filter((p) => p.harness === promptTool);
   const live = await call('prompt_live', { harness: promptTool }).catch(() => null);
   const sel = list.find((p) => p.id === promptSel) || null;
-  const FILE = { claude: 'CLAUDE.md', codex: 'AGENTS.md', opencode: 'AGENTS.md', agy: 'GEMINI.md' };
+  const FILE = { claude: 'CLAUDE.md', codex: 'AGENTS.md', opencode: 'AGENTS.md', agy: 'GEMINI.md', pi: 'AGENTS.md', omp: 'AGENTS.md' };
   const tool = (hs.find((h) => h.id === promptTool) || { label: promptTool }).label;
   const first = (b) => (b || '').split('\n').map((l) => l.replace(/^#+\s*/, '').trim()).find(Boolean) || 'Empty';
   const where = live ? `Writes to <span class="mono">${esc(live.path)}</span> · every ${esc(tool)} account follows it` : `No profile of ${esc(tool)} yet`;

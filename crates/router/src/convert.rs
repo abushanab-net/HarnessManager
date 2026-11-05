@@ -116,8 +116,19 @@ pub fn openai_to_anthropic(resp: &Value, model: &str) -> Value {
         "id": format!("msg_{}", resp["id"].as_str().unwrap_or("hrm")),
         "type": "message", "role": "assistant", "model": model, "content": content,
         "stop_reason": stop_reason(choice["finish_reason"].as_str().unwrap_or("stop")), "stop_sequence": null,
-        "usage": {"input_tokens": resp["usage"]["prompt_tokens"].as_i64().unwrap_or(0), "output_tokens": resp["usage"]["completion_tokens"].as_i64().unwrap_or(0)}
+        "usage": usage_of(&resp["usage"])
     })
+}
+
+/// OpenAI usage -> Anthropic usage. `prompt_tokens` counts every input token; DeepSeek (and OpenAI's
+/// `prompt_tokens_details.cached_tokens`) say how many of them were cache hits, which Anthropic reports apart
+/// from `input_tokens`.
+fn usage_of(u: &Value) -> Value {
+    let prompt = u["prompt_tokens"].as_i64().unwrap_or(0);
+    let hit = u["prompt_cache_hit_tokens"].as_i64().or(u["prompt_tokens_details"]["cached_tokens"].as_i64()).unwrap_or(0).min(prompt);
+    let mut out = json!({"input_tokens": prompt - hit, "output_tokens": u["completion_tokens"].as_i64().unwrap_or(0)});
+    if hit > 0 { out["cache_read_input_tokens"] = json!(hit); }
+    out
 }
 
 /// Reasoning text, which OpenAI-style providers put beside the answer: `reasoning` (OpenRouter, Ollama)
@@ -141,8 +152,10 @@ pub struct StreamConv {
     /// arrive after the first chunk.
     tools: Vec<(u64, String, String, String)>,
     stop: String,
+    /// Every input token, cache hits included (what the log keeps).
     pub input_tokens: i64,
     pub output_tokens: i64,
+    cache_read: i64,
     done: bool,
     /// An error the provider reported inside the stream; the relay ends the answer with an error event.
     pub error: Option<String>,
@@ -150,7 +163,7 @@ pub struct StreamConv {
 
 impl StreamConv {
     pub fn new(model: &str) -> Self {
-        StreamConv { model: model.into(), started: false, open: None, open_kind: "", next: 0, tools: vec![], stop: "end_turn".into(), input_tokens: 0, output_tokens: 0, done: false, error: None }
+        StreamConv { model: model.into(), started: false, open: None, open_kind: "", next: 0, tools: vec![], stop: "end_turn".into(), input_tokens: 0, output_tokens: 0, cache_read: 0, done: false, error: None }
     }
 
     fn start(&mut self, out: &mut Vec<String>, id: &str) {
@@ -207,9 +220,11 @@ impl StreamConv {
             return out;
         }
         self.start(&mut out, chunk["id"].as_str().unwrap_or("hrm"));
-        if let Some(u) = chunk["usage"].as_object() {
-            self.input_tokens = u.get("prompt_tokens").and_then(|v| v.as_i64()).unwrap_or(self.input_tokens);
-            self.output_tokens = u.get("completion_tokens").and_then(|v| v.as_i64()).unwrap_or(self.output_tokens);
+        if chunk["usage"].is_object() {
+            let u = usage_of(&chunk["usage"]);
+            self.cache_read = u["cache_read_input_tokens"].as_i64().unwrap_or(0);
+            self.input_tokens = u["input_tokens"].as_i64().unwrap_or(0) + self.cache_read;
+            self.output_tokens = u["output_tokens"].as_i64().unwrap_or(self.output_tokens);
         }
         let Some(choice) = chunk["choices"].as_array().and_then(|c| c.first()) else { return out };
         let d = &choice["delta"];
@@ -248,7 +263,7 @@ impl StreamConv {
         self.flush_tools(&mut out);
         self.close(&mut out);
         out.push(sse("message_delta", json!({"type": "message_delta", "delta": {"stop_reason": self.stop, "stop_sequence": null},
-            "usage": {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens}})));
+            "usage": {"input_tokens": self.input_tokens - self.cache_read, "output_tokens": self.output_tokens, "cache_read_input_tokens": self.cache_read}})));
         out.push(sse("message_stop", json!({"type": "message_stop"})));
         out
     }
@@ -296,6 +311,23 @@ mod tests {
         assert_eq!(a["content"][1]["input"]["p"], 1);
         assert_eq!(a["stop_reason"], "tool_use");
         assert_eq!(a["usage"]["output_tokens"], 3);
+    }
+
+    #[test]
+    fn deepseek_cache_hits_are_reported_apart_from_fresh_input() {
+        let r = json!({"id": "d1", "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 20, "prompt_cache_hit_tokens": 800, "prompt_cache_miss_tokens": 200}});
+        let a = openai_to_anthropic(&r, "deepseek-v4-pro");
+        assert_eq!(a["usage"], json!({"input_tokens": 200, "output_tokens": 20, "cache_read_input_tokens": 800}));
+        let mut c = StreamConv::new("deepseek-flash");
+        c.feed(&json!({"id": "s", "choices": [{"delta": {"content": "hi"}}]}));
+        c.feed(&json!({"id": "s", "choices": [], "usage": {"prompt_tokens": 50, "completion_tokens": 3, "prompt_cache_hit_tokens": 40, "prompt_cache_miss_tokens": 10}}));
+        let last = c.finish();
+        assert_eq!((c.input_tokens, c.output_tokens), (50, 3), "the log keeps every input token");
+        assert!(last.iter().any(|e| e.contains("\"input_tokens\":10") && e.contains("\"cache_read_input_tokens\":40")), "{last:?}");
+        // a provider without cache fields: nothing changes
+        let plain = openai_to_anthropic(&json!({"choices": [{"message": {"content": "x"}}], "usage": {"prompt_tokens": 7, "completion_tokens": 1}}), "m");
+        assert_eq!(plain["usage"], json!({"input_tokens": 7, "output_tokens": 1}));
     }
 
     #[test]

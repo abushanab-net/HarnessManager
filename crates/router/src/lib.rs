@@ -221,7 +221,9 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
             let out = if p.format == "openai" { convert::openai_to_anthropic(&v, &model) } else { v };
             // not streamed: the first chunk is the whole answer
             let ms = started.elapsed().as_millis() as i64;
-            log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), out["usage"]["input_tokens"].as_i64().unwrap_or(0), out["usage"]["output_tokens"].as_i64().unwrap_or(0));
+            // shortcut: router_log has no cache column, so cache hits (DeepSeek) are counted into input; split them when it gets one
+            let input = out["usage"]["input_tokens"].as_i64().unwrap_or(0) + out["usage"]["cache_read_input_tokens"].as_i64().unwrap_or(0);
+            log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), input, out["usage"]["output_tokens"].as_i64().unwrap_or(0));
             Json(out).into_response()
         };
     }
