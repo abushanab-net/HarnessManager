@@ -160,6 +160,7 @@ impl Harness for Codex {
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
         let mut stored = 0;
+        let prices = crate::pricing::load(ctx);
         let files = self.rollouts(ctx, p);
         each_file_parallel(&files, |f| -> Result<Option<(Vec<UsageRow>, String, i64, u64)>> {
             let mut rows = vec![];
@@ -226,7 +227,7 @@ impl Harness for Codex {
             match r {
                 // rows first, then the cursor: an interrupted import reads this file again
                 Ok(Some((rows, key, mtime, len))) => {
-                    stored += ctx.db.insert_usage(&rows)?;
+                    stored += ctx.db.insert_usage(&rows, &prices)?;
                     ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")?;
                 }
                 Ok(None) => {}

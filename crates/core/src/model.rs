@@ -120,6 +120,13 @@ pub struct SessionMeta {
     pub tags: Vec<String>,
     #[serde(default)]
     pub project_tags: Vec<String>,
+    /// The computer it ran on, by id and name; `open_elsewhere`: a console on another computer is in it now.
+    #[serde(default)]
+    pub device: String,
+    #[serde(default)]
+    pub device_name: String,
+    #[serde(default)]
+    pub open_elsewhere: bool,
 }
 
 /// A transcript as typed blocks, grouped into turns (one user prompt and the answer to it).

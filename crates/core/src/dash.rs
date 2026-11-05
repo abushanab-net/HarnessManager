@@ -64,39 +64,48 @@ pub fn spent_today(ctx: &Ctx, profile: &str) -> Result<f64> {
     Ok(rows.iter().map(|(m, i, o)| crate::pricing::find(&prices, m).map(|p| p.cost(*i, *o, 0, 0)).unwrap_or(0.0)).sum::<f64>() + 0.0)
 }
 
-/// Everything the Overview shows for the last `hours`, optionally for one tool.
-pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>) -> Result<Value> {
+/// Everything the Overview shows for the last `hours`, optionally for one tool; `scope` "here" keeps to this computer.
+pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&str>) -> Result<Value> {
     let now = now_ms();
     let span = hours.max(1) * 3_600_000;
     let since = now - span;
-    let prices = crate::pricing::load(ctx);
     let reg = ctx.registry()?;
     let billed: HashSet<&str> = reg.profiles.iter().filter(|p| p.kind != Kind::Subscription).map(|p| p.name.as_str()).collect();
     let caps = caps(ctx, &reg);
     let h = harness.unwrap_or("");
-    type Row = (i64, String, String, String, i64, i64, i64, i64, Option<i64>);
+    let dev = if scope == Some("here") { ctx.db.device.as_str() } else { "" };
+    type Row = (i64, String, String, String, i64, i64, i64, i64, Option<i64>, Option<f64>, String);
     let rows: Vec<Row> = ctx.db.with(|c| {
-        let mut st = c.prepare("select ts, model, profile, project, input, output, cache_read, cache_write, ttft_ms from usage where ts >= ?1 and (?2 = '' or harness = ?2)")?;
-        let v = st.query_map(rusqlite::params![since - span, h], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))?
+        let mut st = c.prepare("select ts, model, profile, project, input, output, cache_read, cache_write, ttft_ms, cost_usd, device from usage where ts >= ?1 and (?2 = '' or harness = ?2) and (?3 = '' or device = ?3)")?;
+        let v = st.query_map(rusqlite::params![since - span, h, dev], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?)))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
     let (mut cur, mut prev) = (Agg::default(), Agg::default());
     let mut spark = vec![Agg::default(); BUCKETS];
     let mut mix: HashMap<(&str, String), (i64, f64)> = HashMap::new();
-    for (ts, model, profile, project, i, o, cr, cw, ttft) in &rows {
-        let cost = crate::pricing::find(&prices, model).map(|p| p.cost(*i, *o, *cr, *cw));
+    let mut by_device: HashMap<&str, Agg> = HashMap::new();
+    for (ts, model, profile, project, i, o, cr, cw, ttft, cost, device) in &rows {
         let b = billed.contains(profile.as_str());
-        if *ts < since { prev.add(cost, b, *i, *o, *cr, *cw, *ttft); continue; }
-        cur.add(cost, b, *i, *o, *cr, *cw, *ttft);
+        if *ts < since { prev.add(*cost, b, *i, *o, *cr, *cw, *ttft); continue; }
+        cur.add(*cost, b, *i, *o, *cr, *cw, *ttft);
+        by_device.entry(device.as_str()).or_default().add(*cost, b, *i, *o, *cr, *cw, *ttft);
         let k = (((ts - since) * BUCKETS as i64) / span).clamp(0, BUCKETS as i64 - 1) as usize;
-        spark[k].add(cost, b, *i, *o, *cr, *cw, *ttft);
+        spark[k].add(*cost, b, *i, *o, *cr, *cw, *ttft);
         for key in [("account", profile.clone()), ("model", model.clone()), ("project", project_name(project))] {
             let e = mix.entry(key).or_default();
             e.0 += i + o + cr + cw;
             e.1 += cost.unwrap_or(0.0);
         }
     }
+    // the four tiles split by computer: [{id, name, value}] each, biggest first
+    let names = crate::journal::device_names(ctx);
+    let mut devs: Vec<(&str, Agg)> = by_device.into_iter().collect();
+    devs.sort_by_key(|(_, a)| std::cmp::Reverse(a.tokens));
+    let tile = |f: &dyn Fn(&Agg) -> Value| -> Value {
+        json!({"by_device": devs.iter().map(|(id, a)| json!({"id": id, "name": names.get(*id).cloned().unwrap_or_else(|| id.to_string()), "value": f(a)})).collect::<Vec<_>>()})
+    };
+    let tiles = json!({"tokens": tile(&|a| json!(a.tokens)), "requests": tile(&|a| json!(a.requests)), "cost": tile(&|a| json!(a.priced.then_some(a.cost))), "hit": tile(&|a| json!(a.hit()))});
 
     // time to first reply: 16 bars from 0 to a little past the goal or the p95, whichever is later
     let goal = ctx.settings.first_reply_goal_s.max(1) as i64 * 1000;
@@ -125,6 +134,7 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>) -> Result<Value> 
         },
         "latency": {"hist": hist, "top_ms": top, "goal_ms": goal, "within": within},
         "mix": mixes,
+        "tiles": tiles,
         "forecast": forecasts(ctx, now)?,
         "live": live(ctx, now)?,
         "events": ctx.db.events(8)?,
@@ -156,20 +166,19 @@ pub fn router_stats(ctx: &Ctx, now: i64) -> Result<Value> {
 /// One account's last 7 days (tokens, cache share, cost at list prices, reply timing, busiest project) and its
 /// tokens per day over 30 days, for its own page.
 pub fn account_stats(ctx: &Ctx, profile: &str) -> Result<Value> {
-    let prices = crate::pricing::load(ctx);
     let days = crate::service::last_days(30);
     let week = &days[days.len() - 7];
-    type Row = (String, String, String, i64, i64, i64, i64, Option<i64>);
+    type Row = (String, String, i64, i64, i64, i64, Option<i64>, Option<f64>);
     let rows: Vec<Row> = ctx.db.with(|c| {
-        let mut st = c.prepare("select day, model, project, input, output, cache_read, cache_write, ttft_ms from usage where profile = ?1 and day >= ?2")?;
+        let mut st = c.prepare("select day, project, input, output, cache_read, cache_write, ttft_ms, cost_usd from usage where profile = ?1 and day >= ?2")?;
         let v = st.query_map(rusqlite::params![profile, days[0]], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
     let mut a = Agg::default();
     let (mut per_day, mut cost30, mut projects) = (vec![0i64; days.len()], 0.0, HashMap::<String, i64>::new());
-    for (day, model, project, i, o, cr, cw, ttft) in &rows {
+    for (day, project, i, o, cr, cw, ttft, cost) in &rows {
         let t = i + o + cr + cw;
-        let cost = crate::pricing::find(&prices, model).map(|p| p.cost(*i, *o, *cr, *cw));
+        let cost = *cost;
         cost30 += cost.unwrap_or(0.0);
         if let Some(k) = days.iter().position(|d| d == day) { per_day[k] += t; }
         if day >= week {
@@ -185,14 +194,14 @@ pub fn account_stats(ctx: &Ctx, profile: &str) -> Result<Value> {
 
 /// One session's numbers from the usage log: share read from cache, first-reply p50, cost at list prices.
 pub fn session_stats(ctx: &Ctx, profile: &str, session: &str) -> Result<Value> {
-    let prices = crate::pricing::load(ctx);
-    let rows: Vec<(String, i64, i64, i64, i64, Option<i64>)> = ctx.db.with(|c| {
-        let mut st = c.prepare("select model, input, output, cache_read, cache_write, ttft_ms from usage where profile = ?1 and session_id = ?2")?;
+    type Row = (Option<f64>, i64, i64, i64, i64, Option<i64>);
+    let rows: Vec<Row> = ctx.db.with(|c| {
+        let mut st = c.prepare("select cost_usd, input, output, cache_read, cache_write, ttft_ms from usage where profile = ?1 and session_id = ?2")?;
         let v = st.query_map(rusqlite::params![profile, session], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
     let mut a = Agg::default();
-    for (m, i, o, cr, cw, t) in &rows { a.add(crate::pricing::find(&prices, m).map(|p| p.cost(*i, *o, *cr, *cw)), false, *i, *o, *cr, *cw, *t); }
+    for (cost, i, o, cr, cw, t) in &rows { a.add(*cost, false, *i, *o, *cr, *cw, *t); }
     Ok(a.json())
 }
 
@@ -232,20 +241,35 @@ fn forecast(pts: &[(i64, f64, Option<i64>)], now: i64) -> Option<Value> {
     Some(json!({"at_reset": at_reset, "runs_out": runs_out, "per_hour": rate * 3_600_000.0}))
 }
 
-/// The last five minutes: tokens per account and per router provider, and the circuit breakers.
-fn live(ctx: &Ctx, now: i64) -> Result<Value> {
+/// The last five minutes: tokens per account (here and on the other computers, from their presence) and per
+/// router provider, the circuit breakers, and what runs on the other computers.
+pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
+    let peers: Vec<crate::journal::Peer> = crate::journal::peers(ctx).unwrap_or_default().into_iter()
+        .filter(|p| p.presence["at"].as_i64().map(|t| now - t < LIVE_MS).unwrap_or(false)).collect();
+    let running: Vec<Value> = peers.iter().flat_map(|p| p.presence["running"].as_array().cloned().unwrap_or_default().into_iter().map(|mut r| {
+        r["device"] = json!(p.id);
+        r["device_name"] = json!(p.name);
+        r
+    })).collect();
     ctx.db.with(|c| {
         let since = now - LIVE_MS;
-        let mut st = c.prepare("select profile, sum(input + output + cache_read + cache_write), count(*) from usage where ts >= ? group by profile")?;
-        let accounts: serde_json::Map<String, Value> = st.query_map([since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
+        let mut st = c.prepare("select profile, sum(input + output + cache_read + cache_write), count(*) from usage where ts >= ? and device = ? group by profile")?;
+        let mut accounts: serde_json::Map<String, Value> = st.query_map(rusqlite::params![since, ctx.db.device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
             .filter_map(|r| r.ok()).map(|(p, t, n)| (p, json!({"tokens": t, "requests": n}))).collect();
+        for p in &peers {
+            for (name, a) in p.presence["accounts"].as_object().into_iter().flatten() {
+                let e = accounts.entry(name.clone()).or_insert(json!({"tokens": 0, "requests": 0}));
+                e["tokens"] = json!(e["tokens"].as_i64().unwrap_or(0) + a["tokens_5m"].as_i64().unwrap_or(0));
+                e["requests"] = json!(e["requests"].as_i64().unwrap_or(0) + a["requests_5m"].as_i64().unwrap_or(0));
+            }
+        }
         let mut st = c.prepare("select provider, sum(input + output), count(*), sum(status <> 200), avg(first_ms) from router_log where ts >= ? group by provider")?;
         let providers: serde_json::Map<String, Value> = st.query_map([since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<f64>>(4)?)))?
             .filter_map(|r| r.ok()).map(|(p, t, n, e, f)| (p, json!({"tokens": t, "requests": n, "errors": e, "first_ms": f.map(|x| x.round() as i64)}))).collect();
         let mut st = c.prepare("select substr(k, 9), v from kv where k like 'breaker:%'")?;
         let breakers: serde_json::Map<String, Value> = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok()).filter_map(|(p, v)| serde_json::from_str(&v).ok().map(|v| (p, v))).collect();
-        Ok(json!({"window_ms": LIVE_MS, "accounts": accounts, "providers": providers, "breakers": breakers}))
+        Ok(json!({"window_ms": LIVE_MS, "accounts": accounts, "providers": providers, "breakers": breakers, "running": running}))
     })
 }
 

@@ -72,6 +72,29 @@ pub fn read_json(path: &Path) -> Option<serde_json::Value> {
 
 pub fn now_ms() -> i64 { chrono::Utc::now().timestamp_millis() }
 
+/// A random id in the UUID v4 form, from the OS-seeded hasher (no extra dependency needed for an id).
+pub fn uuid4() -> String {
+    let h = crate::service::random_token();
+    let mut b: Vec<u8> = hex::decode(&h[..32]).unwrap_or_default();
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let x = hex::encode(b);
+    format!("{}-{}-{}-{}-{}", &x[..8], &x[8..12], &x[12..16], &x[16..20], &x[20..])
+}
+
+/// This computer's name, as the OS knows it.
+pub fn hostname() -> String {
+    std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).ok().filter(|s| !s.trim().is_empty())
+        .or_else(|| std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "this computer".into())
+}
+
+/// The SHA-256 of `bytes`, as hex.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(bytes))
+}
+
 /// Find an executable on PATH, honouring PATHEXT on Windows (claude, codex and opencode are `.cmd` shims).
 pub fn which(name: &str) -> Option<PathBuf> {
     let p = Path::new(name);

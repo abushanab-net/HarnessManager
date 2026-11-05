@@ -10,6 +10,10 @@ use crate::model::{Quota, SessionMeta, UsageRow};
 
 pub struct Db {
     conn: Mutex<Connection>,
+    /// This computer's id: every row written here carries it.
+    pub device: String,
+    /// Sync is on: every change is also written to the outbox for the other computers.
+    pub journal: bool,
 }
 
 const SCHEMA: &str = r#"
@@ -33,10 +37,59 @@ create index if not exists events_ts on events(ts);
 create table if not exists quota_hist(ts integer not null, profile text not null, tier text not null, used real not null, resets_at integer);
 create index if not exists quota_hist_p on quota_hist(profile, tier, ts);
 create table if not exists tags(kind text not null, key text not null, tag text not null, primary key(kind, key, tag));
+create table if not exists outbox(seq integer primary key autoincrement, ts integer not null, op text not null, key text not null, data text not null);
+create index if not exists outbox_key on outbox(op, key);
+create table if not exists peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer,
+  last_seq integer, applied_seq integer, roots text, transport text, presence text);
+create table if not exists cursors2(device_id text not null, incarnation text not null, seq integer not null, primary key(device_id, incarnation));
 "#;
 
+/// A usage row's insert: the same request from two logs (a resumed session repeats earlier messages) keeps the
+/// copy with the most output, then the earliest, so the result is the same whichever file is read first. An
+/// equal copy with a longer timed reply (a later part of the same answer) brings its timings.
+const USAGE_UPSERT: &str = "insert into usage(request_id, profile, harness, ts, day, model, project, session_id, input, output,
+    cache_read, cache_write, ttft_ms, gen_ms, device, cost_usd, price_rev) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(request_id) do update set
+    profile=excluded.profile, harness=excluded.harness, ts=excluded.ts, day=excluded.day, model=excluded.model,
+    project=excluded.project, session_id=excluded.session_id, input=excluded.input, output=excluded.output,
+    cache_read=excluded.cache_read, cache_write=excluded.cache_write, ttft_ms=excluded.ttft_ms, gen_ms=excluded.gen_ms,
+    device=excluded.device, cost_usd=excluded.cost_usd, price_rev=excluded.price_rev
+    where (-excluded.output, excluded.ts, excluded.session_id) < (-usage.output, usage.ts, usage.session_id)
+       or (excluded.output = usage.output and excluded.ts = usage.ts and coalesce(excluded.gen_ms, -1) > coalesce(usage.gen_ms, -1))";
+
+/// The calendar day of an instant in this computer's zone: every computer buckets a row by its own clock.
+pub fn local_day(ts: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ts).map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()).unwrap_or_default()
+}
+
+/// Store one usage row (ours or a merged one) with its frozen cost; 1 when it was written, 0 when an equal or better copy was there.
+pub fn upsert_usage(c: &Connection, r: &UsageRow, device: &str, cost: Option<f64>, rev: Option<&str>) -> rusqlite::Result<usize> {
+    c.execute(USAGE_UPSERT, params![r.request_id, r.profile, r.harness, r.ts, local_day(r.ts), r.model, r.project, r.session_id,
+        r.input, r.output, r.cache_read, r.cache_write, r.ttft_ms, r.gen_ms, device, cost, rev])
+}
+
+/// A limit reading into the history, when it differs from the last one of that limit; true when it was new.
+pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> rusqlite::Result<bool> {
+    let last: Option<(f64, Option<i64>)> = c.query_row("select used, resets_at from quota_hist where profile=? and tier=? order by ts desc limit 1",
+        params![profile, tier], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    if last == Some((used, resets_at)) { return Ok(false); }
+    c.execute("insert into quota_hist values(?,?,?,?,?)", params![at, profile, tier, used, resets_at])?;
+    c.execute("delete from quota_hist where ts < ?", [at - 60 * 86_400_000])?;
+    Ok(true)
+}
+
+/// The journal key of a session: `<harness>/<profile>/<id>`.
+pub fn session_key(m: &SessionMeta) -> String { format!("{}/{}/{}", m.harness, m.profile, m.id) }
+
+/// A session as the other computers know it: by its journal key, newest `last_active_at` wins.
+pub fn upsert_session(c: &Connection, key: &str, m: &SessionMeta, device: &str) -> rusqlite::Result<usize> {
+    c.execute("insert into sessions(key, profile, harness, path, mtime, len, json, device) values(?,?,?,?,?,0,?,?)
+        on conflict(key) do update set profile=excluded.profile, harness=excluded.harness, path=excluded.path, mtime=excluded.mtime, json=excluded.json, device=excluded.device
+        where excluded.mtime > sessions.mtime",
+        params![key, m.profile, m.harness, m.source_path, m.last_active_at, serde_json::to_string(m).unwrap_or_default(), device])
+}
+
 impl Db {
-    pub fn open(path: &Path) -> Result<Db> {
+    pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -58,7 +111,37 @@ impl Db {
         if !done {
             conn.execute_batch("delete from cursors where path like '%rollout-%'; insert or replace into kv values('migrated:codex-timing', '1');")?;
         }
-        Ok(Db { conn: Mutex::new(conn) })
+        // across computers: every row says which computer it ran on, and its cost is frozen at the price of its day
+        let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'device'")?.exists([])?;
+        if !has {
+            conn.execute_batch("alter table usage add column device text not null default ''; alter table usage add column cost_usd real;
+                alter table usage add column price_rev text; alter table sessions add column device text not null default '';")?;
+        }
+        conn.execute_batch("create index if not exists usage_unpriced on usage(model) where cost_usd is null;")?;
+        let done: bool = conn.prepare("select 1 from kv where k = 'migrated:device'")?.exists([])?;
+        if !done {
+            let n = conn.execute("update usage set device = ?1 where device = ''", [device])? + conn.execute("update sessions set device = ?1 where device = ''", [device])?;
+            conn.execute("insert or replace into kv values('migrated:device', '1')", [])?;
+            if n > 0 { crate::log::info(&format!("{n} rows stamped as this computer's ({device})")); }
+        }
+        Ok(Db { conn: Mutex::new(conn), device: device.into(), journal })
+    }
+
+    /// Rows without a cost (from before costs were frozen, or a catalog that lacked their model) priced now, by model.
+    pub fn price_unpriced(&self, prices: &crate::pricing::Prices) -> Result<usize> {
+        if prices.is_empty() { return Ok(0); }
+        let rev = crate::pricing::rev(prices);
+        self.with(|c| {
+            let models: Vec<String> = c.prepare("select distinct model from usage where cost_usd is null")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            let mut n = 0;
+            for m in models {
+                let Some(p) = crate::pricing::find(prices, &m) else { continue };
+                n += c.execute("update usage set cost_usd = (input * ?1 + output * ?2 + cache_read * ?3 + cache_write * ?4) / 1e6, price_rev = ?5 where model = ?6 and cost_usd is null",
+                    params![p.input, p.output, p.cache_read, p.cache_write, rev, m])?;
+            }
+            if n > 0 { crate::log::info(&format!("{n} usage rows priced at list prices ({rev})")); }
+            Ok(n)
+        })
     }
 
     pub fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
@@ -66,32 +149,47 @@ impl Db {
         f(&mut c)
     }
 
-    pub fn insert_usage(&self, rows: &[UsageRow]) -> Result<usize> {
+    /// Store usage rows read here, each with its cost at today's list prices (frozen; `price_rev` names the table).
+    pub fn insert_usage(&self, rows: &[UsageRow], prices: &crate::pricing::Prices) -> Result<usize> {
+        let rev = (!prices.is_empty()).then(|| crate::pricing::rev(prices));
         self.with(|c| {
             let tx = c.transaction()?;
             let mut n = 0;
-            {
-                // The same request can sit in two logs (a resumed session repeats earlier messages), sometimes with
-                // a partial output count. Keep the copy with the most output, then the earliest, so the result is
-                // the same whichever file is read first (files are read in parallel). An equal copy with a longer
-                // timed reply (a later part of the same answer) brings its timings.
-                let mut st = tx.prepare("insert into usage(request_id, profile, harness, ts, day, model, project, session_id, input, output,
-                    cache_read, cache_write, ttft_ms, gen_ms) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(request_id) do update set
-                    profile=excluded.profile, harness=excluded.harness, ts=excluded.ts, day=excluded.day, model=excluded.model,
-                    project=excluded.project, session_id=excluded.session_id, input=excluded.input, output=excluded.output,
-                    cache_read=excluded.cache_read, cache_write=excluded.cache_write, ttft_ms=excluded.ttft_ms, gen_ms=excluded.gen_ms
-                    where (-excluded.output, excluded.ts, excluded.session_id) < (-usage.output, usage.ts, usage.session_id)
-                       or (excluded.output = usage.output and excluded.ts = usage.ts and coalesce(excluded.gen_ms, -1) > coalesce(usage.gen_ms, -1))")?;
-                for r in rows {
-                    let day = chrono::DateTime::from_timestamp_millis(r.ts)
-                        .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
-                        .unwrap_or_default();
-                    n += st.execute(params![r.request_id, r.profile, r.harness, r.ts, day, r.model, r.project, r.session_id,
-                        r.input, r.output, r.cache_read, r.cache_write, r.ttft_ms, r.gen_ms])?;
+            for r in rows {
+                let cost = crate::pricing::find(prices, &r.model).map(|p| p.cost(r.input, r.output, r.cache_read, r.cache_write));
+                let rev = cost.and(rev.as_deref());
+                if upsert_usage(&tx, r, &self.device, cost, rev)? == 0 { continue; }
+                n += 1;
+                if self.journal {
+                    let mut data = serde_json::to_value(r)?;
+                    data["cost_usd"] = serde_json::json!(cost);
+                    data["price_rev"] = serde_json::json!(rev);
+                    crate::journal::record(&tx, "usage", &r.request_id, &data)?;
                 }
             }
             tx.commit()?;
             Ok(n)
+        })
+    }
+
+    /// A session of this computer as the journal carries it (project resolved); recorded when new or more recent.
+    pub fn journal_session(&self, m: &SessionMeta) -> Result<()> {
+        if !self.journal { return Ok(()); }
+        let key = session_key(m);
+        self.with(|c| {
+            if upsert_session(c, &key, m, &self.device)? == 0 { return Ok(()); }
+            crate::journal::record(c, "session", &key, &serde_json::to_value(m)?)?;
+            Ok(())
+        })
+    }
+
+    /// Sessions merged from the other computers, with the computer each ran on.
+    pub fn remote_sessions(&self) -> Result<Vec<(String, SessionMeta)>> {
+        self.with(|c| {
+            let mut st = c.prepare("select device, json from sessions where device <> '' and device <> ?")?;
+            let v = st.query_map([&self.device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten()
+                .filter_map(|(d, j)| serde_json::from_str(&j).ok().map(|m| (d, m))).collect();
+            Ok(v)
         })
     }
 
@@ -133,8 +231,8 @@ impl Db {
 
     pub fn put_session(&self, key: &str, m: &SessionMeta, mtime: i64, len: i64) -> Result<()> {
         self.with(|c| {
-            c.execute("insert or replace into sessions values(?,?,?,?,?,?,?)",
-                params![key, m.profile, m.harness, m.source_path, mtime, len, serde_json::to_string(m)?])?;
+            c.execute("insert or replace into sessions(key, profile, harness, path, mtime, len, json, device) values(?,?,?,?,?,?,?,?)",
+                params![key, m.profile, m.harness, m.source_path, mtime, len, serde_json::to_string(m)?, self.device])?;
             Ok(())
         })
     }
@@ -174,10 +272,12 @@ impl Db {
             let tx = c.transaction()?;
             tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
             for t in tags { tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t.as_str()])?; }
+            if self.journal { crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?; }
             tx.commit()?;
             Ok(())
         })
     }
+
 
     /// Every tag with how many sessions and projects carry it, oldest first (so each keeps its colour).
     pub fn tag_list(&self) -> Result<Vec<(String, i64, i64)>> {
@@ -191,8 +291,16 @@ impl Db {
     /// Rename a tag everywhere; an empty new name deletes it.
     pub fn tag_rename(&self, from: &str, to: &str) -> Result<()> {
         self.with(|c| {
-            if to.is_empty() { c.execute("delete from tags where tag=?", [from])?; }
-            else { c.execute("insert or ignore into tags select kind, key, ?2 from tags where tag=?1", [from, to])?; c.execute("delete from tags where tag=?", [from])?; }
+            let tx = c.transaction()?;
+            // the journal carries whole tag lists per key: note which keys change before the old tag is gone
+            let keys: Vec<(String, String)> = if self.journal { tx.prepare("select distinct kind, key from tags where tag=?")?.query_map([from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()? } else { vec![] };
+            if to.is_empty() { tx.execute("delete from tags where tag=?", [from])?; }
+            else { tx.execute("insert or ignore into tags select kind, key, ?2 from tags where tag=?1", [from, to])?; tx.execute("delete from tags where tag=?", [from])?; }
+            for (kind, key) in keys {
+                let tags: Vec<String> = tx.prepare("select tag from tags where kind=? and key=? order by rowid")?.query_map([&kind, &key], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?;
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -243,11 +351,8 @@ impl Db {
     /// A limit reading, kept only when it differs from the last one of that limit.
     pub fn quota_point(&self, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> Result<()> {
         self.with(|c| {
-            let last: Option<(f64, Option<i64>)> = c.query_row("select used, resets_at from quota_hist where profile=? and tier=? order by ts desc limit 1",
-                params![profile, tier], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-            if last != Some((used, resets_at)) {
-                c.execute("insert into quota_hist values(?,?,?,?,?)", params![at, profile, tier, used, resets_at])?;
-                c.execute("delete from quota_hist where ts < ?", [at - 60 * 86_400_000])?;
+            if quota_point_in(c, profile, tier, used, resets_at, at)? && self.journal {
+                crate::journal::record(c, "quota", &format!("{profile}/{tier}"), &serde_json::json!({"used": used, "resets_at": resets_at, "at": at}))?;
             }
             Ok(())
         })
@@ -273,12 +378,16 @@ impl Db {
         })
     }
 
+    /// Forget an account's history read here; what the other computers read of it stays theirs.
     pub fn forget_profile(&self, profile: &str) -> Result<()> {
         self.with(|c| {
             let tx = c.transaction()?;
-            for t in ["usage", "cursors", "quota", "sessions"] {
-                tx.execute(&format!("delete from {t} where profile=?"), [profile])?;
+            if self.journal {
+                let keys: Vec<String> = tx.prepare("select key from sessions where profile=? and device=? and key like '%/%'")?.query_map([profile, &self.device], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                for k in keys { crate::journal::record(&tx, "tombstone", &format!("session/{k}"), &serde_json::json!({}))?; }
             }
+            for t in ["cursors", "quota"] { tx.execute(&format!("delete from {t} where profile=?"), [profile])?; }
+            for t in ["usage", "sessions"] { tx.execute(&format!("delete from {t} where profile=? and device=?"), [profile, &self.device])?; }
             tx.commit()?;
             Ok(())
         })
