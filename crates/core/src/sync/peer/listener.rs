@@ -79,6 +79,7 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, port: u16
         .route("/v1/chunks/{origin}", get(chunks))
         .route("/v1/chunk/{origin}/{file}", get(chunk))
         .route("/v1/presence", get(presence))
+        .route("/v1/transcript/{origin}/{harness}/{profile}/{id}", get(transcript))
         .with_state(ctx);
     let _in_runtime = rt.enter();
     let server = axum_server::from_tcp_rustls(l, axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(cfg)))?.handle(handle.clone());
@@ -126,6 +127,23 @@ async fn chunk(State(ctx): State<Arc<Ctx>>, Path((origin, file)): Path<(String, 
     blocking(move || match store::chunk(&ctx, &origin, &file) {
         Ok(b) => (StatusCode::OK, b).into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
+    }).await
+}
+
+/// A transcript as it is carried (zstd): this computer's own from the tool's file, another origin's from the
+/// copy fetched here. The asker checks the sha256 against the journal entry.
+async fn transcript(State(ctx): State<Arc<Ctx>>, Path((origin, harness, profile, id)): Path<(String, String, String, String)>) -> Response {
+    blocking(move || {
+        let r = if origin == ctx.settings.device_id { crate::sync::transcripts::own_zst(&ctx, &harness, &profile, &id) } else {
+            let key = format!("{harness}/{profile}/{id}");
+            ctx.db.with(|c| { crate::transcripts::tables(c)?; Ok(c.query_row("select file from transcripts where device=? and key=? and fetched_at is not null", [&origin, &key], |r| r.get::<_, String>(0))?) })
+                .and_then(|file| Ok(std::fs::read(crate::transcripts::local_path(&ctx, &origin, &harness, &profile, &file))?))
+                .and_then(|plain| Ok(zstd::encode_all(&plain[..], 3)?))
+        };
+        match r {
+            Ok(b) => (StatusCode::OK, b).into_response(),
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        }
     }).await
 }
 

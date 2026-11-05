@@ -239,3 +239,45 @@ fn a_tampered_chunk_is_skipped() {
     let out: i64 = b.ctx.db.with(|c| Ok(c.query_row("select output from usage", [], |r| r.get(0))?)).unwrap();
     assert_eq!(out, 10);
 }
+
+/// Phase 5's follow-up for phase 3: a transcript is fetched from a connected computer before the folder.
+#[test]
+fn a_transcript_comes_from_a_connected_peer_before_the_folder() {
+    let t = tempfile::tempdir().unwrap();
+    let shared = t.path().join("shared");
+    std::fs::create_dir_all(&shared).unwrap();
+    let (mut a, mut b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    for c in [&mut a, &mut b] {
+        let mut x = Ctx::open_at(&c.ctx.data, &c.ctx.home).unwrap();
+        x.settings.sync_mode = "folder".into();
+        x.settings.sync_folder = shared.display().to_string();
+        x.save_settings().unwrap();
+        c.ctx = Arc::new(Ctx::open_at(&c.ctx.data, &c.ctx.home).unwrap());
+    }
+    let mut reg = a.ctx.registry().unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+    a.ctx.save_registry(&reg).unwrap();
+    let cwd = t.path().join("app");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let f = a.ctx.home.join(".claude").join("projects").join(crate::harness::claude::project_dir_name(&cwd)).join("s1.jsonl");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, format!("{}\n", json!({"type": "user", "sessionId": "s1", "cwd": cwd, "timestamp": "2026-11-05T10:00:00.000Z", "message": {"role": "user", "content": "fix the build"}}))).unwrap();
+    let ts = crate::harness::parse::ts_ms("2026-11-05T10:00:00.000Z");
+    a.ctx.db.journal_session(&crate::model::SessionMeta { harness: "claude".into(), profile: "claude-main".into(), id: "s1".into(), title: "fix the build".into(), cwd: cwd.display().to_string(), started_at: ts, last_active_at: ts,
+        project_key: "k".into(), project_name: "r".into(), source_path: f.display().to_string(), ..Default::default() }).unwrap();
+    journal::round(&a.ctx).unwrap();
+    journal::round(&b.ctx).unwrap();
+    assert_eq!(count(&b.ctx, "select count(*) from transcripts"), 1);
+    // the folder's copy is gone (not synced yet): A answers over the direct connection with the same bytes
+    std::fs::remove_dir_all(shared.join("devices").join(&a.ctx.settings.device_id).join("transcripts")).unwrap();
+    let fetched = crate::transcripts::fetch(&b.ctx, &a.ctx.settings.device_id, "claude", "claude-main", "s1").unwrap();
+    assert_eq!(std::fs::read(&fetched.path).unwrap(), std::fs::read(&f).unwrap());
+    // and B, holding the fetched copy, serves it to a third computer the same way
+    let c = computer(t.path(), "C");
+    pair(&b, &c);
+    let b_cert: String = c.ctx.db.with(|x| Ok(x.query_row("select cert_pem from peers where device_id=?", [&b.ctx.settings.device_id], |r| r.get(0))?)).unwrap();
+    let bytes = Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes(&format!("/v1/transcript/{}/claude/claude-main/s1", a.ctx.settings.device_id)).unwrap();
+    assert_eq!(zstd::decode_all(&bytes[..]).unwrap(), std::fs::read(&f).unwrap());
+    assert!(Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes("/v1/transcript/nobody/claude/claude-main/s1").is_err());
+}
