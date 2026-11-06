@@ -142,6 +142,9 @@ export function render() {
 }
 
 async function renderNow() {
+  // a redraw of the same page (a refresh, a filter) keeps its scroll position; moving to another page starts at the top
+  const sheet0 = document.getElementById('sheet'), sameHash = S.lastHash === location.hash, top = sheet0 ? sheet0.scrollTop : 0;
+  S.lastHash = location.hash;
   S.route = parseHash();
   S.pageFind = null; // a page that lists things sets its own filter for the top bar's search
   document.querySelectorAll('nav.nav a[data-nav]').forEach((a) => {
@@ -157,6 +160,7 @@ async function renderNow() {
   const sheet = document.getElementById('sheet');
   try {
     await fn(sheet, S.route.params);
+    if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
     // pages can add to a freshly drawn sheet (the first-run tips in guide.js)
     document.dispatchEvent(new CustomEvent('rendered', { detail: { sheet, view: routes[S.route.view] ? S.route.view : 'home' } }));
   } catch (e) {

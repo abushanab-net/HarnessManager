@@ -224,11 +224,12 @@ function drawDial(host, G, motion, selected) {
   host.innerHTML = '';
   const scene = host.parentElement, W = host.clientWidth, Hh = host.clientHeight;
   if (!W || !Hh) return;
-  const cx = W / 2, cy = Hh - 64;
+  // the baseline leaves room under it for the ring names, the dock labels and the legend
+  const cx = W / 2, cy = Hh - 90;
   // the dial takes the whole width, but shrinks until its label ring passes under the readouts
   const ovl = scene.querySelector('.ov.l'), box = { x0: 0, x1: ovl.offsetWidth + 110, y1: ovl.offsetHeight + 14 };
   const clear = (R) => { const r = R + 22, dx = cx >= box.x0 && cx <= box.x1 ? 0 : Math.min(Math.abs(box.x0 - cx), Math.abs(box.x1 - cx)); return dx >= r || cy - Math.sqrt(r * r - dx * dx) >= box.y1; };
-  let R = Math.min(W / 2 - 130, Hh - 96);
+  let R = Math.min(W / 2 - 130, Hh - 118);
   while (R > 140 && !clear(R)) R -= 4;
   const svg = el('svg', { viewBox: `0 0 ${W} ${Hh}` }); host.append(svg);
   const { N, E, by } = G;
@@ -266,7 +267,7 @@ function drawDial(host, G, motion, selected) {
   for (const n of N) {
     const [x, y] = P(n); body(svg, n, x, y, G);
     const right = n.kind === 'pc' ? true : Math.cos(n.ang) >= 0;
-    if (n.kind === 'pc') lab.add(n, x, cy + 16, 'c', 'sm', `<b>${esc(n.label)}</b>`);
+    if (n.kind === 'pc') lab.add(n, x, cy + 32, 'c', 'sm', `<b>${esc(n.label)}</b>`);
     else if (n.kind === 'account') lab.add(n, x + (right ? 22 : -22), y, right ? 'r' : 'l');
     else if (n.kind === 'tool') lab.add(n, x, y - 14, 'c', 'sm', `<b>${toolIcon(n.harness, 12)}${esc(n.label)}</b><span class="${n.tone || ''}">${esc(n.sub)}</span>`);
     else if (n.kind === 'router') lab.add(n, x + (right ? 14 : -14), y, right ? 'r' : 'l', 'sm');
