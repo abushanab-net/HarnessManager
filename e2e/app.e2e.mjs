@@ -228,11 +228,13 @@ try {
     await click('[data-testid=tool-agy]');
     await hasText('[data-testid=request-log]', 'No replies in this range.');
     await click('[data-testid=tool-all]');
-    // the dial: computers at the docks, accounts, tools, providers as bodies with their routes, drawn as SVG
+    // the dial: computers at the docks, accounts and tools as bodies with their routes, drawn as SVG; no provider hop, no legend
     await $('[data-testid=routes] svg');
     const dial = await exec(`const t = document.querySelector('[data-testid=routes]');
       return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), routes: t.querySelectorAll('path.e').length, labels: t.querySelectorAll('.lb').length };`);
-    assert.ok(dial.nodes.includes('a:codex-main') && dial.nodes.includes('t:codex') && dial.nodes.includes('v:OpenAI'), 'account, tool and provider bodies: ' + dial.nodes);
+    assert.ok(dial.nodes.includes('a:codex-main') && dial.nodes.includes('t:codex') && !dial.nodes.some((n) => /^[pv]:/.test(n)), 'account and tool bodies, no provider: ' + dial.nodes);
+    assert.ok(!(await exec("return !!document.querySelector('.ov.b')")), 'no legend on the scene');
+    assert.equal(await exec("return [...document.querySelectorAll('[data-testid=routes] svg text')].map((t) => t.textContent).join()"), 'accounts', 'only the accounts ring is named');
     assert.ok(dial.routes > 0 && dial.labels === dial.nodes.length, 'every body has a route and a label');
     // no label runs into another, however long its text
     const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] .lb')].map((n) => n.getBoundingClientRect());
@@ -240,6 +242,16 @@ try {
     assert.equal(overlaps, 0, 'labels do not overlap');
     await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
     await shot('00b-overview-routes');
+    // a wide page: the readouts stack under the finding in one column, and the dial keeps its size beside them
+    const dialR = () => exec("const l = document.querySelector('[data-testid=routes] svg line'); return l ? (l.x2.baseVal.value - l.x1.baseVal.value) / 2 - 20 : 0");
+    const narrowR = await dialR();
+    await page.setViewportSize({ width: 1800, height: 1000 });
+    await waitFor(async () => (await exec("return getComputedStyle(document.querySelector('.ov.l')).gridTemplateColumns.split(' ').length")) === 1, 'one column at 1800');
+    await waitFor(async () => (await dialR()) > narrowR, 'the dial grew with the page');
+    assert.ok((await dialR()) >= 380, 'the dial is at least 380px at 1800: ' + (await dialR()));
+    await shot('00c-overview-wide');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitFor(async () => (await exec("return getComputedStyle(document.querySelector('.ov.l')).gridTemplateColumns.split(' ').length")) === 2, 'two columns again at 1280');
     // limits as rings: codex-main's week has 79% left
     await hasText('[data-testid=limits]', 'codex-main');
     assert.equal(await exec("return document.querySelector('[data-testid=ring-codex-main] svg text').textContent"), '79%', 'the ring says what is left');
@@ -1282,7 +1294,7 @@ description: Bulk skill ${i}
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
     await $('[data-testid=limits]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc, .ov.b .sq')")), 'the Overview is as before: no computer switch, no computer dots');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc')")), 'the Overview is as before: no computer switch, no computer dots');
     await nav('#sessions');
     await $('[data-testid=group]');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .srow .pc, .srow.withpc')")), 'Sessions as before');
@@ -1324,18 +1336,17 @@ description: Bulk skill ${i}
     await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
     await shot('19b-settings-two-computers');
     // the chip: a dot per computer, both heard from lately
-    const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.pcav').length, on: el.querySelectorAll('.pcav.on').length, text: el.textContent, names: [...el.querySelectorAll('.pcav')].map((a) => a.title) }`);
+    const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.cdot').length, on: el.querySelectorAll('.cdot.on').length, text: el.textContent, names: [...el.querySelectorAll('.cdot')].map((a) => a.title) }`);
     assert.equal(chip.hidden, false, 'the chip shows with sync on');
-    assert.equal(chip.dots, 2, 'an avatar per computer');
+    assert.equal(chip.dots, 2, 'a dot per computer, as the reference draws it');
     assert.equal(chip.on, 2, 'both heard within three minutes');
-    assert.ok(chip.text.includes('LA') && chip.text.includes('synced'), 'two letters per computer: ' + chip.text);
+    assert.equal(chip.text, '2 computers', chip.text);
     assert.ok(chip.names.some((n) => n.includes('LAPTOP')), 'the full name on hover: ' + chip.names);
     // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots and Running now
     await nav('#home');
     await $('[data-testid=scope]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
     assert.ok((await text('[data-testid=routes]')).includes('LAPTOP'), 'the other computer has a dock');
-    assert.ok((await exec("return document.querySelectorAll('.ov.b .sq').length")) === 2, 'a colour per computer in the legend');
     assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] a')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, two letters each with the name on hover');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');

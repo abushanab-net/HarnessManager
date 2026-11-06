@@ -121,13 +121,11 @@ header.top .right { margin-left: auto; display: flex; gap: var(--s4); align-item
 header.top .iconbtn { border-color: var(--line); }
 .iconbtn.help { font-weight: 600; font-size: var(--fs-md); }
 .iconbtn.sq { border: 1px solid var(--line); border-radius: var(--radS); }
-.pcs { display: inline-flex; gap: 3px; align-items: center; color: var(--m); font: var(--fs-xs) var(--mono); white-space: nowrap; }
+/* the computers as dots in their colours (the reference's chip); the name is the title, dimmed when not heard from lately */
+.pcs { display: inline-flex; gap: 4px; align-items: center; color: var(--m); font: var(--fs-xs) var(--mono); white-space: nowrap; }
 .pcs > span { margin-left: 4px; }
-/* a computer as two letters in its colour; the full name is the title. Dimmed in the top bar when not heard from lately */
-.pcav { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font: 600 9.5px/1 var(--sans); letter-spacing: .02em; color: var(--on-ac); background: var(--line); flex: none; cursor: default; }
-.pcav.c0 { background: var(--ac); } .pcav.c1 { background: var(--sand); color: #0b1b20; } .pcav.c2 { background: var(--r2); } .pcav.c3 { background: var(--warn); color: #0b1b20; }
-.pcs .pcav:not(.on) { opacity: .4; }
-.seg3 a .pcav { width: 18px; height: 18px; font-size: 8.5px; margin: -2px 0; }
+.pcs .cdot:not(.on) { opacity: .35; }
+.seg3 a .cdot { width: 9px; height: 9px; }
 
 .sheet { container: sheet / inline-size; overflow: auto; min-height: 0; padding: var(--s4) var(--s5) var(--s6); display: flex; flex-direction: column; gap: var(--s4); position: relative; }
 .sheet > * { flex-shrink: 0; margin-top: 0; margin-bottom: 0; }
@@ -392,9 +390,6 @@ table.matrix td.c, table.matrix th.c, .mlist th.c, .mlist td.c { text-align: cen
 html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem); line-height: 1.22; }
 .ov.l .basis, .basis { font-size: 10.5px; color: var(--m); line-height: 1.5; }
 .basis b { color: var(--t2); font-weight: 500; }
-.ov.b { left: var(--s4); right: 15rem; bottom: var(--s3); display: flex; gap: var(--s4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--m); pointer-events: none; }
-.ov.b i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.ov.b i.sq { border-radius: 2px; }
 .ov.h { right: var(--s4); top: var(--s3); max-width: 15rem; text-align: right; font-size: var(--fs-xs); color: var(--m); pointer-events: none; }
 .rds { display: grid; grid-template-columns: 1fr; gap: 4px; padding-top: 2px; }
 .rng { display: flex; gap: 2px; margin-bottom: 3px; }
@@ -455,9 +450,11 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
   .hero { grid-template-columns: 1fr; }
   .hero .aside { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
   .ov.l { width: 29rem; grid-template-columns: minmax(0, 1fr) 11rem; }
-  .ov.b { right: var(--s4); } .ov.h { max-width: 11rem; }
+  .ov.h { max-width: 11rem; }
 }
 @container sheet (max-width: 56rem) { .hero .aside, .row2 { grid-template-columns: 1fr; } .ov.l { width: 100%; max-width: 100%; } }
+/* a wide page: the readouts stack under the finding in one column at the side, leaving the dial the width; narrower, the column would shrink the dial, so they sit beside the finding */
+@container sheet (min-width: 80rem) { .ov.l { width: 21rem; grid-template-columns: minmax(0, 1fr); gap: var(--s3); } }
 @container sheet (min-width: 90rem) { .scene { min-height: 48rem; } .clock svg, .hmwrap svg { max-width: none; } }
 
 /* ---------- Sessions ---------- */
@@ -637,10 +634,10 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
 @container sheet (max-width: 70rem) { .acctg { grid-template-columns: 1fr; } }
 
 /* ---------- Session ---------- */
-.sesh { flex-direction: column; align-items: flex-start; gap: var(--s3); }
+/* the Session head as drawn: crumb, title, one meta line, the actions at the right of the same row */
 .sesh .crumb { text-decoration: none; }
-.sesh h1 { margin: 4px 0 var(--s2); }
-.sesh .acts { margin-left: 0; padding-top: 0; }
+.sesh > div:first-child { max-width: 64ch; }
+.sesh .acts { padding-top: var(--s4); justify-content: flex-end; }
 .smeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--s3); font-size: var(--fs-xs); color: var(--t2); }
 .smeta .tags { margin-left: 0; }
 .rh { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line2); min-width: 0; }
