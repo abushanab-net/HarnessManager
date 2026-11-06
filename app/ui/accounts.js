@@ -77,12 +77,21 @@ export function limitRing(p, x = {}, S = 56) {
   return `<svg class="lring" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" aria-hidden="true">${g}<text x="${c}" y="${c + fs / 3}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${mid}</text></svg>`;
 }
 
-/** The limit rings in the sidebar, one small ring per account, after every page is drawn. */
+/** The limits at the foot of the sidebar, in the Limits panel's style: a ring, the account with its tool's icon, and
+ *  when its week resets; drawn after every page. */
 export function drawNavLimits() {
   const el = document.getElementById('nav-limits');
   if (!el || !S.state) return;
   const shown = shownTools(S.state);
-  el.innerHTML = S.state.profiles.filter((p) => shown.some((h) => h.id === p.harness)).map((p) => `<a href="#account?name=${encodeURIComponent(p.name)}" title="${esc(p.label)}" aria-label="${esc(p.label)}" data-testid="nav-limit-${esc(p.name)}">${limitRing(p, {}, 30)}</a>`).join('');
+  const note = (p) => {
+    if (p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in)) return ['sign in to read', 'neg'];
+    if (p.kind === 'api_key') return ['API key, no limit', ''];
+    const w = p.quota && p.quota.tiers.length ? weekTier(p) || p.quota.tiers[0] : null;
+    const short = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); // as the Limits panel: "Fri 13:00"
+    return w ? [`${w.label.toLowerCase()} resets ${short(w.resets_at)}`, w.used >= 80 ? 'warn' : ''] : ['limits not read yet', ''];
+  };
+  el.innerHTML = S.state.profiles.filter((p) => shown.some((h) => h.id === p.harness)).map((p) => { const [t, c] = note(p);
+    return `<a class="ring" href="#account?name=${encodeURIComponent(p.name)}" title="${esc(p.label)}" data-testid="nav-limit-${esc(p.name)}">${limitRing(p, {}, 56)}<b>${toolIcon(p.harness, 12)}${esc(p.label)}</b><small class="${c}">${esc(t)}</small></a>`; }).join('');
 }
 document.addEventListener('rendered', drawNavLimits);
 
