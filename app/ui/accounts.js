@@ -82,16 +82,19 @@ export function limitRing(p, x = {}, S = 56) {
 export function drawNavLimits() {
   const el = document.getElementById('nav-limits');
   if (!el || !S.state) return;
-  const shown = shownTools(S.state);
-  const note = (p) => {
-    if (p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in)) return ['sign in to read', 'neg'];
-    if (p.kind === 'api_key') return ['API key, no limit', ''];
+  const shown = shownTools(S.state), now = Date.now();
+  // the outer ring is the week used, the inner how far along the week is; inside, what is left; under it, the time to the reset
+  const ring = (p) => {
     const w = p.quota && p.quota.tiers.length ? weekTier(p) || p.quota.tiers[0] : null;
-    const short = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false }); // as the Limits panel: "Fri 13:00"
-    return w ? [`${w.label.toLowerCase()} resets ${short(w.resets_at)}`, w.used >= 80 ? 'warn' : ''] : ['limits not read yet', ''];
+    const bad = p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in);
+    if (bad || !w) return { svg: limitRing(p, {}, 56), note: bad ? 'sign in' : p.kind === 'api_key' ? 'no limit' : 'not read', cls: bad ? 'neg' : '', title: bad ? 'sign in to read its limits' : p.kind === 'api_key' ? 'API key, no limit' : 'limits not read yet' };
+    const S_ = 56, c = 28, u = Math.min(1, w.used / 100), span = /week/.test(w.id) ? 7 * 864e5 : 5 * 36e5, left = Math.max(0, w.resets_at - now), gone = Math.min(1, Math.max(0, 1 - left / span));
+    const svg = `<svg class="lring" width="${S_}" height="${S_}" viewBox="0 0 ${S_} ${S_}" aria-hidden="true"><circle cx="${c}" cy="${c}" r="23" fill="none" stroke="var(--line)" stroke-width="5"/>${u > 0 ? `<path d="${arcPath(c, c, 23, 0, u)}" fill="none" stroke="${ringTone(u * 100)}" stroke-width="5" stroke-linecap="round"/>` : ''}<circle cx="${c}" cy="${c}" r="16" fill="none" stroke="var(--line2)" stroke-width="3"/>${gone > 0 ? `<path d="${arcPath(c, c, 16, 0, gone)}" fill="none" stroke="var(--m)" stroke-width="3" stroke-linecap="round" opacity=".7"/>` : ''}<text x="${c}" y="${c + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${Math.max(0, Math.round(100 - w.used))}%</text></svg>`;
+    const note = left >= 864e5 ? `${Math.round(left / 864e5)} d` : dur(left);
+    return { svg, note, cls: u >= .8 ? 'warn' : '', title: `${w.label.toLowerCase()} resets ${when(w.resets_at)}` };
   };
-  el.innerHTML = S.state.profiles.filter((p) => shown.some((h) => h.id === p.harness)).map((p) => { const [t, c] = note(p);
-    return `<a class="ring" href="#account?name=${encodeURIComponent(p.name)}" title="${esc(p.label)}" data-testid="nav-limit-${esc(p.name)}">${limitRing(p, {}, 56)}<b>${toolIcon(p.harness, 12)}${esc(p.label)}</b><small class="${c}">${esc(t)}</small></a>`; }).join('');
+  el.innerHTML = S.state.profiles.filter((p) => shown.some((h) => h.id === p.harness)).map((p) => { const r = ring(p);
+    return `<a class="ring" href="#account?name=${encodeURIComponent(p.name)}" title="${esc(p.label)} · ${esc(r.title)}" data-testid="nav-limit-${esc(p.name)}">${r.svg}<b>${toolIcon(p.harness, 12)}${esc(p.label)}</b><small class="${r.cls}">${esc(r.note)}</small></a>`; }).join('');
 }
 document.addEventListener('rendered', drawNavLimits);
 

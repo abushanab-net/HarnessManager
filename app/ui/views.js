@@ -346,7 +346,7 @@ const rv = { mode: 'all', open: new Set(), more: new Set(), sessionKey: '', foll
 const secsOf = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms');
 
 view('session', async (sheet, params) => {
-  sheet.className = 'sheet';
+  sheet.className = 'sheet sess';
   // a redraw of the shown session (live update, unfolding a step) keeps it on screen until the new one is ready
   if (rv.sessionKey !== params.profile + '/' + params.id || !sheet.querySelector('#chat')) sheet.innerHTML = '<p class="muted">Opening the session…</p>';
   // a session from another computer: its transcript is fetched from the sync folder the first time
