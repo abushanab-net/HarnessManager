@@ -19,19 +19,22 @@ export function setAppUpdates(n) {
   }
 }
 
+/** Live sessions as a 4×4 grid of dots with n of them lit (the number on hover); nothing when none. */
+export const liveGrid = (n) => (n ? `<i class="lgrid" title="${n} live" aria-label="${n} live">${Array.from({ length: 16 }, (_, i) => `<b class="${i < n ? 'on' : ''}"></b>`).join('')}</i>` : '');
+
 /** The pinned projects under Projects in the sidebar (at most five), and the project count. */
 export function drawPins(list) {
   const el = document.getElementById('nav-pins');
   if (!el) return;
   const cur = S.route.view === 'sessions' ? S.route.params.project : '';
-  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions || ''}</span><span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">${ic.x}</span></a>`).join('');
+  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? liveGrid(p.live) : p.sessions || ''}</span><span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">${ic.x}</span></a>`).join('');
   const live = list.filter((p) => p.live).length;
-  setNavCounts({ 'n-projects': list.length ? `${list.length}${live ? ' · ' + live + ' live' : ''}` : '' });
+  setNavCounts({ 'n-projects': list.length ? `${list.length}${liveGrid(live)}` : '' });
 }
 
-/** The counts beside the pages in the sidebar; each one only when known. */
+/** The counts beside the pages in the sidebar; each one only when known. Our own markup: a number, or a number with a live grid. */
 export function setNavCounts(c) {
-  for (const [id, v] of Object.entries(c)) { const el = document.getElementById(id); if (el) el.textContent = v || ''; }
+  for (const [id, v] of Object.entries(c)) { const el = document.getElementById(id); if (el) el.innerHTML = v || ''; }
 }
 
 /** "Limits read 2 m ago · usage 1 m ago" in the top bar, on every page. */
@@ -194,7 +197,7 @@ export function redrawLive() {
   const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
   const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
   const live = running.length + elsewhere;
-  setNavCounts({ 'n-live': live ? live + ' live' : '' });
+  setNavCounts({ 'n-live': liveGrid(live) });
   // the live strip in the top bar: one session here opens straight away, otherwise the live list
   const strip = document.getElementById('live-strip');
   if (strip) {

@@ -61,21 +61,30 @@ function rowNote(p, best, now, x = {}) {
 const arcPath = (cx, cy, r, f0, f1) => { if (f1 - f0 >= 0.999) f1 = f0 + 0.999; const a0 = f0 * 2 * Math.PI - Math.PI / 2, a1 = f1 * 2 * Math.PI - Math.PI / 2; return `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)} A${r} ${r} 0 ${f1 - f0 > 0.5 ? 1 : 0} 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`; };
 const ringTone = (u) => (u >= 80 ? 'var(--neg)' : u >= 55 ? 'var(--warn)' : 'var(--ac)');
 export function limitRing(p, x = {}, S = 56) {
-  const c = S / 2, r1 = c - 5, r0 = c - 12, cap = x.caps && x.caps[p.name];
+  const sw = S >= 48 ? 5 : 3, fs = S >= 48 ? 12 : 9, c = S / 2, r1 = c - sw, r0 = r1 - sw - 2, cap = x.caps && x.caps[p.name];
   let g = '', mid = '';
   if (p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in)) { g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--neg)" stroke-dasharray="3 5" opacity=".7"/>`; mid = '—'; }
-  else if (cap) { const u = Math.min(1, cap.spent / cap.cap); g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--line)" stroke-width="5"/>${u > 0 ? `<path d="${arcPath(c, c, r1, 0, u)}" fill="none" stroke="var(--r2)" stroke-width="5" stroke-linecap="round"/>` : ''}`; mid = Math.round((1 - u) * 100) + '%'; }
+  else if (cap) { const u = Math.min(1, cap.spent / cap.cap); g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--line)" stroke-width="${sw}"/>${u > 0 ? `<path d="${arcPath(c, c, r1, 0, u)}" fill="none" stroke="var(--r2)" stroke-width="${sw}" stroke-linecap="round"/>` : ''}`; mid = Math.round((1 - u) * 100) + '%'; }
   else if (!(p.quota && p.quota.tiers.length)) { g = `<circle cx="${c}" cy="${c}" r="${r1}" fill="none" stroke="var(--line)" stroke-dasharray="2 4"/>`; mid = p.kind === 'api_key' ? '∞' : '—'; }
   else {
     const tiers = [tier(p, 'session'), weekTier(p)].filter(Boolean);
     (tiers.length ? tiers : p.quota.tiers.slice(0, 2)).forEach((t, i) => {
       const r = i || tiers.length === 1 ? r1 : r0, u = Math.min(1, t.used / 100), f = x.forecast && x.forecast[p.name + '|' + t.id] ? Math.min(1, x.forecast[p.name + '|' + t.id].at_reset / 100) : u;
-      g += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--line)" stroke-width="5"/>${f > u ? `<path d="${arcPath(c, c, r, u, f)}" fill="none" stroke="${ringTone(f * 100)}" stroke-width="5" stroke-dasharray="2 3" opacity=".55"/>` : ''}${u > 0 ? `<path d="${arcPath(c, c, r, 0, u)}" fill="none" stroke="${ringTone(u * 100)}" stroke-width="5" stroke-linecap="round"/>` : ''}`;
+      g += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${sw}"/>${f > u ? `<path d="${arcPath(c, c, r, u, f)}" fill="none" stroke="${ringTone(f * 100)}" stroke-width="${sw}" stroke-dasharray="2 3" opacity=".55"/>` : ''}${u > 0 ? `<path d="${arcPath(c, c, r, 0, u)}" fill="none" stroke="${ringTone(u * 100)}" stroke-width="${sw}" stroke-linecap="round"/>` : ''}`;
     });
     const w = weekTier(p) || p.quota.tiers[0]; mid = Math.max(0, Math.round(100 - w.used)) + '%';
   }
-  return `<svg class="lring" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" aria-hidden="true">${g}<text x="${c}" y="${c + 4}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${mid}</text></svg>`;
+  return `<svg class="lring" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" aria-hidden="true">${g}<text x="${c}" y="${c + fs / 3}" text-anchor="middle" font-size="${fs}" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${mid}</text></svg>`;
 }
+
+/** The limit rings in the sidebar, one small ring per account, after every page is drawn. */
+export function drawNavLimits() {
+  const el = document.getElementById('nav-limits');
+  if (!el || !S.state) return;
+  const shown = shownTools(S.state);
+  el.innerHTML = S.state.profiles.filter((p) => shown.some((h) => h.id === p.harness)).map((p) => `<a href="#account?name=${encodeURIComponent(p.name)}" title="${esc(p.label)}" aria-label="${esc(p.label)}" data-testid="nav-limit-${esc(p.name)}">${limitRing(p, {}, 30)}</a>`).join('');
+}
+document.addEventListener('rendered', drawNavLimits);
 
 /** One account in its tool's card. */
 // usage drawn into the rows: the range, each account's breakdown and day series, and the colour it has in the chart
