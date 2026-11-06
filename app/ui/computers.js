@@ -42,10 +42,7 @@ export function transportLine(c, d) {
 }
 /** A computer's colour follows its place in the list: this one teal, then sand, iris, amber. */
 const colorIdx = (c, id) => Math.max(0, computers(c).findIndex((d) => d.id === id)) % 4;
-export const cdot = (c, id, title) => `<i class="cdot c${colorIdx(c, id)}" title="${esc(title || nameOf(c, id))}"></i>`;
-/** "Samys-MacBook-Pro" -> "SM", "DEVELOPMENTPC" -> "DE": two letters where a name would not fit; the name is the title. */
-export const initials = (name) => { const w = String(name).split(/[\s\-_.]+/).filter(Boolean); return (w.length > 1 ? w[0][0] + w[1][0] : String(name).slice(0, 2)).toUpperCase(); };
-export const pcAvatar = (c, d, title, cls = '') => `<i class="pcav c${colorIdx(c, d.id)} ${cls}" title="${esc(title || d.name)}" aria-label="${esc(d.name)}">${esc(initials(d.name))}</i>`;
+export const cdot = (c, id, title, cls = '') => `<i class="cdot c${colorIdx(c, id)} ${cls}" title="${esc(title || nameOf(c, id))}"></i>`;
 export const cdots = (c, ids) => `<span class="cdots">${[...new Set(ids)].map((id) => cdot(c, id)).join('')}</span>`;
 /** A value split by computer ([{id, name, value}]): a thin bar in the computers' colours, and the largest named. */
 export function splitBar(c, parts) {
@@ -70,15 +67,16 @@ action('scope', (el) => { setScope(el.dataset.v); render(); });
 
 // ---------- the chip in the top bar ----------
 const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + ' ago');
-/** One avatar per computer in its colour, dimmed when not heard from within three minutes, and when the last sync round ran; hidden with sync off. */
+/** A dot per computer in its colour (the name and when it was heard on hover), dimmed when not heard from within three
+ *  minutes, then "N computers" with the last sync round on hover; hidden with sync off. As the reference draws it. */
 export function drawChip(c) {
   const el = document.getElementById('pcs');
   if (!el) return;
   el.hidden = !syncOn(c);
   if (el.hidden) return;
-  const now = Date.now();
-  el.innerHTML = computers(c).map((d) => pcAvatar(c, d, `${d.name}${d === c.this ? ' · this computer' : d.last_seen ? ' · heard ' + ago(d.last_seen) : ' · not heard from yet'}`, d === c.this || heardOn(d, now) ? 'on' : '')).join('')
-    + `<span>${c.last_run ? 'synced ' + ago(c.last_run) : 'not synced yet'}</span>`;
+  const now = Date.now(), n = computers(c).length;
+  el.innerHTML = computers(c).map((d) => cdot(c, d.id, `${d.name}${d === c.this ? ' · this computer' : d.last_seen ? ' · heard ' + ago(d.last_seen) : ' · not heard from yet'}`, d === c.this || heardOn(d, now) ? 'on' : '')).join('')
+    + `<span title="${c.last_run ? 'synced ' + ago(c.last_run) : 'not synced yet'}">${n} ${n === 1 ? 'computer' : 'computers'}</span>`;
 }
 // after a page is drawn, and once a minute: the status the page read, or a fresh one
 document.addEventListener('rendered', () => { const c = S.cache.computers; (c && Date.now() - c.at < 5000 ? Promise.resolve(c) : computersStatus()).then(drawChip).catch(() => {}); });

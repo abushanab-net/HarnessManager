@@ -1,19 +1,17 @@
 // Overview: the finding leads, the Horizon Dial shows every route a token takes (computers at the docks, accounts,
-// tools, the router gate, providers), the year clock and what needs attention sit beside it, and below: every limit
+// tools, the router gate), the year clock and what needs attention sit beside it, and below: every limit
 // as a ring, what runs now, the latest replies or the request log. Measured numbers are plain; estimates carry ≈.
 
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools, warmPage, keepPage } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill } from './lib.js';
 import { findings, limitRows } from './accounts.js';
-import { computersStatus, syncOn, computers, nameOf, cdot, pcAvatar, scope, scopeSeg } from './computers.js';
+import { computersStatus, syncOn, computers, nameOf, cdot, scope, scopeSeg } from './computers.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
-const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google', pi: 'Pi', omp: 'Oh My Pi' };
 const RANGES = [['today', 0], ['7d', 168], ['30d', 720], ['all', 24 * 400]], RANGE_LABEL = { today: 'Today', '7d': '7 d', '30d': '30 d', all: 'All' };
 // device: the year clock's own computer ('' is every computer added up)
 const st = { harness: '', range: 'today', metric: 'tokens', rows: null, total: 0, log: false, device: '' };
 const money = (c, digits = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits }));
-const secs = (ms) => (ms == null ? '—' : (ms / 1000).toFixed(1));
 const when = (ms) => new Date(ms).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 const ago = (ms) => (ms < 60000 ? 'just now' : dur(ms) + ' ago');
 const PI = Math.PI, deg = (d) => (d * PI) / 180;
@@ -104,28 +102,18 @@ function graph(state, d, pcs) {
     const t = add({ id: 't:' + p.harness, kind: 'tool', label: TOOL[p.harness] || p.harness, sub: '', rate: 0, open: 0, harness: p.harness, href: '#apps' });
     t.rate += tk; t.open += p.running.length + far.length;
     E.push({ a: 'a:' + p.name, b: 't:' + p.harness, k: needsLogin ? 'r' : routed ? 'a' : 'c', rate: tk });
+    // a routed account goes on to the local router; the vendor behind a tool is the tool, so there is no provider hop
     if (routed) {
       routerUsed = true;
-      if (!E.some((e) => e.a === 't:' + p.harness && e.b === 'router')) E.push({ a: 't:' + p.harness, b: 'router', k: 'a', rate: tk });
-      const r = (state.routes || []).find((x) => x.id === p.route);
-      for (const pid of (r ? r.providers : [])) {
-        const lp = live.providers[pid], b = breakers[pid], bad = paused(pid);
-        add({ id: 'p:' + pid, kind: 'provider', label: pid, k: bad ? 'r' : 'a', via: 'router', rate: (lp || {}).tokens || 0, tone: bad ? 'neg' : lp ? 'ok' : '',
-          sub: bad ? `paused${b.retry_at ? ' · retry in ' + dur(b.retry_at - now) : ''}` : lp && lp.first_ms != null ? `≈ ${secs(lp.first_ms)} s first chunk` : lp ? `${fmt(lp.tokens)} tokens` : 'no traffic', href: '#routing' });
-        if (!E.some((e) => e.a === 'router' && e.b === 'p:' + pid)) E.push({ a: 'router', b: 'p:' + pid, k: bad ? 'r' : 'a', rate: (lp || {}).tokens || 0 });
-      }
-    } else {
-      const v = p.kind === 'api_key' && p.base_url ? p.base_url.replace(/^https?:\/\//, '').split(/[/:]/)[0] : VENDOR[p.harness] || p.harness;
-      const vn = add({ id: 'v:' + v, kind: 'provider', label: v, k: 'c', via: 'direct', rate: 0, sub: '', tone: '' });
-      vn.rate += tk; vn.sub = vn.rate ? `${fmt(vn.rate)} tokens, 5 min` : 'no traffic'; vn.tone = vn.rate ? 'ok' : '';
-      const e = E.find((x) => x.a === 't:' + p.harness && x.b === 'v:' + v);
-      if (e) e.rate += tk; else E.push({ a: 't:' + p.harness, b: 'v:' + v, k: 'c', rate: tk });
+      const e = E.find((x) => x.a === 't:' + p.harness && x.b === 'router');
+      if (e) e.rate += tk; else E.push({ a: 't:' + p.harness, b: 'router', k: 'a', rate: tk });
     }
   }
   const ver = (id) => (S.appVersions || {})[id];
-  for (const t of N.filter((n) => n.kind === 'tool')) t.sub = [ver(t.harness), t.open ? t.open + ' open' : ''].filter(Boolean).join(' · ');
+  for (const t of N.filter((n) => n.kind === 'tool')) { t.sub = [ver(t.harness), t.open ? t.open + ' open' : '', t.rate ? `${fmt(t.rate)} tokens, 5 min` : ''].filter(Boolean).join(' · '); t.tone = t.rate ? 'ok' : ''; }
   const nr = (state.routes || []).length, errs = Object.values(live.providers).reduce((a, x) => a + x.errors, 0);
-  if (routerUsed || nr) N.push({ id: 'router', kind: 'router', label: 'Local router', sub: `${state.router.running ? ':' + state.router.port : 'stopped'} · ${nr} ${nr === 1 ? 'route' : 'routes'} · ${errs} ${errs === 1 ? 'error' : 'errors'}`, k: 'a', rate: 0, tone: errs ? 'warn' : '', href: '#routing' });
+  const pausedN = Object.keys(breakers).filter(paused).length;
+  if (routerUsed || nr) N.push({ id: 'router', kind: 'router', label: 'Local router', sub: `${state.router.running ? ':' + state.router.port : 'stopped'} · ${nr} ${nr === 1 ? 'route' : 'routes'} · ${pausedN ? pausedN + ' paused · ' : ''}${errs} ${errs === 1 ? 'error' : 'errors'}`, k: pausedN ? 'r' : 'a', rate: 0, tone: pausedN ? 'neg' : errs ? 'warn' : '', href: '#routing' });
   const by = Object.fromEntries(N.map((n) => [n.id, n]));
   return { N, E: E.filter((e) => by[e.a] && by[e.b]), by, empty: !ps.length, peers, pcList };
 }
@@ -137,7 +125,7 @@ function chain(E, id) {
   return lit;
 }
 const edgeCol = (k, G) => (k.startsWith('pc:') ? (G.by[k.slice(3)] || {}).col || 'var(--ac)' : k === 'a' ? 'var(--r2)' : k === 'r' ? 'var(--neg)' : 'var(--ac)');
-const nodeCol = (n, G) => (n.kind === 'pc' ? n.col : n.kind === 'tool' ? 'var(--m)' : n.kind === 'router' ? 'var(--r2)' : n.k === 'r' ? 'var(--neg)' : n.kind === 'provider' && !n.rate ? 'var(--m)' : edgeCol(n.k || 'c', G));
+const nodeCol = (n, G) => (n.kind === 'pc' ? n.col : n.kind === 'tool' ? 'var(--m)' : n.kind === 'router' ? (n.k === 'r' ? 'var(--neg)' : 'var(--r2)') : n.k === 'r' ? 'var(--neg)' : edgeCol(n.k || 'c', G));
 const arcPath = (cx, cy, r, f0, f1) => { if (f1 - f0 >= 0.999) f1 = f0 + 0.999; const a0 = f0 * 2 * PI - PI / 2, a1 = f1 * 2 * PI - PI / 2; return `M${cx + r * Math.cos(a0)} ${cy + r * Math.sin(a0)} A${r} ${r} 0 ${f1 - f0 > 0.5 ? 1 : 0} 1 ${cx + r * Math.cos(a1)} ${cy + r * Math.sin(a1)}`; };
 const tone = (u) => (u >= 80 ? 'var(--neg)' : u >= 55 ? 'var(--warn)' : 'var(--ac)');
 /** Two limit arcs around an account: inner 5-hour, outer weekly; solid is used, dashed the estimate at the reset. */
@@ -161,9 +149,8 @@ function body(svg, n, x, y, G) {
   const col = nodeCol(n, G);
   if (n.kind === 'pc') { el('rect', { x: x - 22, y: y - 3, width: 44, height: 6, rx: 2, fill: col, opacity: .55 }, g); el('rect', { x: x - 6, y: y - 6, width: 12, height: 12, rx: 3, fill: col }, g); }
   else if (n.kind === 'tool') el('circle', { cx: x, cy: y, r: 5.5, fill: 'var(--s)', stroke: 'var(--t2)', 'stroke-width': 1.5 }, g);
-  else if (n.kind === 'router') { el('rect', { x: x - 9, y: y - 9, width: 18, height: 18, rx: 4, fill: 'var(--s)', stroke: 'var(--r2)', 'stroke-width': 1.6 }, g); el('circle', { cx: x, cy: y, r: 3, fill: 'var(--r2)' }, g); }
-  else if (n.kind === 'account') { el('circle', { cx: x, cy: y, r: 16, fill: 'var(--s)', opacity: .9 }, g); limitArcs(g, x, y, n.acct); el('circle', { cx: x, cy: y, r: 5, fill: col }, g); }
-  else { const r = n.rate ? 7 : 5; el('circle', { cx: x, cy: y, r: r + 5, fill: col, opacity: n.rate ? .18 : 0 }, g); el('circle', { cx: x, cy: y, r, fill: n.rate || n.k === 'r' ? col : 'var(--s)', stroke: col, 'stroke-width': 1.5, 'stroke-dasharray': n.k === 'r' ? '2 2' : '' }, g); }
+  else if (n.kind === 'router') { el('rect', { x: x - 9, y: y - 9, width: 18, height: 18, rx: 4, fill: 'var(--s)', stroke: col, 'stroke-width': 1.6, 'stroke-dasharray': n.k === 'r' ? '2 2' : '' }, g); el('circle', { cx: x, cy: y, r: 3, fill: col }, g); }
+  else { el('circle', { cx: x, cy: y, r: 16, fill: 'var(--s)', opacity: .9 }, g); limitArcs(g, x, y, n.acct); el('circle', { cx: x, cy: y, r: 5, fill: col }, g); }
   el('circle', { cx: x, cy: y, r: 18, fill: 'transparent' }, g);
   return g;
 }
@@ -218,9 +205,9 @@ function corridor(cx, cy, rA, tA, rB, tB, rc) {
 }
 
 // ---------- the Horizon Dial ----------
-const RING = { account: 0.42, tool: 0.64, router: 0.82, provider: 1 };
+const RING = { account: 0.5, tool: 0.78, router: 1 };
 let dialStop = null;
-/** The half circle from the docks: accounts, tools, the router gate and providers as hops; the finding's route selected. */
+/** The half circle from the docks: accounts, tools and the router gate as hops; the finding's route selected. */
 function drawDial(host, G, motion, selected) {
   if (dialStop) { dialStop(); dialStop = null; }
   host.innerHTML = '';
@@ -229,9 +216,9 @@ function drawDial(host, G, motion, selected) {
   // the baseline leaves room under it for the ring names, the dock labels and the legend
   const cx = W / 2, cy = Hh - 90;
   // the dial takes the whole width, but shrinks until its label ring passes under the readouts
-  const ovl = scene.querySelector('.ov.l'), box = { x0: 0, x1: ovl.offsetWidth + 110, y1: ovl.offsetHeight + 14 };
+  const ovl = scene.querySelector('.ov.l'), box = { x0: 0, x1: ovl.offsetWidth + 70, y1: ovl.offsetHeight + 14 };
   const clear = (R) => { const r = R + 22, dx = cx >= box.x0 && cx <= box.x1 ? 0 : Math.min(Math.abs(box.x0 - cx), Math.abs(box.x1 - cx)); return dx >= r || cy - Math.sqrt(r * r - dx * dx) >= box.y1; };
-  let R = Math.min(W / 2 - 130, Hh - 118);
+  let R = Math.min(W / 2 - 90, Hh - 118);
   while (R > 140 && !clear(R)) R -= 4;
   const svg = el('svg', { viewBox: `0 0 ${W} ${Hh}` }); host.append(svg);
   const { N, E, by } = G;
@@ -241,19 +228,13 @@ function drawDial(host, G, motion, selected) {
   for (const t of of((n) => n.kind === 'tool')) t.ang = meanAng(acc.filter((a) => a.tool === t.harness).map((a) => a.ang));
   spread(of((n) => n.kind === 'tool'), deg(14));
   if (by.router) by.router.ang = meanAng(of((n) => n.kind === 'tool' && E.some((e) => e.a === n.id && e.b === 'router')).map((t) => t.ang));
-  const provs = of((n) => n.kind === 'provider');
-  for (const p of provs) { const via = E.filter((e) => e.b === p.id && e.a !== 'router').map((e) => by[e.a].ang); p.ang = via.length ? meanAng(via) : by.router ? by.router.ang : deg(-90); }
-  const routedP = provs.filter((p) => p.via === 'router');
-  routedP.forEach((p, i) => { p.ang = (by.router ? by.router.ang : deg(-90)) + deg((i - (routedP.length - 1) / 2) * 16); });
-  spread(provs, deg(12));
-  provs.forEach((p) => { p.ang = Math.max(deg(-168), Math.min(deg(-12), p.ang)); });
-  // the dial: baseline and the hop arcs, named at their left ends
+  // the dial: baseline and the hop arcs; only the accounts ring is named (the tools carry their icons, the router its label)
   el('line', { x1: cx - R - 20, x2: cx + R + 20, y1: cy, y2: cy, stroke: 'var(--line)' }, svg);
   for (const [k, r] of Object.entries(RING)) {
-    if (k === 'router') continue;
+    if (k === 'router' && !by.router) continue;
     el('path', { d: `M${cx - r * R} ${cy} A${r * R} ${r * R} 0 0 1 ${cx + r * R} ${cy}`, fill: 'none', stroke: 'var(--line)', 'stroke-dasharray': k === 'tool' ? '2 5' : '' }, svg);
-    el('text', { x: cx - r * R, y: cy + 13, 'text-anchor': 'middle', fill: 'var(--m)', 'font-size': 10.5, 'font-family': 'var(--mono)' }, svg).textContent = { account: 'accounts', tool: 'tools', provider: 'providers' }[k];
   }
+  el('text', { x: cx - RING.account * R, y: cy + 13, 'text-anchor': 'middle', fill: 'var(--m)', 'font-size': 10.5, 'font-family': 'var(--mono)' }, svg).textContent = 'accounts';
   // the computers' docks along the baseline, this one in the middle
   const pcs = of((n) => n.kind === 'pc'), dockX = {};
   pcs.forEach((c, i) => { dockX[c.id] = cx + (pcs.length === 1 ? 0 : (i - (pcs.length - 1) / 2) * (0.84 * R / Math.max(1, pcs.length - 1))); });
@@ -272,11 +253,9 @@ function drawDial(host, G, motion, selected) {
     if (n.kind === 'pc') lab.add(n, x, cy + 32, 'c', 'sm', `<b>${esc(n.label)}</b>`);
     else if (n.kind === 'account') lab.add(n, x + (right ? 22 : -22), y, right ? 'r' : 'l');
     else if (n.kind === 'tool') lab.add(n, x, y - 14, 'c', 'sm', `<b>${toolIcon(n.harness, 12)}${esc(n.label)}</b><span class="${n.tone || ''}">${esc(n.sub)}</span>`);
-    else if (n.kind === 'router') lab.add(n, x + (right ? 14 : -14), y, right ? 'r' : 'l', 'sm');
-    else { const r = R + 18; lab.add(n, cx + r * Math.cos(n.ang), cy + r * Math.sin(n.ang), right ? 'r' : 'l'); }
+    else lab.add(n, x + (right ? 14 : -14), y, right ? 'r' : 'l', 'sm');
   }
-  host.classList.add('measuring'); const placed = lab.place(); host.classList.remove('measuring');
-  for (const l of placed) if (l.n.kind === 'provider' && Math.abs(l.top - l.top0) > 4) el('path', { d: `M${l.n.x} ${l.n.y} L${l.side === 'r' ? l.left - 4 : l.left + l.w + 4} ${l.top + l.h / 2}`, stroke: 'var(--m)', 'stroke-width': .8, fill: 'none', opacity: .7 }, svg);
+  host.classList.add('measuring'); lab.place(); host.classList.remove('measuring');
   // the finding's route is selected on open; hover, focus or click another, Escape returns
   const apply = (lit) => {
     host.querySelectorAll('[data-node]').forEach((g) => g.classList.toggle('dim', !!lit && !lit.has(g.dataset.node)));
@@ -419,10 +398,9 @@ view('home', async (sheet) => {
           <h1 data-testid="finding">${risk ? `<span class="w">${esc(risk.name)}</span> will likely run out of its ${esc(risk.win.toLowerCase())} ${when(risk.out).replace(/ (\d)/, ' at about $1')}, ${dur(risk.reset - risk.out)} before it resets.` : text}</h1>
           <div class="basis" data-testid="basis">${basis}</div>
           </div>${readouts(k)}</div>
-        <div class="ov b"><span><i style="background:var(--ac)"></i>signed-in plan</span><span><i style="background:var(--r2)"></i>through the router</span><span><i style="background:var(--neg)"></i>paused or logged out</span>${G.peers ? G.pcList.map((c) => `<span><i class="sq" style="background:${pcCol(pcs, c.id)}"></i>${esc(c.name)}</span>`).join('') : ''}</div>
         <div class="ov h">${G.empty ? 'add an account to see its route' : 'hover, focus or click a body to trace it · click it again to open it · Esc returns'}</div></section>
       <div class="aside">
-        <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[{ id: '', name: 'All' }, ...computers(pcs)].map((x) => `<a class="${pc.dev === x.id ? 'on' : ''}" data-act="home-device" data-v="${esc(x.id)}" title="${esc(x.id ? x.name : 'Every computer')}" data-testid="activity-pc-${esc(x.id || 'all')}">${x.id ? pcAvatar(pcs, x) : 'All'}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
+        <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[{ id: '', name: 'All' }, ...computers(pcs)].map((x) => `<a class="${pc.dev === x.id ? 'on' : ''}" data-act="home-device" data-v="${esc(x.id)}" title="${esc(x.id ? x.name : 'Every computer')}" data-testid="activity-pc-${esc(x.id || 'all')}">${x.id ? cdot(pcs, x.id, x.name) : 'All'}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
         ${attention(risks, ps, k)}
       </div>
     </div>
