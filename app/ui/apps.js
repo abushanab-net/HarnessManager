@@ -53,6 +53,7 @@ view('apps', async (sheet) => {
     <section class="panel apme"><div><h2>Harness Manager</h2><p class="muted">${esc(st.version)}${me && me.version ? ` · ${esc(me.version)} is available: Settings › Updates installs it` : me ? ' · the newest' : ''}. It checks at launch and every hour, and installs signed updates only.</p></div>
       <span class="pill ${me && me.version ? 'warn' : 'teal'} mono">${me && me.version ? 'update available' : me ? 'up to date' : 'not checked yet'}</span></section>`;
   S.cache.apps = d.apps;
+  if (d.updates != null) setAppUpdates(d.updates); // counted against the versions installed now: an applied update leaves it
 });
 
 action('apps-check', async () => {

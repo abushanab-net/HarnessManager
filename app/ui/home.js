@@ -1,6 +1,6 @@
 // Overview: the finding leads, the Horizon Dial shows every route a token takes (computers at the docks, accounts,
-// tools, the router gate), the year clock and what needs attention sit beside it, and below: every limit
-// as a ring, what runs now, the latest replies or the request log. Measured numbers are plain; estimates carry ≈.
+// tools, the router gate), the year clock and what needs attention sit beside it, and below the latest replies or
+// the request log. The readouts and every account's limit ring are in the sidebar. Measured numbers are plain; estimates carry ≈.
 
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools, warmPage, keepPage } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill } from './lib.js';
@@ -71,6 +71,13 @@ function readouts(d) {
     ${rd('tokens', 'Tokens', fmt(c.tokens), vs(c.tokens, p.tokens, 'pct'), sp.tokens, 'var(--ac)', true)}
     ${rd('cost', 'Cost', money(c.cost, c.cost >= 100 ? 0 : 2), vs(c.cost, p.cost, 'money'), sp.cost, 'var(--warn)', true)}
     ${rd('hit', 'Cached', `${Math.round(c.hit * 100)}<small>%</small>`, vs(c.hit, p.hit, 'pt'), (sp.hit || []).map((x) => Math.max(0, x - 0.5)), 'var(--ac)', false)}</div>`;
+}
+/** The readouts at the foot of the sidebar, every tool: drawn at start, after each refresh, and when the range changes. */
+export async function drawNavStats() {
+  const el = document.getElementById('nav-stats');
+  if (!el) return;
+  const k = await call('dash', { hours: RANGES.find((r) => r[0] === st.range)[1], scope: scope() }).catch(() => null);
+  if (k) el.innerHTML = readouts(k);
 }
 
 // ---------- the graph: every hop a token takes, from the accounts as they are ----------
@@ -308,39 +315,7 @@ function burnRows(ps, d) {
   }
   return out.sort((a, b) => a.left - b.left);
 }
-/** Every account's limits as rings: inner 5-hour, outer weekly; dashed is the estimate at the reset. */
-function ringsPanel(ps, G, now) {
-  const rings = ps.map((p) => {
-    const n = G.by['a:' + p.name], a = n ? n.acct : null, S = 84, c = 42;
-    let g = '', mid = '', note = '', cls = '';
-    if (!a || a.needsLogin) { g = `<circle cx="${c}" cy="${c}" r="34" fill="none" stroke="var(--neg)" stroke-dasharray="3 5" opacity=".7"/>`; mid = '—'; note = 'sign in to read'; cls = 'neg'; }
-    else if (a.cap) { const u = Math.min(1, a.cap.spent / a.cap.cap); g = `<circle cx="${c}" cy="${c}" r="34" fill="none" stroke="var(--line)" stroke-width="6"/>${u > 0 ? `<path d="${arcPath(c, c, 34, 0, u)}" fill="none" stroke="var(--r2)" stroke-width="6" stroke-linecap="round"/>` : ''}`; mid = Math.round((1 - u) * 100) + '%'; note = `$${a.cap.cap.toFixed(2)} daily cap · ${money(a.cap.spent)} today`; }
-    else if (!a.windows) { g = `<circle cx="${c}" cy="${c}" r="34" fill="none" stroke="var(--line)" stroke-dasharray="2 4"/>`; mid = p.kind === 'api_key' ? '∞' : '—'; note = p.kind === 'api_key' ? 'API key, no limit' : 'limits not read yet'; }
-    else {
-      a.windows.forEach((w, i) => { const r = i ? 34 : 25, u = w.used / 100, f = Math.min(1, (w.at != null ? w.at : w.used) / 100);
-        g += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--line)" stroke-width="6"/>${f > u ? `<path d="${arcPath(c, c, r, u, f)}" fill="none" stroke="${tone(w.at)}" stroke-width="6" stroke-dasharray="2 3" opacity=".55"/>` : ''}${u > 0 ? `<path d="${arcPath(c, c, r, 0, u)}" fill="none" stroke="${tone(w.used)}" stroke-width="6" stroke-linecap="round"/>` : ''}`; });
-      const wk = a.windows[1]; mid = Math.round(100 - wk.used) + '%';
-      note = wk.out ? `≈ out ${when(wk.out)}` : wk.reset ? `${wk.label.toLowerCase()} resets ${when(wk.reset)}` : ''; cls = wk.out ? 'warn' : '';
-    }
-    return `<a class="ring" href="#account?name=${encodeURIComponent(p.name)}" style="text-decoration:none;color:inherit" data-testid="ring-${esc(p.name)}"><svg width="${S}" height="${S}" viewBox="0 0 ${S} ${S}" role="img" aria-label="${esc(p.label)}: ${esc(note)}">${g}<text x="${c}" y="${c + 5}" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)" font-family="var(--sans)">${mid}</text></svg><b>${toolIcon(p.harness, 12)}${esc(p.label)}</b><small class="${cls}">${esc(note)}</small></a>`;
-  }).join('');
-  const read = ps.map((p) => p.quota && p.quota.fetched_at).filter(Boolean);
-  return `<section class="panel" data-testid="limits"><div class="ph"><h2>Limits</h2><span class="muted sm">inner 5-hour, outer weekly · dashed is the estimate at the reset${read.length ? ' · read ' + ago(now - Math.max(...read)) : ''}</span></div>
-    ${rings ? `<div class="rings">${rings}</div>` : '<p class="empty">Limits show once an account with a plan has run on this computer.</p>'}</section>`;
-}
-
 // ---------- the page ----------
-/** The Running now panel: every session open on any computer, with the computer's colour and the tool's icon. */
-const runningNow = (running, pcs, now) => `<section class="panel" data-testid="running-now"><div class="ph"><h2>Running now</h2><span class="muted mono sm">${running.length} ${running.length === 1 ? 'session' : 'sessions'}</span></div>
-      ${running.length ? running.map((r) => `<div class="runrow">${cdot(pcs, r.device)}<span><b>${esc(r.project_name || r.project || (r.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder')}</b> <span class="muted">${toolIcon(r.harness, 12)}${esc(acctName(r.profile))}, ${esc(nameOf(pcs, r.device))}</span></span><span class="mono">${r.started_at ? dur(now - r.started_at) : ''}</span></div>`).join('') : '<p class="empty">Nothing is running. Start an account from Accounts, or resume a session.</p>'}</section>`;
-// presence from a connected computer arrives every 10 s: only the Running now panel is drawn again, in place
-document.addEventListener('presence', async (e) => {
-  const sec = document.querySelector('[data-testid=running-now]');
-  if (S.route.view !== 'home' || !sec || document.getElementById('dialog-root').innerHTML) return;
-  const d = await call('live').catch(() => null);
-  if (d && S.route.view === 'home' && sec.isConnected) sec.outerHTML = runningNow(d.live.running || [], e.detail, d.now);
-});
-
 // from the times the parts of an answer reached the log: close, not exact
 const speed = (r) => (r.gen_ms >= 300 && r.output > 0 ? `≈${Math.round(r.output / (r.gen_ms / 1000)).toLocaleString()} <small>tok/s</small>` : '<span class="dash">—</span>');
 const firstToken = (r) => (r.ttft_ms != null ? `≈${(r.ttft_ms / 1000).toFixed(1)} s` : '<span class="dash">—</span>');
@@ -396,7 +371,6 @@ view('home', async (sheet) => {
   const G = graph(state, k, pcs);
   const byDay = Object.fromEntries((((d.activity || {}).days) || []).filter((x) => x.by_device).map((x) => [x.day, x.by_device]));
   const pc = G.peers ? { c: pcs, by: byDay, dev: computers(pcs).some((x) => x.id === st.device) ? st.device : '' } : null;
-  const running = G.peers ? (k.live.running || []) : ps.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name, harness: p.harness, device: pcs ? pcs.this.id : '' })));
   const read = ps.map((p) => p.quota && p.quota.fetched_at).filter(Boolean);
   const basis = risk ? `Measured <b>${Math.round(risk.used)}% used</b>, resets <b>${when(risk.reset)}</b>${risk.read ? ', read ' + ago(now - risk.read) : ''}. The run-out is an estimate from today's pace.`
     : `${ps.length} ${ps.length === 1 ? 'account' : 'accounts'} · ${logged} logged in · ${open ? `<a href="#sessions?live=1" class="acT" data-testid="home-live">${open} ${open === 1 ? 'console' : 'consoles'} open</a>` : 'no console open'} · router ${state.router.running ? ':' + state.router.port + ' running' : 'stopped'}${read.length ? ' · limits read ' + ago(now - Math.max(...read)) : ''} · ${k.cur.requests.toLocaleString()} ${k.cur.requests === 1 ? 'request' : 'requests'} ${RANGE_LABEL[st.range].toLowerCase()}`;
@@ -407,7 +381,7 @@ view('home', async (sheet) => {
           <div class="crumb"><i class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--ac)"></i>Overview · ${esc(state.computer || 'this computer')}${G.peers ? ' · ' + G.pcList.length + ' computers' : ''} · ${open} ${open === 1 ? 'session' : 'sessions'} open</div>
           <h1 data-testid="finding">${risk ? `<span class="w">${esc(risk.name)}</span> will likely run out of its ${esc(risk.win.toLowerCase())} ${when(risk.out).replace(/ (\d)/, ' at about $1')}, ${dur(risk.reset - risk.out)} before it resets.` : text}</h1>
           <div class="basis" data-testid="basis">${basis}</div>
-          </div>${readouts(k)}</div>
+          </div></div>
         </section>
       <div class="aside">
         <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[{ id: '', name: 'All' }, ...computers(pcs)].map((x) => `<a class="${pc.dev === x.id ? 'on' : ''}" data-act="home-device" data-v="${esc(x.id)}" title="${esc(x.id ? x.name : 'Every computer')}" data-testid="activity-pc-${esc(x.id || 'all')}">${x.id ? cdot(pcs, x.id, x.name) : 'All'}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
@@ -418,12 +392,12 @@ view('home', async (sheet) => {
         ${tools.map((h) => `<a class="${st.harness === h.id ? 'on' : ''}" data-act="home-tool" data-v="${h.id}" data-testid="tool-${h.id}">${toolIcon(h.id, 12)}${esc(h.label)}</a>`).join('')}</div>
       ${syncOn(pcs) ? scopeSeg() : ''}
       ${best ? `<button class="btn primary" data-act="start" data-name="${esc(best.name)}" data-testid="start-best" style="margin-left:auto">▶ Start ${esc(best.label)}</button>` : ''}</div>
-    <div class="row2">${ringsPanel(ps, G, now)}${runningNow(running, pcs, now)}</div>
     <section class="panel"><div class="ph"><h2>${st.log ? 'Request log' : 'Latest replies'}</h2><span class="muted mono sm">${d.requests.total.toLocaleString()} ${RANGE_LABEL[st.range].toLowerCase()} · speed and first reply are approximate</span>
         <a class="linkb r" data-act="home-log" data-testid="request-log-open">${st.log ? 'Latest replies' : 'Request log'}</a></div>
       ${st.log ? `<p class="hint">Costs are what these tokens would cost at API list prices (models.dev). Subscriptions are not billed per token.</p>
       <div class="tscroll" id="home-table">${requestTable(st.rows)}</div>
       ${st.rows.length < st.total ? '<div style="padding:10px 0"><button class="btn outline sm" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}` : latestTable(st.rows, pcs)}</section>`;
+  drawNavStats();
   fit(sheet.querySelector('.hmwrap'), () => yearClock(o.heatmap, st.metric === 'hit' ? 'tokens' : st.metric, pc));
   // the dial is drawn for the size its box has, and again whenever that box changes (the window, the sidebar, a fold)
   const map = sheet.querySelector('.map');
@@ -433,11 +407,13 @@ view('home', async (sheet) => {
   keepPage(sheet, wk);
 });
 
-action('home-metric', (el) => { st.metric = el.dataset.v; render(); });
+// the readouts sit in the sidebar: on the Overview the page redraws with them, elsewhere they redraw alone
+const sideChange = () => (S.route.view === 'home' ? render() : drawNavStats());
+action('home-metric', (el) => { st.metric = el.dataset.v; sideChange(); });
 action('home-device', (el) => { st.device = el.dataset.v; render(); });
 action('home-log', () => { st.log = !st.log; render(); });
 action('home-tool', (el) => { st.harness = el.dataset.v; render(); });
-action('home-range', (el) => { st.range = el.dataset.v; render(); });
+action('home-range', (el) => { st.range = el.dataset.v; sideChange(); });
 action('home-more', async (el) => {
   if (el.disabled) return;
   el.disabled = true;

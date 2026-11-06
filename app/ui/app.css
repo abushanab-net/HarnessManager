@@ -84,10 +84,18 @@ nav.nav .count.upd:not(:empty) { color: var(--warn); }
 .lgrid rect.on { fill: var(--ac); }
 /* beside Projects the grid shows only while the pinned rows, which carry their own, are folded away */
 nav.nav a[data-nav=projects]:not(.shut) #n-projects { display: none; }
-/* the limits at the foot of the sidebar, as in the Limits panel: two to a row */
+/* the readouts (the range, tokens, cost, cached) under the brand; the limits at the foot, as in the Limits panel, two to a row */
+.navstats { padding: 0 var(--s2) var(--s4); }
+.navstats:empty { display: none; }
+.navstats .rd { gap: 5px; }
+.navstats .rd label { width: 2.8rem; }
+.navstats .rd strong { width: auto; min-width: 2.6rem; font-size: .95rem; }
 .navlims { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s2); padding: var(--s4) var(--s2) var(--s3); }
 .navlims:empty { display: none; }
 .navlims:not(:empty) + nav.nav.bottom { margin-top: var(--s5); }
+/* the popup by the tray icon: the rings alone, three to a row */
+body.popup { padding: var(--s3); border: 1px solid var(--line); box-sizing: border-box; min-height: 100vh; overflow: auto; }
+.popup .navlims { margin: 0; padding: 0; grid-template-columns: repeat(3, 1fr); }
 .navlims .ring { text-decoration: none; color: var(--ink); min-width: 0; max-width: 100%; }
 .navlims .ring b { font-size: var(--fs-xs); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .navlims .ring b.warn { color: var(--warn); } .navlims .ring b.neg { color: var(--neg); }
@@ -115,7 +123,7 @@ nav.nav a.sub .unpin:hover { background: var(--line); color: var(--ink); }
 /* a narrow window: the sidebar keeps its icons only */
 @media (max-width: 75rem) {
   .frame { grid-template-columns: 4rem minmax(0, 1fr); }
-  .brand div, nav.nav a span, nav.nav .count, nav.nav .caret, nav.nav a.sub, nav.nav .ver, .navfold, .navlims { display: none !important; }
+  .brand div, nav.nav a span, nav.nav .count, nav.nav .caret, nav.nav a.sub, nav.nav .ver, .navfold, .side .navlims, .side .navstats { display: none !important; }
   nav.nav a { justify-content: center; padding: 0; }
   .brand { justify-content: center; padding-inline: 0; }
 }
@@ -399,7 +407,7 @@ table.matrix td.c, table.matrix th.c, .mlist th.c, .mlist td.c { text-align: cen
 .scene .map { position: absolute; inset: 0; }
 .scene .map svg { position: absolute; left: 0; top: 0; overflow: visible; }
 .ov { position: absolute; z-index: 2; }
-.ov.l { left: 0; top: 0; width: 32rem; padding: var(--s4); display: grid; grid-template-columns: minmax(0, 1fr) 12rem; gap: 0 var(--s4); align-items: start; background: radial-gradient(120% 100% at 0% 0%, var(--veil) 62%, transparent 100%); border-bottom-right-radius: 50%; pointer-events: none; }
+.ov.l { left: 0; top: 0; width: 32rem; padding: var(--s4); background: radial-gradient(120% 100% at 0% 0%, var(--veil) 62%, transparent 100%); border-bottom-right-radius: 50%; pointer-events: none; }
 .ov.l > * { pointer-events: auto; }
 .ov.l h1 { font-size: clamp(1rem, .85rem + .6cqi, 1.25rem); line-height: 1.3; margin: 2px 0; }
 html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem); line-height: 1.22; }
@@ -444,19 +452,11 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
 .inc .t em { margin-left: auto; font: normal var(--fs-xs) var(--mono); color: var(--m); }
 .inc p { margin: 0; font-size: var(--fs-xs); color: var(--t2); }
 .inc .btn { justify-self: start; margin-top: 4px; }
-.row2 { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: var(--s3); }
-.rings { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: var(--s3) var(--s2); }
 .ring { display: grid; justify-items: center; text-align: center; gap: 2px; }
 .ring svg { display: block; }
 .ring b { font-size: var(--fs-sm); font-weight: 600; }
 .ring small { font: var(--fs-xs) var(--mono); color: var(--m); }
 .ring small.warn { color: var(--warn); } .ring small.neg { color: var(--neg); }
-.runrow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: var(--s2); align-items: center; padding: 7px 0; border-top: 1px solid var(--line2); font-size: var(--fs-sm); }
-.runrow:first-of-type { border-top: 0; }
-.runrow b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.runrow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.runrow .muted { font-size: var(--fs-xs); }
-.runrow time, .runrow .mono { font: var(--fs-xs) var(--mono); color: var(--m); }
 .clock, .hmwrap { display: grid; place-items: center; }
 .clock svg, .hmwrap svg { display: block; width: 100%; max-width: 16rem; height: auto; }
 .hmlegend { display: none; }
@@ -464,15 +464,9 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
 @container sheet (max-width: 70rem) {
   .hero { grid-template-columns: 1fr; }
   .hero .aside { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
-  .ov.l { width: 29rem; grid-template-columns: minmax(0, 1fr) 11rem; }
+  .ov.l { width: 29rem; }
 }
-@container sheet (max-width: 56rem) { .hero .aside, .row2 { grid-template-columns: 1fr; } .ov.l { width: 100%; max-width: 100%; } }
-/* a wide page: the readouts stack under the finding in one column at the side, leaving the dial the width; narrower, the column would shrink the dial, so they sit beside the finding */
-@container sheet (min-width: 80rem) {
-  .ov.l { width: 23rem; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
-  .rng button { font-size: 12px; padding: 2px 9px; }
-  .rd { gap: var(--s3); } .rd label { width: 4.2rem; font-size: 12px; } .rd strong { font-size: 1.5rem; width: 5rem; } .rd svg { width: 84px; height: auto; } .rd b.d { font-size: 11px; }
-}
+@container sheet (max-width: 56rem) { .hero .aside { grid-template-columns: 1fr; } .ov.l { width: 100%; max-width: 100%; } }
 @container sheet (min-width: 90rem) { .scene { min-height: 48rem; } .clock svg, .hmwrap svg { max-width: none; } }
 
 /* ---------- Sessions ---------- */

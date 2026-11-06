@@ -3,7 +3,7 @@
 import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
 import { ic, brandMark } from './lib.js';
 import './accounts.js';
-import { setTodayBadge } from './home.js';
+import { setTodayBadge, drawNavStats } from './home.js';
 import { setSelfUpdate, refreshProjects } from './views.js';
 import './mcp.js';
 import './skills.js';
@@ -29,6 +29,7 @@ const ev = window.__TAURI__ && window.__TAURI__.event;
 let redraw;
 if (ev) ev.listen('refreshed', () => {
   S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
+  if (S.route.view !== 'home') drawNavStats(); // the Overview redraws them with the page
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
   if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
@@ -59,6 +60,10 @@ if (ev) ev.listen('self-update', (e) => {
 // open consoles change without any file being written; look again every minute on the accounts list
 setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && document.visibilityState === 'visible') render(); }, 60000);
 
+// the limits popup by the tray icon opens this window at an account
+if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });
+
 render();
-// today's cost next to Home, also when another page opens first
+// today's cost next to Home, and the readouts, also when another page opens first
 call('today').then(setTodayBadge).catch(() => {});
+if (S.route.view !== 'home') drawNavStats();
