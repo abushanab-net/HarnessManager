@@ -219,7 +219,7 @@ try {
     await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
-    await hasText('#today-cost', 'Today $');
+    await hasText('#today-cost', '$');
     await shot('00-home');
     await click('[data-testid=kpi-cost]');
     await click('[data-testid=tool-codex]');
@@ -235,7 +235,7 @@ try {
     assert.ok(dial.nodes.includes('a:codex-main') && dial.nodes.includes('t:codex') && !dial.nodes.some((n) => /^[pv]:/.test(n)), 'account and tool bodies, no provider: ' + dial.nodes);
     assert.ok(!(await exec("return !!document.querySelector('.ov.b')")), 'no legend on the scene');
     assert.equal(await exec("return [...document.querySelectorAll('[data-testid=routes] svg text')].map((t) => t.textContent).join()"), 'accounts', 'only the accounts ring is named');
-    assert.ok(dial.routes > 0 && dial.labels === dial.nodes.length, 'every body has a route and a label');
+    assert.ok(dial.routes > 0 && dial.labels === dial.nodes.filter((n) => /^(a:|t:|router$)/.test(n)).length, 'every account, tool and router body has a label; a dock is named on hover');
     // no label runs into another, however long its text
     const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] .lb')].map((n) => n.getBoundingClientRect());
       return r.filter((a, i) => r.some((b, j) => j !== i && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)).length;`);
@@ -1346,7 +1346,7 @@ description: Bulk skill ${i}
     await nav('#home');
     await $('[data-testid=scope]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
-    assert.ok((await text('[data-testid=routes]')).includes('LAPTOP'), 'the other computer has a dock');
+    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=routes] [data-node] title')].map((t) => t.textContent).join()")).includes('LAPTOP'), 'the other computer has a dock, named on hover');
     assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] a')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, two letters each with the name on hover');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');

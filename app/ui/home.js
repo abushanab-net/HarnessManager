@@ -145,6 +145,7 @@ function limitArcs(g, x, y, a, R = 13) {
 function body(svg, n, x, y, G) {
   const g = el('g', { class: 'n', 'data-node': n.id, tabindex: 0, role: 'button', 'aria-label': `${n.label}${n.sub ? ', ' + n.sub : ''}` }, svg);
   if (n.href) g.dataset.href = n.href;
+  el('title', {}, g).textContent = `${n.label}${n.sub ? ' · ' + n.sub : ''}`;
   n.x = x; n.y = y;
   const col = nodeCol(n, G);
   if (n.kind === 'pc') { el('rect', { x: x - 22, y: y - 3, width: 44, height: 6, rx: 2, fill: col, opacity: .55 }, g); el('rect', { x: x - 6, y: y - 6, width: 12, height: 12, rx: 3, fill: col }, g); }
@@ -206,21 +207,27 @@ function corridor(cx, cy, rA, tA, rB, tB, rc) {
 
 // ---------- the Horizon Dial ----------
 const RING = { account: 0.5, tool: 0.78, router: 1 };
-let dialStop = null;
+let dialStop = null, dialPick = null, dialT = 0;
+// one observer for the dial's box: a redraw 150 ms after it settles at a size other than the one drawn
+const dialRO = new ResizeObserver((es) => { const m = es[0].target; clearTimeout(dialT); dialT = setTimeout(() => { if (m.isConnected && S.dialDraw && `${m.clientWidth}x${m.clientHeight}` !== m.dataset.size) S.dialDraw(); }, 150); });
 /** The half circle from the docks: accounts, tools and the router gate as hops; the finding's route selected. */
 function drawDial(host, G, motion, selected) {
   if (dialStop) { dialStop(); dialStop = null; }
   host.innerHTML = '';
+  host.classList.add('still'); // no fades while drawing: a redraw (every refresh) would blink every dimmed body
   const scene = host.parentElement, W = host.clientWidth, Hh = host.clientHeight;
   if (!W || !Hh) return;
-  // the baseline leaves room under it for the ring names, the dock labels and the legend
-  const cx = W / 2, cy = Hh - 90;
+  // the baseline leaves room under it only for the ring name: the docks are named on hover and there is no legend
+  const cx = W / 2, cy = Hh - 40;
   // the dial takes the whole width, but shrinks until its label ring passes under the readouts
   const ovl = scene.querySelector('.ov.l'), box = { x0: 0, x1: ovl.offsetWidth + 70, y1: ovl.offsetHeight + 14 };
   const clear = (R) => { const r = R + 22, dx = cx >= box.x0 && cx <= box.x1 ? 0 : Math.min(Math.abs(box.x0 - cx), Math.abs(box.x1 - cx)); return dx >= r || cy - Math.sqrt(r * r - dx * dx) >= box.y1; };
-  let R = Math.min(W / 2 - 90, Hh - 118);
+  let R = Math.min(W / 2 - 90, Hh - 68);
   while (R > 140 && !clear(R)) R -= 4;
-  const svg = el('svg', { viewBox: `0 0 ${W} ${Hh}` }); host.append(svg);
+  // drawn at the box's size in pixels, never scaled by CSS: the HTML labels sit in the same pixels, so a stale drawing
+  // (the box resized, or the page's cached copy shown while fresh data loads) is only clipped, never torn apart
+  host.dataset.size = `${W}x${Hh}`;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${Hh}`, width: W, height: Hh }); host.append(svg);
   const { N, E, by } = G;
   const acc = N.filter((n) => n.kind === 'account');
   acc.forEach((n, i) => { n.ang = deg(-180 + ((i + 1) * 180) / (acc.length + 1)); });
@@ -250,8 +257,8 @@ function drawDial(host, G, motion, selected) {
   for (const n of N) {
     const [x, y] = P(n); body(svg, n, x, y, G);
     const right = n.kind === 'pc' ? true : Math.cos(n.ang) >= 0;
-    if (n.kind === 'pc') lab.add(n, x, cy + 32, 'c', 'sm', `<b>${esc(n.label)}</b>`);
-    else if (n.kind === 'account') lab.add(n, x + (right ? 22 : -22), y, right ? 'r' : 'l');
+    if (n.kind === 'pc') continue; // a dock is its coloured bar; the computer's name is on hover (the body's title)
+    if (n.kind === 'account') lab.add(n, x + (right ? 22 : -22), y, right ? 'r' : 'l');
     else if (n.kind === 'tool') lab.add(n, x, y - 14, 'c', 'sm', `<b>${toolIcon(n.harness, 12)}${esc(n.label)}</b><span class="${n.tone || ''}">${esc(n.sub)}</span>`);
     else lab.add(n, x + (right ? 14 : -14), y, right ? 'r' : 'l', 'sm');
   }
@@ -263,18 +270,21 @@ function drawDial(host, G, motion, selected) {
     host.querySelectorAll('path.e').forEach((p) => p.classList.toggle('dim', !!lit && !(lit.has(p.dataset.a) && lit.has(p.dataset.b))));
     bd.filter(lit ? (e) => lit.has(e.a) && lit.has(e.b) : null);
   };
-  let sticky = by[selected] ? selected : null, hover = null;
+  // the body the user picked (or '' for none after Escape) outlives a redraw; otherwise the finding's route is selected
+  let sticky = dialPick && by[dialPick] ? dialPick : dialPick === '' ? null : by[selected] ? selected : null, hover = null;
   const upd = () => apply(hover ? chain(E, hover) : sticky ? chain(E, sticky) : null);
+  const pick = (id) => { sticky = id; dialPick = id == null ? '' : id; upd(); };
   host.querySelectorAll('[data-node]').forEach((g) => {
     const id = g.dataset.node;
     g.addEventListener('mouseenter', () => { hover = id; upd(); }); g.addEventListener('mouseleave', () => { hover = null; upd(); });
     g.addEventListener('focus', () => { hover = id; upd(); }); g.addEventListener('blur', () => { hover = null; upd(); });
-    g.addEventListener('click', (ev) => { ev.stopPropagation(); if (sticky === id && g.dataset.href) { location.hash = g.dataset.href; return; } sticky = id; upd(); });
-    g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (sticky === id && g.dataset.href) location.hash = g.dataset.href; else { sticky = id; upd(); } } });
+    g.addEventListener('click', (ev) => { ev.stopPropagation(); if (sticky === id && g.dataset.href) { location.hash = g.dataset.href; return; } pick(id); });
+    g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (sticky === id && g.dataset.href) location.hash = g.dataset.href; else pick(id); } });
   });
-  host.addEventListener('click', () => { sticky = null; upd(); });
-  host.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { sticky = null; hover = null; upd(); } });
+  host.addEventListener('click', () => pick(null));
+  host.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { hover = null; pick(null); } });
   upd();
+  requestAnimationFrame(() => requestAnimationFrame(() => host.classList.remove('still')));
   dialStop = bd.stop;
 }
 
@@ -351,7 +361,7 @@ function latestTable(rows, pcs) {
 }
 export function setTodayBadge(cost) {
   const el = document.getElementById('today-cost');
-  if (el) el.textContent = cost == null ? '' : 'Today ' + money(cost);
+  if (el) { el.textContent = cost == null ? '' : money(cost); el.title = 'Today, at API list prices'; }
 }
 
 /** What needs attention: a limit running out before its reset, a login to renew, a paused provider, router errors. */
@@ -415,12 +425,11 @@ view('home', async (sheet) => {
       <div class="tscroll" id="home-table">${requestTable(st.rows)}</div>
       ${st.rows.length < st.total ? '<div style="padding:10px 0"><button class="btn outline sm" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}` : latestTable(st.rows, pcs)}</section>`;
   fit(sheet.querySelector('.hmwrap'), () => yearClock(o.heatmap, st.metric === 'hit' ? 'tokens' : st.metric, pc));
-  // the dial is drawn for the width the scene has, and again when the window changes size
+  // the dial is drawn for the size its box has, and again whenever that box changes (the window, the sidebar, a fold)
   const map = sheet.querySelector('.map');
   const draw = () => drawDial(map, G, !!s.moving_routes && !window.matchMedia('(prefers-reduced-motion: reduce)').matches, risk ? 'a:' + risk.acct : null);
   draw();
-  let t; const onResize = () => { if (!map.isConnected) { window.removeEventListener('resize', onResize); return; } clearTimeout(t); t = setTimeout(draw, 150); };
-  window.addEventListener('resize', onResize);
+  S.dialDraw = draw; dialRO.disconnect(); dialRO.observe(map);
   keepPage(sheet, wk);
 });
 

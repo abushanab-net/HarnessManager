@@ -79,6 +79,13 @@ nav.nav .count.live { color: var(--ac); }
 nav.nav .count.live:not(:empty), nav.nav .count.upd:not(:empty) { cursor: pointer; }
 nav.nav .count.live:not(:empty):hover, nav.nav .count.upd:not(:empty):hover { text-decoration: underline; }
 nav.nav .count.upd:not(:empty) { color: var(--warn); }
+.lgrid { display: inline-grid; grid-template-columns: repeat(4, 4px); gap: 2px; vertical-align: middle; margin-left: 5px; }
+.lgrid b { display: block; width: 4px; height: 4px; border-radius: 1px; background: var(--line); }
+.lgrid b.on { background: var(--ac); }
+.navlims { display: flex; flex-wrap: wrap; gap: 3px 5px; padding: 0 var(--s3) var(--s2) 2.6rem; }
+.navlims:empty { display: none; }
+.navlims a { display: block; line-height: 0; border-radius: 50%; }
+.navlims a:hover { background: var(--line2); }
 nav.nav .udot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
 nav.nav .ver { display: block; padding: var(--s1) var(--s3) 0 2.6rem; font: var(--fs-xs) var(--mono); color: var(--m); }
 .navgap { height: var(--s4); }
@@ -100,7 +107,7 @@ nav.nav a.sub .unpin:hover { background: var(--line); color: var(--ink); }
 /* a narrow window: the sidebar keeps its icons only */
 @media (max-width: 75rem) {
   .frame { grid-template-columns: 4rem minmax(0, 1fr); }
-  .brand div, nav.nav a span, nav.nav .count, nav.nav .caret, nav.nav a.sub, nav.nav .ver, .navfold { display: none !important; }
+  .brand div, nav.nav a span, nav.nav .count, nav.nav .caret, nav.nav a.sub, nav.nav .ver, .navfold, .navlims { display: none !important; }
   nav.nav a { justify-content: center; padding: 0; }
   .brand { justify-content: center; padding-inline: 0; }
 }
@@ -382,7 +389,7 @@ table.matrix td.c, table.matrix th.c, .mlist th.c, .mlist td.c { text-align: cen
 .hero .aside { display: grid; grid-template-rows: auto 1fr; gap: var(--s3); min-width: 0; }
 .scene { position: relative; min-height: 40rem; border-radius: var(--rad); overflow: hidden; border: 1px solid var(--line); background: radial-gradient(120% 90% at 50% 45%, var(--s), var(--g)); user-select: none; }
 .scene .map { position: absolute; inset: 0; }
-.scene .map svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.scene .map svg { position: absolute; left: 0; top: 0; overflow: visible; }
 .ov { position: absolute; z-index: 2; }
 .ov.l { left: 0; top: 0; width: 32rem; padding: var(--s4); display: grid; grid-template-columns: minmax(0, 1fr) 12rem; gap: 0 var(--s4); align-items: start; background: radial-gradient(120% 100% at 0% 0%, var(--veil) 62%, transparent 100%); border-bottom-right-radius: 50%; pointer-events: none; }
 .ov.l > * { pointer-events: auto; }
@@ -415,6 +422,7 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
 .lb.dim span { display: none; }
 .map.measuring .lb span { display: block; }
 .scene [data-node] { cursor: pointer; transition: opacity .25s; outline: 0; }
+.map.still [data-node], .map.still .lb, .map.still path.e { transition: none; }
 .scene [data-node].dim { opacity: .45; }
 .scene [data-node]:focus-visible > :first-child { stroke: var(--ac); stroke-width: 2; }
 .scene path.e { transition: opacity .25s; }
@@ -454,7 +462,11 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
 }
 @container sheet (max-width: 56rem) { .hero .aside, .row2 { grid-template-columns: 1fr; } .ov.l { width: 100%; max-width: 100%; } }
 /* a wide page: the readouts stack under the finding in one column at the side, leaving the dial the width; narrower, the column would shrink the dial, so they sit beside the finding */
-@container sheet (min-width: 80rem) { .ov.l { width: 21rem; grid-template-columns: minmax(0, 1fr); gap: var(--s3); } }
+@container sheet (min-width: 80rem) {
+  .ov.l { width: 23rem; grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+  .rng button { font-size: 12px; padding: 2px 9px; }
+  .rd { gap: var(--s3); } .rd label { width: 4.2rem; font-size: 12px; } .rd strong { font-size: 1.5rem; width: 5rem; } .rd svg { width: 84px; height: auto; } .rd b.d { font-size: 11px; }
+}
 @container sheet (min-width: 90rem) { .scene { min-height: 48rem; } .clock svg, .hmwrap svg { max-width: none; } }
 
 /* ---------- Sessions ---------- */
