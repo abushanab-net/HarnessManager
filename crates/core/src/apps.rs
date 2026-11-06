@@ -220,7 +220,8 @@ fn update_method(id: &str, ins: &Installer, c: &Copy) -> Option<Method> {
         Kind::Brew if !ins.brew.is_empty() => m("brew", "Update with Homebrew", format!("brew upgrade {}", ins.brew)),
         Kind::Scoop if !ins.scoop.is_empty() => m("scoop", "Update with Scoop", format!("scoop update {}", ins.scoop)),
         Kind::Choco if !ins.choco.is_empty() => m("choco", "Update with Chocolatey", format!("choco upgrade {} -y", ins.choco)),
-        _ if !ins.self_update.is_empty() => m("self", "Run its updater", format!("{} {}", q(&c.path), ins.self_update)),
+        // Pi's own updater refuses its standalone copy on Windows ("only supported for npm and pnpm installs"): its installer runs again there
+        _ if !ins.self_update.is_empty() && !(id == "pi" && cfg!(windows)) => m("self", "Run its updater", format!("{} {}", q(&c.path), ins.self_update)),
         // no update command: the installer is run again, over the file it finds (Antigravity's refuses an existing one, so it goes first)
         _ if !native_cmd.is_empty() => {
             let remove = if id == "agy" { if cfg!(windows) { format!("Remove-Item -Force '{}'; ", c.path) } else { format!("rm -f {} && ", q(&c.path)) } } else { String::new() };
@@ -480,6 +481,7 @@ mod tests {
         let agy = cmd("agy", &AGY, c(Kind::Native, r"C:\u\agy.exe", None));
         assert!(agy.contains("Remove-Item") || agy.contains("rm -f"), "{agy}");
         assert!(agy.contains("antigravity.google/cli/install"), "{agy}");
-        assert_eq!(cmd("pi", &PI, c(Kind::Native, r"C:\u\.local\bin\pi.cmd", None)), "\"C:\\u\\.local\\bin\\pi.cmd\" update", "a standalone Pi runs its own updater");
+        let pi = cmd("pi", &PI, c(Kind::Native, r"C:\u\.local\bin\pi.cmd", None));
+        if cfg!(windows) { assert!(pi.contains("pi.dev/install.ps1"), "a standalone Pi on Windows runs the installer again: {pi}"); } else { assert_eq!(pi, "\"C:\\u\\.local\\bin\\pi.cmd\" update", "a standalone Pi runs its own updater"); }
     }
 }
