@@ -408,7 +408,7 @@ view('home', async (sheet) => {
           <h1 data-testid="finding">${risk ? `<span class="w">${esc(risk.name)}</span> will likely run out of its ${esc(risk.win.toLowerCase())} ${when(risk.out).replace(/ (\d)/, ' at about $1')}, ${dur(risk.reset - risk.out)} before it resets.` : text}</h1>
           <div class="basis" data-testid="basis">${basis}</div>
           </div>${readouts(k)}</div>
-        <div class="ov h">${G.empty ? 'add an account to see its route' : 'hover, focus or click a body to trace it · click it again to open it · Esc returns'}</div></section>
+        </section>
       <div class="aside">
         <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[{ id: '', name: 'All' }, ...computers(pcs)].map((x) => `<a class="${pc.dev === x.id ? 'on' : ''}" data-act="home-device" data-v="${esc(x.id)}" title="${esc(x.id ? x.name : 'Every computer')}" data-testid="activity-pc-${esc(x.id || 'all')}">${x.id ? cdot(pcs, x.id, x.name) : 'All'}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
         ${attention(risks, ps, k)}

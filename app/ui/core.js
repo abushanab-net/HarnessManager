@@ -28,8 +28,8 @@ export function drawPins(list) {
   if (!el) return;
   const cur = S.route.view === 'sessions' ? S.route.params.project : '';
   el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? liveGrid(p.live) : p.sessions || ''}</span><span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">${ic.x}</span></a>`).join('');
-  const live = list.filter((p) => p.live).length;
-  setNavCounts({ 'n-projects': list.length ? `${list.length}${liveGrid(live)}` : '' });
+  // beside Projects: only the live grid, and only while the pinned rows (which carry their own) are folded away
+  setNavCounts({ 'n-projects': liveGrid(list.filter((p) => p.live).length) });
 }
 
 /** The counts beside the pages in the sidebar; each one only when known. Our own markup: a number, or a number with a live grid. */
@@ -147,8 +147,11 @@ export function render() {
 }
 
 async function renderNow() {
-  // a redraw of the same page (a refresh, a filter) keeps its scroll position; moving to another page starts at the top
-  const sheet0 = document.getElementById('sheet'), sameHash = S.lastHash === location.hash, top = sheet0 ? sheet0.scrollTop : 0;
+  // a redraw of the same page (a refresh, a filter) keeps its scroll position; moving to another page starts at the top.
+  // The position is the one the sheet had when its content was replaced, not when the redraw began: a page's data takes
+  // seconds to load, and restoring the older position pulled the reader back up while they scrolled
+  const sheet0 = document.getElementById('sheet'), sameHash = S.lastHash === location.hash;
+  if (sheet0 && !S.sheetWatched) { S.sheetWatched = true; S.sheetTop = sheet0.scrollTop; sheet0.addEventListener('scroll', () => { S.sheetTop = sheet0.scrollTop; }, { passive: true }); }
   S.lastHash = location.hash;
   S.route = parseHash();
   S.pageFind = null; // a page that lists things sets its own filter for the top bar's search
@@ -166,6 +169,7 @@ async function renderNow() {
   if (!sameHash) delete sheet.dataset.warm;
   try {
     await fn(sheet, S.route.params);
+    const top = S.sheetTop; // what the reader had before fn replaced the content; the replacement's own scroll event has not fired yet
     if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
     // pages can add to a freshly drawn sheet (the first-run tips in guide.js)
     document.dispatchEvent(new CustomEvent('rendered', { detail: { sheet, view: routes[S.route.view] ? S.route.view : 'home' } }));

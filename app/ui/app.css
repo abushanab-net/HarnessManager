@@ -79,13 +79,18 @@ nav.nav .count.live { color: var(--ac); }
 nav.nav .count.live:not(:empty), nav.nav .count.upd:not(:empty) { cursor: pointer; }
 nav.nav .count.live:not(:empty):hover, nav.nav .count.upd:not(:empty):hover { text-decoration: underline; }
 nav.nav .count.upd:not(:empty) { color: var(--warn); }
-.lgrid { display: inline-grid; grid-template-columns: repeat(4, 4px); gap: 2px; vertical-align: middle; margin-left: 5px; }
-.lgrid b { display: block; width: 4px; height: 4px; border-radius: 1px; background: var(--line); }
+.lgrid { display: inline-grid; grid-template-columns: repeat(4, 3px); gap: 3px; vertical-align: middle; margin-left: 5px; }
+.lgrid b { display: block; width: 3px; height: 3px; background: var(--line); }
+/* beside Projects the grid shows only while the pinned rows, which carry their own, are folded away */
+nav.nav a[data-nav=projects]:not(.shut) #n-projects { display: none; }
 .lgrid b.on { background: var(--ac); }
-.navlims { display: flex; flex-wrap: wrap; gap: 3px 5px; padding: 0 var(--s3) var(--s2) 2.6rem; }
+/* the limits at the foot of the sidebar, as in the Limits panel: two to a row */
+.navlims { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3) var(--s2); padding: var(--s4) var(--s2) var(--s3); }
 .navlims:empty { display: none; }
-.navlims a { display: block; line-height: 0; border-radius: 50%; }
-.navlims a:hover { background: var(--line2); }
+.navlims:not(:empty) + nav.nav.bottom { margin-top: var(--s3); }
+.navlims .ring { text-decoration: none; color: var(--ink); min-width: 0; max-width: 100%; }
+.navlims .ring b { font-size: var(--fs-xs); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navlims .ring small { font-size: 10.5px; line-height: 1.3; }
 nav.nav .udot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
 nav.nav .ver { display: block; padding: var(--s1) var(--s3) 0 2.6rem; font: var(--fs-xs) var(--mono); color: var(--m); }
 .navgap { height: var(--s4); }
@@ -397,7 +402,6 @@ table.matrix td.c, table.matrix th.c, .mlist th.c, .mlist td.c { text-align: cen
 html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem); line-height: 1.22; }
 .ov.l .basis, .basis { font-size: 10.5px; color: var(--m); line-height: 1.5; }
 .basis b { color: var(--t2); font-weight: 500; }
-.ov.h { right: var(--s4); top: var(--s3); max-width: 15rem; text-align: right; font-size: var(--fs-xs); color: var(--m); pointer-events: none; }
 .rds { display: grid; grid-template-columns: 1fr; gap: 4px; padding-top: 2px; }
 .rng { display: flex; gap: 2px; margin-bottom: 3px; }
 .rng button { font: 500 10.5px var(--sans); color: var(--m); background: transparent; border: 0; border-radius: 999px; padding: 1px 7px; cursor: pointer; }
@@ -458,7 +462,6 @@ html[data-brand="vg"] .ov.l h1 { font-size: clamp(1.2rem, .95rem + .8cqi, 1.5rem
   .hero { grid-template-columns: 1fr; }
   .hero .aside { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
   .ov.l { width: 29rem; grid-template-columns: minmax(0, 1fr) 11rem; }
-  .ov.h { max-width: 11rem; }
 }
 @container sheet (max-width: 56rem) { .hero .aside, .row2 { grid-template-columns: 1fr; } .ov.l { width: 100%; max-width: 100%; } }
 /* a wide page: the readouts stack under the finding in one column at the side, leaving the dial the width; narrower, the column would shrink the dial, so they sit beside the finding */
