@@ -80,14 +80,16 @@ const AGY: Installer = Installer {
     npm: &[], winget: "", brew: "--cask antigravity-cli", scoop: "", choco: "",
     self_update: "", auto_updates: true,
 };
-// Pi and Oh My Pi ship on npm only (the first Pi package name is deprecated in favour of the second, both still install)
+// Pi: npm, or its installer puts a standalone copy in ~/.local/share/pi with a pi / pi.cmd shim in ~/.local/bin, and
+// `pi update` replaces it (the first package name is deprecated in favour of the second, both still install)
 const PI: Installer = Installer {
-    win_dirs: &[], unix_dirs: &[],
-    win_install: "", unix_install: "",
-    site: "https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent",
+    win_dirs: &[("USERPROFILE", r".local\bin")], unix_dirs: &["~/.local/bin"],
+    win_install: "irm https://pi.dev/install.ps1 | iex", unix_install: "curl -fsSL https://pi.dev/install.sh | sh",
+    site: "https://pi.dev",
     npm: &["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"], winget: "", brew: "", scoop: "", choco: "",
-    self_update: "", auto_updates: false,
+    self_update: "update", auto_updates: false,
 };
+// Oh My Pi ships on npm only
 const OMP: Installer = Installer {
     win_dirs: &[], unix_dirs: &[],
     win_install: "", unix_install: "",
@@ -478,5 +480,6 @@ mod tests {
         let agy = cmd("agy", &AGY, c(Kind::Native, r"C:\u\agy.exe", None));
         assert!(agy.contains("Remove-Item") || agy.contains("rm -f"), "{agy}");
         assert!(agy.contains("antigravity.google/cli/install"), "{agy}");
+        assert_eq!(cmd("pi", &PI, c(Kind::Native, r"C:\u\.local\bin\pi.cmd", None)), "\"C:\\u\\.local\\bin\\pi.cmd\" update", "a standalone Pi runs its own updater");
     }
 }
