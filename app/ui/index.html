@@ -12,24 +12,24 @@
   <aside class="side">
     <div class="brand" id="brand"><span id="brand-mark"></span><div><b>Harness Manager</b><small id="brand-sub">Loading…</small></div></div>
     <nav class="nav" id="nav-main">
-      <a data-nav="home" href="#home" data-testid="nav-home"><span data-icon="dash"></span>Overview<span class="count" id="today-cost"></span></a>
-      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span>Sessions<span class="count live" id="n-live" data-act="go-live" role="link" title="The sessions running now" data-testid="nav-live"></span></a>
-      <a data-nav="projects" href="#projects" data-testid="nav-projects"><span data-icon="folder"></span>Projects<span class="count" id="n-projects"></span><span class="caret" data-act="nav-fold" data-fold="nav-pins" role="button" tabindex="0" aria-label="Show or hide the pinned projects" data-testid="fold-pins"></span></a>
+      <a data-nav="home" href="#home" data-testid="nav-home"><span data-icon="dash"></span><span>Overview</span><span class="count" id="today-cost"></span></a>
+      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span><span>Sessions</span><span class="count live" id="n-live" data-act="go-live" role="link" title="The sessions running now" data-testid="nav-live"></span></a>
+      <a data-nav="projects" href="#projects" data-testid="nav-projects"><span data-icon="folder"></span><span>Projects</span><span class="count" id="n-projects"></span><span class="caret" data-act="nav-fold" data-fold="nav-pins" role="button" tabindex="0" aria-label="Show or hide the pinned projects" data-testid="fold-pins"></span></a>
       <div id="nav-pins" class="navfold" data-testid="nav-pins"></div>
-      <a data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span data-icon="users"></span>Accounts<span class="count" id="n-accounts"></span></a>
+      <a data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span data-icon="users"></span><span>Accounts</span><span class="count" id="n-accounts"></span></a>
       <div class="navgap"></div>
-      <a class="grp" href="#" data-act="nav-fold" data-fold="nav-setup" role="button" aria-label="Show or hide the setup pages" data-testid="nav-setup"><span data-icon="grid"></span>Setup<span class="count upd" id="apps-count" title="Tools with a newer version"></span><span class="caret"></span></a>
+      <a class="grp" href="#" data-act="nav-fold" data-fold="nav-setup" role="button" aria-label="Show or hide the setup pages" data-testid="nav-setup"><span data-icon="grid"></span><span>Setup</span><span class="count upd" id="apps-count" data-act="go-apps" role="link"></span><span class="caret"></span></a>
       <div id="nav-setup" class="navfold">
         <a class="sub" data-nav="mcp" href="#mcp" data-testid="nav-mcp"><span>MCP servers</span><span class="count" id="n-mcp"></span></a>
         <a class="sub" data-nav="skills" href="#skills" data-testid="nav-skills"><span>Skills</span><span class="count" id="n-skills"></span></a>
         <a class="sub" data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span>System prompts</span></a>
         <a class="sub" data-nav="routing" href="#routing" data-testid="nav-routing"><span>API keys &amp; routing</span></a>
-        <a class="sub" data-nav="apps" href="#apps" data-testid="nav-apps"><span>Apps</span></a>
+        <a class="sub" data-nav="apps" href="#apps" data-testid="nav-apps"><span>Apps</span><span class="count upd" id="n-apps"></span></a>
       </div>
     </nav>
     <nav class="nav bottom">
-      <a data-nav="cli" href="#cli" data-testid="nav-cli"><span data-icon="book"></span>CLI reference</a>
-      <a data-nav="settings" href="#settings" data-testid="nav-settings"><span data-icon="gear"></span>Settings<i class="udot" id="settings-upd" title="A newer Harness Manager is available" hidden data-testid="settings-upd"></i></a>
+      <a data-nav="cli" href="#cli" data-testid="nav-cli"><span data-icon="book"></span><span>CLI reference</span></a>
+      <a data-nav="settings" href="#settings" data-testid="nav-settings"><span data-icon="gear"></span><span>Settings</span><i class="udot" id="settings-upd" title="A newer Harness Manager is available" hidden data-testid="settings-upd"></i></a>
       <span class="ver mono" id="nav-version" title="The version of Harness Manager running" data-testid="nav-version"></span>
     </nav>
   </aside>

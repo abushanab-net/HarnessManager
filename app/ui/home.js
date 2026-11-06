@@ -5,7 +5,7 @@
 import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, fit, refreshText, shownTools, warmPage, keepPage } from './core.js';
 import { esc, fmt, hm, dur, toolIcon, toolPill } from './lib.js';
 import { findings, limitRows } from './accounts.js';
-import { computersStatus, syncOn, computers, nameOf, cdot, scope, scopeSeg } from './computers.js';
+import { computersStatus, syncOn, computers, nameOf, cdot, pcAvatar, scope, scopeSeg } from './computers.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 const VENDOR = { claude: 'Anthropic', codex: 'OpenAI', opencode: 'OpenCode', agy: 'Google', pi: 'Pi', omp: 'Oh My Pi' };
@@ -187,6 +187,7 @@ function labelLayer(host, G) {
   };
 }
 /** Beads along routes, as many and as fast as the traffic on them; a still picture when motion is off. */
+const T0 = performance.now();
 function beads(svg, items, motion, G) {
   const g = el('g', { class: 'beads' }, svg), B = [];
   for (const it of items) {
@@ -196,7 +197,8 @@ function beads(svg, items, motion, G) {
   }
   const place = (t) => { for (const b of B) { const u = ((t * b.v) / b.len + b.o) % 1, p = b.path.getPointAtLength(u * b.len); b.c.setAttribute('cx', p.x.toFixed(1)); b.c.setAttribute('cy', p.y.toFixed(1)); } };
   let raf = 0;
-  if (motion && B.length) { const t0 = performance.now(); const loop = (n) => { if (!svg.isConnected) return; if (!document.hidden) place((n - t0) / 1000); raf = requestAnimationFrame(loop); }; raf = requestAnimationFrame(loop); } else place(3.1);
+  // the clock is the page's, not this drawing's: a redraw (a refresh every few seconds while sessions write) continues the motion instead of restarting it
+  if (motion && B.length) { const loop = (n) => { if (!svg.isConnected) return; if (!document.hidden) place((n - T0) / 1000); raf = requestAnimationFrame(loop); }; raf = requestAnimationFrame(loop); } else place(3.1);
   return { stop: () => cancelAnimationFrame(raf), filter(f) { g.style.opacity = f ? 1 : .55; for (const b of B) b.c.style.display = !f || f(b.e) ? '' : 'none'; } };
 }
 /** The circular mean; when the angles cancel the first one stands in. */
@@ -420,7 +422,7 @@ view('home', async (sheet) => {
         <div class="ov b"><span><i style="background:var(--ac)"></i>signed-in plan</span><span><i style="background:var(--r2)"></i>through the router</span><span><i style="background:var(--neg)"></i>paused or logged out</span>${G.peers ? G.pcList.map((c) => `<span><i class="sq" style="background:${pcCol(pcs, c.id)}"></i>${esc(c.name)}</span>`).join('') : ''}</div>
         <div class="ov h">${G.empty ? 'add an account to see its route' : 'hover, focus or click a body to trace it · click it again to open it · Esc returns'}</div></section>
       <div class="aside">
-        <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[['', 'All'], ...computers(pcs).map((x) => [x.id, x.name])].map(([v, l]) => `<a class="${pc.dev === v ? 'on' : ''}" data-act="home-device" data-v="${esc(v)}" data-testid="activity-pc-${esc(v || 'all')}">${esc(l)}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
+        <section class="panel" data-testid="activity"><div class="ph"><h2>Activity, 53 weeks</h2>${pc ? `<span class="seg3" role="group" aria-label="Computer" data-testid="activity-pc">${[{ id: '', name: 'All' }, ...computers(pcs)].map((x) => `<a class="${pc.dev === x.id ? 'on' : ''}" data-act="home-device" data-v="${esc(x.id)}" title="${esc(x.id ? x.name : 'Every computer')}" data-testid="activity-pc-${esc(x.id || 'all')}">${x.id ? pcAvatar(pcs, x) : 'All'}</a>`).join('')}</span>` : ''}<span class="muted sm r">Mon inside · daily ${pc && pc.dev ? 'tokens on ' + esc(nameOf(pcs, pc.dev)) : st.metric === 'hit' ? 'tokens' : st.metric}</span></div><div class="hmwrap"></div></section>
         ${attention(risks, ps, k)}
       </div>
     </div>

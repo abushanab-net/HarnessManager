@@ -57,7 +57,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 mark { background: var(--hl); color: inherit; }
 
 /* ---------- the shell: sidebar, top bar, the page ---------- */
-.frame { position: fixed; inset: 0; display: grid; grid-template-columns: 15rem minmax(0, 1fr); grid-template-rows: 3.25rem minmax(0, 1fr); background: var(--g); }
+.frame { position: fixed; inset: 0; display: grid; grid-template-columns: 16rem minmax(0, 1fr); grid-template-rows: 3.25rem minmax(0, 1fr); background: var(--g); }
 aside.side { grid-row: 1 / 3; display: flex; flex-direction: column; padding: var(--s3); border-right: 1px solid var(--line); min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .brand { display: flex; gap: var(--s3); align-items: center; padding: var(--s2) var(--s2) var(--s5); }
 .brand > span { width: 30px; height: 30px; flex: none; display: grid; place-items: center; }
@@ -72,10 +72,12 @@ nav.nav a svg { color: var(--m); flex: none; }
 nav.nav a:hover { background: var(--line2); }
 nav.nav a.on { background: var(--acS); color: var(--ink); font-weight: 600; }
 nav.nav a.on svg { color: var(--ac); }
-nav.nav .count { margin-left: auto; font: normal var(--fs-xs) var(--mono); color: var(--m); white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* the count is always whole; the name beside it gives way with an ellipsis */
+nav.nav a > span:not(.count):not(.caret):not(.unpin) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+nav.nav .count { margin-left: auto; font: normal var(--fs-xs) var(--mono); color: var(--m); white-space: nowrap; flex: none; }
 nav.nav .count.live { color: var(--ac); }
-nav.nav .count.live:not(:empty) { cursor: pointer; }
-nav.nav .count.live:not(:empty):hover { text-decoration: underline; }
+nav.nav .count.live:not(:empty), nav.nav .count.upd:not(:empty) { cursor: pointer; }
+nav.nav .count.live:not(:empty):hover, nav.nav .count.upd:not(:empty):hover { text-decoration: underline; }
 nav.nav .count.upd:not(:empty) { color: var(--warn); }
 nav.nav .udot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
 nav.nav .ver { display: block; padding: var(--s1) var(--s3) 0 2.6rem; font: var(--fs-xs) var(--mono); color: var(--m); }
@@ -91,8 +93,7 @@ nav.nav a.sub { padding-left: 2.6rem; font-size: var(--fs-sm); height: 1.875rem;
 #nav-setup a.sub { padding-left: 2.6rem; }
 nav.nav a.sub .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); flex: none; }
 nav.nav a.sub .dot.live { background: var(--ac); box-shadow: 0 0 0 2px var(--acS); }
-nav.nav a.sub span:not(.count) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-nav.nav a.sub .unpin { width: 0; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--m); opacity: 0; flex: none; overflow: hidden; }
+nav.nav a.sub .unpin { width: 0; margin-left: -7px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--m); opacity: 0; flex: none; overflow: hidden; }
 nav.nav a.sub .unpin svg { width: 11px; height: 11px; }
 nav.nav a.sub:hover .unpin, nav.nav a.sub .unpin:focus-visible { opacity: 1; width: 18px; margin-left: 2px; }
 nav.nav a.sub .unpin:hover { background: var(--line); color: var(--ink); }
@@ -120,10 +121,13 @@ header.top .right { margin-left: auto; display: flex; gap: var(--s4); align-item
 header.top .iconbtn { border-color: var(--line); }
 .iconbtn.help { font-weight: 600; font-size: var(--fs-md); }
 .iconbtn.sq { border: 1px solid var(--line); border-radius: var(--radS); }
-.pcs { display: inline-flex; gap: 5px; align-items: center; color: var(--m); font: var(--fs-xs) var(--mono); white-space: nowrap; }
-.pcs .cdot { width: 8px; height: 8px; }
-.pcs .cdot.on { background: var(--ac); }
+.pcs { display: inline-flex; gap: 3px; align-items: center; color: var(--m); font: var(--fs-xs) var(--mono); white-space: nowrap; }
 .pcs > span { margin-left: 4px; }
+/* a computer as two letters in its colour; the full name is the title. Dimmed in the top bar when not heard from lately */
+.pcav { width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; font: 600 9.5px/1 var(--sans); letter-spacing: .02em; color: var(--on-ac); background: var(--line); flex: none; cursor: default; }
+.pcav.c0 { background: var(--ac); } .pcav.c1 { background: var(--sand); color: #0b1b20; } .pcav.c2 { background: var(--r2); } .pcav.c3 { background: var(--warn); color: #0b1b20; }
+.pcs .pcav:not(.on) { opacity: .4; }
+.seg3 a .pcav { width: 18px; height: 18px; font-size: 8.5px; margin: -2px 0; }
 
 .sheet { container: sheet / inline-size; overflow: auto; min-height: 0; padding: var(--s4) var(--s5) var(--s6); display: flex; flex-direction: column; gap: var(--s4); position: relative; }
 .sheet > * { flex-shrink: 0; margin-top: 0; margin-bottom: 0; }

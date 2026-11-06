@@ -651,7 +651,7 @@ try {
     assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the ground');
     assert.equal(d.sheetRadius, '0px', 'no framed sheet');
     assert.equal(d.sheetShadow, 'none', 'no shadow on the page');
-    assert.equal(d.side, 240, 'sidebar 15rem');
+    assert.equal(d.side, 256, 'sidebar 16rem');
     assert.equal(d.top, 52, 'top bar 3.25rem');
     assert.ok(d.navActive !== 'rgba(0, 0, 0, 0)' && d.navActive !== d.frame, 'the active item is shaded: ' + d.navActive);
     assert.equal(d.navLabel, 'Accounts');
@@ -700,7 +700,7 @@ try {
         search: [box('.search').height, cs(q('.search')).borderTopLeftRadius],
         gaps: (() => { const k = [...document.querySelectorAll('.ovk')].map((e) => e.getBoundingClientRect()); return Math.round(k[1].left - k[0].right); })(),
       };`);
-    assert.equal(d.side, 240, 'sidebar 15rem');
+    assert.equal(d.side, 256, 'sidebar 16rem');
     assert.equal(d.top, 52, 'top bar 3.25rem');
     assert.deepEqual([d.padTop, d.padLeft, d.gap], ['16px', '24px', '16px'], 'page padding 16 / 24, parts 16 apart');
     assert.ok(d.h1[0] === '600' && d.h1[1] === 'Inter' && d.h1[2] >= 17.6 && d.h1[2] <= 23.2, 'the finding: Inter 600, between 1.1rem and 1.45rem: ' + d.h1);
@@ -1324,18 +1324,20 @@ description: Bulk skill ${i}
     await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
     await shot('19b-settings-two-computers');
     // the chip: a dot per computer, both heard from lately
-    const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.cdot').length, on: el.querySelectorAll('.cdot.on').length, text: el.textContent }`);
+    const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.pcav').length, on: el.querySelectorAll('.pcav.on').length, text: el.textContent, names: [...el.querySelectorAll('.pcav')].map((a) => a.title) }`);
     assert.equal(chip.hidden, false, 'the chip shows with sync on');
-    assert.equal(chip.dots, 2);
+    assert.equal(chip.dots, 2, 'an avatar per computer');
     assert.equal(chip.on, 2, 'both heard within three minutes');
-    assert.ok(chip.text.includes('LAPTOP') && chip.text.includes('synced'), chip.text);
+    assert.ok(chip.text.includes('LA') && chip.text.includes('synced'), 'two letters per computer: ' + chip.text);
+    assert.ok(chip.names.some((n) => n.includes('LAPTOP')), 'the full name on hover: ' + chip.names);
     // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots and Running now
     await nav('#home');
     await $('[data-testid=scope]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
     assert.ok((await text('[data-testid=routes]')).includes('LAPTOP'), 'the other computer has a dock');
     assert.ok((await exec("return document.querySelectorAll('.ov.b .sq').length")) === 2, 'a colour per computer in the legend');
-    assert.ok((await text('[data-testid=activity-pc]')).includes('LAPTOP'), 'the year clock has a switch per computer');
+    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] a')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, two letters each with the name on hover');
+    assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');
     await hasText('[data-testid=running-now]', 'LAPTOP');
     await shot('19c-overview-all-computers');
