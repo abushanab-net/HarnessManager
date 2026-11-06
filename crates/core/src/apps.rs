@@ -347,6 +347,15 @@ pub fn newer(a: &str, b: &str) -> bool {
     n(a) > n(b)
 }
 
+/// The count again from the versions installed now against the last check's newest: an update applied since that
+/// check leaves the count; the stored one follows, so the badge is right at the next launch too.
+pub fn recount(ctx: &crate::Ctx, apps: &[AppInfo], latest: &mut Option<serde_json::Value>) -> anyhow::Result<u64> {
+    let Some(l) = latest else { return Ok(0) };
+    let n = apps.iter().filter(|a| matches!((l["versions"][a.id.as_str()].as_str(), &a.version), (Some(v), Some(c)) if newer(v, c))).count() as u64;
+    if l["updates"].as_u64() != Some(n) { l["updates"] = n.into(); ctx.db.kv_set("apps:latest", &l.to_string())?; }
+    Ok(n)
+}
+
 /// Ask each vendor for the newest versions, remember them with the time, and count the tools that have a newer one.
 pub fn check(ctx: &crate::Ctx) -> anyhow::Result<serde_json::Value> {
     let apps = list();

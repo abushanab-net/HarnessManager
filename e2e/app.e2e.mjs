@@ -242,26 +242,29 @@ try {
     assert.equal(overlaps, 0, 'labels do not overlap');
     await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
     await shot('00b-overview-routes');
-    // a wide page: the readouts stack under the finding in one column, and the dial keeps its size beside them
+    // the readouts sit in the sidebar, not on the scene; the Overview's limits are its panel, so the sidebar leaves them out
+    assert.ok(await exec("return !!document.querySelector('#nav-stats [data-testid=kpi-cost]') && !document.querySelector('.ov.l .rds')"), 'the readouts are in the sidebar');
+    // a wide page: the dial grows with it
     const dialR = () => exec("const l = document.querySelector('[data-testid=routes] svg line'); return l ? (l.x2.baseVal.value - l.x1.baseVal.value) / 2 - 20 : 0");
     const narrowR = await dialR();
     await page.setViewportSize({ width: 1800, height: 1000 });
-    await waitFor(async () => (await exec("return getComputedStyle(document.querySelector('.ov.l')).gridTemplateColumns.split(' ').length")) === 1, 'one column at 1800');
     await waitFor(async () => (await dialR()) > narrowR, 'the dial grew with the page');
-    assert.ok((await dialR()) >= 380, 'the dial is at least 380px at 1800: ' + (await dialR()));
+    const wideR = await dialR();
+    assert.ok(wideR >= 380, 'the dial is at least 380px at 1800: ' + wideR);
     await shot('00c-overview-wide');
     await page.setViewportSize({ width: 1280, height: 800 });
-    await waitFor(async () => (await exec("return getComputedStyle(document.querySelector('.ov.l')).gridTemplateColumns.split(' ').length")) === 2, 'two columns again at 1280');
-    // limits as rings: codex-main's week has 79% left
-    await hasText('[data-testid=limits]', 'codex-main');
-    assert.equal(await exec("return document.querySelector('[data-testid=ring-codex-main] svg text').textContent"), '79%', 'the ring says what is left');
+    await waitFor(async () => (await dialR()) < wideR, 'the dial back at 1280');
+    // limits as rings in the sidebar, not on the page, and no Running now: Sessions lists the live ones
+    await hasText('[data-testid=nav-limits]', 'codex-main');
+    assert.equal(await exec("return document.querySelector('[data-testid=nav-limit-codex-main] svg text').textContent"), '79%', 'the ring says what is left');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=limits], [data-testid=running-now]')")), 'no Limits or Running now panel on the Overview');
     await hasText('[data-testid=activity]', 'Activity, 53 weeks');
     await $('[data-testid=attention]');
     // a range picks the period; the readouts follow
     await click('[data-testid=range-7d]');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('on')")), '7 days picked');
     await hasText('[data-testid=basis]', '5 requests');
-    await exec("document.querySelector('[data-testid=limits]').scrollIntoView()");
+    await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('00c-overview-panels');
     await click('[data-testid=range-today]');
   });
@@ -277,6 +280,9 @@ try {
     if (!(await shut())) { await click('[data-testid=nav-setup]'); await waitFor(async () => shut(), 'shut'); }
     await nav('#skills');
     await waitFor(async () => !(await shut()), 'open for the page shown');
+    // off the Overview the sidebar's foot carries the readouts and every account's limit ring
+    await $('[data-testid=nav-limit-codex-main] svg');
+    await hasText('[data-testid=nav-stats]', 'Tokens');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
     await click('[data-testid=fold-pins]');
@@ -291,10 +297,9 @@ try {
     await $('[data-testid=row-claude-main]');
     await $('[data-testid=row-codex-main]');
     await hasText('[data-testid=row-codex-main]', 'ChatGPT');
-    // every account with plan limits has a row in Limits on Overview, read or not
-    await nav('#home');
-    await hasText('[data-testid=limits]', 'claude-main');
-    await hasText('[data-testid=limits]', 'codex-main');
+    // every account with plan limits has a ring in the sidebar, read or not
+    await hasText('[data-testid=nav-limits]', 'claude-main');
+    await hasText('[data-testid=nav-limits]', 'codex-main');
     await nav('#accounts');
     await hasText('[data-testid=row-codex-main]', '79% left');
     await shot('01-accounts');
@@ -731,7 +736,7 @@ try {
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Activity, 53 weeks', 'Limits', 'Running now', 'Latest replies'],
+      '#home': ['Overview', 'Activity, 53 weeks', 'Latest replies'],
       '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'By model'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
@@ -745,7 +750,7 @@ try {
     };
     // the replies panel as the design opens it (an earlier test left the full log open)
     await nav('#home');
-    await $('[data-testid=limits]');
+    await $('[data-testid=activity]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
       const before = await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''");
@@ -803,17 +808,15 @@ try {
     await shot('10-routing');
     assert.ok(hrm('router', 'models', 'cheap').includes('hm-openrouter--z-ai/glm-5'));
     hrm('router', 'stop');
-    // a routed account's daily spend cap: set in its settings, shown on Overview's burn-down and timeline
+    // a routed account's daily spend cap: set in its settings, shown on the accounts list
     hrm('add', 'capped', '--route', 'cheap');
     await nav('#account?name=capped&tab=settings');
     await type('[data-testid=cap-input]', '5');
     await click('[data-testid=cap-save]');
     await waitFor(() => (JSON.parse(fs.readFileSync(path.join(data, 'profiles.json'), 'utf8')).profiles.find((x) => x.name === 'capped') || {}).daily_cap_usd === 5, 'cap saved');
-    await nav('#home');
-    await hasText('[data-testid=limits]', '$5.00 daily cap');
-    await hasText('[data-testid=limits]', 'resets');
-    await exec("document.querySelector('[data-testid=limits]').scrollIntoView()");
-    await shot('10b-overview-cap');
+    await nav('#accounts');
+    await hasText('[data-testid=row-capped]', '$5.00 daily cap');
+    await shot('10b-accounts-cap');
     hrm('remove', 'capped');
   });
 
@@ -1050,7 +1053,7 @@ description: Bulk skill ${i}
     await $('[data-testid=accounts-table]');
     await shot('17b-dark-accounts');
     await nav('#home');
-    await $('[data-testid=limits]');
+    await $('[data-testid=activity]');
     await sleep(600);
     await shot('17c-dark-overview');
     await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
@@ -1293,7 +1296,7 @@ description: Bulk skill ${i}
     await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-devname')).display`)) === 'block', 'tooltip shown');
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
-    await $('[data-testid=limits]');
+    await $('[data-testid=activity]');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc')")), 'the Overview is as before: no computer switch, no computer dots');
     await nav('#sessions');
     await $('[data-testid=group]');
@@ -1342,7 +1345,7 @@ description: Bulk skill ${i}
     assert.equal(chip.on, 2, 'both heard within three minutes');
     assert.equal(chip.text, '2 computers', chip.text);
     assert.ok(chip.names.some((n) => n.includes('LAPTOP')), 'the full name on hover: ' + chip.names);
-    // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots and Running now
+    // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots
     await nav('#home');
     await $('[data-testid=scope]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
@@ -1350,7 +1353,6 @@ description: Bulk skill ${i}
     assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] a')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, two letters each with the name on hover');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');
-    await hasText('[data-testid=running-now]', 'LAPTOP');
     await shot('19c-overview-all-computers');
     await click('[data-testid=activity-pc-' + dev + ']');
     await hasText('[data-testid=activity] .ph', 'LAPTOP');

@@ -68,7 +68,7 @@ fn sync_soft(ctx: &Ctx) -> Value {
 
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "dash", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
     "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
@@ -199,6 +199,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows},
                    "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h, scope)?, "activity": service::activity(ctx, h, scope)?})
         }
+        // the sidebar's readouts: tokens, cost and the cache share for the range, every tool
+        "dash" => hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(0), None, a["scope"].as_str())?,
         // the last five minutes of traffic, here and on the other computers
         "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
@@ -432,7 +434,12 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(sk)
         }
         // the tools themselves: installed where, which version, the newest one (last checked), install or update
-        "apps" => json!({"apps": hrm_core::apps::list(), "latest": ctx.db.kv_get("apps:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok())}),
+        "apps" => {
+            let apps = hrm_core::apps::list();
+            let mut latest = ctx.db.kv_get("apps:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok());
+            let updates = hrm_core::apps::recount(ctx, &apps, &mut latest)?;
+            json!({"apps": apps, "latest": latest, "updates": updates})
+        }
         "apps_latest" => hrm_core::apps::check(ctx)?,
         "autostart_set" => {
             let exe = std::env::current_exe()?;
@@ -708,6 +715,12 @@ async fn call(app: tauri::AppHandle, state: tauri::State<'_, Arc<AppState>>, op:
     if op == "self_update_check" || op == "self_update_install" {
         return self_update(&app, op == "self_update_install").await.map_err(|e| format!("{e:#}"));
     }
+    // the limits popup: a ring opens the window at that account
+    if op == "open_main" {
+        show_main(&app);
+        if let Some(h) = args["hash"].as_str() { let _ = app.emit_to("main", "navigate", h); }
+        return Ok(Value::Null);
+    }
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || dispatch(&st, &op, &args).map_err(|e| format!("{e:#}")))
         .await
@@ -735,7 +748,46 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
-/// The tray icon: a click opens the window; its menu opens it or quits.
+/// The limits popup: every account's ring in a small frameless window by the tray icon. A click on the icon opens
+/// it and a second one closes it; so does losing the focus. The window itself opens from the icon's menu or a double-click.
+fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: tauri::Rect) {
+    use std::time::{Duration, Instant};
+    use tauri::{PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+    static HID: Mutex<Option<Instant>> = Mutex::new(None);
+    // the click that took its focus (and so hid it) must not open it again
+    if HID.lock().unwrap().is_some_and(|t| t.elapsed() < Duration::from_millis(400)) { return; }
+    let w = match app.get_webview_window("limits") {
+        Some(w) => { if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; } w }
+        None => {
+            // three rings to a row, a row per three shown accounts. shortcut: sized once, at its first open; an account added later scrolls, until the app restarts
+            let n = { let ctx = app.state::<Arc<AppState>>().ctx(); let hidden = &ctx.settings.hidden_tools; ctx.registry().map(|r| r.profiles.iter().filter(|p| !hidden.contains(&p.harness)).count()).unwrap_or(0) };
+            let w = match WebviewWindowBuilder::new(app, "limits", WebviewUrl::App("limits.html".into()))
+                .title("Limits").decorations(false).resizable(false).always_on_top(true).skip_taskbar(true).visible(false)
+                .inner_size(372.0, 20.0 + n.max(1).div_ceil(3) as f64 * 104.0).build() {
+                Ok(w) => w,
+                Err(e) => { hrm_core::log::warn(&format!("limits popup: {e:#}")); return }
+            };
+            let w2 = w.clone();
+            w.on_window_event(move |e| if let WindowEvent::Focused(false) = e { let _ = w2.hide(); *HID.lock().unwrap() = Some(Instant::now()); });
+            w
+        }
+    };
+    // by the icon: above a tray at the foot of the screen (Windows), under one at the top (macOS), and within the screen
+    let size = w.outer_size().unwrap_or_default();
+    let (sw, sh) = (size.width as f64, size.height as f64);
+    let m = app.monitor_from_point(at.x, at.y).ok().flatten();
+    let scale = m.as_ref().map_or(1.0, |m| m.scale_factor());
+    let (mx, my, mw, mh) = m.map(|m| (m.position().x as f64, m.position().y as f64, m.size().width as f64, m.size().height as f64)).unwrap_or((0.0, 0.0, at.x + sw, at.y + sh));
+    let top = match icon.position { tauri::Position::Physical(p) => p.y as f64, tauri::Position::Logical(p) => p.y * scale };
+    let bottom = top + match icon.size { tauri::Size::Physical(s) => s.height as f64, tauri::Size::Logical(s) => s.height * scale };
+    let x = (at.x - sw / 2.0).clamp(mx, (mx + mw - sw).max(mx));
+    let y = (if at.y > my + mh / 2.0 { top - sh - 6.0 } else { bottom + 6.0 }).clamp(my, (my + mh - sh).max(my));
+    let _ = w.set_position(PhysicalPosition::new(x, y));
+    let _ = w.show();
+    let _ = w.set_focus();
+}
+
+/// The tray icon: a click shows the limits, a double-click the window; its menu opens the window or quits.
 fn tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -748,8 +800,10 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
             "quit" => app.exit(0),
             _ => {}
         })
-        .on_tray_icon_event(|t, e| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e { show_main(t.app_handle()); }
+        .on_tray_icon_event(|t, e| match e {
+            TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, position, rect, .. } => limits_popup(t.app_handle(), position, rect),
+            TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => show_main(t.app_handle()),
+            _ => {}
         });
     if let Some(icon) = app.default_window_icon() { t = t.icon(icon.clone()); }
     t.build(app)?;
