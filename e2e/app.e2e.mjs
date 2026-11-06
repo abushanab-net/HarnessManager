@@ -651,7 +651,7 @@ try {
     assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the ground');
     assert.equal(d.sheetRadius, '0px', 'no framed sheet');
     assert.equal(d.sheetShadow, 'none', 'no shadow on the page');
-    assert.equal(d.side, 216, 'sidebar 13.5rem');
+    assert.equal(d.side, 240, 'sidebar 15rem');
     assert.equal(d.top, 52, 'top bar 3.25rem');
     assert.ok(d.navActive !== 'rgba(0, 0, 0, 0)' && d.navActive !== d.frame, 'the active item is shaded: ' + d.navActive);
     assert.equal(d.navLabel, 'Accounts');
@@ -700,7 +700,7 @@ try {
         search: [box('.search').height, cs(q('.search')).borderTopLeftRadius],
         gaps: (() => { const k = [...document.querySelectorAll('.ovk')].map((e) => e.getBoundingClientRect()); return Math.round(k[1].left - k[0].right); })(),
       };`);
-    assert.equal(d.side, 216, 'sidebar 13.5rem');
+    assert.equal(d.side, 240, 'sidebar 15rem');
     assert.equal(d.top, 52, 'top bar 3.25rem');
     assert.deepEqual([d.padTop, d.padLeft, d.gap], ['16px', '24px', '16px'], 'page padding 16 / 24, parts 16 apart');
     assert.ok(d.h1[0] === '600' && d.h1[1] === 'Inter' && d.h1[2] >= 17.6 && d.h1[2] <= 23.2, 'the finding: Inter 600, between 1.1rem and 1.45rem: ' + d.h1);
@@ -1329,13 +1329,14 @@ description: Bulk skill ${i}
     assert.equal(chip.dots, 2);
     assert.equal(chip.on, 2, 'both heard within three minutes');
     assert.ok(chip.text.includes('LAPTOP') && chip.text.includes('synced'), chip.text);
-    // the Overview: the switch, the split on the tiles, the Activity switch, the account's dots and Running now
+    // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots and Running now
     await nav('#home');
     await $('[data-testid=scope]');
-    await waitFor(async () => (await exec("return !!document.querySelector('[data-testid=kpi-tokens] .split')")), 'the tokens tile split by computer');
-    assert.ok((await text('[data-testid=kpi-tokens] .kn')).includes('%'), 'the largest computer named in the note');
-    assert.ok((await text('[data-testid=activity-pc]')).includes('LAPTOP'), 'the Activity grid has a switch per computer');
-    await $('[data-testid=routes] [data-node="a:claude-main"] .cdots');
+    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
+    assert.ok((await text('[data-testid=routes]')).includes('LAPTOP'), 'the other computer has a dock');
+    assert.ok((await exec("return document.querySelectorAll('.ov.b .sq').length")) === 2, 'a colour per computer in the legend');
+    assert.ok((await text('[data-testid=activity-pc]')).includes('LAPTOP'), 'the year clock has a switch per computer');
+    await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');
     await hasText('[data-testid=running-now]', 'LAPTOP');
     await shot('19c-overview-all-computers');
     await click('[data-testid=activity-pc-' + dev + ']');
