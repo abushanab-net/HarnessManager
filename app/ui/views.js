@@ -154,6 +154,7 @@ action('s-set', (el) => {
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
 action('rail-more', () => { railMore = true; render(); });
 action('go-live', () => go('sessions', { live: '1' }));
+action('go-apps', () => go('apps'));
 action('project-pin', (el) => mutate(() => call('project_pin', { key: el.dataset.key, on: el.dataset.on === '1' }), el.dataset.on === '1' ? 'Pinned to the sidebar' : 'Unpinned'));
 
 // ---------- projects: every project as a row card, with its tokens, cost, sessions and activity ----------

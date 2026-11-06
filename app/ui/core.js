@@ -13,8 +13,10 @@ export async function call(op, args = {}) {
 
 /** The number of tools with a newer version, beside Apps in the sidebar. */
 export function setAppUpdates(n) {
-  const el = document.getElementById('apps-count');
-  if (el) el.textContent = n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '';
+  for (const el of document.querySelectorAll('#apps-count, #n-apps')) {
+    el.textContent = n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '';
+    el.title = n ? `${n} ${n === 1 ? 'tool has' : 'tools have'} a newer version: Apps installs them` : '';
+  }
 }
 
 /** The pinned projects under Projects in the sidebar (at most five), and the project count. */
@@ -158,6 +160,7 @@ async function renderNow() {
   if (fold && fold.hidden) setFold(fold.id, false);
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
+  if (!sameHash) delete sheet.dataset.warm;
   try {
     await fn(sheet, S.route.params);
     if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
@@ -203,8 +206,9 @@ export function redrawLive() {
 }
 
 /** A page's last markup, shown at once while fresh data is read; the view calls keep() after it draws. */
-export function warmPage(sheet, key) { const h = S.cache.html && S.cache.html[key]; if (!h) return false; sheet.innerHTML = h; return true; }
-export function keepPage(sheet, key) { (S.cache.html ||= {})[key] = sheet.innerHTML; }
+// the page already on screen is never swapped for its own stale copy: its routes keep moving while the fresh data loads
+export function warmPage(sheet, key) { if (sheet.dataset.warm === key) return true; const h = S.cache.html && S.cache.html[key]; if (!h) return false; sheet.innerHTML = h; sheet.dataset.warm = key; return true; }
+export function keepPage(sheet, key) { (S.cache.html ||= {})[key] = sheet.innerHTML; sheet.dataset.warm = key; }
 
 export async function loadState() {
   S.state = await call('state');
