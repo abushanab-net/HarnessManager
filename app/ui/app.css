@@ -90,7 +90,10 @@ nav.nav a[data-nav=projects]:not(.shut) #n-projects { display: none; }
 .navlims:not(:empty) + nav.nav.bottom { margin-top: var(--s5); }
 .navlims .ring { text-decoration: none; color: var(--ink); min-width: 0; max-width: 100%; }
 .navlims .ring b { font-size: var(--fs-xs); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.navlims .ring small { font-size: 10.5px; line-height: 1.3; }
+.navlims .ring b.warn { color: var(--warn); } .navlims .ring b.neg { color: var(--neg); }
+/* how far the week has run towards its reset */
+.navlims .rbar { display: block; width: 56px; height: 3px; margin: 2px 0 1px; background: var(--line2); }
+.navlims .rbar i { background: var(--m); opacity: .7; }
 nav.nav .udot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); flex: none; }
 nav.nav .ver { display: block; padding: var(--s1) var(--s3) 0 2.6rem; font: var(--fs-xs) var(--mono); color: var(--m); }
 .navgap { height: var(--s4); }

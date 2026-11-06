@@ -21,7 +21,7 @@ export function setAppUpdates(n) {
 
 /** Live sessions as a 4×4 grid of dots with n of them lit (the number on hover); nothing when none. */
 // drawn as SVG squares snapped to device pixels, so a lit one is a flat colour, not a blurred glow at 125 % scaling
-export const liveGrid = (n) => (n ? `<svg class="lgrid" width="21" height="21" viewBox="0 0 21 21" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 6}" y="${Math.floor(i / 4) * 6}" width="3" height="3" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
+export const liveGrid = (n) => (n ? `<svg class="lgrid" width="11" height="11" viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 3}" y="${Math.floor(i / 4) * 3}" width="2" height="2" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
 
 /** The pinned projects under Projects in the sidebar (at most five), and the project count. */
 export function drawPins(list) {
