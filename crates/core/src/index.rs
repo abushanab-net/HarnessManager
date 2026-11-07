@@ -204,7 +204,7 @@ pub fn rebuild(ctx: &Ctx) -> Result<Report> {
 pub fn status(ctx: &Ctx) -> Result<Value> {
     let refreshed_at: Option<i64> = ctx.db.kv_get("index:refreshed_at")?.and_then(|s| s.parse().ok());
     let watcher_at: Option<i64> = ctx.db.kv_get("index:watcher_at")?.and_then(|s| s.parse().ok());
-    let (tools, remote, archived, projects) = ctx.db.with(|c| {
+    let (tools, remote, archived, projects) = ctx.db.read(|c| {
         let mut st = c.prepare("select harness, count(*), max(last_active_at) from sessions where device = ?1 and instr(key, '|') > 0 group by harness order by harness")?;
         let tools: Vec<Value> = st.query_map([&ctx.db.device], |r| Ok(json!({"harness": r.get::<_, String>(0)?, "sessions": r.get::<_, i64>(1)?, "last_active_at": r.get::<_, i64>(2)?})))?.collect::<rusqlite::Result<_>>()?;
         let remote: i64 = c.query_row("select count(*) from sessions where device <> ?1", [&ctx.db.device], |r| r.get(0))?;

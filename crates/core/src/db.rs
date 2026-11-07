@@ -1,7 +1,7 @@
 //! Per-computer SQLite database: usage rows, import cursors, cached quotas, session index, write ledger.
 
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -10,6 +10,10 @@ use crate::model::{Quota, SessionMeta, UsageRow};
 
 pub struct Db {
     conn: Mutex<Connection>,
+    path: PathBuf,
+    /// Read-only connections, opened on first use: the pages read side by side, and never wait behind a write
+    /// or the watcher's import (WAL lets readers run while one connection writes).
+    readers: [OnceLock<Option<Mutex<Connection>>>; 3],
     /// This computer's id: every row written here carries it.
     pub device: String,
     /// Sync is on: every change is also written to the outbox for the other computers.
@@ -109,6 +113,63 @@ pub fn promote_columns(c: &Connection) -> rusqlite::Result<usize> {
         project_key = coalesce(json_extract(json, '$.project_key'), ''), project_name = coalesce(json_extract(json, '$.project_name'), '') where last_active_at = 0", [])
 }
 
+/// Usage added up per day, computer, account, tool, model and project: the Overview, its heatmap and the account
+/// and project totals read these few thousand rows instead of every response. Triggers keep it in step with
+/// `usage` whoever writes it (import, merge from other computers, restore, pricing); it is never synced, each
+/// computer adds up the rows it has. `cost` is null while none of the rows is priced, as `sum(cost_usd)` was.
+const USAGE_DAY: &str = r#"
+create table if not exists usage_day(day text not null, device text not null, profile text not null, harness text not null,
+  model text not null, project text not null, requests integer not null, input integer not null, output integer not null,
+  cache_read integer not null, cache_write integer not null, cost real, priced_n integer not null, priced_tokens integer not null,
+  primary key(day, device, profile, harness, model, project));
+create trigger if not exists usage_day_ins after insert on usage begin
+  insert into usage_day values(new.day, new.device, new.profile, new.harness, new.model, new.project, 1, new.input, new.output,
+    new.cache_read, new.cache_write, new.cost_usd, new.cost_usd is not null,
+    case when new.cost_usd is null then 0 else new.input + new.output + new.cache_read + new.cache_write end)
+  on conflict(day, device, profile, harness, model, project) do update set requests = requests + 1, input = input + excluded.input,
+    output = output + excluded.output, cache_read = cache_read + excluded.cache_read, cache_write = cache_write + excluded.cache_write,
+    cost = case when excluded.cost is null then cost else coalesce(cost, 0) + excluded.cost end,
+    priced_n = priced_n + excluded.priced_n, priced_tokens = priced_tokens + excluded.priced_tokens;
+end;
+create trigger if not exists usage_day_del after delete on usage begin
+  update usage_day set requests = requests - 1, input = input - old.input, output = output - old.output, cache_read = cache_read - old.cache_read,
+    cache_write = cache_write - old.cache_write,
+    cost = case when old.cost_usd is null then cost when priced_n <= 1 then null else cost - old.cost_usd end,
+    priced_n = priced_n - (old.cost_usd is not null),
+    priced_tokens = priced_tokens - (case when old.cost_usd is null then 0 else old.input + old.output + old.cache_read + old.cache_write end)
+  where day = old.day and device = old.device and profile = old.profile and harness = old.harness and model = old.model and project = old.project;
+  delete from usage_day where day = old.day and device = old.device and profile = old.profile and harness = old.harness and model = old.model
+    and project = old.project and requests <= 0;
+end;
+create trigger if not exists usage_day_upd after update of day, device, profile, harness, model, project, input, output, cache_read, cache_write, cost_usd on usage begin
+  update usage_day set requests = requests - 1, input = input - old.input, output = output - old.output, cache_read = cache_read - old.cache_read,
+    cache_write = cache_write - old.cache_write,
+    cost = case when old.cost_usd is null then cost when priced_n <= 1 then null else cost - old.cost_usd end,
+    priced_n = priced_n - (old.cost_usd is not null),
+    priced_tokens = priced_tokens - (case when old.cost_usd is null then 0 else old.input + old.output + old.cache_read + old.cache_write end)
+  where day = old.day and device = old.device and profile = old.profile and harness = old.harness and model = old.model and project = old.project;
+  delete from usage_day where day = old.day and device = old.device and profile = old.profile and harness = old.harness and model = old.model
+    and project = old.project and requests <= 0;
+  insert into usage_day values(new.day, new.device, new.profile, new.harness, new.model, new.project, 1, new.input, new.output,
+    new.cache_read, new.cache_write, new.cost_usd, new.cost_usd is not null,
+    case when new.cost_usd is null then 0 else new.input + new.output + new.cache_read + new.cache_write end)
+  on conflict(day, device, profile, harness, model, project) do update set requests = requests + 1, input = input + excluded.input,
+    output = output + excluded.output, cache_read = cache_read + excluded.cache_read, cache_write = cache_write + excluded.cache_write,
+    cost = case when excluded.cost is null then cost else coalesce(cost, 0) + excluded.cost end,
+    priced_n = priced_n + excluded.priced_n, priced_tokens = priced_tokens + excluded.priced_tokens;
+end;
+"#;
+
+/// The totals from every row, once (and again if they are ever found missing): in one write transaction, so
+/// a row another process adds meanwhile is counted by its trigger or by this, never both.
+const USAGE_DAY_FILL: &str = "begin immediate;
+delete from usage_day;
+insert into usage_day select day, device, profile, harness, model, project, count(*), sum(input), sum(output), sum(cache_read), sum(cache_write),
+  sum(cost_usd), count(cost_usd), coalesce(sum(case when cost_usd is null then 0 else input + output + cache_read + cache_write end), 0)
+  from usage group by day, device, profile, harness, model, project;
+insert or replace into kv values('migrated:usage_day', '1');
+commit;";
+
 /// The index's search table and the triggers that keep it in step with `sessions` (external content: it holds
 /// only the words, by rowid; `insert or replace` elsewhere is safe because `recursive_triggers` is on).
 const INDEX_SCHEMA: &str = r#"
@@ -116,6 +177,12 @@ create index if not exists sessions_dev_active on sessions(device, last_active_a
 create index if not exists sessions_proj_active on sessions(project_key, last_active_at);
 create index if not exists usage_device_project on usage(device, project);
 create index if not exists usage_day_project on usage(day, project);
+-- the dashboard and the live strip read by time: without it each read scanned every usage row
+create index if not exists usage_ts on usage(ts);
+-- an account's last use (max(ts) per profile, on every account list): one index step, not every row of the account
+create index if not exists usage_profile_ts on usage(profile, ts);
+-- the live strip (this computer's last five minutes): device alone matched nearly every row
+create index if not exists usage_device_ts on usage(device, ts);
 create table if not exists project_index(key text primary key, name text not null, root text not null, remote text);
 create virtual table if not exists sessions_fts using fts5(title, cwd, profile, content='sessions', content_rowid='rowid');
 "#;
@@ -136,6 +203,8 @@ impl Db {
         let conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // pages read from the mapped file, not one ReadFile each: the year of usage the Overview adds up is ~3x faster
+        conn.pragma_update(None, "mmap_size", 1i64 << 30)?;
         conn.execute_batch(SCHEMA)?;
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
@@ -192,7 +261,11 @@ impl Db {
             conn.execute_batch("insert into sessions_fts(sessions_fts) values('rebuild'); insert or replace into kv values('migrated:index', '1');")?;
         }
         conn.execute_batch(INDEX_TRIGGERS)?;
-        Ok(Db { conn: Mutex::new(conn), device: device.into(), journal })
+        conn.execute_batch(USAGE_DAY)?;
+        if !conn.prepare("select 1 from kv where k = 'migrated:usage_day'")?.exists([])? {
+            if let Err(e) = conn.execute_batch(USAGE_DAY_FILL) { let _ = conn.execute_batch("rollback"); return Err(e.into()); }
+        }
+        Ok(Db { conn: Mutex::new(conn), path: path.to_path_buf(), readers: Default::default(), device: device.into(), journal })
     }
 
     /// Rows without a cost (from before costs were frozen, or a catalog that lacked their model) priced now, by model.
@@ -215,6 +288,37 @@ impl Db {
     pub fn with<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
         let mut c = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut c)
+    }
+
+    fn reader(&self, i: usize) -> Option<&Mutex<Connection>> {
+        self.readers[i].get_or_init(|| {
+            let c = Connection::open(&self.path).ok()?;
+            c.busy_timeout(std::time::Duration::from_secs(10)).ok()?;
+            c.pragma_update(None, "query_only", true).ok()?;
+            c.pragma_update(None, "mmap_size", 1i64 << 30).ok()?;
+            Some(Mutex::new(c))
+        }).as_ref()
+    }
+
+    /// A number that changes whenever any connection (this process's writer, the CLI, another process) commits a
+    /// change to the database; always read on the same connection, as SQLite requires. None without a reader.
+    pub fn data_version(&self) -> Option<i64> {
+        let m = self.reader(0)?;
+        let c = m.lock().unwrap_or_else(|e| e.into_inner());
+        c.query_row("pragma data_version", [], |r| r.get(0)).ok()
+    }
+
+    /// A query on a read-only connection: a free one if there is, else the first one's turn. It sees what was
+    /// committed when it starts; a write in it fails. Without a reader (it could not open) it runs as `with`.
+    pub fn read<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+        for i in 0..self.readers.len() {
+            let Some(m) = self.reader(i) else { return self.with(f) };
+            if let Ok(mut c) = m.try_lock() { return f(&mut c); }
+        }
+        match self.reader(0) {
+            Some(m) => f(&mut m.lock().unwrap_or_else(|e| e.into_inner())),
+            None => self.with(f),
+        }
     }
 
     /// Store usage rows read here, each with its cost at today's list prices (frozen; `price_rev` names the table).
@@ -421,7 +525,7 @@ impl Db {
     }
 
     pub fn kv_get(&self, k: &str) -> Result<Option<String>> {
-        self.with(|c| Ok(c.query_row("select v from kv where k=?", [k], |r| r.get(0)).optional()?))
+        self.read(|c| Ok(c.query_row("select v from kv where k=?", [k], |r| r.get(0)).optional()?))
     }
 
     pub fn kv_set(&self, k: &str, v: &str) -> Result<()> {
