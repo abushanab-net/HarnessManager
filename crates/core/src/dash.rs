@@ -55,7 +55,7 @@ fn project_name(p: &str) -> String {
 pub fn spent_today(ctx: &Ctx, profile: &str) -> Result<f64> {
     let prices = crate::pricing::load(ctx);
     let midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(chrono::Local).earliest()).map(|t| t.timestamp_millis()).unwrap_or(0);
-    let rows: Vec<(String, i64, i64)> = ctx.db.with(|c| {
+    let rows: Vec<(String, i64, i64)> = ctx.db.read(|c| {
         let mut st = c.prepare("select model, sum(input), sum(output) from router_log where profile = ? and ts >= ? group by model")?;
         let v = st.query_map(rusqlite::params![profile, midnight], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
@@ -76,7 +76,7 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&st
     let h = harness.unwrap_or("");
     let dev = if scope == Some("here") { ctx.db.device.as_str() } else { "" };
     type Row = (i64, String, String, String, i64, i64, i64, i64, Option<i64>, Option<f64>, String);
-    let rows: Vec<Row> = ctx.db.with(|c| {
+    let rows: Vec<Row> = ctx.db.read(|c| {
         let mut st = c.prepare("select ts, model, profile, project, input, output, cache_read, cache_write, ttft_ms, cost_usd, device from usage where ts >= ?1 and (?2 = '' or harness = ?2) and (?3 = '' or device = ?3)")?;
         let v = st.query_map(rusqlite::params![since - span, h, dev], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -148,7 +148,7 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&st
 /// The router's last 24 hours: requests, errors, failovers, and per provider its requests and p95 time to first chunk.
 pub fn router_stats(ctx: &Ctx, now: i64) -> Result<Value> {
     let since = now - 86_400_000;
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let (total, errors): (i64, i64) = c.query_row("select count(*), coalesce(sum(status <> 200), 0) from router_log where ts >= ?", [since], |r| Ok((r.get(0)?, r.get(1)?)))?;
         let failovers: i64 = c.query_row("select count(*) from events where kind = 'router' and text like '% failed over %' and ts >= ?", [since], |r| r.get(0))?;
         let mut st = c.prepare("select provider, first_ms from router_log where ts >= ?")?;
@@ -170,7 +170,7 @@ pub fn account_stats(ctx: &Ctx, profile: &str) -> Result<Value> {
     let days = crate::service::last_days(30);
     let week = &days[days.len() - 7];
     type Row = (String, String, i64, i64, i64, i64, Option<i64>, Option<f64>);
-    let rows: Vec<Row> = ctx.db.with(|c| {
+    let rows: Vec<Row> = ctx.db.read(|c| {
         let mut st = c.prepare("select day, project, input, output, cache_read, cache_write, ttft_ms, cost_usd from usage where profile = ?1 and day >= ?2")?;
         let v = st.query_map(rusqlite::params![profile, days[0]], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
@@ -196,7 +196,7 @@ pub fn account_stats(ctx: &Ctx, profile: &str) -> Result<Value> {
 /// One session's numbers from the usage log: share read from cache, first-reply p50, cost at list prices.
 pub fn session_stats(ctx: &Ctx, profile: &str, session: &str) -> Result<Value> {
     type Row = (Option<f64>, i64, i64, i64, i64, Option<i64>);
-    let rows: Vec<Row> = ctx.db.with(|c| {
+    let rows: Vec<Row> = ctx.db.read(|c| {
         let mut st = c.prepare("select cost_usd, input, output, cache_read, cache_write, ttft_ms from usage where profile = ?1 and session_id = ?2")?;
         let v = st.query_map(rusqlite::params![profile, session], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
@@ -215,7 +215,7 @@ pub fn caps(ctx: &Ctx, reg: &crate::Registry) -> serde_json::Map<String, Value> 
 /// For each limit with two or more readings in its current window: the level it reaches at the reset at this pace,
 /// and when it runs out first, if it does. Keyed "account|limit".
 pub fn forecasts(ctx: &Ctx, now: i64) -> Result<serde_json::Map<String, Value>> {
-    let keys: Vec<(String, String)> = ctx.db.with(|c| {
+    let keys: Vec<(String, String)> = ctx.db.read(|c| {
         let mut st = c.prepare("select distinct profile, tier from quota_hist where ts >= ?")?;
         let v = st.query_map([now - 8 * 86_400_000], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
@@ -252,7 +252,7 @@ pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
         r["device_name"] = json!(p.name);
         r
     })).collect();
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let since = now - LIVE_MS;
         let mut st = c.prepare("select profile, sum(input + output + cache_read + cache_write), count(*) from usage where ts >= ? and device = ? group by profile")?;
         let mut accounts: serde_json::Map<String, Value> = st.query_map(rusqlite::params![since, ctx.db.device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
@@ -276,7 +276,7 @@ pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
 
 /// Experience from use (a point a reply, ten a day used), and the days since a limit last ran out.
 fn game(ctx: &Ctx, now: i64) -> Result<Value> {
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let (replies, days): (i64, i64) = c.query_row("select count(*), count(distinct day) from usage", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
         let first: Option<i64> = c.query_row("select min(ts) from quota_hist", [], |r| r.get(0))?;
         let last_hit: Option<i64> = c.query_row("select max(ts) from quota_hist where used >= 99.5", [], |r| r.get(0))?;

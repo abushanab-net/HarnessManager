@@ -77,7 +77,15 @@ pub fn load(ctx: &Ctx) -> Prices {
             let _ = ctx.db.kv_set("pricing:at", &crate::util::now_ms().to_string());
         }
     }
-    ctx.db.kv_get("pricing:catalog").ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|v| parse_catalog(&v)).unwrap_or_default()
+    // parsed once per stored catalog: the watcher prices every file change, and parsing it each time was most of
+    // the app's background CPU while a session was being written
+    static PARSED: std::sync::Mutex<Option<(String, Prices)>> = std::sync::Mutex::new(None);
+    let key = format!("{}|{}", ctx.data.display(), ctx.db.kv_get("pricing:at").ok().flatten().unwrap_or_default());
+    let mut parsed = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, p)) = parsed.as_ref() { if *k == key { return p.clone(); } }
+    let p = ctx.db.kv_get("pricing:catalog").ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|v| parse_catalog(&v)).unwrap_or_default();
+    *parsed = Some((key, p.clone()));
+    p
 }
 
 fn fetch() -> Result<Value> {

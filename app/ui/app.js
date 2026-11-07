@@ -30,14 +30,16 @@ find.addEventListener('keydown', (e) => {
 
 // the backend imports usage in the background, and the folder watcher refreshes the index, and both say when done
 const ev = window.__TAURI__ && window.__TAURI__.event;
-let redraw;
+let redraw, lastDraw = 0;
 if (ev) ev.listen('refreshed', () => {
   S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
   if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
   else if (S.route.view === 'projects') refreshProjects(); // the tiles and rows take the new numbers where they are
-  else { clearTimeout(redraw); redraw = setTimeout(render, 250); } // a session being written refreshes often: one redraw per burst
+  // a session being written refreshes every second or two: the Overview, the costliest page, redraws at most every
+  // five seconds; the others a quarter second after the change
+  else if (!redraw) redraw = setTimeout(() => { redraw = null; lastDraw = Date.now(); render(); }, Math.max(250, S.route.view === 'home' ? lastDraw + 5000 - Date.now() : 0));
 });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes

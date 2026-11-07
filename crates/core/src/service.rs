@@ -71,9 +71,9 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
     let h = harness::of(p);
     let identity = h.identity(ctx, p);
     let days = last_days(7);
-    let (tokens_7d, days_7d, sessions_7d, last_used) = ctx.db.with(|c| {
+    let (tokens_7d, days_7d, sessions_7d, last_used) = ctx.db.read(|c| {
         let mut per = vec![0i64; 7];
-        let mut st = c.prepare("select day, sum(input+output) from usage where profile=? and day>=? group by day")?;
+        let mut st = c.prepare("select day, sum(input+output) from usage_day where profile=? and day>=? group by day")?;
         for r in st.query_map(rusqlite::params![p.name, days[0]], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?.flatten() {
             if let Some(i) = days.iter().position(|d| *d == r.0) { per[i] = r.1; }
         }
@@ -349,10 +349,10 @@ pub struct UsageSummary {
 pub fn usage_summary(ctx: &Ctx, days_back: i64, profile: Option<&str>) -> Result<UsageSummary> {
     let days = last_days(days_back);
     let from = days[0].clone();
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let pf = profile; // NULL means every profile; an exact match, so `dev_1` never counts `dev-1`
         let mut by_profile: BTreeMap<String, Vec<i64>> = BTreeMap::new();
-        let mut st = c.prepare("select profile, day, sum(input+output) from usage where day>=?1 and (?2 is null or profile = ?2) group by profile, day")?;
+        let mut st = c.prepare("select profile, day, sum(input+output) from usage_day where day>=?1 and (?2 is null or profile = ?2) group by profile, day")?;
         for r in st.query_map(rusqlite::params![from, pf], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?.flatten() {
             let e = by_profile.entry(r.0).or_insert_with(|| vec![0; days.len()]);
             if let Some(i) = days.iter().position(|d| *d == r.1) { e[i] += r.2; }
@@ -362,9 +362,9 @@ pub fn usage_summary(ctx: &Ctx, days_back: i64, profile: Option<&str>) -> Result
             let v = st.query_map(rusqlite::params![from, pf], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
             v
         };
-        let by_model = pairs("select model, sum(input+output) t from usage where day>=?1 and (?2 is null or profile = ?2) group by model order by t desc")?;
-        let by_project = pairs("select project, sum(input+output) t from usage where day>=?1 and (?2 is null or profile = ?2) group by project order by t desc limit 20")?;
-        let (total, cr, cw): (i64, i64, i64) = c.query_row("select coalesce(sum(input+output),0), coalesce(sum(cache_read),0), coalesce(sum(cache_write),0) from usage where day>=?1 and (?2 is null or profile = ?2)", rusqlite::params![from, pf], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let by_model = pairs("select model, sum(input+output) t from usage_day where day>=?1 and (?2 is null or profile = ?2) group by model order by t desc")?;
+        let by_project = pairs("select project, sum(input+output) t from usage_day where day>=?1 and (?2 is null or profile = ?2) group by project order by t desc limit 20")?;
+        let (total, cr, cw): (i64, i64, i64) = c.query_row("select coalesce(sum(input+output),0), coalesce(sum(cache_read),0), coalesce(sum(cache_write),0) from usage_day where day>=?1 and (?2 is null or profile = ?2)", rusqlite::params![from, pf], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         Ok(UsageSummary { days: days.clone(), by_profile, by_model, by_project, total, cache_read: cr, cache_write: cw })
     })
 }
@@ -506,7 +506,7 @@ fn rows(ctx: &Ctx, f: &SessionFilter, with_json: bool) -> Result<Vec<(Lite, Stri
     let (w, p) = filter_sql(ctx, f);
     let json = if with_json { "json" } else { "''" };
     let (limit, offset) = (f.per.unwrap_or(-1), f.per.map(|per| per * f.page.unwrap_or(0).max(0)).unwrap_or(0));
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let mut st = c.prepare(&format!("select device, profile, harness, id, project_key, project_name, tokens, last_active_at, open, archived, {json} from ({ROWS}) where {w} order by last_active_at desc, archived, key limit {limit} offset {offset}"))?;
         let v = st.query_map(rusqlite::params_from_iter(p), |r| Ok((Lite { device: r.get(0)?, profile: r.get(1)?, harness: r.get(2)?, id: r.get(3)?, project_key: r.get(4)?, project_name: r.get(5)?,
             tokens: r.get(6)?, last_active_at: r.get(7)?, open: r.get::<_, i64>(8)? != 0, archived: r.get::<_, i64>(9)? != 0 }, r.get::<_, String>(10)?)))?.collect::<rusqlite::Result<_>>()?;
@@ -517,7 +517,7 @@ fn rows(ctx: &Ctx, f: &SessionFilter, with_json: bool) -> Result<Vec<(Lite, Stri
 /// How many sessions a filter matches (its paging apart).
 pub fn sessions_total(ctx: &Ctx, f: &SessionFilter) -> Result<i64> {
     let (w, p) = filter_sql(ctx, f);
-    ctx.db.with(|c| Ok(c.query_row(&format!("select count(*) from ({ROWS}) where {w}"), rusqlite::params_from_iter(p), |r| r.get(0))?))
+    ctx.db.read(|c| Ok(c.query_row(&format!("select count(*) from ({ROWS}) where {w}"), rusqlite::params_from_iter(p), |r| r.get(0))?))
 }
 
 /// A first launch with an empty index reads the folders now; after that the background refresh keeps it.
@@ -529,7 +529,7 @@ fn ensure_index(ctx: &Ctx) -> Result<()> {
 /// The project table the refresh keeps: key to (name, root, remote).
 type ProjectIndex = HashMap<String, (String, String, Option<String>)>;
 fn project_index(ctx: &Ctx) -> Result<ProjectIndex> {
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let mut st = c.prepare("select key, name, root, remote from project_index")?;
         let m = st.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?.flatten().collect();
         Ok(m)
@@ -681,8 +681,8 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
     let day_list = last_days(span);
     let from = from_day(days);
     let (dc, dv) = device_clause(ctx, scope, 2);
-    let rows: Vec<(String, String, i64, Option<f64>, i64)> = ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select project, day, sum(input + output + cache_read + cache_write), sum(cost_usd), coalesce(sum(case when cost_usd is null then 0 else input + output + cache_read + cache_write end), 0) from usage where day >= ?1 and {dc} group by project, day"))?;
+    let rows: Vec<(String, String, i64, Option<f64>, i64)> = ctx.db.read(|c| {
+        let mut st = c.prepare(&format!("select project, day, sum(input + output + cache_read + cache_write), sum(cost), coalesce(sum(priced_tokens), 0) from usage_day where day >= ?1 and {dc} group by project, day"))?;
         let r = st.query_map(rusqlite::params![from, dv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(r)
     })?;
@@ -1005,9 +1005,9 @@ pub fn overview(ctx: &Ctx, days: Option<i64>, harness: Option<&str>, scope: Opti
     let heat_days = last_days(53 * 7);
     let (hc, hv) = harness_clause(harness);
     let (dc, dv) = device_clause(ctx, scope, 3);
-    ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select day, count(*), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost_usd),
-            coalesce(sum(case when cost_usd is null then 0 else input + output + cache_read + cache_write end), 0) from usage where day >= ?1 and {hc} and {dc} group by day"))?;
+    ctx.db.read(|c| {
+        let mut st = c.prepare(&format!("select day, sum(requests), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost),
+            coalesce(sum(priced_tokens), 0) from usage_day where day >= ?1 and {hc} and {dc} group by day"))?;
         let earliest = if from < heat_days[0] { from.clone() } else { heat_days[0].clone() };
         type Row = (String, i64, i64, i64, i64, i64, Option<f64>, i64);
         let rows: Vec<Row> = st.query_map(rusqlite::params![earliest, hv, dv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)))?.collect::<rusqlite::Result<_>>()?;
@@ -1073,7 +1073,7 @@ pub fn request_log_since(ctx: &Ctx, days: Option<i64>, since_ms: Option<i64>, ha
     let (hc, hv) = harness_clause(harness);
     let (dc4, dv) = device_clause(ctx, scope, 4);
     let (dc6, _) = device_clause(ctx, scope, 6);
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let total: i64 = c.query_row(&format!("select count(*) from usage where day >= ?1 and {hc} and ts >= ?3 and {dc4}"), rusqlite::params![since, hv, since_ms, dv], |r| r.get(0))?;
         let mut st = c.prepare(&format!("select ts, harness, profile, model, project, session_id, input, output, cache_read, cache_write, ttft_ms, gen_ms, cost_usd, device from usage where day >= ?1 and {hc} and ts >= ?5 and {dc6} order by ts desc limit ?3 offset ?4"))?;
         let rows = st.query_map(rusqlite::params![since, hv, limit, offset, since_ms, dv], |r| {
@@ -1090,8 +1090,8 @@ pub fn activity(ctx: &Ctx, harness: Option<&str>, scope: Option<&str>) -> Result
     let (hc, hv) = harness_clause(harness);
     let (dc, dv) = device_clause(ctx, scope, 3);
     let mut out: Vec<serde_json::Value> = days.iter().map(|d| serde_json::json!({"day": d, "tokens": 0, "by_device": {}})).collect();
-    ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select day, device, sum(input + output + cache_read + cache_write) from usage where day >= ?1 and {hc} and {dc} group by day, device"))?;
+    ctx.db.read(|c| {
+        let mut st = c.prepare(&format!("select day, device, sum(input + output + cache_read + cache_write) from usage_day where day >= ?1 and {hc} and {dc} group by day, device"))?;
         for r in st.query_map(rusqlite::params![days[0], hv, dv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?.flatten() {
             if let Some(i) = days.iter().position(|d| *d == r.0) {
                 out[i]["tokens"] = serde_json::json!(out[i]["tokens"].as_i64().unwrap_or(0) + r.2);
@@ -1125,8 +1125,8 @@ pub fn breakdown_of(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str
     let (hc, hv) = harness_clause(harness);
     let (pc, pv) = match profile { Some(p) if !p.is_empty() => ("profile = ?3", p.to_string()), _ => ("?3 = ?3", String::new()) };
     let key = if by == "model" { "model" } else { "profile" };
-    ctx.db.with(|c| {
-        let mut st = c.prepare(&format!("select {key}, max(harness), count(*), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost_usd) from usage where day >= ?1 and {hc} and {pc} group by {key}"))?;
+    ctx.db.read(|c| {
+        let mut st = c.prepare(&format!("select {key}, max(harness), sum(requests), sum(input), sum(output), sum(cache_read), sum(cache_write), sum(cost) from usage_day where day >= ?1 and {hc} and {pc} group by {key}"))?;
         let mut map: BTreeMap<String, Breakdown> = BTreeMap::new();
         let mut prompt: HashMap<String, (i64, i64)> = HashMap::new();
         for r in st.query_map(rusqlite::params![since, hv, pv], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, i64>(5)?, r.get::<_, i64>(6)?, r.get::<_, Option<f64>>(7)?)))?.flatten() {
