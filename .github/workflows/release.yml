@@ -29,12 +29,17 @@ jobs:
       matrix:
         include:
           - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe }
+          # Windows on ARM: cross-compiled on the same x64 runner (the aarch64-pc-windows-msvc target and the
+          # MSVC ARM64 build tools must be on the runner image); its asset lands in latest.json as windows-aarch64.
+          # experimental: a failure here must not cancel the release of the other three
+          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe, target: aarch64-pc-windows-msvc, experimental: true }
           # Tauri's own .dmg lays out its window through Finder, which a runner without a desktop session may not
           # control; the .dmg is made with hdiutil after the build instead
           - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: app, ext: '' }
           # 22.04: an AppImage built on the oldest supported glibc runs on the most distributions
           - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE || 'ubuntu-22.04' }}", bundles: 'appimage,deb', ext: '' }
     runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental || false }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -44,6 +49,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
       - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target || '' }}" }   # a no-op when the runner image already has the target
+      # the ARM64 cross build needs the MSVC ARM64 cross-tools environment (INCLUDE, LIB, the arm64 cl and link):
+      # ring's C code is compiled by clang against the MSVC headers. This runs the installed Visual Studio's
+      # vcvarsamd64_arm64; nothing is downloaded
+      - if: matrix.target == 'aarch64-pc-windows-msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+        with: { arch: amd64_arm64 }
       - uses: actions/setup-node@v5
         with: { node-version: 24, cache: "${{ runner.environment == 'github-hosted' && 'npm' || '' }}", cache-dependency-path: app/package-lock.json }
       - name: Version from the tag
@@ -61,10 +73,12 @@ jobs:
       - name: hrm, bundled next to the app
         shell: bash
         run: |
-          cargo build --release -p hrm
-          triple=$(rustc -vV | sed -n 's/^host: //p')
+          # a cross-compiled build (matrix.target) lands under target/<triple>/ and the sidecar is named by that triple
+          triple="${{ matrix.target }}"
+          if [ -n "$triple" ]; then cargo build --release -p hrm --target "$triple"; out="target/$triple/release"
+          else cargo build --release -p hrm; triple=$(rustc -vV | sed -n 's/^host: //p'); out="target/release"; fi
           mkdir -p app/src-tauri/binaries
-          cp "target/release/hrm${{ matrix.ext }}" "app/src-tauri/binaries/hrm-${triple}${{ matrix.ext }}"
+          cp "$out/hrm${{ matrix.ext }}" "app/src-tauri/binaries/hrm-${triple}${{ matrix.ext }}"
       - run: npm ci --prefix app --no-audit --no-fund
       # Developer ID signing and notarization when the Apple secrets are set; without them the app is signed
       # ad hoc (tauri.release.conf.json) and needs Open Anyway the first time. Only set variables are exported:
@@ -99,6 +113,7 @@ jobs:
           tauriScript: npx tauri
           args: >-
             --bundles ${{ matrix.bundles }}
+            ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
             --config src-tauri/tauri.release.conf.json
             --config src-tauri/tauri.updater.conf.json
           releaseId: ${{ needs.draft.outputs.id }}
