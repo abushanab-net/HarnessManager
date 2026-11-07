@@ -135,10 +135,14 @@ export function parseHash() {
 }
 
 // renders run one after another, so a slow earlier page never paints over the one you moved to
-let chain = Promise.resolve();
+let chain = Promise.resolve(), queued = null;
 export function render() {
-  chain = chain.then(renderNow, renderNow);
-  return chain;
+  // one redraw waits at most: a burst of refreshes while a page loads draws it once more, not once per event
+  if (!queued) {
+    const run = () => { queued = null; return renderNow(); };
+    queued = chain = chain.then(run, run);
+  }
+  return queued;
 }
 
 async function renderNow() {
@@ -257,7 +261,14 @@ export function redrawLive() {
 /** A page's last markup, shown at once while fresh data is read; the view calls keep() after it draws. */
 // the page already on screen is never swapped for its own stale copy: its routes keep moving while the fresh data loads
 export function warmPage(sheet, key) { if (sheet.dataset.warm === key) return true; const h = S.cache.html && S.cache.html[key]; if (!h) return false; sheet.innerHTML = h; sheet.dataset.warm = key; return true; }
-export function keepPage(sheet, key) { (S.cache.html ||= {})[key] = sheet.innerHTML; sheet.dataset.warm = key; }
+export function keepPage(sheet, key) {
+  S.cache.html ||= {};
+  delete S.cache.html[key]; // to the end: the most recent pages are the ones kept
+  S.cache.html[key] = sheet.innerHTML; sheet.dataset.warm = key;
+  // kept for the next launch too (the last eight pages), so the first page opens drawn while its data loads
+  try { const all = Object.entries(S.cache.html).slice(-8); localStorage.setItem('hm.pages', JSON.stringify(Object.fromEntries(all))); } catch {}
+}
+try { S.cache.html = JSON.parse(localStorage.getItem('hm.pages') || '{}') || {}; } catch { S.cache.html = {}; }
 
 export async function loadState() {
   S.state = await call('state');
