@@ -64,6 +64,14 @@ jobs:
       - if: matrix.target == 'aarch64-pc-windows-msvc'
         uses: ilammy/msvc-dev-cmd@v1
         with: { arch: amd64_arm64 }
+      # with the MSVC environment set, rustc takes link.exe from PATH, and in the bash steps Git's own
+      # /usr/bin/link.exe (a coreutils tool) comes first: name the MSVC ARM64 linker explicitly
+      - if: matrix.target == 'aarch64-pc-windows-msvc'
+        shell: bash
+        run: |
+          linker="${VCToolsInstallDir}bin/Hostx64/arm64/link.exe"
+          test -f "$linker"
+          echo "CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER=$linker" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v5
         with: { node-version: 24, cache: "${{ runner.environment == 'github-hosted' && 'npm' || '' }}", cache-dependency-path: app/package-lock.json }
       - name: Version from the tag
