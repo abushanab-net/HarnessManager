@@ -107,17 +107,22 @@ export function trayHtml(accts, inWindow) {
 }
 /** Draw the popup window's content (limits.html) from the state read; the mark is drawn by the caller. */
 export async function drawTray(root) {
-  const x = await call('limits_extra').catch(() => ({}));
-  root.innerHTML = trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), false);
+  // the rings first, from the state already read; the forecasts patch in when their read returns (seconds, on a busy database)
+  const html = (x) => trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), false);
+  if (root.innerHTML) patch(root, html(S.cache.extra || {})); else root.innerHTML = html(S.cache.extra || {});
+  const x = await call('limits_extra').catch(() => null);
+  if (x) { S.cache.extra = x; patch(root, html(x)); }
 }
 action('toggle-tray', async (el) => {
   const root = document.getElementById('tray-root'), trigger = document.querySelector('[data-act=toggle-tray].tray-trigger');
   if (root.innerHTML) { root.innerHTML = ''; trigger.setAttribute('aria-expanded', 'false'); trigger.focus({ preventScroll: true }); return; }
-  const x = await call('limits_extra').catch(() => ({}));
-  root.innerHTML = trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), true);
+  // drawn at once from the state in hand (the forecasts from the last read, if any); the fresh forecasts patch in when
+  // they arrive, since that read can wait seconds behind a busy database
+  root.innerHTML = trayHtml(accountViews(S.state, S.cache.extra || {}, Date.now(), S.cache.computers), true);
   document.dispatchEvent(new CustomEvent('hm:tray'));
   trigger.setAttribute('aria-expanded', 'true');
   (root.querySelector('.tray-ring-card') || root.querySelector('.tray-popup')).focus({ preventScroll: true });
+  call('limits_extra').then((x) => { S.cache.extra = x; if (root.innerHTML) patch(root, trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), true)); }).catch(() => {});
 });
 action('tray-open', (el) => { document.getElementById('tray-root').innerHTML = ''; document.querySelector('.tray-trigger')?.setAttribute('aria-expanded', 'false'); go('account', { name: el.dataset.name }); });
 // a click outside the open popup closes it
@@ -191,7 +196,7 @@ function stackedChart(days, series, short) {
 
 view('accounts', async (sheet) => {
   sheet.className = 'sheet';
-  const [st, u, x] = await Promise.all([loadState(), call('usage', { days: au.days }).catch(() => null), call('limits_extra').catch(() => ({}))]);
+  const [st, u, x] = await Promise.all([loadState(), call('usage', { days: au.days }).catch(() => null), call('limits_extra').catch(() => ({}))]); S.cache.extra = x;
   if (u) {
     au.by = Object.fromEntries(u.accounts.map((b) => [b.key, b]));
     au.series = u.summary.by_profile || {};
