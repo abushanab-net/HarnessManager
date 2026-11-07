@@ -3,5 +3,5 @@ resolver = "2"
 members = ["crates/core", "crates/cli", "crates/router", "crates/fakeharness", "crates/hub", "app/src-tauri"]
 
 [workspace.package]
-version = "1.8.3"
+version = "1.9.0"
 edition = "2021"
