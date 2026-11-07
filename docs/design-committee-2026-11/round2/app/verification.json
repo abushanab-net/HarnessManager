@@ -1,0 +1,809 @@
+{
+  "engine": "Microsoft Edge headless, file://",
+  "capturedAt": "2026-11-07T00:31:13.295Z",
+  "sourceHashes": {
+    "index.html": "44226902cbb6a31927d9250ebe6891bf7760c8671b1567947eeb3912dfe8ef15",
+    "styles.css": "3963c75334e58c3eebec4c8ee3feceb3fdc909ac0a00a75d1cb570196a2b0937",
+    "views.js": "5de5a2527cee250b89e50d249095df3550c594c9a829dd6d2187b1fa93172854",
+    "modals.js": "fd67bd5704026b9c580ab26bc7f8877ac8c3855ed2204c96de105811616a78b4",
+    "data.js": "c5301087051dfe096fd4eae64bf80de60dc7888a41bc98ce79a2ba5c4624ae9b",
+    "account.js": "98b5a36a6953669250e11410791ff4e1b6b673745ded408199433c173a697086",
+    "pages-a.js": "859ac6dc0133a510ad5578463dcd86771e91ba47c31fe26a69e87e3ce1023507",
+    "pages-b.js": "859ac6dc0133a510ad5578463dcd86771e91ba47c31fe26a69e87e3ce1023507"
+  },
+  "checks": [
+    "capability matrix",
+    "all fixtures obey capabilities/windows",
+    "all 18 sessions shown, counts agree",
+    "SAMYMSI count equals four rows",
+    "redraw retains shell, animation nodes and scrollers",
+    "text selection survives data redraw",
+    "dialog, focused input, caret selection and scroll survive redraw",
+    "Escape restores opener focus",
+    "search retains input node/focus after each keystroke",
+    "account sessions tab",
+    "account projects tab",
+    "account settings tab",
+    "account overview tab",
+    "registry render/mount contract and redraw",
+    "keyed tag replacement leaves one sibling",
+    "unregistered placeholder, mount cleanup",
+    "first run has no forecast, historical usage or setup counts",
+    "empty profile name rejected",
+    "new unread account retains empty dataset",
+    "duplicate profile is rejected",
+    "unread account never recommended as ready",
+    "reauth uses selected tool and a preview dialog",
+    "API-key account exposes key endpoint and model fields",
+    "key replacement preview clears credential",
+    "routed account exposes spend cap",
+    "negative spend cap rejected",
+    "editable labels escaped at HTML boundary",
+    "CSV quotes editable labels",
+    "main profile hide-only",
+    "animation phase survives redraw",
+    "reduced motion has no running animations",
+    "Still has no running animations",
+    "recent folder selection survives redraw",
+    "width switch sets exact width and height"
+  ],
+  "consoleErrors": [],
+  "captures": [
+    {
+      "filename": "overview-lower-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1280-dark.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-lower-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1280-light.png",
+      "width": 1280,
+      "height": 720,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-lower-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1536-dark.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-lower-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1536-light.png",
+      "width": 1536,
+      "height": 864,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-lower-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1920-dark.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-lower-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "overview-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "accounts-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-detail-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "add-account-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "first-run-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "12-accounts-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "tray-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "tray-12-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 12
+    },
+    {
+      "filename": "empty-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 0
+    },
+    {
+      "filename": "first-run-accounts-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 4
+    },
+    {
+      "filename": "account-sessions-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-projects-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    },
+    {
+      "filename": "account-settings-1920-light.png",
+      "width": 1920,
+      "height": 1080,
+      "mainOverflow": 0,
+      "trayOverflow": 0,
+      "small": [],
+      "accountCount": 8
+    }
+  ]
+}

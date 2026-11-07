@@ -1,10 +1,15 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, closeDialog, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
-import { ic, brandMark } from './lib.js';
+import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
+import { brandMark } from './lib.js';
 import './accounts.js';
-import { setTodayBadge, drawNavStats } from './home.js';
-import { setSelfUpdate, refreshProjects } from './views.js';
+import { setTodayBadge } from './home.js';
+import { setSelfUpdate } from './settings.js';
+import { refreshProjects } from './projects.js';
+import './sessions.js';
+import './routing.js';
+import './prompts.js';
+import './cli.js';
 import './mcp.js';
 import './skills.js';
 import './apps.js';
@@ -13,10 +18,9 @@ import './computers.js';
 
 document.documentElement.dataset.theme = 'dark';
 document.getElementById('brand-mark').innerHTML = brandMark(28);
-document.querySelectorAll('[data-icon]').forEach((el) => { el.outerHTML = ic[el.dataset.icon] || ''; });
 
-// moving to another page closes any dialog left open
-window.addEventListener('hashchange', () => { closeDialog(); render(); });
+// moving to another page draws it (core.js closes the dialog, the menu and the notice of the page left)
+window.addEventListener('hashchange', () => render());
 
 const find = document.getElementById('find');
 find.addEventListener('input', () => { if (S.route.view === 'accounts') render(); else if (S.pageFind) S.pageFind(find.value); });
@@ -29,7 +33,6 @@ const ev = window.__TAURI__ && window.__TAURI__.event;
 let redraw;
 if (ev) ev.listen('refreshed', () => {
   S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
-  if (S.route.view !== 'home') drawNavStats(); // the Overview redraws them with the page
   if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
   // a dialog stays as it is; the page catches up when it closes
   if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
@@ -64,6 +67,5 @@ setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById(
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });
 
 render();
-// today's cost next to Home, and the readouts, also when another page opens first
+// today's cost beside Overview, also when another page opens first
 call('today').then(setTodayBadge).catch(() => {});
-if (S.route.view !== 'home') drawNavStats();

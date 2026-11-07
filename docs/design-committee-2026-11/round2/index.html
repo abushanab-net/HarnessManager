@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design committee, round 2: the whole app in the Chrono-Runway direction</title>
+<style>
+  :root { --bg: #0B1418; --panel: #10202A; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --m: #8FA6AE; --ac: #3FD6CF; --warn: #E0A84C; --neg: #F07A6A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  body { margin: 0; }
+  main { max-width: 1400px; margin: 0 auto; padding: 32px 32px 140px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 10px; }
+  h2.sec { font-size: 22px; margin: 56px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 22px 0 8px; }
+  p { margin: 6px 0; } .muted { color: var(--m); } .mono { font-family: var(--mono); font-size: 12.5px; }
+  a { color: var(--ac); }
+  .lede { font-size: 17px; color: #C6D4D9; max-width: 62rem; }
+  .toc { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; } .toc a { text-decoration: none; font-size: 14px; }
+  .how { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ac); border-radius: 10px; padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th { text-align: left; color: var(--m); font-weight: 500; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  td.n { font-family: var(--mono); text-align: center; font-size: 15px; } td.n b { color: var(--ac); }
+  .design { margin-top: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .design header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .design header h3 { margin: 0; font-size: 20px; } .design header .by { color: var(--m); font-size: 13px; }
+  .design header .open { margin-left: auto; font-size: 13px; }
+  .angle { color: #C6D4D9; font-size: 14px; margin: 8px 0 12px; }
+  .frame { position: relative; min-height: 900px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #000; }
+  .frame iframe { width: 100%; height: 900px; border: 0; display: block; background: #fff; }
+  .frame .load { position: absolute; inset: 0; display: grid; place-items: center; color: var(--m); font-size: 14px; background: var(--bg); }
+  .frame .load button { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 0; border-radius: 999px; padding: 10px 18px; cursor: pointer; }
+  .verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .verdict { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .verdict b { display: block; font-size: 13px; margin-bottom: 4px; } .verdict b span { color: var(--ac); font-family: var(--mono); margin-left: 6px; }
+  .verdict ul { margin: 4px 0 0; padding-left: 16px; } .verdict li { margin: 2px 0; }
+  .fb { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .fb > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .fb h4 { margin: 0 0 6px; font-size: 14px; }
+  .fb label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .fb label input { margin-right: 8px; accent-color: var(--ac); }
+  .fb textarea { width: 100%; min-height: 70px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  .record { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+  .record ul { margin: 6px 0; padding-left: 18px; } .record li { margin: 3px 0; }
+  .pbtn { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 1px solid var(--ac); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  .pbtn.ghost { background: transparent; color: var(--m); border-color: var(--line); }
+  .final { position: sticky; bottom: 0; background: rgba(11,20,24,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); margin: 40px -32px 0; padding: 14px 32px; }
+  .final .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .final .pick label { display: inline-block; margin-right: 18px; font-size: 14px; } .final .pick input { margin-right: 6px; accent-color: var(--ac); }
+  .saved { color: var(--m); font-size: 13px; }
+  #out { width: 100%; min-height: 200px; margin-top: 10px; font: 12.5px/1.5 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: none; }
+  @media (max-width: 1000px) { .verdicts, .fb { grid-template-columns: 1fr; } }
+.page { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .page header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; } .page header h3 { margin: 0; font-size: 18px; } .page header .sc { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--m); } .page header .sc b { color: var(--ac); font-size: 15px; }
+  .page .by { color: var(--m); font-size: 13px; }
+  .cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; margin-top: 10px; }
+  .cols > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+  .cols h4 { margin: 0 0 6px; font-size: 13px; color: var(--m); font-weight: 500; } .cols ul { margin: 0; padding-left: 16px; } .cols li { margin: 3px 0; }
+  .cols label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .cols label input { margin-right: 8px; accent-color: var(--ac); }
+  .cols textarea { width: 100%; min-height: 64px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-fbkey="hm-design-committee-2026-11-round2">
+<main>
+  <p class="mono muted">Harness Manager · design committee · round 2 · 7 November 2026</p>
+  <h1>The whole app in the Chrono-Runway direction</h1>
+  <p class="lede">You picked C as the base. Its designer's base was repaired and systematised, Designer A drew Sessions, Session and Projects, Designer B drew the seven Setup pages, all in one clickable prototype. Six critics reviewed every page. Below: the app live in a frame (navigate with its rail; its own switches set width, theme, motion and data state), the scores, a verdict per page, and the committee's findings. At the bottom, decide: implement, or one more fix round.</p>
+  <nav class="toc"><a href="#app">The app</a><a href="#scores">The scores</a><a href="#base">Pages</a><a href="#record">The record</a><a href="#answers">Your decision</a></nav>
+  <div class="how">Press <b>Load the app</b> below, then use its rail. Everything you tick saves in this browser; press <b>Copy my answers</b> at the bottom and paste the text into the chat.</div>
+
+  <h2 class="sec" id="app">The app</h2>
+  <p><a href="app/index.html" target="_blank" rel="noopener">Open the prototype in its own tab ↗</a> (recommended for the 1920 size)</p>
+  <div class="frame" data-src="app/index.html" data-title="The round-2 prototype"><div class="load"><button>Load the app</button></div></div>
+
+  <h2 class="sec" id="scores">The scores</h2>
+  
+<p class="muted">Six critics, one lens each, scored every page out of 10 after rendering it at 1280×720, 1536×864 and 1920×1080 in both themes and clicking its actions (Astra from code and screenshots). Nine or ten: implement as drawn; seven or eight: one fix round; below seven: redraw.</p>
+<table><tr><th>Page</th><th>Craft</th><th>Clarity</th><th>Lazy user</th><th>Build</th><th>Data-viz</th><th>Astra</th><th>of 60</th></tr><tr><td>The shell and the base <span class="muted">· the lead (C, repaired on Codex)</span></td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">7</td><td class="n">6</td><td class="n"><b>45</b></td></tr><tr><td>Sessions <span class="muted">· Designer A (Claude)</span></td><td class="n">8</td><td class="n">8</td><td class="n">9</td><td class="n">8</td><td class="n">7</td><td class="n">6</td><td class="n"><b>46</b></td></tr><tr><td>Session <span class="muted">· Designer A (Claude)</span></td><td class="n">9</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">7</td><td class="n"><b>48</b></td></tr><tr><td>Projects <span class="muted">· Designer A (Claude)</span></td><td class="n">8</td><td class="n">8</td><td class="n">7</td><td class="n">8</td><td class="n">7</td><td class="n">7</td><td class="n"><b>45</b></td></tr><tr><td>MCP servers <span class="muted">· Designer B (Codex)</span></td><td class="n">8</td><td class="n">9</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n"><b>49</b></td></tr><tr><td>Skills <span class="muted">· Designer B (Codex)</span></td><td class="n">8</td><td class="n">8</td><td class="n">6</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n"><b>46</b></td></tr><tr><td>System prompts <span class="muted">· Designer B (Codex)</span></td><td class="n">8</td><td class="n">9</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">6</td><td class="n"><b>47</b></td></tr><tr><td>API keys & routing <span class="muted">· Designer B (Codex)</span></td><td class="n">7</td><td class="n">8</td><td class="n">7</td><td class="n">8</td><td class="n">7</td><td class="n">6</td><td class="n"><b>43</b></td></tr><tr><td>Apps <span class="muted">· Designer B (Codex)</span></td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">8</td><td class="n">7</td><td class="n"><b>47</b></td></tr><tr><td>CLI reference <span class="muted">· Designer B (Codex)</span></td><td class="n">7</td><td class="n">9</td><td class="n">8</td><td class="n">9</td><td class="n">9</td><td class="n">8</td><td class="n"><b>50</b></td></tr><tr><td>Settings <span class="muted">· Designer B (Codex)</span></td><td class="n">8</td><td class="n">9</td><td class="n">8</td><td class="n">7</td><td class="n">8</td><td class="n">6</td><td class="n"><b>46</b></td></tr></table>
+<p class="muted">Build critic's total to implement the whole app in app/ui: 25 to 30 engineer-days, including the shell (reconciler, registry, state restore, dialogs), the e2e rewrite and QA. Full texts: <span class="mono">round2/critiques/critique-*.md</span>.</p>
+
+
+  <h2 class="sec">The pages</h2>
+  
+<section class="page" id="base">
+  <header><h3>The shell and the base</h3><span class="by">the lead (C, repaired on Codex): Overview, Accounts, Account detail, Add account, tray</span><span class="sc">8 8 8 8 7 6 · <b>45</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>All round-1 defects verified fixed: capability matrix, 5-hour rows as their own labelled 0–5 h track, linear 7-day ruler, legend "Time until reset", tray shows all 12 unclipped, 11 px floor, honest first-run and empty states.</li><li>Keyed-region rendering holds: scroll, focus, an open dialog with a typed draft, the pulse phase all survive a real redraw; keystrokes patch in place.</li><li>Lazy user: Start in one click, the limits popup is one labelled click in the rail.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Account detail draws limit bars as used share while every other bar in the app is % left (same shape, opposite meaning), and shows "7.51B tokens" above "No usage yet" tiles.</li><li>The tray popup is unreachable by keyboard; Request log and tour open with focus on body.</li><li>"Next reset & pace" column and the hero fact line wrap mid-value at 1536/1920; the Overview tour is a three-paragraph card.</li><li>Astra: when an account is unread the Overview swaps the exhausted finding for onboarding and hides running work; the Reset Horizon still owns the middle of the page (lazy user).</li><li>Build: 14 inline on*= handlers (blocked by the app's CSP in WebView2) and 183–306 inline styles that block the VektraGrid theme.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-base" data-k="v-base" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-base" data-k="v-base" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-base" data-k="v-base" value="Redraw">Redraw</label>
+      <textarea data-k="c-base" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="sessions">
+  <header><h3>Sessions</h3><span class="by">Designer A (Claude)</span><span class="sc">8 8 9 8 7 6 · <b>46</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Running sessions are the finding and the first group; SAMYMSI + Follow in two clicks; pin from the rail updates the sidebar at once; grouping, paging, filters and folds survive redraws.</li><li>A's session row carries exactly the inventory's 24 fields.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>The rail's "All projects" count grows 113 → 223 under a tag filter; at 1280 the account and "running on SA…" truncate while the file path stays.</li><li>The 18-session Running-now group fills the 720 fold until folded; the ⋯ menu is a popover while the lead's is a modal.</li><li>Fixture gaps: archived and remote sessions, paging; the "Pinned to the sidebar" notice survives into the empty preset.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-sessions" data-k="v-sessions" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-sessions" data-k="v-sessions" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-sessions" data-k="v-sessions" value="Redraw">Redraw</label>
+      <textarea data-k="c-sessions" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="session">
+  <header><h3>Session</h3><span class="by">Designer A (Claude)</span><span class="sc">9 8 8 8 8 7 · <b>48</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>A fixed-height reader: head, five tiles, only the chat scrolls; follow-live sticks to the end and stops when you scroll up; 2,000-step turn shows first and last five with "Show 1,990 more"; craft's best page.</li><li>Resume here in two clicks.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Monospace in the meta lines (the only place outside logs and paths); amber on the H1 count is decoration.</li><li>The remote-session page and the ↓ Latest click could not be driven by automation (unverified); a per-launch terminal picker is an untagged invention.</li><li>Still mode also freezes updates (Astra).</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-session" data-k="v-session" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-session" data-k="v-session" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-session" data-k="v-session" value="Redraw">Redraw</label>
+      <textarea data-k="c-session" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="projects">
+  <header><h3>Projects</h3><span class="by">Designer A (Claude)</span><span class="sc">8 8 7 8 7 7 · <b>45</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>The real page's instruments in the base's components: five tiles, share bar and rows, one card per project with sparkline, pin / play / ⋯, in-place redraw on sort and range.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Card sparklines each on their own y-scale (rows cannot be compared); the share bar triplicates the row tracks and the % column.</li><li>Pin Bunyan took a page jump plus an unlabelled glyph (lazy user).</li><li>A's tag palette reuses colours the language reserves for state and computer identity.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-projects" data-k="v-projects" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-projects" data-k="v-projects" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-projects" data-k="v-projects" value="Redraw">Redraw</label>
+      <textarea data-k="c-projects" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="mcp">
+  <header><h3>MCP servers</h3><span class="by">Designer B (Codex)</span><span class="sc">8 9 8 8 8 8 · <b>49</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>The server × tool matrix in the base's voice, add/edit as form and JSON, import from apps; codegraph to Codex is one tick; clarity's and Astra's best setup page.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>A tour modal auto-opens on arrival before the page is seen (the same on Routing and Settings).</li><li>"Left alone" entries are not findable in the matrix; the Off tag and take-over of a left-alone entry are missing from the fixtures.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-mcp" data-k="v-mcp" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-mcp" data-k="v-mcp" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-mcp" data-k="v-mcp" value="Redraw">Redraw</label>
+      <textarea data-k="c-mcp" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="skills">
+  <header><h3>Skills</h3><span class="by">Designer B (Codex)</span><span class="sc">8 8 6 8 8 8 · <b>46</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>258 rows usable: paging, search, per-tool ticks, Not managed, Discover; header ticks per tool.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Lazy user stuck: the Install dialog asks for "a GitHub tree link or folder" then rejects the link ("Enter an absolute folder path").</li><li>Replace-copy and Discover error states missing from the fixtures.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-skills" data-k="v-skills" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-skills" data-k="v-skills" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-skills" data-k="v-skills" value="Redraw">Redraw</label>
+      <textarea data-k="c-skills" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="prompts">
+  <header><h3>System prompts</h3><span class="by">Designer B (Codex)</span><span class="sc">8 9 8 8 8 6 · <b>47</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Clear, complete, keyboard-clean (clarity 9).</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Astra: the editor claims the text is enabled in the live file while the file still holds different text; the head leans to a general claim rather than a finding.</li><li>The "Preview: Saved prompt." notice leaks into the Add-account dialog's error strip (global notice bug).</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-prompts" data-k="v-prompts" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-prompts" data-k="v-prompts" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-prompts" data-k="v-prompts" value="Redraw">Redraw</label>
+      <textarea data-k="c-prompts" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="routing">
+  <header><h3>API keys & routing</h3><span class="by">Designer B (Codex)</span><span class="sc">7 8 7 8 7 6 · <b>43</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Router card, providers, routes with provider chains, request log, both dialogs; add a provider and start the router works.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Ships as the empty router; the good populated state hides behind a fixture control (craft's worst three).</li><li>Cross-page disagreement: Routing says "0 routes · router stopped" while the Overview routes opencode-main through cheap-fast; Failovers / Errors / Paused stats carry no state mark; the aggregate route is missing.</li><li>Astra: route-to-account wiring is not there.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-routing" data-k="v-routing" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-routing" data-k="v-routing" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-routing" data-k="v-routing" value="Redraw">Redraw</label>
+      <textarea data-k="c-routing" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="apps">
+  <header><h3>Apps</h3><span class="by">Designer B (Codex)</span><span class="sc">8 8 8 8 8 7 · <b>47</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Tools table with installed / newest, update, reinstall, show/hide, Harness Manager's own row; update Pi in two clicks.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>The newer version is not amber; "could not check" and Website states missing; "Installed by" wording is an untagged invention.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-apps" data-k="v-apps" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-apps" data-k="v-apps" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-apps" data-k="v-apps" value="Redraw">Redraw</label>
+      <textarea data-k="c-apps" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="cli">
+  <header><h3>CLI reference</h3><span class="by">Designer B (Codex)</span><span class="sc">7 9 8 9 9 8 · <b>50</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Simple and complete; the build critic's and data-viz's best page.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Craft: the least "designed" page of the twelve; the head is a general claim.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-cli" data-k="v-cli" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-cli" data-k="v-cli" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-cli" data-k="v-cli" value="Redraw">Redraw</label>
+      <textarea data-k="c-cli" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="page" id="settings">
+  <header><h3>Settings</h3><span class="by">Designer B (Codex)</span><span class="sc">8 9 8 7 8 6 · <b>46</b>/60</span></header>
+  <div class="cols">
+    <div><h4>What the critics saw</h4><ul><li>Every section and row with its control and default, Computers / sync with its dialogs, backups; turn off "start with Windows" and set Light in one click each.</li></ul><h4 style="margin-top:10px">What must change</h4><ul><li>Build: B's MutationObserver and five document-level listeners edit the lead's rail, Accounts page and top-bar from outside the registry, and push the frame down 36 px on B's pages.</li><li>Hub-only recovery-key and invite rows missing; Router-port Change and Old-launcher Import clicks timed out (unverified).</li><li>Astra: no coherent terminal preference across pages.</li></ul></div>
+    <div><h4>Your verdict</h4>
+      <label><input type="radio" name="v-settings" data-k="v-settings" value="Good: implement as drawn, with the critics' fixes">Good: implement as drawn, with the critics' fixes</label>
+      <label><input type="radio" name="v-settings" data-k="v-settings" value="Change: see my notes">Change: see my notes</label>
+      <label><input type="radio" name="v-settings" data-k="v-settings" value="Redraw">Redraw</label>
+      <textarea data-k="c-settings" placeholder="What you like, what must change, what is missing"></textarea></div>
+  </div>
+</section>
+
+  <h2 class="sec" id="record">The committee's record</h2>
+  
+<div class="record">
+<p><b>Is it one app?</b> Visually yes: rail, top bar, page head, cards, chips, rings, the teal primary and both themes are shared by all three hands; no text under 11 px, no overflow, monospace confined to paths, commands and logs, Still truly stills, AA contrast everywhere. Operationally not yet: three ⋯ menu styles (modal vs popovers), three tour styles (B's auto-opening modal, the lead's three-paragraph card, none on A's pages), two dialog footers, "Preview" captions inside product dialogs, B's second fixture bar, and three separate data stores so pages disagree (Routing vs Overview routes, Sessions counts under a filter).</p>
+<p><b>The three worst defects in the whole app, as the critics rank them</b></p>
+<ul>
+<li>Account detail draws limit bars as used share while every other bar of that shape means % left; the tray popup is unreachable by keyboard.</li>
+<li>B's tour modal opens on arrival at five Setup pages before the page is seen; B's observer and document-level listeners reach outside the registry into the lead's rail and top bar.</li>
+<li>Cross-page data disagreements (routes, counts, installed tools, terminal preference) and notices leaking between pages ("Preview: Saved prompt." inside Add account).</li>
+</ul>
+<p><b>Before it can be built as one app/ui codebase (build critic)</b></p>
+<ul>
+<li>Remove the 21 inline on*= handler attributes (the app's CSP blocks them in WebView2) and move the 180–300 inline styles on the base pages to classes, or the VektraGrid theme cannot be applied.</li>
+<li>One dialog and menu controller, one notice channel, one data store; A's and B's pages hook into the registry only.</li>
+</ul>
+<p><b>Astra's ranking of the pages</b>: CLI reference &gt; MCP servers &gt; Skills &gt; Projects &gt; Session &gt; Apps &gt; Accounts &gt; Settings &gt; Sessions &gt; Routing &gt; System prompts &gt; Account detail. <b>Craft's</b>: Session &gt; Sessions &gt; Skills &gt; MCP &gt; Overview &gt; Accounts &gt; Apps &gt; Account detail &gt; Settings &gt; Projects &gt; Prompts &gt; CLI &gt; Routing.</p>
+<p><b>How the round ran</b>: the lead's phase ran on Codex after OpenCode's Gemini gateway hung twice (recorded; C's design kept exactly); Designer A on Claude Fable, Designer B on Codex; six critics isolated, each rendering every page. Log: <span class="mono">round1/record.md</span>.</p>
+</div>
+
+
+  <section class="final" id="answers">
+    <div class="pick">
+      <b style="font-size:14px;margin-right:12px">Decision:</b>
+      <label><input type="radio" name="pick" data-k="pick" value="Approve: implement in app/ui with the critics' fixes folded in">Approve: implement in app/ui with the critics' fixes folded in</label>
+      <label><input type="radio" name="pick" data-k="pick" value="One more fix round on the pages I marked Change or Redraw, then implement">One more fix round on the pages I marked Change or Redraw, then implement</label>
+      <label><input type="radio" name="pick" data-k="pick" value="Something else: see notes">Something else: see my notes</label>
+    </div>
+    <textarea data-k="general" placeholder="Anything else" style="width:100%;min-height:50px;margin-top:8px;font:14px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px"></textarea>
+    <div class="row" style="margin-top:8px"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn ghost" id="dl">Download as a file</button><button class="pbtn ghost" id="clear">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script>
+  document.querySelectorAll('.frame').forEach((f) => { const b = f.querySelector('button'); b.addEventListener('click', () => { const i = document.createElement('iframe'); i.src = f.dataset.src; i.title = f.dataset.title; f.appendChild(i); f.querySelector('.load').remove(); }); });
+  (function () {
+    const KEY = document.body.dataset.fbkey; let draft = {};
+    try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const saved = document.getElementById('saved');
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(draft)); saved.textContent = 'Saved in this browser ' + new Date().toLocaleTimeString(); };
+    document.querySelectorAll('[data-k]').forEach((x) => {
+      const k = x.dataset.k;
+      if (x.type === 'radio') { x.checked = draft[k] === x.value; x.addEventListener('change', () => { draft[k] = x.value; save(); }); }
+      else { x.value = draft[k] || ''; x.addEventListener('input', () => { draft[k] = x.value; save(); }); }
+    });
+    const text = () => {
+      const out = ['# Design committee, round 2: my answers', ''];
+      document.querySelectorAll('.page').forEach((p) => { const id = p.id; out.push('## ' + p.querySelector('h3').textContent, 'Verdict: ' + (draft['v-' + id] || '(none)')); if (draft['c-' + id]) out.push('Notes: ' + draft['c-' + id]); out.push(''); });
+      out.push('## Decision', draft.pick || '(none)'); if (draft.general) out.push('Anything else: ' + draft.general);
+      return out.join('\n');
+    };
+    const box = document.getElementById('out');
+    document.getElementById('copy').addEventListener('click', async () => { box.style.display = 'block'; box.value = text(); box.select(); try { await navigator.clipboard.writeText(box.value); saved.textContent = 'Copied. Paste it into the chat with Claude.'; } catch (e) { document.execCommand('copy'); saved.textContent = 'Copied (or select the text below and copy it).'; } });
+    document.getElementById('dl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text()], { type: 'text/markdown' })); a.download = 'design-committee-round2-answers.md'; a.click(); });
+    document.getElementById('clear').addEventListener('click', () => { if (!window.confirm('Clear every answer on this page?')) return; localStorage.removeItem(KEY); location.reload(); });
+  })();
+</script>
+</body>
+</html>

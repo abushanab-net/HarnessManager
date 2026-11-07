@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design committee, round 1: three designs, the critics' verdicts, your pick</title>
+<style>
+  :root { --bg: #0B1418; --panel: #10202A; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --m: #8FA6AE; --ac: #3FD6CF; --warn: #E0A84C; --neg: #F07A6A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  body { margin: 0; }
+  main { max-width: 1400px; margin: 0 auto; padding: 32px 32px 140px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 10px; }
+  h2.sec { font-size: 22px; margin: 56px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 22px 0 8px; }
+  p { margin: 6px 0; } .muted { color: var(--m); } .mono { font-family: var(--mono); font-size: 12.5px; }
+  a { color: var(--ac); }
+  .lede { font-size: 17px; color: #C6D4D9; max-width: 62rem; }
+  .toc { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; } .toc a { text-decoration: none; font-size: 14px; }
+  .how { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ac); border-radius: 10px; padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th { text-align: left; color: var(--m); font-weight: 500; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  td.n { font-family: var(--mono); text-align: center; font-size: 15px; } td.n b { color: var(--ac); }
+  .design { margin-top: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .design header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .design header h3 { margin: 0; font-size: 20px; } .design header .by { color: var(--m); font-size: 13px; }
+  .design header .open { margin-left: auto; font-size: 13px; }
+  .angle { color: #C6D4D9; font-size: 14px; margin: 8px 0 12px; }
+  .frame { position: relative; min-height: 860px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #000; }
+  .frame iframe { width: 100%; height: 860px; border: 0; display: block; background: #fff; }
+  .frame .load { position: absolute; inset: 0; display: grid; place-items: center; color: var(--m); font-size: 14px; background: var(--bg); }
+  .frame .load button { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 0; border-radius: 999px; padding: 10px 18px; cursor: pointer; }
+  .verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .verdict { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .verdict b { display: block; font-size: 13px; margin-bottom: 4px; } .verdict b span { color: var(--ac); font-family: var(--mono); margin-left: 6px; }
+  .verdict ul { margin: 4px 0 0; padding-left: 16px; } .verdict li { margin: 2px 0; }
+  .fb { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .fb > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .fb h4 { margin: 0 0 6px; font-size: 14px; }
+  .fb label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .fb label input { margin-right: 8px; accent-color: var(--ac); }
+  .fb textarea { width: 100%; min-height: 70px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  .record { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+  .record ul { margin: 6px 0; padding-left: 18px; } .record li { margin: 3px 0; }
+  .pbtn { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 1px solid var(--ac); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  .pbtn.ghost { background: transparent; color: var(--m); border-color: var(--line); }
+  .final { position: sticky; bottom: 0; background: rgba(11,20,24,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); margin: 40px -32px 0; padding: 14px 32px; }
+  .final .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .final .pick label { display: inline-block; margin-right: 18px; font-size: 14px; } .final .pick input { margin-right: 6px; accent-color: var(--ac); }
+  .saved { color: var(--m); font-size: 13px; }
+  #out { width: 100%; min-height: 200px; margin-top: 10px; font: 12.5px/1.5 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: none; }
+  @media (max-width: 1000px) { .verdicts, .fb { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-fbkey="hm-design-committee-2026-11-round1">
+<main>
+  <p class="mono muted">Harness Manager · design committee · round 1 · 7 November 2026</p>
+  <h1>Three designs, the critics' verdicts, your pick</h1>
+  <p class="lede">Three designers, on three models, each built a clickable prototype of the shell, the Overview, Accounts and Add account from the same brief, each led by a different part of your sentence. Six critics then scored them without seeing each other. Below: each prototype live in its own frame (use its own width, theme, motion and first-run switches, or open it in a tab), the critics' verdicts, the committee's record, and a form per design. At the bottom, pick the base.</p>
+  <nav class="toc"><a href="#scores">The scores</a><a href="#a">A · The board</a><a href="#b">B · Capacity ledger</a><a href="#c">C · Chrono-Runway</a><a href="#record">The record</a><a href="#answers">Your pick</a></nav>
+  <div class="how">Each frame is the designer's real prototype. Click <b>Load</b> on a frame to start it (they animate; load the one you are looking at). Everything you tick saves in this browser; press <b>Copy my answers</b> at the bottom and paste the text into the chat.</div>
+
+  <h2 class="sec" id="scores">The scores</h2>
+  
+<p class="muted">Six critics, each with one lens, scored each design out of 10 twice: before and after the designers' one rebuttal with fixes. Nine or ten means "ship it as the base with small fixes"; seven or eight a strong base that needs a round; below five does not beat the app today. Every critic rendered the prototypes themselves (Astra judged from code and B's screenshots).</p>
+<table>
+<tr><th>Lens</th><th>A · The board (Claude)</th><th>B · Capacity ledger (Codex)</th><th>C · Chrono-Runway (OpenCode, Gemini)</th><th>Ranking after fixes</th></tr>
+<tr><td>Judge 1 · craft</td><td class="n">8 → <b>9</b></td><td class="n">7 → <b>8</b></td><td class="n">5 → <b>7</b></td><td>A &gt; B &gt; C</td></tr>
+<tr><td>Judge 2 · clarity and completeness</td><td class="n">8 → <b>9</b></td><td class="n">7 → <b>9</b></td><td class="n">6 → <b>7</b></td><td>A ≥ B &gt; C</td></tr>
+<tr><td>The lazy user (a developer who has never seen the app)</td><td class="n">9 → <b>9</b></td><td class="n">7 → <b>9</b></td><td class="n">6 → <b>7</b></td><td>A &gt; B &gt; C</td></tr>
+<tr><td>Build critic (Tauri/WebView2, redraw loop, e2e)</td><td class="n">7 → <b>8</b></td><td class="n">8 → <b>9</b></td><td class="n">5 → <b>7</b></td><td>B &gt; A &gt; C</td></tr>
+<tr><td>Data-viz critic (does every instrument earn its place)</td><td class="n">6 → <b>8</b></td><td class="n">7 → <b>9</b></td><td class="n">5 → <b>6</b></td><td>B &gt; A &gt; C</td></tr>
+<tr><td>Astra (Codex), third judge, the whole</td><td class="n">6 → <b>7</b></td><td class="n">7 → <b>8</b></td><td class="n">4 → <b>6</b></td><td>B &gt; A &gt; C</td></tr>
+<tr><td><b>Total of 60</b></td><td class="n">44 → <b>50</b></td><td class="n">43 → <b>52</b></td><td class="n">31 → <b>40</b></td><td>Split 3 – 3; B ahead by two points</td></tr>
+<tr><td>Build cost (build critic's estimate, engineer-days)</td><td class="n">11 – 13</td><td class="n">7 – 8</td><td class="n">11 – 14</td><td></td></tr>
+</table>
+<p class="muted">The split is real and it is yours to settle: the three people-facing lenses (craft, clarity, the lazy user) prefer A's glance; the three rigour lenses (build, data-viz, Astra) prefer B's honesty and cost. Every critic's full text is in <span class="mono">round1/critiques/</span> (critique-*.md, then rescore-*.md).</p>
+
+
+  
+<section class="design" id="a">
+  <header><h3>A · The board</h3><span class="by">Designer A, Claude Fable · lead: "what is running, and where"</span><a class="open" href="designs/a-claude/index.html" target="_blank" rel="noopener">Open in a new tab ↗</a></header>
+  <p class="angle">The Overview is a live board of every session running now, one lane per computer, with the account ladder beside it; your sentence reads as three cells across the top (Running now · Runs out first · Use next, with Start). No sidebar: a top bar and a tab row. The readouts and limit rings moved into the ladder and the tray popup.</p>
+  <div class="frame" data-src="designs/a-claude/index.html" data-title="A · The board"><div class="load"><button>Load A · The board</button></div></div>
+  <p class="muted" style="margin-top:8px">The frame is 860 px tall; use the prototype's own width / theme / motion / data switches at its top. Add account and first run are inside it.</p>
+  <div class="verdicts"><div class="verdict"><b>Craft<span>9</span></b><ul><li>Reads as a shipped product; cures all four things you ticked.</li><li>Open: a void at 1920; freshness text still hidden at 1280; 9 px "WEEK" captions.</li></ul></div><div class="verdict"><b>Clarity<span>9</span></b><ul><li>The sentence answered fastest, strip + board; inventory complete; AA contrast fixed.</li><li>New: the 4-card lane cap folds writing sessions behind "+2 more".</li></ul></div><div class="verdict"><b>Lazy user<span>9</span></b><ul><li>All three answers in ten seconds, Start in one click, SAMYMSI named.</li><li>Adding a Codex account is 7 clicks (3-step wizard).</li></ul></div><div class="verdict"><b>Build<span>8</span></b><ul><li>Only design that proved the redraw story (keyed patching); nothing invented.</li><li>Costs the shell rewrite and a second render path; 11 to 13 days.</li></ul></div><div class="verdict"><b>Data-viz<span>8</span></b><ul><li>Ladder bar and ring now honest and labelled; one colour rule; no t/s.</li><li>Horizontal scrollbar on the ladder at 1280 with 12 accounts.</li></ul></div><div class="verdict"><b>Astra<span>7</span></b><ul><li>Strongest "running / where" structure.</li><li>Some secondary readings still disagree with the current state.</li></ul></div></div>
+  <div class="fb">
+    <div><h4>Parts of A · The board worth keeping, whatever the base</h4><label><input type="checkbox" data-k="a-part" value="The three-cell answer strip (Running now · Runs out first · Use next)">The three-cell answer strip (Running now · Runs out first · Use next)</label><label><input type="checkbox" data-k="a-part" value="The session board, one lane per computer, writing pulse, quiet computer dimmed">The session board, one lane per computer, writing pulse, quiet computer dimmed</label><label><input type="checkbox" data-k="a-part" value="The shell without a sidebar: top bar + tab row + gear menu">The shell without a sidebar: top bar + tab row + gear menu</label><label><input type="checkbox" data-k="a-part" value="The Room ladder (ring + tightest window + reset) and its tray popup">The Room ladder (ring + tightest window + reset) and its tray popup</label><label><input type="checkbox" data-k="a-part" value="Keyed patching so redraws are invisible">Keyed patching so redraws are invisible</label><label><input type="checkbox" data-k="a-part" value="The year clock drawing (square cells, month letters, busiest day)">The year clock drawing (square cells, month letters, busiest day)</label><textarea data-k="a-parts" placeholder="Other parts, or why"></textarea></div>
+    <div><h4>What must change in A · The board</h4><textarea data-k="a-change" placeholder="What you dislike, what is missing, what confuses you"></textarea></div>
+  </div>
+</section>
+<section class="design" id="b">
+  <header><h3>B · Capacity ledger</h3><span class="by">Designer B, OpenAI Codex · lead: "which account is exhausted"</span><a class="open" href="designs/b-codex/index.html" target="_blank" rel="noopener">Open in a new tab ↗</a></header>
+  <p class="angle">Every account's room on one aligned instrument: fixed columns for 5-hour and weekly room with each reset beneath, exhausted first, unknown separate, measured solid / ≈ dashed / — not read. Beside it: Use now with Start, Resets first, Running now by computer. The sidebar stays, trimmed. The headline is the exception, now "codex-main is out of its 5-hour window."</p>
+  <div class="frame" data-src="designs/b-codex/index.html" data-title="B · Capacity ledger"><div class="load"><button>Load B · Capacity ledger</button></div></div>
+  <p class="muted" style="margin-top:8px">The frame is 860 px tall; use the prototype's own width / theme / motion / data switches at its top. Add account and first run are inside it.</p>
+  <div class="verdicts"><div class="verdict"><b>Craft<span>8</span></b><ul><li>Most disciplined ledger, cleanest type and colour; slogans replaced by the finding.</li><li>Open: "live" barely visible; the tray is a generic modal; slogans moved into the eyebrows.</li></ul></div><div class="verdict"><b>Clarity<span>9</span></b><ul><li>Headline states the answer; rings back on rows and tray; computers named; honest "None" vs "—".</li><li>The dot-grid trends you like are gone; week ring vs 5-hour headline disagree at a glance.</li></ul></div><div class="verdict"><b>Lazy user<span>9</span></b><ul><li>Start one click, SAMYMSI by name, add account 5 clicks on one screen.</li><li>The table is still the biggest thing; "Resets first 18m" card unexplained.</li></ul></div><div class="verdict"><b>Build<span>9</span></b><ul><li>Closest to the app's own render model; cheapest: 7 to 8 days; redraw now continuous.</li><li>Needs-attention list is still fixture text; tray taller than the popup at 12.</li></ul></div><div class="verdict"><b>Data-viz<span>9</span></b><ul><li>Every instrument finding fixed; the ledger answers all three rank-1 jobs with the fewest marks.</li><li>Vestigial traveller marks; a two-line explanation under the year clock.</li></ul></div><div class="verdict"><b>Astra<span>8</span></b><ul><li>Clearest verified visual improvement; B as the base.</li><li>Follow per project and some state disagreements remain.</li></ul></div></div>
+  <div class="fb">
+    <div><h4>Parts of B · Capacity ledger worth keeping, whatever the base</h4><label><input type="checkbox" data-k="b-part" value="The capacity ledger: two aligned bars per account, reset under each, exhausted first, not-read dashed">The capacity ledger: two aligned bars per account, reset under each, exhausted first, not-read dashed</label><label><input type="checkbox" data-k="b-part" value="The finding as the headline (&quot;codex-main is out of its 5-hour window.&quot;)">The finding as the headline ("codex-main is out of its 5-hour window.")</label><label><input type="checkbox" data-k="b-part" value="Use now + Resets first cards beside the ledger">Use now + Resets first cards beside the ledger</label><label><input type="checkbox" data-k="b-part" value="The one-screen Add account: tool first, unsupported kinds greyed and explained">The one-screen Add account: tool first, unsupported kinds greyed and explained</label><label><input type="checkbox" data-k="b-part" value="The selected-account inspector (ring, week elapsed, forecast with its basis)">The selected-account inspector (ring, week elapsed, forecast with its basis)</label><label><input type="checkbox" data-k="b-part" value="The tray popup as a plain table of both windows with resets and Start">The tray popup as a plain table of both windows with resets and Start</label><textarea data-k="b-parts" placeholder="Other parts, or why"></textarea></div>
+    <div><h4>What must change in B · Capacity ledger</h4><textarea data-k="b-change" placeholder="What you dislike, what is missing, what confuses you"></textarea></div>
+  </div>
+</section>
+<section class="design" id="c">
+  <header><h3>C · Chrono-Runway</h3><span class="by">Designer C, OpenCode on Gemini · lead: "which account to use, because it resets soon"</span><a class="open" href="designs/c-opencode/index.html" target="_blank" rel="noopener">Open in a new tab ↗</a></header>
+  <p class="angle">Time as the organising idea: a three-card dispatch deck (Use next · Runs out first · Running now) over a Reset Horizon, every account on a linear 7-day timeline towards its resets with a capacity column beside it, a "harvest before reset" rule, and Start on the recommended lane. Sidebar kept.</p>
+  <div class="frame" data-src="designs/c-opencode/index.html" data-title="C · Chrono-Runway"><div class="load"><button>Load C · Chrono-Runway</button></div></div>
+  <p class="muted" style="margin-top:8px">The frame is 860 px tall; use the prototype's own width / theme / motion / data switches at its top. Add account and first run are inside it.</p>
+  <div class="verdicts"><div class="verdict"><b>Craft<span>7</span></b><ul><li>Biggest leap after fixes: one Start, plain titles, monospace tamed, linear axis.</li><li>Open: capability matrix wrong (Routed shown for Codex/OpenCode/Oh My Pi); 15 texts under 10 px; tick labels overprint at 1280.</li></ul></div><div class="verdict"><b>Clarity<span>7</span></b><ul><li>Focus, contrast, first-run zeroing, linear timeline genuinely fixed.</li><li>Routed still wrong; 3 of 18 sessions visible at 1280; "NOW" overlaps "Sat (+1d)".</li></ul></div><div class="verdict"><b>Lazy user<span>7</span></b><ul><li>Computers named, new account shows "—" until read, 4-click add.</li><li>The timeline owns the middle of the page; chip counts disagree with rows.</li></ul></div><div class="verdict"><b>Build<span>7</span></b><ul><li>Views computed, no baked strings, redraw restores state; no design round needed now.</li><li>Whole-app innerHTML; 261 inline styles; no 720 fold; 11 to 14 days.</li></ul></div><div class="verdict"><b>Data-viz<span>6</span></b><ul><li>Axis linear, capacity decoupled, forecast dashes honest, crisp year clock.</li><li>The 5-hour row is a sliver on a 7-day axis; legend calls time-to-reset "Measured"; label collisions.</li></ul></div><div class="verdict"><b>Astra<span>6</span></b><ul><li>Max-room vs use-before-reset distinction worth keeping.</li><li>Still contradicts its own instruments and account states in places.</li></ul></div></div>
+  <div class="fb">
+    <div><h4>Parts of C · Chrono-Runway worth keeping, whatever the base</h4><label><input type="checkbox" data-k="c-part" value="The &quot;harvest before reset&quot; rule and reset-gate labels (&quot;5h ↻ 1 h 48 m ★&quot;)">The "harvest before reset" rule and reset-gate labels ("5h ↻ 1 h 48 m ★")</label><label><input type="checkbox" data-k="c-part" value="Use next vs resets-first as two different recommendations">Use next vs resets-first as two different recommendations</label><label><input type="checkbox" data-k="c-part" value="The route bar (computer → account → tool → provider · first reply) under the selection">The route bar (computer → account → tool → provider · first reply) under the selection</label><label><input type="checkbox" data-k="c-part" value="The ring with the &quot;% left / % used&quot; switch for the tray">The ring with the "% left / % used" switch for the tray</label><label><input type="checkbox" data-k="c-part" value="The Request log columns (input, output, cache read, cost ≈, first reply)">The Request log columns (input, output, cache read, cost ≈, first reply)</label><label><input type="checkbox" data-k="c-part" value="The green confirmation bar after Start">The green confirmation bar after Start</label><textarea data-k="c-parts" placeholder="Other parts, or why"></textarea></div>
+    <div><h4>What must change in C · Chrono-Runway</h4><textarea data-k="c-change" placeholder="What you dislike, what is missing, what confuses you"></textarea></div>
+  </div>
+</section>
+
+  <h2 class="sec" id="record">The committee's record</h2>
+  
+<div class="record">
+<p><b>What every critic agrees a winning design must have</b></p>
+<ul>
+<li>Your three answers as three readable statements above the fold at 1280, each in its own place, with exactly one primary Start.</li>
+<li>Two aligned bars per account (5-hour, week), each with "% left" and its reset countdown, exhausted first, not-read dashed; measured / ≈ / — told apart without a legend.</li>
+<li>Sessions shown per named computer, each card saying account + project, directly followable.</li>
+<li>State kept in JS and a DOM patched by key or rebuilt with scroll, focus, open surfaces and animation phase restored, so the redraw every few seconds is invisible.</li>
+</ul>
+<p><b>What it must not have</b></p>
+<ul>
+<li>A slogan, a lecture title or an explanation line where the finding should be; tokens-per-second on the Overview; a capability matrix the app contradicts.</li>
+<li>A bar, ring or timeline whose length or colour encodes something other than what the label beside it says; decorative or stale precision.</li>
+<li>A diagram the lazy user has to learn before the page answers.</li>
+</ul>
+<p><b>Parts worth combining (named by three or more critics)</b></p>
+<ul>
+<li>A's answer strip and per-computer session board, and its keyed patching.</li>
+<li>B's capacity ledger as the hero instrument and as the Accounts rows; B's one-screen Add account.</li>
+<li>C's harvest-before-reset rule and reset-gate labels inside B's reset column; C's ring with the left/used switch in the tray.</li>
+</ul>
+<p><b>Where the committee splits, for you to settle</b></p>
+<ul>
+<li><b>Shell:</b> A removes the sidebar (top bar + tabs + gear); B and C keep a trimmed sidebar. The craft and lazy-user lenses credit A's removal; the build critic prices it at about four extra days.</li>
+<li><b>The hero:</b> A's live board (what is running where) versus B's ledger (which account has room). Critics who rank A first say the glance wins; critics who rank B first say the ledger is the honest instrument and the cheaper build. Several suggest both: A's strip and board with B's ledger as the Room list.</li>
+<li><b>C:</b> no critic ranks it above third after fixes; its ideas (time to reset, harvest rule) are recommended as parts, not as the base.</li>
+</ul>
+<p><b>How the round ran</b></p>
+<ul>
+<li>Designers: A on Claude Fable (native subagent); B on OpenAI Codex and C on OpenCode through the delegate driver, because no native subagent reaches those models. C's OpenCode default model was an unreachable local server and its Zen API key has expired (renew it in the OpenCode Console); C ran on the OpenCode Go credential with Gemini and needed three relaunches (an output-length stop, a provider error, a hung run).</li>
+<li>Critics: five Claude Fable subagents and Astra (Codex, read-only), all isolated from the designers' reasoning; each rendered the prototypes in headless Edge at 1280/1536/1920, light and dark, except Astra (code and B's screenshots).</li>
+<li>Clerk errors caught and corrected during the round: a wrong capability matrix in the rebuttal briefs (fixed in inventory.md; C still carries it), and a wrong "Codex has no 5-hour window" correction that you overruled (reverted before it touched B).</li>
+<li>Full log: <span class="mono">round1/record.md</span>; the brief, inventory and references next to it.</li>
+</ul>
+</div>
+
+
+  <section class="final" id="answers">
+    <div class="pick">
+      <b style="font-size:14px;margin-right:12px">The base:</b>
+      <label><input type="radio" name="pick" data-k="pick" value="A · The board">A · The board</label>
+      <label><input type="radio" name="pick" data-k="pick" value="B · Capacity ledger">B · Capacity ledger</label>
+      <label><input type="radio" name="pick" data-k="pick" value="C · Chrono-Runway">C · Chrono-Runway</label>
+      <label><input type="radio" name="pick" data-k="pick" value="None: one more round">None of them: one more round, with my notes</label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn ghost" id="dl">Download as a file</button><button class="pbtn ghost" id="clear">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<script>
+  // frames load on demand: three animated prototypes at once would fight for the GPU
+  document.querySelectorAll('.frame').forEach((f) => { const b = f.querySelector('button'); b.addEventListener('click', () => { const i = document.createElement('iframe'); i.src = f.dataset.src; i.title = f.dataset.title; f.appendChild(i); f.querySelector('.load').remove(); }); });
+  (function () {
+    const KEY = document.body.dataset.fbkey; let draft = {};
+    try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const saved = document.getElementById('saved');
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(draft)); saved.textContent = 'Saved in this browser ' + new Date().toLocaleTimeString(); };
+    document.querySelectorAll('[data-k]').forEach((x) => {
+      const k = x.dataset.k;
+      if (x.type === 'radio') { x.checked = draft[k] === x.value; x.addEventListener('change', () => { draft[k] = x.value; save(); }); }
+      else if (x.type === 'checkbox') { const ck = k + ':' + x.value; x.checked = !!draft[ck]; x.addEventListener('change', () => { draft[ck] = x.checked; save(); }); }
+      else { x.value = draft[k] || ''; x.addEventListener('input', () => { draft[k] = x.value; save(); }); }
+    });
+    const text = () => {
+      const out = ['# Design committee, round 1: my answers', ''];
+      document.querySelectorAll('.design').forEach((d) => {
+        out.push('## ' + d.querySelector('h3').textContent);
+        d.querySelectorAll('.fb > div').forEach((box) => {
+          const picks = [...box.querySelectorAll('input:checked')].map((i) => i.value);
+          const t = box.querySelector('textarea');
+          if (picks.length || (t && t.value.trim())) { out.push('### ' + box.querySelector('h4').textContent); if (picks.length) out.push('- ' + picks.join('\n- ')); if (t && t.value.trim()) out.push(t.value.trim()); out.push(''); }
+        });
+      });
+      out.push('## The base', draft.pick || '(none)');
+      return out.join('\n');
+    };
+    const box = document.getElementById('out');
+    document.getElementById('copy').addEventListener('click', async () => { box.style.display = 'block'; box.value = text(); box.select(); try { await navigator.clipboard.writeText(box.value); saved.textContent = 'Copied. Paste it into the chat with Claude.'; } catch (e) { document.execCommand('copy'); saved.textContent = 'Copied (or select the text below and copy it).'; } });
+    document.getElementById('dl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text()], { type: 'text/markdown' })); a.download = 'design-committee-round1-answers.md'; a.click(); });
+    document.getElementById('clear').addEventListener('click', () => { if (!window.confirm('Clear every answer on this page?')) return; localStorage.removeItem(KEY); location.reload(); });
+  })();
+</script>
+</body>
+</html>

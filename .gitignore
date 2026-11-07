@@ -7,3 +7,10 @@
 .DS_Store
 /app/src-tauri/binaries/
 /app/src-tauri/gen/
+.delegate/
+docs/design-committee-2026-11/shots/
+docs/design-committee-2026-11/implementation/shots/
+docs/design-committee-2026-11/round1/designs/*/screenshots/
+docs/design-committee-2026-11/round2/app/screenshots*/
+docs/design-committee-2026-11/round2/app/review/
+docs/design-committee-2026-11/round2/app/review.html

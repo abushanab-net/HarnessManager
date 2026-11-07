@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-motion="live">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Harness Manager — Designer C (Chrono-Runway)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Shared SVG Defs for inlined docs/logo.svg, codex.svg, and agy.svg -->
+  <svg width="0" height="0" style="position:absolute;overflow:hidden;pointer-events:none" aria-hidden="true">
+    <defs>
+      <!-- Harness Manager Logo Gradients (docs/logo.svg) -->
+      <linearGradient id="hm-lu" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#006D79"/><stop offset="1" stop-color="#009C99"/></linearGradient>
+      <linearGradient id="hm-ll" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#393F91"/><stop offset="1" stop-color="#7F82E8"/></linearGradient>
+      <linearGradient id="hm-bc" x1="0" y1=".1" x2="1" y2=".8"><stop stop-color="#00616C"/><stop offset=".58" stop-color="#097D8C"/><stop offset="1" stop-color="#57CAC9"/></linearGradient>
+      <linearGradient id="hm-ru" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6588DD"/><stop offset=".6" stop-color="#4455AF"/><stop offset="1" stop-color="#283875"/></linearGradient>
+      <linearGradient id="hm-rl" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#00A3A8"/><stop offset="1" stop-color="#00676D"/></linearGradient>
+      <linearGradient id="hm-fc" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#65DBD8"/><stop offset=".4" stop-color="#36C8C5"/><stop offset=".76" stop-color="#078B98"/><stop offset="1" stop-color="#087680"/></linearGradient>
+      <linearGradient id="hm-rm" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#B0E8E4"/><stop offset="1" stop-color="#5BCAD1"/></linearGradient>
+
+      <!-- Codex Official Icon Gradient (app/ui/icons/codex.svg) -->
+      <linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_" x1="12" x2="12" y1="3" y2="21">
+        <stop stop-color="#B1A7FF"></stop>
+        <stop offset=".5" stop-color="#7A9DFF"></stop>
+        <stop offset="1" stop-color="#3941FF"></stop>
+      </linearGradient>
+
+      <!-- Antigravity Official Icon Mask & Blur Filters (app/ui/icons/agy.svg) -->
+      <mask height="23" id="lobe-icons-antigravity-0-_R_0_" maskUnits="userSpaceOnUse" width="24" x="0" y="1">
+        <path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" fill="#fff"></path>
+      </mask>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="17.587" id="lobe-icons-antigravity-1-_R_0_" width="19.838" x="-3.288" y="-11.917"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="1.117"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="38.565" id="lobe-icons-antigravity-2-_R_0_" width="38.9" x="4.251" y="-13.493"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="5.4"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="36.517" id="lobe-icons-antigravity-3-_R_0_" width="40.955" x="-21.889" y="-10.592"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="4.591"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="36.517" id="lobe-icons-antigravity-4-_R_0_" width="40.955" x="-21.889" y="-10.592"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="4.591"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="36.595" id="lobe-icons-antigravity-5-_R_0_" width="36.632" x="-19.099" y="-10.278"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="4.591"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="34.087" id="lobe-icons-antigravity-6-_R_0_" width="33.533" x=".981" y="8.758"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="4.363"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="35.276" id="lobe-icons-antigravity-7-_R_0_" width="35.978" x="-6.143" y="-21.659"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="3.954"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="46.523" id="lobe-icons-antigravity-8-_R_0_" width="45.114" x="-11.96" y="-.46"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="3.531"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="24.054" id="lobe-icons-antigravity-9-_R_0_" width="25.094" x="10.485" y=".58"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="3.159"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="30.007" id="lobe-icons-antigravity-10-_R_0_" width="33.508" x="5.833" y="-12.467"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="2.669"/></filter>
+      <filter color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse" height="26.151" id="lobe-icons-antigravity-11-_R_0_" width="22.194" x="-8.355" y="-8.876"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur result="effect1_foregroundBlur_977_115" stdDeviation="3.303"/></filter>
+    </defs>
+  </svg>
+
+  <div id="app-root"></div>
+
+  <script src="data.js"></script>
+  <script src="views.js"></script>
+  <script src="modals.js"></script>
+</body>
+</html>

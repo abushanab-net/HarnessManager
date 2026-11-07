@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design committee, round 0: the plan, and your answers</title>
+<style>
+  :root { --bg: #0B1418; --panel: #10202A; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --m: #8FA6AE; --ac: #3FD6CF; --warn: #E0A84C; --neg: #F07A6A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  body { margin: 0; }
+  main { max-width: 1180px; margin: 0 auto; padding: 32px 32px 120px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 10px; }
+  h2.sec { font-size: 22px; margin: 56px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p { margin: 6px 0; } .muted { color: var(--m); } .mono { font-family: var(--mono); font-size: 12.5px; }
+  .lede { font-size: 17px; color: #C6D4D9; max-width: 60rem; }
+  .toc { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; }
+  .toc a { color: var(--ac); text-decoration: none; font-size: 14px; }
+  a { color: var(--ac); }
+  .how { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ac); border-radius: 10px; padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  /* screenshots */
+  .shotbar { display: flex; align-items: center; gap: 12px; margin: 10px 0 14px; font-size: 13px; color: var(--m); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+  .seg button { font: 500 13px var(--sans); color: var(--m); background: transparent; border: 0; padding: 5px 12px; cursor: pointer; }
+  .seg button.on { color: #06161A; background: var(--ac); }
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .shot img { width: 100%; display: block; border-radius: 6px; border: 1px solid var(--line2); cursor: zoom-in; }
+  .shot h4 { margin: 8px 0 2px; font-size: 14px; }
+  .shot p { font-size: 13px; color: var(--m); margin: 0; }
+  .shot.wide { grid-column: 1 / -1; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 96vw; } dialog img { max-width: 96vw; max-height: 94vh; border-radius: 8px; } dialog::backdrop { background: rgba(0,0,0,.8); }
+  /* findings */
+  .finds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; margin: 14px 0; }
+  .find { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .find b { display: block; color: var(--ac); margin-bottom: 3px; }
+  .find small { display: block; color: var(--m); margin-top: 5px; font-size: 12.5px; }
+  /* roles table */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th { text-align: left; color: var(--m); font-weight: 500; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  td.r { white-space: nowrap; font-weight: 600; }
+  .tag { display: inline-block; font: 600 11px var(--mono); padding: 2px 8px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; }
+  .tag.keep { background: #16343A; color: var(--ac); } .tag.rec { background: #3A2E12; color: var(--warn); } .tag.pos { background: #223038; color: #B9CBD2; } .tag.me { background: #2A2238; color: #C9B6F2; }
+  ol.steps { padding-left: 22px; } ol.steps li { margin: 6px 0; }
+  .lanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 10px 0; }
+  .lane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .lane b { display: block; margin-bottom: 4px; }
+  /* questions */
+  .q { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 10px 0; }
+  .q > b { display: block; font-size: 15px; margin-bottom: 4px; }
+  .q > .why { color: var(--m); font-size: 13px; margin: 0 0 8px; }
+  .q label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; }
+  .q label input { margin-right: 8px; vertical-align: -1px; accent-color: var(--ac); }
+  .q .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+  .q textarea, .q input[type=text] { width: 100%; font: 14px/1.45 var(--sans); color: var(--ink); background: #0B1418; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 6px; resize: vertical; }
+  .q textarea { min-height: 56px; }
+  .q .rank { display: grid; grid-template-columns: 3rem 1fr; gap: 4px 10px; align-items: center; font-size: 14px; }
+  .q .rank input[type=text] { margin: 0; width: 3rem; text-align: center; padding: 4px; font-family: var(--mono); }
+  .pbtn { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 1px solid var(--ac); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  .pbtn.ghost { background: transparent; color: var(--m); border-color: var(--line); }
+  .final { position: sticky; bottom: 0; background: rgba(11,20,24,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); margin: 40px -32px 0; padding: 14px 32px; }
+  .final .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .saved { color: var(--m); font-size: 13px; }
+  #out { width: 100%; min-height: 200px; margin-top: 10px; font: 12.5px/1.5 var(--mono); color: var(--ink); background: #0B1418; border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: none; }
+  @media (max-width: 900px) { .shots, .finds, .lanes, .q .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-fbkey="hm-design-committee-2026-11-round0">
+<main>
+  <p class="mono muted">Harness Manager · design committee · round 0 · November 2026</p>
+  <h1>The plan for the committee, and the questions I need you to answer first</h1>
+  <p class="lede">You asked for three designers, two judges and one lazy user to redesign the app, starting with the Overview, the sidebar and adding accounts. This page shows what the app looks like today on your real data, the committee as I would seat it (with three roles I recommend adding), and a question sheet. Answer below; nothing is designed until you do.</p>
+  <nav class="toc"><a href="#today">What the app looks like today</a><a href="#plan">Your plan, revised</a><a href="#process">How a round runs</a><a href="#questions">The questions</a><a href="#answers">Send your answers</a></nav>
+  <div class="how">Answers save in this browser as you type. When done, press <b>Copy my answers</b> at the bottom and paste the text into the chat, or <b>Download</b> and tell me the file's path. Skip anything you don't care about; I'll take the default written next to it.</div>
+
+  <h2 class="sec" id="today">What the app looks like today, on your data</h2>
+  <p class="muted">Version 1.8.3, the debug build, 1536 px wide (your 125% machine), screenshots taken a few minutes ago. Click an image to see it full size.</p>
+  <div class="shotbar">Theme <span class="seg"><button class="on" data-shots="dark">Dark</button><button data-shots="light">Light</button></span></div>
+  <div class="shots">
+    <div class="shot wide"><img data-shot="home" src="shots/home-dark.png" alt="Overview"><h4>Overview</h4><p>The sidebar carries readouts, navigation and eight limit rings; the top bar a status strip; the page the finding, the dial, the year clock, the attention card, a filter row, a start button and the replies table.</p></div>
+    <div class="shot"><img data-shot="sidebar-bottom" src="shots/sidebar-bottom-dark.png" alt="The sidebar scrolled to its foot"><h4>The sidebar, scrolled down</h4><p>With eight accounts the rings do not fit: the sidebar scrolls on its own, the brand and readouts scroll away, the version sits under the rings.</p></div>
+    <div class="shot"><img data-shot="accounts" src="shots/accounts-dark.png" alt="Accounts"><h4>Accounts</h4><p>Headline sentence, chart, tool filter, then one card per account with three bars, a sparkline, two numbers, two buttons and a one-line advice.</p></div>
+    <div class="shot"><img data-shot="add-account" src="shots/add-account-dark.png" alt="Add account dialog"><h4>Add account</h4><p>One dialog: tool, kind, name, email, two explanatory rows, the CLI equivalent, then Create and log in (the browser opens).</p></div>
+    <div class="shot"><img data-shot="sessions" src="shots/sessions-dark.png" alt="Sessions"><h4>Sessions</h4><p>A project list on the left, three filter groups, then grouped session rows.</p></div>
+    <div class="shot"><img data-shot="projects" src="shots/projects-dark.png" alt="Projects"><h4>Projects</h4><p>Five stat cards, a share table, then project cards with sparklines.</p></div>
+    <div class="shot"><img data-shot="mcp" src="shots/mcp-dark.png" alt="MCP servers"><h4>MCP servers</h4><p>A server × tool tick matrix.</p></div>
+    <div class="shot"><img data-shot="skills" src="shots/skills-dark.png" alt="Skills"><h4>Skills</h4><p>258 rows, a tick per tool.</p></div>
+    <div class="shot"><img data-shot="apps" src="shots/apps-dark.png" alt="Apps"><h4>Apps</h4><p>Tools, versions, updates.</p></div>
+    <div class="shot"><img data-shot="routing" src="shots/routing-dark.png" alt="API keys and routing"><h4>API keys &amp; routing</h4><p>Router status, routes, providers, recent requests (empty on this machine).</p></div>
+    <div class="shot"><img data-shot="settings" src="shots/settings-dark.png" alt="Settings"><h4>Settings</h4><p>Grouped rows, one control column.</p></div>
+  </div>
+
+  <h3>Why it reads as crowded: my diagnosis, for the committee to confirm or reject</h3>
+  <div class="finds">
+    <div class="find"><b>Three status layers compete before the page starts</b>The sidebar readouts (tokens, cost, cached, with dot grids), the top-bar strip (live count, computers, limits read, usage read) and the page's own finding all say "here is the state", in three visual languages, before the eye reaches the content.<small>Overview, every page</small></div>
+    <div class="find"><b>The sidebar does four jobs</b>Brand, readouts, navigation with counts and folds, eight limit rings, version. It scrolls on its own, so the rings you asked for are half hidden and the brand scrolls off.<small>Sidebar, scrolled</small></div>
+    <div class="find"><b>Every page opens with reading, not doing</b>A crumb, a two-line finding sentence, a paragraph of explanation, then stat cards, then a chart, then the list. The thing you came to click is below the fold on Accounts and Projects.<small>Accounts, Projects, Sessions</small></div>
+    <div class="find"><b>One accent colour carries everything</b>Links, numbers, bars, buttons, live dots, rings and the dial's selected route are all teal, so nothing is more important than anything else. Orange is used both for warnings and for the headline's subject.<small>All pages</small></div>
+    <div class="find"><b>Monospace numbers sit in five places at five sizes</b>Sidebar readouts, nav counts, top-bar strip, stat cards, table cells. Each is right on its own; together they look like a cockpit without a flight plan.<small>Overview, Projects</small></div>
+    <div class="find"><b>The dial's labels collide with its own data</b>Account names, tool names, the selected route's readout and the "accounts" ring label overlap near the centre; the year clock beside it is a second radial instrument fighting for the same attention.<small>Overview</small></div>
+    <div class="find"><b>Account cards pack seven facts and three actions</b>Ring, name, email, plan chip, three limit bars with resets, sparkline, tokens, cost, read time, refresh, Start, more. The one fact that matters (can I use it now?) is not visually first.<small>Accounts</small></div>
+    <div class="find"><b>Add account explains the architecture in the dialog</b>"Kept in sync", "Its own", the CLI line and the folder hint are documentation inside a form. A newcomer wants: pick the tool, name it, sign in.<small>Add account</small></div>
+  </div>
+
+  <h2 class="sec" id="plan">Your plan, revised</h2>
+  <p>Your six seats stay. I recommend three more, and one change to how the two judges are briefed so they do not converge on the same opinion.</p>
+  <table>
+    <tr><th>Seat</th><th>Who they are</th><th>What they produce</th><th>My view</th></tr>
+    <tr><td class="r">Designer A, B, C</td><td>Each a senior UX/UI designer with SaaS product work, 3D/animated interface work and WebGL sites behind them. Each is given a different lane (below) so the three designs cannot look alike.</td><td>One complete design each: Overview + shell (sidebar, top bar) + the add-account flow, light and dark, as HTML mockups on data shaped like yours.</td><td><span class="tag keep">keep</span>As you asked. Each designer runs as its own subagent with only the brief, the screenshots and its lane; they never see each other's work in round 1.</td></tr>
+    <tr><td class="r">Judge 1: craft</td><td>Visual coherence, hierarchy, type, colour, motion, brand fit (the Harness and VektraGrid palettes, the official icons).</td><td>A critique of each design with a score, and a list of what must change.</td><td><span class="tag keep">keep</span>Briefed narrowly on craft so the two judges differ.</td></tr>
+    <tr><td class="r">Judge 2: clarity</td><td>Information architecture and usability: can a person find and do the job in five seconds, is every number honest (measured vs estimated), is nothing the app does lost.</td><td>Same shape as Judge 1, different lens; checks each design against the feature inventory.</td><td><span class="tag keep">keep</span>Briefed narrowly on clarity and completeness.</td></tr>
+    <tr><td class="r">The lazy user</td><td>Someone who opens the app to get one answer and leave. Cares only what it tells them and how fast; never reads explanations; will not learn a diagram.</td><td>For each design: "what did I get in 10 seconds, what did I have to hunt for, what would I never use."</td><td><span class="tag keep">keep</span>Needs you to tell me who this person is (question C1).</td></tr>
+    <tr><td class="r">Build critic</td><td>A front-end engineer who knows what the app is: Tauri + WebView2, vanilla JS, four themes, 100/125/150% display scale, a full redraw every few seconds while sessions write, 47 e2e tests.</td><td>For each design: what it costs to build, what will not survive WebView2 or the redraw loop, what the e2e tests lose.</td><td><span class="tag rec">recommended</span>Without this seat the "wow" designs win the vote and then cannot be built, or stutter on the 150% laptop. It judges feasibility only, never taste.</td></tr>
+    <tr><td class="r">Data-viz critic</td><td>Someone who designs instruments: what a ring, a dial, a sparkline, a dot grid actually encode, and when a picture lies.</td><td>For each design: does every instrument earn its place, what does the reader learn from it that a number would not say.</td><td><span class="tag rec">recommended</span>Half the crowding is instruments. A designer chasing wow adds them; this seat removes them. Could be merged into Judge 2 if you want fewer voices.</td></tr>
+    <tr><td class="r">Astra (Codex)</td><td>Your standing second opinion from OpenAI Codex, which agreed the earlier reference designs with you.</td><td>A third judge's score, or the tie-break when the two judges split.</td><td><span class="tag pos">possible</span>A different model gives a genuinely different eye; it costs one more critique per design.</td></tr>
+    <tr><td class="r">Clerk (me)</td><td>Briefs every seat, keeps the files, runs the rounds, builds the HTML reports, never scores and never picks.</td><td>The brief, the gallery pages, the decision record, this question sheet.</td><td><span class="tag me">me</span>Same role as the clerk in the planning majlis skill, which I'll borrow the mechanics from (parallel subagents, critics isolated from authors, one record).</td></tr>
+  </table>
+  <p class="muted">Not recommended: an accessibility seat on its own (folded into Judge 2's checklist: contrast, keyboard, reduced motion), a brand seat (you are the brand owner and decide that yourself), a security seat (nothing here touches keys or logins).</p>
+
+  <h3>Three lanes, so the three designs differ on purpose</h3>
+  <p class="muted">A proposal. Rewrite any of them in question D4.</p>
+  <div class="lanes">
+    <div class="lane"><b>A · The living instrument</b>Spatial and animated: the state of your accounts and sessions as one scene (3D or WebGL-grade 2D) that you read at a glance; everything else is a layer that slides in. The wow is motion with meaning.</div>
+    <div class="lane"><b>B · The calm editorial</b>Typography-led: one finding, large; one action; everything else folded behind progressive disclosure. The wow is restraint: a page that feels like a well-set magazine spread and never scrolls on the Overview.</div>
+    <div class="lane"><b>C · The operator's console</b>Dense on purpose but ordered: a strict grid, a command palette, keyboard-first, every number aligned, one accent. The wow is the feeling of a professional tool that answers before you finish the question.</div>
+  </div>
+
+  <h2 class="sec" id="process">How a round runs</h2>
+  <ol class="steps">
+    <li><b>Brief.</b> I write one brief from your answers: the jobs the Overview must do, the feature inventory it may not lose, the constraints, the lanes. Everyone gets it, plus these screenshots and the real data shapes.</li>
+    <li><b>Design, in parallel.</b> The three designers each produce their HTML mockups (Overview, shell, add account; light and dark). They do not see each other.</li>
+    <li><b>Critique, in parallel and isolated.</b> The judges, the lazy user and the critics each read the three designs and write their critique and scores. They never see the designers' reasoning, only the pages.</li>
+    <li><b>Debate.</b> Each designer answers the critiques once (a written rebuttal and, where cheap, a revised page). The judges then settle their disagreements in one written exchange and produce a record: what a good design here must have, what it must not, and the final scores.</li>
+    <li><b>Your pick.</b> One HTML page: the three designs side by side with a theme switch, the scores, the record, and a form like this one. You pick one, or name the parts you want combined.</li>
+    <li><b>All pages.</b> The winner's designer leads; the other two take pages in the winning direction; the same critics review every page; you review in one HTML page per round, section by section as before; then it goes into app/ui.</li>
+  </ol>
+  <p class="muted">Cost: a round with nine seats is roughly ten to fifteen times a normal chat's tokens. Say in question E3 how many rounds you will pay for.</p>
+
+  <h2 class="sec" id="questions">The questions</h2>
+
+  <h3>A · The problem</h3>
+  <div class="q" data-q="A1 What exactly feels crowded? Tick everything that applies"><b>A1 · What exactly feels crowded or disorganised? Tick everything that applies.</b><p class="why">I listed my own diagnosis above; this tells the committee which of it you feel, and what I missed.</p>
+    <div class="row">
+      <label><input type="checkbox" data-k="a1" value="The readouts under the brand (tokens, cost, cached)">The readouts under the brand (tokens, cost, cached)</label>
+      <label><input type="checkbox" data-k="a1" value="The limit rings at the foot of the sidebar">The limit rings at the foot of the sidebar</label>
+      <label><input type="checkbox" data-k="a1" value="The sidebar scrolling on its own">The sidebar scrolling on its own</label>
+      <label><input type="checkbox" data-k="a1" value="The top-bar status strip (live, computers, limits read)">The top-bar status strip (live, computers, limits read)</label>
+      <label><input type="checkbox" data-k="a1" value="The Horizon Dial itself">The Horizon Dial itself</label>
+      <label><input type="checkbox" data-k="a1" value="The year clock beside the dial">The year clock beside the dial</label>
+      <label><input type="checkbox" data-k="a1" value="The two-line finding sentence on every page">The two-line finding sentence on every page</label>
+      <label><input type="checkbox" data-k="a1" value="The explanation paragraph under every heading">The explanation paragraph under every heading</label>
+      <label><input type="checkbox" data-k="a1" value="Stat cards before the content">Stat cards before the content</label>
+      <label><input type="checkbox" data-k="a1" value="Account cards: too many facts per card">Account cards: too many facts per card</label>
+      <label><input type="checkbox" data-k="a1" value="Too many monospace numbers everywhere">Too many monospace numbers everywhere</label>
+      <label><input type="checkbox" data-k="a1" value="Everything is the same teal">Everything is the same teal</label>
+    </div>
+    <textarea data-k="a1x" placeholder="Anything else, or in your own words: what annoys you when you open it?"></textarea></div>
+
+  <div class="q" data-q="A2 What do you do in the first ten seconds after opening the app?"><b>A2 · What do you actually do in the first ten seconds after opening the app?</b><p class="why">The lazy user is built from this answer.</p>
+    <textarea data-k="a2" placeholder="e.g. I look for which account still has room, then I start a session there."></textarea></div>
+
+  <div class="q" data-q="A3 Which page do you open most, and which never?"><b>A3 · Which page do you open most, and which do you never open?</b>
+    <div class="row"><div><label>Most</label><input type="text" data-k="a3most" placeholder="Overview? Sessions? Accounts?"></div><div><label>Never, or almost never</label><input type="text" data-k="a3never" placeholder=""></div></div></div>
+
+  <h3>B · The jobs the Overview must do</h3>
+  <div class="q" data-q="B1 Rank the jobs (1 = most important, blank = not needed on the Overview)"><b>B1 · Rank these jobs. 1 is the most important. Leave blank what the Overview does not need to do at all.</b><p class="why">Everything ranked 1 to 3 must be visible without scrolling in every design; blank ones may go to their own page.</p>
+    <div class="rank">
+      <input type="text" data-k="b1-room"><span>Which account has room right now, and which is about to run out</span>
+      <input type="text" data-k="b1-start"><span>Start a session on the right account, from here</span>
+      <input type="text" data-k="b1-live"><span>See what is running now, on which computer, and follow one</span>
+      <input type="text" data-k="b1-cost"><span>Cost and tokens today / this week, and the trend</span>
+      <input type="text" data-k="b1-reset"><span>When each limit resets</span>
+      <input type="text" data-k="b1-attn"><span>Things that need attention (updates, a failing login, a paused provider)</span>
+      <input type="text" data-k="b1-replies"><span>The latest replies and their speed</span>
+      <input type="text" data-k="b1-year"><span>Activity over the year (the year clock)</span>
+      <input type="text" data-k="b1-pcs"><span>Which computers are alive</span>
+      <input type="text" data-k="b1-routes"><span>Which tool talks to which account (the routes on the dial)</span>
+    </div>
+    <textarea data-k="b1x" placeholder="A job I forgot?"></textarea></div>
+
+  <div class="q" data-q="B2 One sentence the Overview should answer"><b>B2 · If the Overview could answer only one question, which?</b>
+    <input type="text" data-k="b2" placeholder="e.g. Where should I work right now?"></div>
+
+  <div class="q" data-q="B3 The sidebar readouts and rings, added on 7 Nov: keep, move or drop?"><b>B3 · The readouts and the limit rings in the sidebar were added at your request this week. Are they now in question?</b>
+    <label><input type="radio" name="b3" data-k="b3" value="Designers are free to move or drop them">Designers are free to move or drop them (default)</label>
+    <label><input type="radio" name="b3" data-k="b3" value="Keep the rings somewhere always visible, readouts are free">Keep the limit rings somewhere always visible; the readouts are free</label>
+    <label><input type="radio" name="b3" data-k="b3" value="Keep both in the sidebar as they are">Keep both in the sidebar as they are</label></div>
+
+  <h3>C · The people</h3>
+  <div class="q" data-q="C1 Who is the lazy user?"><b>C1 · Who is the lazy user? Pick the closest.</b><p class="why">The persona is written from this; "me on a bad day" and "a colleague who never ran Codex" give very different critiques.</p>
+    <label><input type="radio" name="c1" data-k="c1" value="Me, at the end of a day, wanting one answer">Me, at the end of a day, wanting one answer (default)</label>
+    <label><input type="radio" name="c1" data-k="c1" value="A developer colleague who uses one of these tools but not the app">A developer colleague who uses one of these tools but has never seen the app</label>
+    <label><input type="radio" name="c1" data-k="c1" value="A non-developer who pays for the accounts and wants to know the spend">A non-developer who pays for the accounts and wants to know the spend and the limits</label>
+    <input type="text" data-k="c1x" placeholder="Or describe them"></div>
+
+  <div class="q" data-q="C2 Who else will use the app?"><b>C2 · Besides you, who uses or will use Harness Manager in the next year?</b>
+    <label><input type="radio" name="c2" data-k="c2" value="Only me">Only me</label>
+    <label><input type="radio" name="c2" data-k="c2" value="Me and a small team">Me and a small team</label>
+    <label><input type="radio" name="c2" data-k="c2" value="Public release, strangers">Public release, strangers who found it on GitHub</label></div>
+
+  <div class="q" data-q="C3 The added seats"><b>C3 · The seats I recommended adding. Tick the ones that sit.</b>
+    <label><input type="checkbox" data-k="c3" value="Build critic" checked>Build critic (feasibility in Tauri/WebView2, performance, tests)</label>
+    <label><input type="checkbox" data-k="c3" value="Data-viz critic" checked>Data-viz critic (does every instrument earn its place)</label>
+    <label><input type="checkbox" data-k="c3" value="Astra (Codex) as a third judge">Astra (Codex) as a third judge and tie-break</label>
+    <label><input type="checkbox" data-k="c3" value="Merge the data-viz critic into Judge 2">Rather merge the data-viz critic into Judge 2 (fewer voices)</label>
+    <input type="text" data-k="c3x" placeholder="A seat I missed?"></div>
+
+  <div class="q" data-q="C4 Which models run the seats?"><b>C4 · Which models run the seats?</b><p class="why">Designers on different models give more different designs; critics on different models give more honest scores. All on Fable is the strongest single eye.</p>
+    <label><input type="radio" name="c4" data-k="c4" value="All seats on Claude Fable">All seats on Claude Fable (default)</label>
+    <label><input type="radio" name="c4" data-k="c4" value="Designers on three different harnesses (Claude, Codex, OpenCode)">The three designers on three different harnesses (Claude, Codex, OpenCode), critics on Fable</label>
+    <label><input type="radio" name="c4" data-k="c4" value="Mix: say which">Mix: say which below</label>
+    <input type="text" data-k="c4x" placeholder=""></div>
+
+  <h3>D · Scope and freedom in round 1</h3>
+  <div class="q" data-q="D1 What is in round 1?"><b>D1 · Round 1 covers the Overview, the shell (sidebar and top bar) and adding an account. Correct?</b>
+    <label><input type="radio" name="d1" data-k="d1" value="Yes: Overview + shell + add account">Yes (default)</label>
+    <label><input type="radio" name="d1" data-k="d1" value="Overview + shell only, add account later">Overview and shell only; add account comes with the other pages</label>
+    <label><input type="radio" name="d1" data-k="d1" value="Also the Accounts page">Also the Accounts page, since it is where the rings live</label></div>
+
+  <div class="q" data-q="D2 How free are the designers?"><b>D2 · How free are the designers? Tick what they may do.</b><p class="why">The Horizon Dial and the pages were approved on 6 November; say now whether that approval still binds, or the committee will design around it out of caution.</p>
+    <label><input type="checkbox" data-k="d2" value="Drop or replace the Horizon Dial" checked>Drop or replace the Horizon Dial</label>
+    <label><input type="checkbox" data-k="d2" value="Remove the sidebar entirely (top nav, command palette, rail)" checked>Remove the sidebar entirely (a top nav, a rail, a command palette instead)</label>
+    <label><input type="checkbox" data-k="d2" value="Change the navigation structure (which pages exist, what is grouped)">Change the navigation structure (which pages exist, how they group)</label>
+    <label><input type="checkbox" data-k="d2" value="Drop the finding-as-headline pattern" checked>Drop the finding-as-headline pattern</label>
+    <label><input type="checkbox" data-k="d2" value="Change fonts (EB Garamond display, Inter text)">Change the fonts (EB Garamond for display, Inter for text)</label>
+    <label><input type="checkbox" data-k="d2" value="Change the Harness palette">Change the Harness palette</label>
+    <label><input type="checkbox" data-k="d2" value="Hide features behind menus (nothing removed, but not all visible)" checked>Put features behind menus or disclosure (nothing removed, not everything visible)</label></div>
+
+  <div class="q" data-q="D3 What must never change?"><b>D3 · What must never change, whatever the design? (The rules I already have: the real logo, the tools' official icons, the Harness mark in every theme, no tokens-per-second on the Overview, measured vs estimated marked.)</b>
+    <textarea data-k="d3" placeholder="Add to the list, or strike something from it"></textarea></div>
+
+  <div class="q" data-q="D4 The three lanes"><b>D4 · The three lanes above (living instrument, calm editorial, operator's console). Keep, or rewrite?</b>
+    <label><input type="radio" name="d4" data-k="d4" value="Keep the three lanes">Keep them (default)</label>
+    <label><input type="radio" name="d4" data-k="d4" value="Let each designer choose its own angle, the clerk only ensures they differ">Let each designer choose its own angle; the clerk only makes sure they differ</label>
+    <label><input type="radio" name="d4" data-k="d4" value="Rewrite: see below">Rewrite them, see below</label>
+    <textarea data-k="d4x" placeholder="Lane A … / Lane B … / Lane C …"></textarea></div>
+
+  <div class="q" data-q="D5 Themes in round 1"><b>D5 · Which themes must round 1 show?</b>
+    <label><input type="radio" name="d5" data-k="d5" value="Harness light and dark only; VektraGrid once a winner is picked">Harness light and dark only; VektraGrid derived once a winner is picked (default)</label>
+    <label><input type="radio" name="d5" data-k="d5" value="All four themes from the start">All four (Harness and VektraGrid, light and dark) from the start</label>
+    <label><input type="radio" name="d5" data-k="d5" value="Dark only in round 1">Dark only in round 1</label></div>
+
+  <h3>E · The wow, and its limits</h3>
+  <div class="q" data-q="E1 How much wow?"><b>E1 · How far should the wow go?</b><p class="why">The app lives in the tray, redraws every few seconds while sessions write, and runs on a 150% laptop. The build critic will price whatever you pick.</p>
+    <label><input type="radio" name="e1" data-k="e1" value="Motion with meaning only: transitions, live particles, no 3D">Motion with meaning only: transitions, live particles, no 3D</label>
+    <label><input type="radio" name="e1" data-k="e1" value="One 3D/WebGL scene on the Overview, the rest flat">One 3D or WebGL scene on the Overview; everything else flat (default)</label>
+    <label><input type="radio" name="e1" data-k="e1" value="3D and depth throughout the app">Depth and 3D throughout the app</label>
+    <label><input type="radio" name="e1" data-k="e1" value="Let the three designs differ on this, I decide after">Let the three designs differ on this; I decide when I see them</label></div>
+
+  <div class="q" data-q="E2 Screens and sizes"><b>E2 · Which screens must it be right on? Tick all.</b>
+    <label><input type="checkbox" data-k="e2" value="1920 wide at 100% (desktop)" checked>1920 wide at 100% (the desktop)</label>
+    <label><input type="checkbox" data-k="e2" value="1536 wide at 125%" checked>1536 wide at 125%</label>
+    <label><input type="checkbox" data-k="e2" value="1280 wide at 150% (laptop)" checked>1280 wide at 150% (the laptop)</label>
+    <label><input type="checkbox" data-k="e2" value="2K/4K at 100%">2K / 4K at 100%</label>
+    <label><input type="checkbox" data-k="e2" value="macOS">macOS (the Mac build)</label>
+    <label><input type="checkbox" data-k="e2" value="A narrow window, half a screen">A narrow window, half a screen wide, side by side with a terminal</label></div>
+
+  <div class="q" data-q="E3 Rounds and budget"><b>E3 · How many rounds will you pay for before a winner must be picked, and how many for all pages after that?</b>
+    <div class="row"><div><label>Rounds to pick a winner</label><input type="text" data-k="e3a" placeholder="e.g. 1 (default), 2"></div><div><label>Rounds for all pages</label><input type="text" data-k="e3b" placeholder="e.g. 2 (default)"></div></div></div>
+
+  <div class="q" data-q="E4 Mockup form"><b>E4 · What should the designers hand in?</b>
+    <label><input type="radio" name="e4" data-k="e4" value="Static HTML mockups, light and dark, pixel-accurate at the sizes above">Static HTML mockups, light and dark, right at the sizes above (default)</label>
+    <label><input type="radio" name="e4" data-k="e4" value="Clickable prototypes: navigation, add-account flow, hover and selection working">Clickable prototypes: navigation, the add-account flow, hover and selection working</label>
+    <label><input type="radio" name="e4" data-k="e4" value="Built on the app's own CSS so the winner is half implemented">Built on the app's own CSS and markup so the winner is half implemented already</label></div>
+
+  <h3>F · References and taste</h3>
+  <div class="q" data-q="F1 Apps or sites you find beautiful"><b>F1 · Three to five apps or sites whose look you want this to stand beside. Links or names, and one word on why.</b><p class="why">The earlier rounds used references agreed with Astra; say if those still stand, or give new ones.</p>
+    <textarea data-k="f1" placeholder="Linear: calm. Raycast: fast. Vercel dashboard: …"></textarea></div>
+  <div class="q" data-q="F2 Apps or sites you dislike"><b>F2 · Two or three you dislike, and why. This is often more useful.</b>
+    <textarea data-k="f2" placeholder=""></textarea></div>
+  <div class="q" data-q="F3 Mood in three words"><b>F3 · The mood, in three words.</b>
+    <input type="text" data-k="f3" placeholder="e.g. precise, warm, alive"></div>
+  <div class="q" data-q="F4 Earlier redesign: what to keep"><b>F4 · From the 6 November redesign, is there anything you still love and want every design to keep? (The dial, the readouts' dot grids, the year clock, the porcelain light theme, the finding sentence…)</b>
+    <textarea data-k="f4" placeholder=""></textarea></div>
+
+  <h3>G · Adding accounts</h3>
+  <div class="q" data-q="G1 What is painful about adding an account today?"><b>G1 · What is painful about adding an account today?</b>
+    <div class="row">
+      <label><input type="checkbox" data-k="g1" value="The dialog explains too much">The dialog explains too much</label>
+      <label><input type="checkbox" data-k="g1" value="Three kinds (subscription, API key, routed) confuse">The three kinds (subscription, API key, routed) confuse</label>
+      <label><input type="checkbox" data-k="g1" value="The browser sign-in handoff">The browser sign-in handoff and pasting the code</label>
+      <label><input type="checkbox" data-k="g1" value="Not knowing which tool supports which kind">Not knowing which tool supports which kind</label>
+      <label><input type="checkbox" data-k="g1" value="The first run with zero accounts">The first run, with zero accounts, is bare</label>
+      <label><input type="checkbox" data-k="g1" value="Nothing, it is fine, only make it prettier">Nothing; it works, only make it look like the rest</label>
+    </div>
+    <textarea data-k="g1x" placeholder=""></textarea></div>
+  <div class="q" data-q="G2 First run matters?"><b>G2 · Should round 1 also design the first run (no accounts, no tools found) or only adding one more to an existing set?</b>
+    <label><input type="radio" name="g2" data-k="g2" value="Both: the empty first run and adding one more">Both (default)</label>
+    <label><input type="radio" name="g2" data-k="g2" value="Only adding one more to an existing set">Only adding one more to an existing set</label></div>
+  <div class="q" data-q="G3 How many accounts to design for?"><b>G3 · How many accounts should the designs hold comfortably? You have eight today.</b>
+    <label><input type="radio" name="g3" data-k="g3" value="Up to 8">Up to 8</label>
+    <label><input type="radio" name="g3" data-k="g3" value="Up to 12" checked>Up to 12 (default)</label>
+    <label><input type="radio" name="g3" data-k="g3" value="Up to 20 or more">Up to 20 or more</label></div>
+
+  <h3>H · Deciding</h3>
+  <div class="q" data-q="H1 How do you decide?"><b>H1 · When the three designs are in front of you, how do you want to decide?</b>
+    <label><input type="radio" name="h1" data-k="h1" value="Pick one as is">Pick one as is</label>
+    <label><input type="radio" name="h1" data-k="h1" value="Pick one as the base and name parts from the others" checked>Pick one as the base and name parts to take from the others (default, as in the earlier rounds)</label>
+    <label><input type="radio" name="h1" data-k="h1" value="Let the judges' scores decide, I only veto">Let the judges' scores decide; I only veto</label></div>
+  <div class="q" data-q="H2 Review format"><b>H2 · The review pages: one page with the three side by side and a form per design, as before?</b>
+    <label><input type="radio" name="h2" data-k="h2" value="Yes, one page, three designs, a form each">Yes (default)</label>
+    <label><input type="radio" name="h2" data-k="h2" value="One page per design">One page per design, a form on each</label>
+    <input type="text" data-k="h2x" placeholder="Anything the review page must have"></div>
+  <div class="q" data-q="H3 Anything else"><b>H3 · Anything else I should know before I brief them?</b>
+    <textarea data-k="h3" placeholder=""></textarea></div>
+
+  <section class="final" id="answers">
+    <div class="row"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn ghost" id="dl">Download as a file</button><button class="pbtn ghost" id="clear">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<dialog id="zoom"><img alt=""></dialog>
+<script>
+  // screenshots: theme switch and zoom
+  document.querySelectorAll('[data-shots]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-shots]').forEach((x) => x.classList.toggle('on', x === b));
+    document.querySelectorAll('img[data-shot]').forEach((img) => { img.src = `shots/${img.dataset.shot}-${b.dataset.shots}.png`; });
+  }));
+  const zoom = document.getElementById('zoom');
+  document.querySelectorAll('img[data-shot]').forEach((img) => img.addEventListener('click', () => { zoom.querySelector('img').src = img.src; zoom.showModal(); }));
+  zoom.addEventListener('click', () => zoom.close());
+
+  // the form: every answer saved in this browser, copied or downloaded as text
+  (function () {
+    const KEY = document.body.dataset.fbkey; let draft = {};
+    try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const saved = document.getElementById('saved');
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(draft)); saved.textContent = 'Saved in this browser ' + new Date().toLocaleTimeString(); };
+    const fresh = Object.keys(draft).length === 0;
+    document.querySelectorAll('[data-k]').forEach((x) => {
+      const k = x.dataset.k;
+      if (x.type === 'radio') { if (!fresh || !x.checked) x.checked = draft[k] === x.value; else draft[k] = x.value; x.addEventListener('change', () => { draft[k] = x.value; save(); }); }
+      else if (x.type === 'checkbox') { const ck = k + ':' + x.value; if (!fresh || !x.checked) x.checked = !!draft[ck]; else draft[ck] = true; x.addEventListener('change', () => { draft[ck] = x.checked; save(); }); }
+      else { x.value = draft[k] || ''; x.addEventListener('input', () => { draft[k] = x.value; save(); }); }
+    });
+    if (fresh) localStorage.setItem(KEY, JSON.stringify(draft));
+    const text = () => {
+      const out = ['# Design committee, round 0: my answers', ''];
+      document.querySelectorAll('#questions ~ h3, #questions ~ .q').forEach((el) => {
+        if (el.tagName === 'H3') { out.push('## ' + el.textContent, ''); return; }
+        out.push('### ' + el.dataset.q);
+        const picks = [...el.querySelectorAll('input[type=radio]:checked, input[type=checkbox]:checked')].map((i) => i.value);
+        if (picks.length) out.push('- ' + picks.join('\n- '));
+        el.querySelectorAll('input[type=text], textarea').forEach((i) => { if (i.value.trim()) { const lbl = i.closest('.rank') ? i.nextElementSibling.textContent : (i.previousElementSibling && i.previousElementSibling.tagName === 'LABEL' ? i.previousElementSibling.textContent : ''); out.push(i.closest('.rank') ? `- ${i.value.trim()}: ${lbl}` : (lbl ? `- ${lbl}: ${i.value.trim()}` : '- ' + i.value.trim())); } });
+        if (!picks.length && ![...el.querySelectorAll('input[type=text], textarea')].some((i) => i.value.trim())) out.push('(no answer)');
+        out.push('');
+      });
+      return out.join('\n');
+    };
+    const box = document.getElementById('out');
+    document.getElementById('copy').addEventListener('click', async () => { box.style.display = 'block'; box.value = text(); box.select(); try { await navigator.clipboard.writeText(box.value); saved.textContent = 'Copied. Paste it into the chat with Claude.'; } catch (e) { document.execCommand('copy'); saved.textContent = 'Copied (or select the text below and copy it).'; } });
+    document.getElementById('dl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text()], { type: 'text/markdown' })); a.download = 'design-committee-round0-answers.md'; a.click(); });
+    document.getElementById('clear').addEventListener('click', () => { if (!window.confirm('Clear every answer on this page?')) return; localStorage.removeItem(KEY); location.reload(); });
+  })();
+</script>
+</body>
+</html>

@@ -21,17 +21,17 @@ export async function restoreDialog(src, { welcome = false, preview = null } = {
     ? `This folder has the history of ${comps.length} ${comps.length === 1 ? 'computer' : 'computers'}${name ? `, including <b>${esc(name)}</b>` : ''}${p.newest ? `, up to ${esc(stamp(p.newest))}` : ''}.`
     : `This backup is from <b>${esc((comps[0] || {}).name || 'a computer')}</b>${p.newest ? `, up to ${esc(stamp(p.newest))}` : ''}.`;
   openDialog(`${dlgHead(welcome ? 'Welcome back' : 'Restore')}
-    <div class="sdlg" data-testid="${welcome ? 'welcome-back' : 'restore-dialog'}">
-      <p>${intro} ${welcome ? 'Restore it into this installation?' : 'Merge it into this computer?'}</p>
-      <ul class="rlist" data-testid="restore-counts"><li><b>${fmt(p.tokens)}</b> tokens across <b>${p.requests.toLocaleString()}</b> requests, <b>${p.sessions.toLocaleString()}</b> sessions, <b>${p.accounts}</b> ${p.accounts === 1 ? "account's" : "accounts'"} limit history, and <b>${p.archived.toLocaleString()}</b> archived transcripts.</li>
+    <div class="dlg-text a-dlg" data-testid="${welcome ? 'welcome-back' : 'restore-dialog'}">
+      <span>${intro} ${welcome ? 'Restore it into this installation?' : 'Merge it into this computer?'}</span>
+      <ul class="a-rlist" data-testid="restore-counts"><li><b>${fmt(p.tokens)}</b> tokens across <b>${p.requests.toLocaleString()}</b> requests, <b>${p.sessions.toLocaleString()}</b> sessions, <b>${p.accounts}</b> ${p.accounts === 1 ? "account's" : "accounts'"} limit history, and <b>${p.archived.toLocaleString()}</b> archived transcripts.</li>
         <li>Keys and logins are not in it: each account asks you to log in again when first used.</li>
         <li>Nothing is counted twice: what this computer already has stays as it is.</li></ul>
-      ${comps.length ? `<p class="hint" data-testid="restore-computers">${comps.map((c) => `${esc(c.name || c.id)} · ${c.requests.toLocaleString()} requests · ${c.sessions} sessions`).join('<br>')}</p>` : ''}
-      <p class="hint mono muted" style="overflow-wrap:anywhere">${esc(p.path)}</p>
+      ${comps.length ? `<span class="a-hint" data-testid="restore-computers">${comps.map((c) => `${esc(c.name || c.id)} · ${c.requests.toLocaleString()} requests · ${c.sessions} sessions`).join('<br>')}</span>` : ''}
+      <span class="a-hint mono a-path">${esc(p.path)}</span>
     </div>
-    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close" data-testid="welcome-fresh">${welcome ? 'Start fresh' : 'Cancel'}</button>
-      <button class="btn ${name ? '' : 'primary'}" id="rs-new" data-testid="welcome-new">${mine ? 'Restore' : 'Restore as a new computer'}</button>
-      ${name ? `<button class="btn primary" id="rs-adopt" data-testid="welcome-adopt">Restore and continue as ${esc(name)}</button>` : ''}</span></div>`, { onClose: done });
+    <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close" data-testid="welcome-fresh">${welcome ? 'Start fresh' : 'Cancel'}</button>
+      <button class="${name ? 'btn-secondary' : 'btn-primary'}" id="rs-new" data-testid="welcome-new">${mine ? 'Restore' : 'Restore as a new computer'}</button>
+      ${name ? `<button class="btn-primary" id="rs-adopt" data-testid="welcome-adopt">Restore and continue as ${esc(name)}</button>` : ''}</span></div>`, { onClose: done, label: welcome ? 'Welcome back' : 'Restore' });
   const run = async (adopt) => {
     const btns = [...document.querySelectorAll('#rs-new, #rs-adopt')];
     btns.forEach((b) => { b.disabled = true; });
@@ -58,14 +58,14 @@ action('restore-pick', async () => {
   const b = await attempt(() => call('backups'));
   if (!b) return;
   const c = S.cache.computers, folder = c && c.mode === 'folder' ? c.folder : '', sep = b.dir.includes('/') ? '/' : '\\';
-  const item = (label, sub, data) => `<a class="rsrc" data-act="restore-src" ${data} role="button" tabindex="0"><b>${label}</b><small>${sub}</small></a>`;
-  openDialog(`${dlgHead('Restore from…')}<div class="sdlg rpick" data-testid="restore-pick">
+  const item = (label, sub, data) => `<button class="a-rsrc" data-act="restore-src" ${data}><b>${label}</b><small>${sub}</small></button>`;
+  openDialog(`${dlgHead('Restore from…')}<div class="a-rpick" data-testid="restore-pick">
     ${folder ? item('The sync folder', `every computer's journal, the backups and the archive in <span class="mono">${esc(folder)}</span>`, `data-folder="${esc(folder)}" data-testid="restore-src-folder"`) : ''}
     ${b.list.map((x) => item(`${esc(x.label)} · ${esc(stamp(x.at))}`, `a backup of this computer · ${kb(x.size)}`, `data-zip="${esc(b.dir + sep + x.name)}" data-testid="restore-src-${esc(x.label)}"`)).join('')}
     ${(b.in_sync_folder || []).map((x) => item(`${esc(x.label)} · ${esc(stamp(x.at))}`, `a backup of ${esc(x.device_name)} in the sync folder · ${kb(x.size)}`, `data-zip="${esc(x.path)}"`)).join('')}
     ${item('A folder…', 'a sync folder anywhere', 'data-pick="folder" data-testid="restore-src-pick-folder"')}
     ${item('A zip file…', 'a backup exported or copied from elsewhere', 'data-pick="zip" data-testid="restore-src-pick-zip"')}
-  </div>`);
+  </div>`, { size: 'sm', label: 'Restore from…' });
 });
 action('restore-src', async (el) => {
   let src;

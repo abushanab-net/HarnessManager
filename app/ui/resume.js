@@ -12,16 +12,14 @@ export async function resumeHereDialog(s) {
   // this computer's clone of the repository: the project's root, as the Projects list knows it
   const projects = await call('projects', {}).catch(() => []);
   const root = ((projects || []).find((p) => p.key === s.project_key) || {}).root || '';
-  const fact = (k, v) => `<div class="df"><label>${k}</label><div class="txt">${v}</div></div>`;
-  openDialog(`${dlgHead('Resume here')}
-    <div class="sdlg" data-testid="resume-here-dialog">
-      <div class="note">${ic.info} <div><b>${esc(s.title || 'Untitled session')}</b><br>${esc(s.project_name || s.project_key || 'no project')} · ${esc(acctName(s.profile))} · ${esc(TOOL[s.harness] || s.harness)}</div></div>
-      ${fact('Last ran on', `<b>${esc(from)}</b> · ${esc(when(s.last_active_at))}`)}
-      ${fact('Opens in', `<span class="mono" data-testid="resume-here-root">${esc(root || 'this computer\'s clone of ' + (s.project_name || s.project_key))}</span>`)}
-      <p class="hint">Opens as a new session that continues from the ${esc(from)} transcript; the ${esc(from)} copy stays as it is.</p>
-      <p class="hint">Only the conversation comes across: files changed since, attachments and running shells do not. Pull the branch first.</p>
+  openDialog(`${dlgHead(s.title || 'Untitled session')}
+    <div class="dlg-text a-dlg" data-testid="resume-here-dialog">
+      <div class="muted">${esc(s.project_name || s.project_key || 'no project')} · ${esc(acctName(s.profile))} · ${esc(TOOL[s.harness] || s.harness)}</div>
+      <dl class="facts-grid"><dt>Last ran on</dt><dd><b>${esc(from)}</b> · ${esc(when(s.last_active_at))}</dd><dt>Opens in</dt><dd class="mono" data-testid="resume-here-root">${esc(root || 'this computer\'s clone of ' + (s.project_name || s.project_key))}</dd></dl>
+      <span>Opens as a new session that continues from the ${esc(from)} transcript; the ${esc(from)} copy stays as it is.</span>
+      <span class="a-hint">Only the conversation comes across: files changed since, attachments and running shells do not. Pull the branch first.</span>
     </div>
-    <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn primary" id="rh-ok" data-testid="resume-here-ok">${ic.play} Resume here</button></span></div>`);
+    <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="btn-primary" id="rh-ok" data-testid="resume-here-ok">${ic.play} Resume here</button></span></div>`, { label: 'Resume here' });
   document.getElementById('rh-ok').onclick = async () => {
     const r = await attempt(() => call('session_resume_here', { device: s.device, harness: s.harness, profile: s.profile, id: s.id }));
     if (!r) return;
