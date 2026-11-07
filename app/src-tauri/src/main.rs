@@ -4,7 +4,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use hrm_core::registry::{Kind, McpServer, Provider, Route};
@@ -15,6 +18,10 @@ use tauri::{Emitter, Manager};
 
 struct AppState {
     ctx: Mutex<Arc<Ctx>>,
+    /// The pages' data, kept: see `cached`.
+    pages: Mutex<HashMap<String, Page>>,
+    /// Moves on with every change made through the window: an answer computed across one is never kept.
+    epoch: AtomicU64,
     first_run: Mutex<Option<Value>>,
     settings_mtime: Mutex<Option<std::time::SystemTime>>,
     /// The direct connection's listener, mDNS and pairing; set once the window exists to tell.
@@ -39,6 +46,101 @@ impl AppState {
         cur.clone()
     }
 }
+
+/// One page's data as last computed, and whether a fresher one is being computed now.
+struct Page { value: Value, at: Instant, stamp: Stamp, busy: bool }
+
+/// What the pages are computed from, as of now: the database (any commit, by anyone) and the account list and
+/// settings files. None when it cannot be told: nothing is kept then.
+type Stamp = Option<(i64, Option<std::time::SystemTime>, Option<std::time::SystemTime>)>;
+fn stamp(st: &AppState) -> Stamp {
+    let ctx = st.ctx();
+    let mtime = |p: PathBuf| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    Some((ctx.db.data_version()?, mtime(ctx.registry_path()), mtime(ctx.data.join("settings.json"))))
+}
+
+/// The calls a page opens with: answered from what was kept, at once, while no new data has arrived since; one
+/// older than `PAGE_FRESH` is also redone in the background for the next call (the clock-driven parts: open
+/// consoles, limits). After new data the next call computes it, so the redraw that new data brings shows it.
+const PAGE_CALLS: &[&str] = &["state", "home", "today", "projects"];
+const PAGE_FRESH: Duration = Duration::from_secs(10);
+/// Calls that change nothing the pages show. Any other call (a change, a login, a refresh) drops what was kept,
+/// so the page drawn after it is computed fresh.
+const NO_CHANGE: &[&str] = &["state", "home", "today", "projects", "dash", "live", "requests", "usage", "sessions", "detail", "items",
+    "self_latest", "sync_last", "mcp_last_import", "computers_status", "transcripts_status", "archive_status", "hub_status", "account_stats",
+    "session_stats", "limits_extra", "routing", "backups", "tag_list", "transcript", "file_stamp", "skill_check", "discover", "prompt_live",
+    "open_folder", "open_url", "show_window", "export_markdown"];
+
+fn page_key(op: &str, args: &Value) -> String { format!("{op} {args}") }
+
+/// A page call through the kept answers (see `PAGE_CALLS`).
+fn cached(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
+    // the first-run report is handed over once: never kept, never computed in the background
+    if op == "state" && st.first_run.lock().unwrap().is_some() { return dispatch(st, op, args); }
+    let key = page_key(op, args);
+    let now = stamp(st);
+    if now.is_none() { return dispatch(st, op, args); }
+    let kept = {
+        let mut pages = st.pages.lock().unwrap();
+        match pages.get_mut(&key) {
+            // anything changed since it was kept: computed now, so the redraw that follows new data shows it
+            Some(p) if p.stamp != now => None,
+            Some(p) => {
+                let redo = p.at.elapsed() > PAGE_FRESH && !p.busy;
+                if redo { p.busy = true; }
+                Some((p.value.clone(), redo))
+            }
+            None => None,
+        }
+    };
+    match kept {
+        Some((v, redo)) => {
+            if redo { let (st, op, args) = (st.clone(), op.to_string(), args.clone()); std::thread::spawn(move || { let _ = compute_page(&st, &op, &args); }); }
+            Ok(v)
+        }
+        None => compute_page(st, op, args),
+    }
+}
+
+/// Compute a page call and keep it, with the data generation it started from.
+fn compute_page(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
+    let (stamp, epoch) = (stamp(st), st.epoch.load(Ordering::SeqCst));
+    let r = dispatch(st, op, args);
+    let mut pages = st.pages.lock().unwrap();
+    match &r {
+        Ok(_) if st.epoch.load(Ordering::SeqCst) != epoch => {}
+        Ok(v) => {
+            let first = !pages.contains_key(&page_key(op, args));
+            pages.insert(page_key(op, args), Page { value: v.clone(), at: Instant::now(), stamp, busy: false });
+            drop(pages);
+            if first { remember_page_call(st, op, args); }
+        }
+        Err(_) => { if let Some(p) = pages.get_mut(&page_key(op, args)) { p.busy = false; } }
+    }
+    r
+}
+
+/// The page calls this window makes, kept between launches (the last twelve), so they are ready at the next start.
+fn remember_page_call(st: &AppState, op: &str, args: &Value) {
+    let ctx = st.ctx();
+    let mut list: Vec<Value> = ctx.db.kv_get("pages:calls").ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    let item = json!([op, args]);
+    list.retain(|x| *x != item);
+    list.insert(0, item);
+    list.truncate(12);
+    let _ = ctx.db.kv_set("pages:calls", &Value::Array(list).to_string());
+}
+
+/// At launch: the page calls of the last session computed ahead, so the first page opens with its data ready.
+fn prefetch_pages(st: &Arc<AppState>) {
+    let list: Vec<Value> = st.ctx().db.kv_get("pages:calls").ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    for c in list {
+        if let (Some(op), Some(args)) = (c[0].as_str(), c.get(1)) {
+            if PAGE_CALLS.contains(&op) { let _ = cached(st, op, args); }
+        }
+    }
+}
+
 
 fn s(args: &Value, k: &str) -> Result<String> {
     args[k].as_str().map(String::from).with_context(|| format!("missing {k}"))
@@ -722,7 +824,11 @@ async fn call(app: tauri::AppHandle, state: tauri::State<'_, Arc<AppState>>, op:
         return Ok(Value::Null);
     }
     let st = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || dispatch(&st, &op, &args).map_err(|e| format!("{e:#}")))
+    tauri::async_runtime::spawn_blocking(move || {
+        if !NO_CHANGE.contains(&op.as_str()) { st.epoch.fetch_add(1, Ordering::SeqCst); st.pages.lock().unwrap().clear(); }
+        let r = if PAGE_CALLS.contains(&op.as_str()) { cached(&st, &op, &args) } else { dispatch(&st, &op, &args) };
+        r.map_err(|e| format!("{e:#}"))
+    })
         .await
         .map_err(|e| e.to_string())?
 }
@@ -816,7 +922,7 @@ fn main() {
     hrm_core::util::adopt_shell_path();
     let ctx = Arc::new(Ctx::open().unwrap_or_else(|e| fatal(&format!("Harness Manager could not start:\n\n{e:#}"))));
     let first = { let _l = ctx.lock_registry(); hrm_core::import::first_run(&ctx).ok().flatten().map(|r| serde_json::to_value(r).unwrap()) };
-    let state = Arc::new(AppState { ctx: Mutex::new(ctx), first_run: Mutex::new(first), settings_mtime: Mutex::new(None), peers: std::sync::OnceLock::new() });
+    let state = Arc::new(AppState { ctx: Mutex::new(ctx), pages: Mutex::new(HashMap::new()), epoch: AtomicU64::new(0), first_run: Mutex::new(first), settings_mtime: Mutex::new(None), peers: std::sync::OnceLock::new() });
     let mut builder = tauri::Builder::default();
     // one copy runs: opening it again (Start menu, a shortcut) shows the window the tray keeps. The tests' copy
     // skips this, so they can run while the installed app sits in the tray.
@@ -879,6 +985,9 @@ fn main() {
             // the folder watcher: a changed session file is in the index within a second, and the pages redraw
             let (h6, st6) = (app.handle().clone(), state.clone());
             hrm_core::watch::start(Arc::new(move || st6.ctx()), Arc::new(move |r| { let _ = h6.emit("refreshed", json!({"new_rows": 0, "index": r})); }));
+            // the pages the window opened last time, computed while it starts
+            let st8 = state.clone();
+            std::thread::spawn(move || prefetch_pages(&st8));
             // the direct connection: the listener while it is on, the paired computers pulled every ten seconds
             let (h3, st3) = (app.handle().clone(), state.clone());
             let on_event: hrm_core::sync::peer::OnEvent = Arc::new(move |name, v| { let _ = h3.emit(name, v); });

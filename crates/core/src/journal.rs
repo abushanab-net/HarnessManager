@@ -343,7 +343,7 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 }
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error
             from peers order by name, device_id")?;
         let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
