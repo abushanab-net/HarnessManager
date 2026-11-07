@@ -1,7 +1,7 @@
 {
   "name": "harnessmanager-app",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.9.4",
   "scripts": {
     "tauri": "tauri",
     "build": "tauri build",

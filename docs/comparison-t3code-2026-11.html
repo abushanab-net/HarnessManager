@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Manager and T3 Code: how they differ</title>
+<style>
+  :root { --bg: #0B1418; --panel: #10202A; --panel2: #0D1A22; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --m: #8FA6AE; --ac: #3FD6CF; --t3: #F28FB0; --warn: #E0A84C; --neg: #F07A6A; --ok: #5BD08A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); scroll-behavior: smooth; }
+  body { margin: 0; }
+  main { max-width: 1180px; margin: 0 auto; padding: 32px 32px 96px; }
+  h1 { font-size: 32px; line-height: 1.2; margin: 6px 0 12px; }
+  h2 { font-size: 23px; margin: 60px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 26px 0 8px; }
+  p { margin: 8px 0; max-width: 64rem; }
+  a { color: var(--ac); }
+  .muted { color: var(--m); } .mono { font-family: var(--mono); font-size: 12.5px; }
+  .lede { font-size: 17px; color: #C6D4D9; max-width: 62rem; }
+  .toc { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: 16px 0 0; font-size: 14px; }
+  .toc a { text-decoration: none; }
+  .hm { color: var(--ac); font-weight: 600; } .t3 { color: var(--t3); font-weight: 600; }
+  .verdict { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 22px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card.hmc { border-top: 3px solid var(--ac); } .card.t3c { border-top: 3px solid var(--t3); }
+  .card h3 { margin: 0 0 6px; }
+  .card p { font-size: 14.5px; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; } .card li { margin: 3px 0; }
+  .callout { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 10px; padding: 12px 16px; margin: 16px 0; font-size: 14.5px; }
+  .callout.ac { border-left-color: var(--ac); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0 6px; }
+  th { text-align: left; color: var(--m); font-weight: 500; font-size: 12.5px; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: bottom; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  td:first-child { font-weight: 600; width: 15%; }
+  tr.grp td { background: var(--panel2); color: var(--m); font-weight: 600; font-size: 12.5px; letter-spacing: .03em; text-transform: uppercase; padding: 8px 10px; }
+  .lead { white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  .lead.hm { color: var(--ac); } .lead.t3 { color: var(--t3); } .lead.eq { color: var(--m); }
+  .no { color: var(--m); font-style: italic; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .flow { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .flow h3 { margin: 0 0 10px; }
+  .steps { display: grid; gap: 6px; }
+  .step { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; font-size: 14px; }
+  .step b.n { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--line); font-size: 12px; }
+  .bars { display: grid; grid-template-columns: 11rem 1fr 6rem; gap: 6px 12px; align-items: center; font-size: 13.5px; margin: 8px 0; }
+  .bar { height: 10px; border-radius: 5px; background: var(--line2); position: relative; overflow: hidden; }
+  .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 5px; }
+  .src li { margin: 4px 0; font-size: 13.5px; }
+  ol.recs li { margin: 8px 0; }
+  @media (max-width: 900px) { .verdict, .two { grid-template-columns: 1fr; } td:first-child { width: auto; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="mono muted">Harness Manager · comparison · 7 November 2026 · Harness Manager 1.9.3, T3 Code 0.1.7 stable / 0.1.8 nightly</p>
+  <h1>Harness Manager and T3 Code: how they differ</h1>
+  <p class="lede"><span class="t3">T3 Code</span> replaces the agents' interface: you chat with Claude Code, Codex and others inside its threads, it makes the branch and the pull request, and you drive it from a phone. <span class="hm">Harness Manager</span> manages what sits behind the agents' own terminals: several accounts per tool side by side, their limits and usage, every session they wrote, and one set of MCP servers, skills and prompts written into every tool. They overlap on usage and limits; they do not compete on how you actually work with an agent.</p>
+  <nav class="toc"><a href="#verdict">The short answer</a><a href="#glance">At a glance</a><a href="#how">How each works</a><a href="#matrix">Feature by feature</a><a href="#behaviour">Differences that matter in use</a><a href="#leads">Who leads where</a><a href="#together">Using both</a><a href="#recs">What Harness Manager could take from this</a><a href="#sources">Sources</a></nav>
+
+  <h2 id="verdict">The short answer</h2>
+  <div class="verdict">
+    <div class="card t3c"><h3 class="t3">T3 Code is an agent client</h3>
+      <p>"An agent harness control surface." A server runs where your agents run and drives them through each vendor's SDK or protocol; desktop, web and mobile apps connect to it. You never open the Claude Code or Codex terminal: the conversation, the diff, the commit and the PR all happen in T3 Code's threads.</p>
+      <ul><li>Best at: one chat surface for ten named agents and any ACP agent, git and PR flow, remote and mobile control.</li>
+      <li>Deliberately not: an account manager. Its FAQ says "I don't think T3 Code is the right place to manage a pile of accounts" and points to an outside proxy.</li></ul></div>
+    <div class="card hmc"><h3 class="hm">Harness Manager is an account and setup manager</h3>
+      <p>A desktop app and the <span class="mono">hrm</span> CLI around the tools you already use. Each account gets its own folder, so several run in parallel; Start opens the tool's real terminal as that account. It reads every tool's own logs for limits, usage and sessions, and writes shared MCP servers, skills and prompts into each tool's own files.</p>
+      <ul><li>Best at: many accounts per tool, limits and when they free up, sessions across tools and computers, one setup for six tools.</li>
+      <li>Deliberately not: a chat client. It never sits between you and the agent's terminal.</li></ul></div>
+  </div>
+  <div class="callout ac"><b>In one line:</b> T3 Code is where you talk to the agents. Harness Manager is where you decide which account they run on, see what they cost and what they did, and keep their setup in step. The niche T3 Code says it will not fill (many accounts per provider) is Harness Manager's centre.</div>
+
+  <h2 id="glance">At a glance</h2>
+  <table>
+    <tr><th></th><th class="t3">T3 Code</th><th class="hm">Harness Manager</th></tr>
+    <tr><td>Category</td><td>Agent client and remote control surface (chat threads, git, PR)</td><td>Account, limits, sessions and setup manager around the agents' own CLIs</td></tr>
+    <tr><td>Made by</td><td>T3 Tools, Inc. (San Francisco; the t3.gg / Ping team)</td><td>abushanab-net (one maintainer)</td></tr>
+    <tr><td>License and price</td><td>MIT, free. T3 Connect free for 3 machines; more with a paid T3 Chat plan</td><td>MIT, free. No hosted service; the optional hub is self-hosted</td></tr>
+    <tr><td>Stack</td><td>TypeScript (Effect) server; Electron desktop; React Native mobile; hosted web app at app.t3.codes</td><td>Rust core shared by a Tauri desktop app and the <span class="mono">hrm</span> CLI; plain HTML/JS UI; SQLite</td></tr>
+    <tr><td>Agents</td><td>Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, Muse Code, fx, Kiro, any ACP agent</td><td>Claude Code, Codex, OpenCode, Antigravity, Pi, Oh My Pi</td></tr>
+    <tr><td>Platforms</td><td>Windows x64 and ARM64, macOS arm64 and x64, Linux x64 and arm64 (deb, AppImage, AUR, Nix), iOS, Android, web</td><td>Windows x64 (tested); macOS arm64 and Linux x64 built but untested; Windows ARM64 from 1.9.4 (built, not yet run on an ARM device)</td></tr>
+    <tr><td>Maturity</td><td>Created Feb 2026. 50.9k stars, 9.8k forks, 923 contributors, about 9,700 commits, 5,600 open issues. Stable 0.1.7 (4 Nov) plus several nightlies a day. README: "very very early. Expect bugs." Not accepting big contributions</td><td>Created 31 Oct 2026. 134 commits, 1.9.3. Single maintainer; e2e suite of 50 tests on every change</td></tr>
+    <tr><td>Size</td><td>About 199 MB of TypeScript in the repository (apps, 30+ packages, native helpers)</td><td>About 18,000 lines of Rust and 6,300 of UI</td></tr>
+    <tr><td>Telemetry</td><td>On by default: provider, model, token counts and hashed account ids (including your OpenAI and Claude accounts) to its own endpoint and PostHog; relay traces to Axiom. <span class="mono">T3CODE_TELEMETRY_ENABLED=false</span> turns it off</td><td>None. Network use is update checks, optional live Claude limits, the router you configure, and the sync you choose</td></tr>
+  </table>
+
+  <h2 id="how">How each works</h2>
+  <div class="two">
+    <div class="flow"><h3 class="t3">T3 Code</h3><div class="steps">
+      <div class="step"><b class="n">1</b><span>You install and sign in each agent's CLI on the machine that will do the work (<span class="mono">claude auth login</span>, <span class="mono">codex login</span>, …).</span></div>
+      <div class="step"><b class="n">2</b><span>The T3 Code server (<span class="mono">t3</span>, or inside the desktop app) runs on that machine and drives the agents: Claude through Anthropic's Agent SDK, Codex through its App Server, others through ACP or their SDK.</span></div>
+      <div class="step"><b class="n">3</b><span>You work in threads: each thread is a conversation with a chosen agent and model, on its own git branch or worktree, with diff review, commit, push and PR from one button.</span></div>
+      <div class="step"><b class="n">4</b><span>Clients connect from anywhere: desktop, web, iOS, Android, through T3 Connect (a Cloudflare tunnel set up by T3's relay), LAN pairing, Tailscale or SSH. The phone is a remote; the computer does the work.</span></div>
+      <div class="step"><b class="n">5</b><span>Usage and Limits read the agents' history on each connected machine and pool accounts per provider.</span></div>
+    </div></div>
+    <div class="flow"><h3 class="hm">Harness Manager</h3><div class="steps">
+      <div class="step"><b class="n">1</b><span>It finds the tools installed and adds their main profiles; Add account creates a new account in its own folder (<span class="mono">CLAUDE_CONFIG_DIR</span>, <span class="mono">CODEX_HOME</span>, XDG folders, <span class="mono">PI_CODING_AGENT_DIR</span>) and signs it in.</span></div>
+      <div class="step"><b class="n">2</b><span>Start opens a terminal running the tool's own CLI as that account; you work in the real Claude Code or Codex TUI. Several accounts run at once.</span></div>
+      <div class="step"><b class="n">3</b><span>It reads each account's logs and limit readings into a local index: 5-hour and weekly windows, the pace forecast, tokens and cost, every session and project, followed live by a folder watcher.</span></div>
+      <div class="step"><b class="n">4</b><span>It keeps MCP servers, skills and prompt files once and writes them into every tool in that tool's format, with a ledger so it only removes its own entries.</span></div>
+      <div class="step"><b class="n">5</b><span>Optionally: API-key accounts through a local router with failover, and several computers merged through a shared folder, a direct mTLS link or a self-hosted encrypted hub.</span></div>
+    </div></div>
+  </div>
+
+  <h2 id="matrix">Feature by feature</h2>
+  <p class="muted">"Leads" marks who does more of that job today, from each project's own documentation and code. <span class="lead eq">different job</span> means the two do not try to do the same thing.</p>
+  <table>
+    <tr><th>Area</th><th class="t3">T3 Code</th><th class="hm">Harness Manager</th><th>Leads</th></tr>
+
+    <tr class="grp"><td colspan="4">Working with an agent</td></tr>
+    <tr><td>Where you talk to the agent</td><td>Its own chat threads for every agent; one look for all of them; switch model mid-thread; send while the agent works; queued and offline messages on mobile; attachments, images, video; voice input; side chats; snooze; prompt stash</td><td><span class="no">Not its job.</span> Start opens the tool's own terminal UI as the chosen account; Start in a folder picks a recent project, skip-permissions and extra arguments</td><td><span class="lead t3">T3 Code</span></td></tr>
+    <tr><td>Permission modes, skills in the chat</td><td>Permission modes per thread; <span class="mono">$skill</span> picker in the composer reading each agent's skill folders; slash commands; goals</td><td>The tool's own behaviour, unchanged</td><td><span class="lead t3">T3 Code</span></td></tr>
+    <tr><td>Terminal</td><td>Built-in terminals per environment (libghostty), 5,000 lines kept on the server</td><td>Windows Terminal or console, chosen in Settings</td><td><span class="lead t3">T3 Code</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Git and pull requests</td></tr>
+    <tr><td>Branches, review, PR</td><td>Every thread on its own branch or worktree; inline diff review; one button to commit, push and open a PR with generated title, body and changelog; draft, stacked and amended PRs; review guides; GitHub, GitLab, Bitbucket, Azure DevOps, Forgejo/Gitea, GitCafe; worktree cleanup</td><td><span class="no">None.</span> It knows each project's repository to say "not cloned here" and to resume a session from another computer in the right clone</td><td><span class="lead t3">T3 Code</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Accounts</td></tr>
+    <tr><td>Several accounts per tool</td><td>Possible but manual: a second "provider instance" pointing at a <span class="mono">CLAUDE_CONFIG_DIR</span> you created and signed in from a terminal; Codex uses a shared home plus a "shadow home". FAQ: not the place for "a pile of accounts"; for 6 Claude and 3 Codex subscriptions its author uses CLIProxyAPI outside T3</td><td>The core feature: Add account creates the folder and signs in (Claude inside the app, others in a terminal); main profiles found automatically; rename, remove (keep or delete the folder), per-account settings; six tools; Antigravity's single login swapped on Start</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Which account to use</td><td>You pick the instance in the thread's model picker. No recommendation</td><td>"Use next": the account with the most room, a "resets soonest" alternative, and Start on it in one click; the Overview's finding names the account that will run out first</td><td><span class="lead hm">Harness Manager</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Limits</td></tr>
+    <tr><td>Reading limits</td><td>Usage → Limits pools every account per provider: one number per window, a bar with a segment per account, sorted by the next 5-hour refill; banked reset credits with "Use reset"; CLIProxyAPI hubs; OpenCode Go, Cursor and Grok allowances; limits under the chat; a mobile home-screen widget</td><td>Per account, every window the tool reports (5-hour, week, per-model week), each with time to reset; the pace forecast ("runs out Sun 03:38, 2 d before it resets"); a seven-day Reset Horizon of every account; the history of readings; measured, estimated and unread kept apart; a tray popup of every ring; daily spend caps for API-key accounts</td><td><span class="lead eq">both, differently</span></td></tr>
+    <tr><td>Forecasting</td><td>Says when the next reset lands and what it gives back</td><td>Projects each window from its pace and warns before it runs out; ranks accounts on it</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Tools covered</td><td>Codex, Claude, OpenCode Go, Cursor, Grok (subscription allowances)</td><td>Claude Code and Codex (the tools that report 5-hour and weekly windows)</td><td><span class="lead t3">T3 Code</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Usage and cost</td></tr>
+    <tr><td>Tokens and cost</td><td>Token use, cache savings, model breakdown, API-equivalent cost split by token type and speed ("Premium" for Fast modes); custom model prices and model mapping; include/exclude filters; 8 providers; 24 h, 7, 30, 90 days; per environment</td><td>Tokens and cost per account, per project, per day and per model; a request log with first-reply time; a 53-week activity clock; CSV export; Today, 7 d, 30 d, All; per computer; DeepSeek priced from its own usage reports</td><td><span class="lead eq">both, differently</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Sessions and projects</td></tr>
+    <tr><td>Which sessions it sees</td><td>Its own threads (started in T3 Code); usage totals also read the agents' history</td><td>Every session the tools wrote, including the ones you started in a plain terminal, on this computer and the others; an FTS index, paged at 50, updated within a second of a write</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Reading and resuming</td><td>Threads with full history, pinning, grouping by project, linked PRs, thread migration and handoffs between agents</td><td>A reading view with steps, failed commands, answers and changed files; follow a running session live; Resume in its own account; Resume here for a session from another computer (a fork); tags; archive of old transcripts; Markdown export</td><td><span class="lead eq">different job</span></td></tr>
+    <tr><td>Projects</td><td>Project settings per repository; start, clone or publish a project</td><td>Every folder your tools ran in, with sessions, tokens and cost, a share table, sparklines, pins and tags</td><td><span class="lead eq">different job</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Setup shared across tools</td></tr>
+    <tr><td>MCP servers</td><td><span class="no">Does not manage the agents' MCP servers.</span> It exposes its own MCP server so outside agents (Claude Code in a terminal, ChatGPT) can read and start T3 threads</td><td>One list of MCP servers written into every tool you tick, in that tool's format; import from the tools; edit as a form or JSON; "left alone" entries a tool's file already had</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Skills and prompts</td><td>Reads skills from each agent's own folders for the composer</td><td>A skills store linked into each tool, Discover and install from GitHub repositories, update checks; system prompt files (<span class="mono">CLAUDE.md</span>, <span class="mono">AGENTS.md</span>, <span class="mono">GEMINI.md</span>) with saved versions</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>The tools themselves</td><td>Installs Codex and Antigravity for you; checks provider status</td><td>Apps page: every copy of each tool and how it was installed, its version against the vendor's newest, install, update or remove a duplicate in a visible terminal</td><td><span class="lead hm">Harness Manager</span></td></tr>
+
+    <tr class="grp"><td colspan="4">API keys and routing</td></tr>
+    <tr><td>Keys, routers</td><td>Provider instances with their own environment variables; an OpenRouter recipe for Claude; credentials in the OS store; 1Password as a secret provider (preview)</td><td>API-key accounts with keys in Windows Credential Manager, given only to the launched process; a local router with provider failover and Anthropic ↔ OpenAI format conversion; DeepSeek preset; routed accounts; a request log through the router</td><td><span class="lead hm">Harness Manager</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Several computers, remote, mobile</td></tr>
+    <tr><td>Driving agents remotely</td><td>The headline: run the server on a desktop, VPS or container (<span class="mono">npx t3 up</span>), drive it from the web, the phone or another desktop; T3 Connect, LAN pairing, Tailscale, SSH; load balancing new threads across machines; browser view of a remote machine; guest links</td><td><span class="no">Not offered.</span> Agents run in a terminal on the computer you start them on</td><td><span class="lead t3">T3 Code</span></td></tr>
+    <tr><td>Seeing every computer</td><td>Usage and Limits across connected environments, one account counted once</td><td>Every computer's requests, sessions, limit readings and tags merged into each one: shared folder journal, direct mutual-TLS link (mDNS or an address), or a self-hosted hub that only sees ciphertext; presence within seconds; "running on LAPTOP"; Resume here; backups that restore by merging</td><td><span class="lead eq">both, differently</span></td></tr>
+    <tr><td>Mobile</td><td>iOS and Android apps, notifications, a limits widget</td><td>None; a tray popup on the desktop</td><td><span class="lead t3">T3 Code</span></td></tr>
+
+    <tr class="grp"><td colspan="4">Product</td></tr>
+    <tr><td>Command line</td><td><span class="mono">t3</span> runs the server, installs it as a service, updates, pairs devices</td><td><span class="mono">hrm</span> does everything the window does (47 commands), with <span class="mono">--json</span></td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Install and update</td><td>Installer scripts, winget, scoop, Homebrew, AUR, Nix, deb; stable and nightly channels; app and server kept in step</td><td>Signed installers from GitHub releases; the app updates itself (signed updates only)</td><td><span class="lead t3">T3 Code</span></td></tr>
+    <tr><td>Privacy</td><td>Code and prompts go to your providers, not to T3. Telemetry on by default with hashed account ids; relay setup through T3's service; optional T3 account</td><td>No account, no telemetry; keys never in files, logs or backups; the hub cannot read what it stores</td><td><span class="lead hm">Harness Manager</span></td></tr>
+    <tr><td>Design</td><td>One consistent chat UI across desktop, web and mobile</td><td>Four themes (Harness and VektraGrid, light and dark), the Chrono-Runway design, the official tool icons, tours on every page</td><td><span class="lead eq">different job</span></td></tr>
+  </table>
+
+  <h2 id="behaviour">Differences that matter in use</h2>
+  <h3>Your Claude subscription is spent differently</h3>
+  <p>T3 Code drives Claude through Anthropic's Agent SDK. Its own FAQ says this "will drain your 5h limits faster than using Claude Code directly" (a bug its author reported to Anthropic; weekly limits are not affected). Harness Manager starts the real Claude Code CLI, so a session costs what it costs in Claude Code.</p>
+  <h3>Many accounts sit in a zone T3 Code avoids on purpose</h3>
+  <p>T3 Code's FAQ declines account auto-switching because it could risk terms-of-service bans, and sends users with many subscriptions to a self-hosted proxy. Harness Manager runs each account in its own folder and recommends which one to start, but never switches accounts by itself or pools them behind one login. That line is worth keeping explicit in Harness Manager's documentation, since it is exactly what T3 Code's author worries about.</p>
+  <h3>Sessions you started outside the app</h3>
+  <p>T3 Code's history is its threads. Harness Manager's history is everything the tools wrote, wherever you started them: a Claude Code session run from VS Code's terminal on another computer still appears, can be read, followed and resumed.</p>
+  <h3>What leaves your machine</h3>
+  <p>Both keep code and prompts between you and the providers. T3 Code sends anonymous product events by default (provider, model, token counts, hashed ids of your T3, OpenAI and Claude accounts) and relies on its relay for the easy remote path. Harness Manager sends nothing unless you turn a feature on, and its hub is end-to-end encrypted.</p>
+  <h3>Scale of the projects</h3>
+  <div class="bars">
+    <span>GitHub stars</span><div class="bar"><i style="width:100%;background:var(--t3)"></i></div><span class="mono">50,864 vs 1</span>
+    <span>Contributors</span><div class="bar"><i style="width:100%;background:var(--t3)"></i></div><span class="mono">923 vs 1</span>
+    <span>Commits</span><div class="bar"><i style="width:100%;background:var(--t3)"></i><i style="width:1.4%;background:var(--ac)"></i></div><span class="mono">≈9,700 vs 134</span>
+    <span>Agents supported</span><div class="bar"><i style="width:100%;background:var(--t3)"></i><i style="width:60%;background:var(--ac)"></i></div><span class="mono">10+ vs 6</span>
+  </div>
+  <p class="muted">T3 Code is a funded team's product with a large community and a fast nightly cadence, still at 0.1 and calling itself very early. Harness Manager is a focused single-maintainer tool at 1.9 with a full end-to-end suite.</p>
+
+  <h2 id="leads">Who leads where</h2>
+  <div class="two">
+    <div class="card t3c"><h3 class="t3">T3 Code is clearly ahead on</h3><ul>
+      <li>Talking to agents: one polished chat for ten named agents plus any ACP agent, model switching, attachments, voice.</li>
+      <li>Git: branches or worktrees per thread, diff review, commit, push, PR, stacks, six forges.</li>
+      <li>Remote and mobile: drive agents on any machine from a phone or the web.</li>
+      <li>Reach: every desktop OS and architecture, package managers, a large community.</li>
+      <li>Limits for more tools (Cursor, Grok, OpenCode Go) and reset credits.</li>
+    </ul></div>
+    <div class="card hmc"><h3 class="hm">Harness Manager is clearly ahead on</h3><ul>
+      <li>Many accounts per tool, created and signed in from the app, running side by side.</li>
+      <li>Knowing which account to use: forecasts, the Reset Horizon, "use next", the tray.</li>
+      <li>One setup for six tools: MCP servers, skills, prompts, written in each tool's format.</li>
+      <li>Every session from every tool and computer, including ones started outside the app.</li>
+      <li>API-key accounts through a local router with failover and format conversion.</li>
+      <li>Privacy: no telemetry, no account, an encrypted self-hosted hub.</li>
+      <li>Spending your Claude subscription the way Claude Code does.</li>
+    </ul></div>
+  </div>
+
+  <h2 id="together">Using both</h2>
+  <p>They fit together rather than replace each other. A reasonable setup on one computer:</p>
+  <ol>
+    <li>Harness Manager creates and signs in the accounts (for example <span class="mono">~\.claude-work</span>, <span class="mono">~\.claude-personal</span>, <span class="mono">~\.codex-work</span>) and keeps their MCP servers, skills and prompts in step.</li>
+    <li>In T3 Code, add one provider instance per account, pointing <span class="mono">CLAUDE_CONFIG_DIR</span> (or Codex's home) at those folders. T3 Code's docs describe exactly this per-instance folder setting.</li>
+    <li>Use T3 Code for the conversation, git and PR work, and from the phone. Use Harness Manager's Overview to pick the account with room, and its Sessions page to find past work across tools and computers.</li>
+  </ol>
+  <p class="muted">Not verified here: whether sessions T3 Code starts through the Agent SDK land in the account folder in the format Harness Manager's Claude reader indexes. Claude's Agent SDK normally writes the same transcript files as the CLI, so they should appear; worth a quick check before relying on it.</p>
+
+  <h2 id="recs">What Harness Manager could take from this</h2>
+  <ol class="recs">
+    <li><b>Say "works with T3 Code" out loud.</b> An "Use in T3 Code" action per account that copies the provider-instance settings (name, binary, config folder) would turn T3 Code's biggest user request ("many subs") into Harness Manager's front door. Low effort, high reach.</li>
+    <li><b>Pooled view per provider.</b> T3 Code's "one number per window with a segment per account" answers "how much Claude do I have in total" in one glance. Harness Manager shows per account; a pooled line above the Reset Horizon would add the total without losing the detail.</li>
+    <li><b>Reset credits.</b> Codex and Claude accounts can carry banked resets; T3 Code shows them and offers "Use reset". If the tools expose this locally, it belongs next to the limit it restores.</li>
+    <li><b>More limit sources.</b> OpenCode Go (session, weekly, monthly with an API key) is already in your setup; reading its allowance would light up OpenCode's empty limit rows.</li>
+    <li><b>Model price overrides and mapping.</b> T3 Code lets you price unknown models and map preview IDs to released ones; Harness Manager's cost at list prices would benefit for routed and new models.</li>
+    <li><b>Package managers.</b> winget and scoop manifests would match how Windows developers install tools, and the Apps page already understands those installers.</li>
+    <li><b>Keep the privacy and Claude-accounting advantages visible.</b> No telemetry and native Claude Code accounting are real differences; the README should state them in the first screen.</li>
+  </ol>
+
+  <h2 id="sources">Sources</h2>
+  <ul class="src">
+    <li>T3 Code site: <a href="https://t3.codes">t3.codes</a>, <a href="https://t3.codes/download">download</a>, <a href="https://t3.codes/privacy-policy">privacy policy</a>, <a href="https://t3.codes/security-policy">security policy</a> (read 7 Nov 2026).</li>
+    <li>Repository: <a href="https://github.com/pingdotgg/t3code">github.com/pingdotgg/t3code</a> (README, release v0.1.7 assets, repository statistics from the GitHub API).</li>
+    <li>T3 Code docs: <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/faq.md">FAQ</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/usage.md">Usage and limits</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/providers-claude.md">Claude</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/providers-codex.md">Codex</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/remote-access.md">Remote access</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/outside-agents.md">Outside agents (MCP)</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/source-control.md">Source control</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/telemetry.md">Telemetry</a>, <a href="https://github.com/pingdotgg/t3code/blob/main/docs/user/secrets.md">Secrets</a>.</li>
+    <li>Harness Manager: <a href="../README.md">README</a>, <a href="architecture.md">architecture</a>, the code in this repository at 1.9.3.</li>
+  </ul>
+  <p class="muted">The marketing claims on t3.codes (for example "Tolerated by over 500,000 devs") were not verified. T3 Code changes daily; this comparison reflects 7 November 2026.</p>
+</main>
+</body>
+</html>
