@@ -49,7 +49,15 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
       - uses: dtolnay/rust-toolchain@stable
-        with: { targets: "${{ matrix.target || '' }}" }   # a no-op when the runner image already has the target
+      # the cross target goes into the toolchain cargo will actually use: the Windows runner pins its own with
+      # RUSTUP_TOOLCHAIN, so the action's `targets` (which installs for stable) never reached it. On the persistent
+      # self-hosted runner this installs once into its toolchain and is a no-op on every later release
+      - if: matrix.target
+        shell: bash
+        run: |
+          rustup show active-toolchain
+          rustup target add "${{ matrix.target }}"
+          test -d "$(rustc --print target-libdir --target "${{ matrix.target }}")"
       # the ARM64 cross build needs the MSVC ARM64 cross-tools environment (INCLUDE, LIB, the arm64 cl and link):
       # ring's C code is compiled by clang against the MSVC headers. This runs the installed Visual Studio's
       # vcvarsamd64_arm64; nothing is downloaded
