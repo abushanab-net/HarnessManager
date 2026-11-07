@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The redesign implemented: every page on your real data</title>
+<style>
+  :root { --bg: #0B1418; --panel: #10202A; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --m: #8FA6AE; --ac: #3FD6CF; --warn: #E0A84C; --neg: #F07A6A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, monospace; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--sans); }
+  body { margin: 0; }
+  main { max-width: 1400px; margin: 0 auto; padding: 32px 32px 140px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 6px 0 10px; }
+  h2.sec { font-size: 22px; margin: 56px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); }
+  h3 { font-size: 17px; margin: 22px 0 8px; }
+  p { margin: 6px 0; } .muted { color: var(--m); } .mono { font-family: var(--mono); font-size: 12.5px; }
+  a { color: var(--ac); }
+  .lede { font-size: 17px; color: #C6D4D9; max-width: 62rem; }
+  .toc { display: flex; gap: 18px; flex-wrap: wrap; margin: 14px 0 0; } .toc a { text-decoration: none; font-size: 14px; }
+  .how { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--ac); border-radius: 10px; padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+  th { text-align: left; color: var(--m); font-weight: 500; font-size: 12.5px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  td.n { font-family: var(--mono); text-align: center; font-size: 15px; } td.n b { color: var(--ac); }
+  .design { margin-top: 28px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .design header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .design header h3 { margin: 0; font-size: 20px; } .design header .by { color: var(--m); font-size: 13px; }
+  .design header .open { margin-left: auto; font-size: 13px; }
+  .angle { color: #C6D4D9; font-size: 14px; margin: 8px 0 12px; }
+  .frame { position: relative; min-height: 900px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #000; }
+  .frame iframe { width: 100%; height: 900px; border: 0; display: block; background: #fff; }
+  .frame .load { position: absolute; inset: 0; display: grid; place-items: center; color: var(--m); font-size: 14px; background: var(--bg); }
+  .frame .load button { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 0; border-radius: 999px; padding: 10px 18px; cursor: pointer; }
+  .verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+  .verdict { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  .verdict b { display: block; font-size: 13px; margin-bottom: 4px; } .verdict b span { color: var(--ac); font-family: var(--mono); margin-left: 6px; }
+  .verdict ul { margin: 4px 0 0; padding-left: 16px; } .verdict li { margin: 2px 0; }
+  .fb { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .fb > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .fb h4 { margin: 0 0 6px; font-size: 14px; }
+  .fb label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .fb label input { margin-right: 8px; accent-color: var(--ac); }
+  .fb textarea { width: 100%; min-height: 70px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  .record { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; font-size: 14px; }
+  .record ul { margin: 6px 0; padding-left: 18px; } .record li { margin: 3px 0; }
+  .pbtn { font: 600 14px var(--sans); color: #06161A; background: var(--ac); border: 1px solid var(--ac); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  .pbtn.ghost { background: transparent; color: var(--m); border-color: var(--line); }
+  .final { position: sticky; bottom: 0; background: rgba(11,20,24,.94); backdrop-filter: blur(8px); border-top: 1px solid var(--line); margin: 40px -32px 0; padding: 14px 32px; }
+  .final .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .final .pick label { display: inline-block; margin-right: 18px; font-size: 14px; } .final .pick input { margin-right: 6px; accent-color: var(--ac); }
+  .saved { color: var(--m); font-size: 13px; }
+  #out { width: 100%; min-height: 200px; margin-top: 10px; font: 12.5px/1.5 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: none; }
+  @media (max-width: 1000px) { .verdicts, .fb { grid-template-columns: 1fr; } }
+.page { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .page header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; } .page header h3 { margin: 0; font-size: 18px; } .page header .sc { margin-left: auto; font-family: var(--mono); font-size: 13px; color: var(--m); } .page header .sc b { color: var(--ac); font-size: 15px; }
+  .page .by { color: var(--m); font-size: 13px; }
+  .cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 12px; margin-top: 10px; }
+  .cols > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
+  .cols h4 { margin: 0 0 6px; font-size: 13px; color: var(--m); font-weight: 500; } .cols ul { margin: 0; padding-left: 16px; } .cols li { margin: 3px 0; }
+  .cols label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .cols label input { margin-right: 8px; accent-color: var(--ac); }
+  .cols textarea { width: 100%; min-height: 64px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  @media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+.bar { position: sticky; top: 0; z-index: 20; background: rgba(11,20,24,.94); backdrop-filter: blur(8px); margin: 0 -32px; padding: 10px 32px; display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--m); }
+  .gal { margin-top: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .gal header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; } .gal header h3 { margin: 0; font-size: 18px; } .gal header .by { color: var(--m); font-size: 13px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .pair figure { margin: 0; } .pair figcaption { font-size: 12px; color: var(--m); margin-bottom: 4px; }
+  .pair img { width: 100%; display: block; border: 1px solid var(--line2); border-radius: 6px; cursor: zoom-in; background: #000; }
+  .gal .fb2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+  .gal .fb2 > div { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .gal label { display: block; font-size: 14px; margin: 3px 0; cursor: pointer; } .gal label input { margin-right: 8px; accent-color: var(--ac); }
+  .gal textarea { width: 100%; min-height: 56px; margin-top: 6px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+  dialog { border: 0; padding: 0; background: transparent; max-width: 98vw; } dialog img { max-width: 98vw; max-height: 96vh; border-radius: 8px; } dialog::backdrop { background: rgba(0,0,0,.85); }
+  @media (max-width: 1000px) { .pair, .gal .fb2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-fbkey="hm-design-committee-2026-11-implementation">
+<main>
+  <p class="mono muted">Harness Manager · design committee · implementation · 7 November 2026</p>
+  <h1>The redesign implemented, after your five fixes</h1>
+  <p class="lede">Your five notes are fixed: the ring label now fits inside a 36 px circle everywhere (Overview, Accounts, tray); the Accounts refresh button is a fixed 28 px square with the read time under the buttons; the Sessions computer filter shows named chips up to three other computers and an "Elsewhere ▾" menu from four on (demonstrated below with eight computers); the MCP and Skills tool icons are 24 px; the pager is repeated at the top of both tables. The suite passed again, 47 of 47. The changed pages were re-captured on your data in all four themes at both sizes; the unchanged pages keep their earlier captures. Mark anything still wrong, then decide at the bottom.</p>
+  <nav class="toc"><a href="#result">The result</a><a href="#overview">Pages</a><a href="#answers">Your decision</a></nav>
+  <div class="how">Click an image to see it full size. Everything you tick saves in this browser; press <b>Copy my answers</b> at the bottom and paste the text into the chat.</div>
+
+  <h2 class="sec" id="result">The result</h2>
+  <table>
+  <tr><th>What</th><th>Result</th></tr>
+  <tr><td>End-to-end suite (e2e/app.e2e.mjs)</td><td>47 passed, 0 failed after the fixes (and three consecutive passes before them); 3 tests skip without a second computer or a hub.</td></tr>
+  <tr><td>Console errors on any page, four themes, two sizes</td><td>None.</td></tr>
+  <tr><td>Inline event handlers or inline styles in app/ui (the app's CSP and the VektraGrid theme)</td><td>None left.</td></tr>
+  <tr><td>Stylesheet</td><td>app.css rewritten to four themes on role tokens; the old pages' rules removed (3333 → 2483 lines); one CSS file per page group.</td></tr>
+  <tr><td>Code</td><td>19 files changed, about 3,900 lines added and 3,400 removed; views.js split into sessions, projects, routing, prompts, settings, cli modules; the Rust side untouched.</td></tr>
+  <tr><td>Report with every difference from the reference and the critics' fixes applied or left</td><td><a href="report.md">implementation/report.md</a></td></tr>
+  </table>
+  <p class="muted">One thing seen on your data during capture: the Sessions page once sat on "Reading sessions…" for about 45 seconds while sessions were being written (a slow read on the Rust side, not part of this work).</p>
+
+  <h2 class="sec">The pages</h2>
+  <div class="bar">Theme <span class="seg"><button class="on" data-brand="hm">Harness</button><button data-brand="vg">VektraGrid</button></span> <span class="seg"><button class="on" data-theme="dark">Dark</button><button data-theme="light">Light</button></span> Size <span class="seg"><button class="on" data-size="1536">1536</button><button data-size="1280">1280</button></span><span style="margin-left:auto">The reference frame stays Harness dark 1536</span></div>
+  
+<section class="gal" id="overview">
+  <header><h3>Overview</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="overview" src="shots/overview-1536-hm-dark.png" alt="Overview in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots/overview-1536-dark.png" alt="Overview in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-overview" data-k="v-overview" value="Good">Good</label><label><input type="radio" name="v-overview" data-k="v-overview" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-overview" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="sessions">
+  <header><h3>Sessions</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="sessions" src="shots/sessions-1536-hm-dark.png" alt="Sessions in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-a/sessions-1536-dark.png" alt="Sessions in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div><figure style="margin:10px 0 0"><figcaption>With eight computers: named chips give way to an Elsewhere menu (Harness dark, 1536)</figcaption><img src="shots/sessions-6computers-1536-hm-dark.png" alt="Sessions with eight computers"></figure>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-sessions" data-k="v-sessions" value="Good">Good</label><label><input type="radio" name="v-sessions" data-k="v-sessions" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-sessions" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="session">
+  <header><h3>Session</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="session" src="shots/session-1536-hm-dark.png" alt="Session in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-a/session-live-1536-dark.png" alt="Session in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-session" data-k="v-session" value="Good">Good</label><label><input type="radio" name="v-session" data-k="v-session" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-session" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="projects">
+  <header><h3>Projects</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="projects" src="shots/projects-1536-hm-dark.png" alt="Projects in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-a/projects-1536-dark.png" alt="Projects in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-projects" data-k="v-projects" value="Good">Good</label><label><input type="radio" name="v-projects" data-k="v-projects" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-projects" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="accounts">
+  <header><h3>Accounts</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="accounts" src="shots/accounts-1536-hm-dark.png" alt="Accounts in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots/accounts-1536-dark.png" alt="Accounts in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-accounts" data-k="v-accounts" value="Good">Good</label><label><input type="radio" name="v-accounts" data-k="v-accounts" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-accounts" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="account">
+  <header><h3>Account detail</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="account" src="shots/account-1536-hm-dark.png" alt="Account detail in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots/account-detail-1536-dark.png" alt="Account detail in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-account" data-k="v-account" value="Good">Good</label><label><input type="radio" name="v-account" data-k="v-account" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-account" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="add-account">
+  <header><h3>Add account</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="add-account" src="shots/add-account-1536-hm-dark.png" alt="Add account in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots/add-account-1536-dark.png" alt="Add account in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-add-account" data-k="v-add-account" value="Good">Good</label><label><input type="radio" name="v-add-account" data-k="v-add-account" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-add-account" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="mcp">
+  <header><h3>MCP servers</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="mcp" src="shots/mcp-1536-hm-dark.png" alt="MCP servers in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/mcp-ready-1536-dark.png" alt="MCP servers in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-mcp" data-k="v-mcp" value="Good">Good</label><label><input type="radio" name="v-mcp" data-k="v-mcp" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-mcp" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="skills">
+  <header><h3>Skills</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="skills" src="shots/skills-1536-hm-dark.png" alt="Skills in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/skills-ready-1536-dark.png" alt="Skills in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-skills" data-k="v-skills" value="Good">Good</label><label><input type="radio" name="v-skills" data-k="v-skills" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-skills" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="prompts">
+  <header><h3>System prompts</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="prompts" src="shots/prompts-1536-hm-dark.png" alt="System prompts in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/prompts-ready-1536-dark.png" alt="System prompts in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-prompts" data-k="v-prompts" value="Good">Good</label><label><input type="radio" name="v-prompts" data-k="v-prompts" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-prompts" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="routing">
+  <header><h3>API keys & routing</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="routing" src="shots/routing-1536-hm-dark.png" alt="API keys & routing in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/routing-ready-1536-dark.png" alt="API keys & routing in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-routing" data-k="v-routing" value="Good">Good</label><label><input type="radio" name="v-routing" data-k="v-routing" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-routing" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="apps">
+  <header><h3>Apps</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="apps" src="shots/apps-1536-hm-dark.png" alt="Apps in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/apps-ready-1536-dark.png" alt="Apps in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-apps" data-k="v-apps" value="Good">Good</label><label><input type="radio" name="v-apps" data-k="v-apps" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-apps" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="cli">
+  <header><h3>CLI reference</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="cli" src="shots/cli-1536-hm-dark.png" alt="CLI reference in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/cli-ready-1536-dark.png" alt="CLI reference in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-cli" data-k="v-cli" value="Good">Good</label><label><input type="radio" name="v-cli" data-k="v-cli" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-cli" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="settings">
+  <header><h3>Settings</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="settings" src="shots/settings-1536-hm-dark.png" alt="Settings in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots-b/settings-ready-1536-dark.png" alt="Settings in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-settings" data-k="v-settings" value="Good">Good</label><label><input type="radio" name="v-settings" data-k="v-settings" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-settings" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+<section class="gal" id="tray">
+  <header><h3>The tray popup</h3><span class="by">left: the app on your data · right: the reference (Harness dark, 1536)</span></header>
+  <div class="pair">
+    <figure><figcaption>The app, now</figcaption><img data-shot="tray" src="shots/tray-1536-hm-dark.png" alt="The tray popup in the app"></figure>
+    <figure><figcaption>The reference design</figcaption><img class="ref" src="../round2/app/screenshots/tray-1536-dark.png" alt="The tray popup in the reference" onerror="this.closest('figure').style.display='none'"></figure>
+  </div>
+  <div class="fb2">
+    <div><label><input type="radio" name="v-tray" data-k="v-tray" value="Good">Good</label><label><input type="radio" name="v-tray" data-k="v-tray" value="Change">Change (say what)</label></div>
+    <div><textarea data-k="c-tray" placeholder="What is wrong, what differs from the design, what is missing"></textarea></div>
+  </div>
+</section>
+
+  <section class="final" id="answers">
+    <div class="pick">
+      <b style="font-size:14px;margin-right:12px">Decision:</b>
+      <label><input type="radio" name="pick" data-k="pick" value="Commit to develop and release">Commit to develop and release</label>
+      <label><input type="radio" name="pick" data-k="pick" value="Commit to develop, no release yet">Commit to develop, no release yet</label>
+      <label><input type="radio" name="pick" data-k="pick" value="Fix what I marked first, then show me again">Fix what I marked first, then show me again</label>
+    </div>
+    <textarea data-k="general" placeholder="Anything else" style="width:100%;min-height:50px;margin-top:8px;font:14px var(--sans);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px"></textarea>
+    <div class="row" style="margin-top:8px"><button class="pbtn" id="copy">Copy my answers</button><button class="pbtn ghost" id="dl">Download as a file</button><button class="pbtn ghost" id="clear">Clear</button><span class="saved" id="saved"></span></div>
+    <textarea id="out" readonly aria-label="Your answers as text"></textarea>
+  </section>
+</main>
+<dialog id="zoom"><img alt=""></dialog>
+<script>
+  const sel = { brand: 'hm', theme: 'dark', size: '1536' };
+  const apply = () => document.querySelectorAll('img[data-shot]').forEach((i) => { i.src = `shots/${i.dataset.shot}-${sel.size}-${sel.brand}-${sel.theme}.png`; });
+  document.querySelectorAll('.bar button').forEach((b) => b.addEventListener('click', () => { const k = Object.keys(b.dataset)[0]; sel[k] = b.dataset[k]; b.parentElement.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); apply(); }));
+  const zoom = document.getElementById('zoom');
+  document.addEventListener('click', (e) => { const img = e.target.closest('.pair img'); if (!img) return; zoom.querySelector('img').src = img.src; zoom.showModal(); });
+  zoom.addEventListener('click', () => zoom.close());
+  (function () {
+    const KEY = document.body.dataset.fbkey; let draft = {};
+    try { draft = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+    const saved = document.getElementById('saved');
+    const save = () => { localStorage.setItem(KEY, JSON.stringify(draft)); saved.textContent = 'Saved in this browser ' + new Date().toLocaleTimeString(); };
+    document.querySelectorAll('[data-k]').forEach((x) => {
+      const k = x.dataset.k;
+      if (x.type === 'radio') { x.checked = draft[k] === x.value; x.addEventListener('change', () => { draft[k] = x.value; save(); }); }
+      else { x.value = draft[k] || ''; x.addEventListener('input', () => { draft[k] = x.value; save(); }); }
+    });
+    const text = () => {
+      const out = ['# The redesign implemented: my answers', ''];
+      document.querySelectorAll('.gal').forEach((p) => { const id = p.id; const v = draft['v-' + id], c = draft['c-' + id]; if (v || c) { out.push('## ' + p.querySelector('h3').textContent, 'Verdict: ' + (v || '(none)')); if (c) out.push('Notes: ' + c); out.push(''); } });
+      out.push('## Decision', draft.pick || '(none)'); if (draft.general) out.push('Anything else: ' + draft.general);
+      return out.join('\n');
+    };
+    const box = document.getElementById('out');
+    document.getElementById('copy').addEventListener('click', async () => { box.style.display = 'block'; box.value = text(); box.select(); try { await navigator.clipboard.writeText(box.value); saved.textContent = 'Copied. Paste it into the chat with Claude.'; } catch (e) { document.execCommand('copy'); saved.textContent = 'Copied (or select the text below and copy it).'; } });
+    document.getElementById('dl').addEventListener('click', () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text()], { type: 'text/markdown' })); a.download = 'implementation-answers.md'; a.click(); });
+    document.getElementById('clear').addEventListener('click', () => { if (!window.confirm('Clear every answer on this page?')) return; localStorage.removeItem(KEY); location.reload(); });
+  })();
+</script>
+</body>
+</html>

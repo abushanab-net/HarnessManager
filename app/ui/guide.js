@@ -1,4 +1,4 @@
-// First-run walkthrough: on a page's first visit, a short tour highlights one part of the page at a time with
+// The page tour, started from the ? in the top bar: it highlights one part of the page at a time with
 // a note beside it (Next / Back, or the arrow keys). Finishing a tour marks its page; Skip or Esc turns every
 // page's tour off. Remembered on this computer; the ? button replays the current page's tour, and
 // Settings > Show the tours again turns them all back on.
@@ -9,31 +9,31 @@ import { esc } from './lib.js';
 // [selector of the part to highlight (null: the middle of the window), title, explanation]
 const TOURS = {
   home: [
-    [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode and Antigravity on this computer in one place. This short tour shows each page the first time you open it.'],
-    ['aside.side nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts your tools share.'],
-    ['[data-testid=finding]', 'The finding', 'The one sentence that matters now: a limit running out before its reset, or the account with the most room. Measured numbers are plain; estimates carry ≈.'],
-    ['.rds', 'Key numbers', 'Tokens, cost and the share read from cache, each with its trend and its change against the period before: today, 7 days, 30 days or all time. Cost is what the tokens would cost at API list prices: subscriptions are not billed per token.'],
-    ['[data-testid=home-filters]', 'Tool and computers', 'Show one tool or all of them; with sync on, every number adds up your computers or shows this one only.'],
-    ['[data-testid=routes]', 'Live routes', 'The dial: your computers at the docks, then each account, the tool it runs, the router gate and the providers. Beads move with the tokens of the last five minutes; red is a paused provider or an account not logged in. Hover or click a body to trace its route; click it again to open it.'],
+    [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode, Antigravity, Pi and Oh My Pi on this computer in one place. The ? at the top shows this tour of a page.'],
+    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts shared between accounts.'],
+    ['[data-testid=use-next]', 'Use next', 'The account to start on now: the most room, or the 5-hour window that resets soonest. Start opens a terminal on it; Folder picks where.'],
+    ['[data-testid=finding]', 'Runs out first', 'The account on pace to run out before its reset, with the measured basis under it. Measured numbers are plain; estimates carry ≈.'],
+    ['[data-testid=running-now]', 'Running now', 'Every console open, on which computer; Follow opens its session as it writes.'],
+    ['[data-testid=horizon]', 'Reset Horizon', 'Each account as a lane: its week ring, the capacity left in each window, and the time to each reset on a 7-day scale (the 5-hour window on its own zoom). Start appears on hover.'],
+    ['[data-testid=kpi-tokens]', 'Key numbers', 'Tokens, cost and the share read from cache, each with its trend and its change against the period before: today, 7 days, 30 days or all time. Cost is what the tokens would cost at API list prices.'],
     ['[data-testid=attention]', 'Needs attention', 'A limit that runs out before its reset at today\'s pace, a login to renew, a provider the router paused.'],
-    ['[data-testid=limits]', 'Limits', 'Every account as a ring: the inner arc is the 5-hour window, the outer the week; dashed is the estimate at the reset.'],
-    ['[data-testid=request-log]', 'Every model call', 'Newest first, with its account, model, tokens, cost and reply timing.'],
-    ['[data-nav=home] .count', 'Today', 'Today\'s usage at API prices, always in view.'],
+    ['[data-testid=activity]', 'Activity, 53 weeks', 'A year clock of daily tokens: 53 weeks around, Monday inside, the busiest day in the centre.'],
+    ['[data-testid=latest-replies]', 'Latest replies', 'Newest first, with the account, model, tokens and the time to the first reply; the request log has every call with its cost.'],
+    ['[data-nav=home] .nav-badge', 'Today', 'Today\'s usage at API prices, always in view.'],
   ],
   accounts: [
     ['[data-testid=add-account]', 'Add an account', 'Each account gets its own folder and login. Sign in once; Harness Manager keeps the accounts apart.'],
-    ['.tray', 'This week', 'Totals for all accounts, and when each account\'s limits free up again.'],
     ['[data-testid=usage-panel]', 'Tokens per day', 'Every account\'s tokens for each day of the range, priced at API list prices in the rows below. Subscriptions are not billed per token.'],
-    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets, and the row ends with the account\'s tokens and cost for the range.'],
-    ['[data-testid=accounts-table] .acr .lims', 'Limits', 'Every limit of the plan: 5-hour, weekly and per model. The ↻ button beside a Claude account reads its limits from Anthropic right now.'],
-    ['[data-testid=accounts-table] .go .btn', 'Start', 'Opens a terminal running the tool as this account. Log in appears instead when the account has not signed in yet.'],
+    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets.'],
+    ['[data-testid=accounts-table] .acct-windows-col', 'Limits', 'Every limit of the plan: 5-hour, weekly and per model. The ↻ button beside a Claude account reads its limits from Anthropic right now.'],
+    ['[data-testid=accounts-table] .btn-lane-start', 'Start', 'Opens a terminal running the tool as this account. Log in appears instead when the account has not signed in yet.'],
     ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Log in again, open the account\'s folder, its settings, or remove it.'],
     ['[data-testid=best-note]', 'The account with the most room', 'The account furthest from its limits says so: start your next session there.'],
   ],
   account: [
-    ['.tabs2', 'Overview, Sessions, Projects, Settings', 'Plan, limits and usage; this account\'s sessions and projects; and its email, key or endpoint.'],
+    ['.page-tabs', 'Overview, Sessions, Projects, Settings', 'Plan, limits and usage; this account\'s sessions and projects; and its email, key or endpoint.'],
     ['[data-act=start-in-folder]', 'Start in a folder', 'Opens the account in the project folder you pick.'],
-    ['.trow [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
+    ['.page-actions [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
   ],
   projects: [
     ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
@@ -41,12 +41,12 @@ const TOURS = {
   ],
   sessions: [
     ['[data-testid=rail]', 'Projects, pinned and recent', 'What runs now, every project, the ones you pinned, and your tags. Pick one to see only its sessions.'],
-    ['.tagc.add', 'Tags', 'Your own labels on a session or a project, shared across tools and accounts. Group by Tag, or click a tag to see what carries it.'],
+    ['[data-act=tag-edit]', 'Tags', 'Your own labels on a session or a project, shared across tools and accounts. Group by Tag, or click a tag to see what carries it.'],
     ['[data-testid=find]', 'Find a session', 'The search above narrows this list by title, folder, account and tool as you type.'],
     ['[data-testid=group]', 'Grouped by project', 'Sessions of the same repository sit together, whichever account or tool ran them. Open one to read it.'],
   ],
   session: [
-    ['[data-testid=conv-panel] .seg3', 'Changes and Failed', 'List only the steps that edited files, or only the failed commands.'],
+    ['[data-tour=modes]', 'Changes and Failed', 'List only the steps that edited files, or only the failed commands.'],
     ['[data-testid=chat]', 'Conversation', 'Your prompts on the right, the answers on the left, and every tool call (folded) where it happened: click one for its output or diff. An open session follows as its tool writes.'],
     ['[data-testid=resume]', 'Resume', 'Continues this session in a terminal, with the same account.'],
     ['[data-testid=export-md]', 'Export', 'Save the session as a Markdown file.'],
@@ -63,12 +63,11 @@ const TOURS = {
     ['[data-testid=skill-install]', 'Install a skill', 'From a folder or a GitHub link, then tick the tools that should have it. The tick in a tool\'s column header links every skill shown in one go. Skills are linked, so one update reaches every tool.'],
   ],
   prompts: [
-    ['.tabs2', 'One list per tool', 'The instructions file of each tool: CLAUDE.md for Claude Code, AGENTS.md for Codex, and so on.'],
+    ['[data-testid=prompt-tabs]', 'One list per tool', 'The instructions file of each tool: CLAUDE.md for Claude Code, AGENTS.md for Codex, and so on.'],
     ['[data-testid=prompt-new]', 'Versions', 'Keep several prompts and switch with Use this prompt. The file\'s current text is saved in the list before it is replaced.'],
   ],
   settings: [
     ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
-    ['[data-testid=settings-save]', 'Save', 'These settings belong to this computer.'],
     ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
     ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
     ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
@@ -145,7 +144,6 @@ document.addEventListener('rendered', (e) => {
   const { view } = e.detail;
   if (tour && tour.view !== view) end(false); // left the page: its tour waits for the next visit
   if (tour) { tour.steps = visibleSteps(view); tour.i = Math.min(tour.i, tour.steps.length - 1); if (tour.i < 0) end(false); else show(); return; }
-  if (!seen(view) && !document.getElementById('dialog-root').innerHTML) startTour(view);
 });
 
 action('tour-next', () => { if (!tour) return; if (tour.i < tour.steps.length - 1) { tour.i++; show(); } else end(); });

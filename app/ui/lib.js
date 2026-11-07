@@ -11,7 +11,6 @@ export const fmt = (n) => {
 };
 
 export const hm = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-export const dayShort = (ms) => new Date(ms).toLocaleDateString([], { weekday: 'short' });
 export const when = (ms) => {
   if (!ms) return '-';
   const d = new Date(ms), now = new Date();
@@ -27,18 +26,7 @@ export const dur = (ms) => {
   if (m >= 60) return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} m`;
   return `${m} m`;
 };
-export const resetText = (ms, now) => {
-  if (!ms) return 'no window open';
-  if (ms <= now) return 'reset';
-  const sameWeek = ms - now < 6 * 86400000;
-  const d = new Date(ms);
-  return (ms - now < 86400000 && d.getDate() === new Date(now).getDate()) ? `until ${hm(ms)}` : sameWeek ? `${dayShort(ms)} ${hm(ms)}` : d.toLocaleDateString();
-};
-export const lvl = (p) => (p >= 90 ? 'neg' : p >= 75 ? 'warn' : '');
 
-export const initials = (name) => name.split(/[-_ ]/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('');
-export const hue = (name) => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-export const avatar = (name, sm = false) => `<span class="av${sm ? ' sm' : ''}">${esc(initials(name))}</span>`;
 
 /** The tool's own icon (LobeHub Icons, see icons/README.md). */
 /** Pages rows in place: those off the page get `.paged`. Returns the pager's HTML, or nothing when one page holds all;
@@ -54,7 +42,6 @@ export function pager(rows, st, act) {
 export const toolIcon = (h, s = 16) => `<img class="ticon" src="icons/${esc(h)}.svg" width="${s}" height="${s}" alt="">`;
 export const toolPill = (h, label) => `<span class="tool ${esc(h)}">${toolIcon(h, 13)}${esc(label || h)}</span>`;
 
-export const meter = (p, txt) => `<div class="meter"><div class="bar"><i class="${lvl(p)}" style="width:${Math.min(100, p)}%"></i></div><span><b>${Math.round(p)}%</b> · ${esc(txt)}</span></div>`;
 
 const I = (d, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 export const ic = {
@@ -112,64 +99,6 @@ export const brandMark = (s = 28) => `<svg width="${s}" height="${s}" viewBox="6
 <path d="M84 270 C84 242 106 229 149 208 L333 121 L333 244 L151 332 C111 353 91 368 84 393 Z" fill="url(#hm-fc)"/></svg>`;
 
 
-/** Bars of values over day labels; the last bar (today) in the accent. */
-export function bars(vals, labels, { w = 640, h = 170 } = {}) {
-  const padL = 44, padB = 22, padT = 8, iw = w - padL - 4, ih = h - padB - padT;
-  const max = Math.max(1, ...vals);
-  const steps = [1, 2, 5];
-  let step = 1;
-  for (let e = 1; step * 4 < max; e *= 10) for (const s of steps) if (step * 4 < max) step = s * e;
-  const top = Math.ceil(max / step) * step, bw = iw / vals.length;
-  let s = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Tokens per day">`;
-  for (let v = 0; v <= top; v += step) {
-    const y = padT + ih - (v / top) * ih;
-    s += `<line x1="${padL}" x2="${w - 4}" y1="${y}" y2="${y}" style="stroke:var(--ru)"/><text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="11" style="fill:var(--m)">${fmt(v)}</text>`;
-  }
-  vals.forEach((v, i) => {
-    const bh = (v / top) * ih, x = padL + i * bw + bw * 0.22, today = i === vals.length - 1;
-    s += `<rect x="${x}" y="${padT + ih - bh}" width="${bw * 0.56}" height="${Math.max(bh, v ? 1 : 0)}" rx="2" style="fill:${today ? 'var(--ac)' : 'var(--bar)'}"><title>${esc(labels[i])}: ${fmt(v)}</title></rect>`;
-    s += `<text x="${x + bw * 0.28}" y="${h - 6}" text-anchor="middle" font-size="11" style="fill:${today ? 'var(--ac)' : 'var(--m)'}">${esc(labels[i])}</text>`;
-  });
-  return s + '</svg>';
-}
-
-/** "When limits free up": the next seven days, one row per account with limits. */
-export function timeline(rows, now, w = 950) {
-  // the design's lanes: a name column, then seven days from now with a shaded lane per account
-  w = Math.max(560, w);
-  const padL = 150, rowH = 28, top = 22, h = top + rows.length * rowH + 4, span = 7 * 86400000;
-  const x = (t) => padL + Math.max(0, Math.min(1, (t - now) / span)) * (w - padL - 8);
-  const day = (t) => new Date(t).toLocaleDateString([], { weekday: 'short' }) + ' ' + hm(t);
-  let s = `<svg width="${w}" height="${h}" style="display:block;max-width:100%;height:auto;font-family:var(--sans)" viewBox="0 0 ${w} ${h}" role="img" aria-label="When each limit resets over the next seven days">`;
-  const mid = new Date(now); mid.setHours(24, 0, 0, 0);
-  s += `<text x="${padL + 6}" y="13" font-size="11" style="fill:var(--m);font-family:var(--mono)">${dayShort(now)} now</text>`;
-  for (let i = 0; i < 7; i++) {
-    const t = mid.getTime() + i * 86400000, xx = x(t);
-    if (xx > w - 40) break;
-    s += `<line x1="${xx}" x2="${xx}" y1="2" y2="${h}" style="stroke:var(--ru)"/>${xx - padL > 60 ? `<text x="${xx + 6}" y="13" font-size="11" style="fill:var(--m);font-family:var(--mono)">${dayShort(t)}</text>` : ''}`;
-  }
-  rows.forEach((r, i) => {
-    const y = top + i * rowH, cy = y + 11;
-    s += `<text x="0" y="${cy + 4}" font-size="13" style="fill:var(--t)">${esc(r.name)}</text>`;
-    s += `<rect x="${padL}" y="${y}" width="${w - padL}" height="22" rx="4" style="fill:var(--sub)"/>`;
-    const txt = (tx, str) => `<text x="${tx}" y="${cy + 4}" font-size="11" style="fill:var(--t2);font-family:var(--mono)">${esc(str)}</text>`;
-    if (r.note) { s += txt(padL + 8, r.note); return; }
-    const sess = r.session && r.session.resets_at > now ? r.session : null, week = r.week && r.week.resets_at > now ? r.week : null;
-    let tx = padL + 8;
-    if (sess) {
-      const bw = Math.max(8, x(sess.resets_at) - x(now));
-      s += `<rect x="${padL + 4}" y="${cy - 4}" width="${bw}" height="8" rx="4" style="fill:${sess.used >= 75 ? 'var(--warn)' : 'var(--t)'}"/>`;
-      tx = padL + 4 + bw + 6;
-    }
-    const label = [sess ? '5 h → ' + hm(sess.resets_at) : '', week ? 'week resets ' + day(week.resets_at) : ''].filter(Boolean).join(' · ') || 'no window open';
-    s += txt(tx, label);
-    if (week) s += `<rect x="${x(week.resets_at) - 1}" y="${y + 1}" width="2" height="20" style="fill:var(--ac)"/>`;
-    // where a limit runs out at the pace so far, when that is before its reset
-    if (r.out && r.out > now) s += `<g data-testid="runs-out"><title>Runs out ${esc(day(r.out))} at this pace</title><rect x="${x(r.out) - 1}" y="${y + 1}" width="2" height="20" style="fill:var(--warn)"/></g>`;
-  });
-  return s + '</svg>';
-}
-
 /** Markdown subset for assistant answers: fences, headings, lists, tables, inline code, bold, italics, links. */
 export function md(src) {
   const lines = String(src || '').replace(/\r/g, '').split('\n');
@@ -218,9 +147,4 @@ export function md(src) {
     out += `<p>${inline(para.join('\n')).replace(/\n/g, '<br>')}</p>`;
   }
   return out;
-}
-
-export function diffHtml(diff) {
-  return '<div class="diff">' + String(diff || '').split('\n').filter((l, i, a) => l || i < a.length - 1).map((l) =>
-    `<div class="${l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}">${esc(l) || ' '}</div>`).join('') + '</div>';
 }

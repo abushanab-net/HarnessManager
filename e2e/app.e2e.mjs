@@ -195,81 +195,65 @@ try {
   // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
   await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off'); localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`, [TOURED]);
 
-  await test('overview: the finding, the readouts, the dial, the year clock, limits as rings, reply timing and the request log', async () => {
+  await test('overview: the deck, the horizon lanes, the readouts, the year clock, attention, reply timing and the request log', async () => {
     await $('[data-testid=heatmap]');
-    assert.equal(await exec("return document.querySelectorAll('[data-testid=heatmap] .hm').length"), 371, '53 weeks of days on the year clock');
-    // the finding leads; the basis under it counts the requests of the range
-    await hasText('[data-testid=finding]', 'codex-main');
-    await hasText('[data-testid=basis]', '5 requests');
-    // the latest replies, as the design shows them; Request log opens the whole log
+    assert.equal(await exec("return document.querySelectorAll('[data-testid=heatmap] .yc-cell').length"), 371, '53 weeks of days on the year clock');
+    // the deck: the account to use next with Start, the account that runs out first with its measured basis, what runs now
+    await hasText('[data-testid=use-next]', 'codex-main');
+    await $('[data-testid=finding]');
+    await hasText('[data-testid=basis]', 'easured');
+    await $('[data-testid=use-next] [data-testid=start-best]');
+    await $('[data-testid=running-now]');
+    // the lanes: one per account; the ring says what is left of the week; the ruler is linear over seven days
+    await $('[data-testid=lane-codex-main]');
+    assert.equal(await exec("return document.querySelector('[data-testid=lane-codex-main] .ring-val').textContent"), '79%', 'the ring says what is left');
+    await hasText('[data-testid=lane-codex-main]', 'Wk ↻');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.axis-tick')].map((t) => t.textContent)"), ['NOW', '+2d', '+4d', '+6d', '+7d'], 'a linear 7-day ruler');
+    // the latest replies carry no tokens-per-second; Request log opens the whole log in a dialog, every number column right-aligned
     await hasText('[data-testid=latest-replies]', 'claude-opus-5-5');
+    assert.ok(!(await exec("return document.querySelector('[data-testid=latest-replies] thead').textContent.includes('Speed')")), 'no speed column on the Overview');
     await click('[data-testid=request-log-open]');
-    // request log: every number header lines up with its numbers, and the speed and first-token columns are there
     await $('[data-testid=request-log] tbody tr');
     const off = await exec(`const t = document.querySelector('[data-testid=request-log]'); const r = t.querySelector('tbody tr');
       return [...t.querySelectorAll('thead th.num')].map((th) => Math.abs(th.getBoundingClientRect().right - r.children[th.cellIndex].getBoundingClientRect().right));`);
     assert.ok(off.length === 7 && off.every((d) => d < 1), 'number headers aligned: ' + off);
     await $('[data-testid=request-log] [data-testid=ttft]');
-    // the year clock fits its panel and is drawn for its width
-    const fits = () => exec("const w = document.querySelector('.hmwrap'); const r = document.querySelector('[data-testid=heatmap]').getBoundingClientRect(); return r.width > 100 && r.width <= w.clientWidth + 1");
-    assert.ok(await fits(), 'the year clock fits its panel');
-    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] .hm:not([data-l=\"0\"])').length")) > 0, 'today shaded');
-    // the readouts: tokens, cost at list prices, the share read from cache
-    await hasText('[data-testid=kpi-cost]', '$0.01');
-    await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
+    await exec("document.querySelector('[data-act=dialog-close]').click()");
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=request-log]')")), 'the log closed');
+    // the year clock shades today; the readouts: tokens, cost at list prices, the share read from cache
+    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] .yc-cell:not(.lv-0)').length")) > 0, 'today shaded');
+    await hasText('[data-testid=kpi-cost]', '$0.01');
+    await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await hasText('#today-cost', '$');
     await shot('00-home');
-    await click('[data-testid=kpi-cost]');
+    // a tool chip shows that tool's lanes and replies; Antigravity too (it keeps no usage logs, so its numbers are zero)
     await click('[data-testid=tool-codex]');
-    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid=request-log] tbody tr')].map(r => r.innerText)")).every((t) => t.includes('Codex')), 'only codex requests');
-    // as drawn: every shown tool is a choice, Antigravity too (it keeps no usage logs, so its numbers are zero)
+    await waitFor(async () => (await exec("const l = [...document.querySelectorAll('.t-lane')]; return l.length > 0 && l.every((x) => x.dataset.name.startsWith('codex'))")), 'only codex lanes');
     await click('[data-testid=tool-agy]');
-    await hasText('[data-testid=request-log]', 'No replies in this range.');
+    await hasText('[data-testid=latest-replies]', 'No replies in this range.');
     await click('[data-testid=tool-all]');
-    // the dial: computers at the docks, accounts and tools as bodies with their routes, drawn as SVG; no provider hop, no legend
-    await $('[data-testid=routes] svg');
-    const dial = await exec(`const t = document.querySelector('[data-testid=routes]');
-      return { nodes: [...t.querySelectorAll('[data-node]')].map((n) => n.dataset.node), routes: t.querySelectorAll('path.e').length, labels: t.querySelectorAll('.lb').length };`);
-    assert.ok(dial.nodes.includes('a:codex-main') && dial.nodes.includes('t:codex') && !dial.nodes.some((n) => /^[pv]:/.test(n)), 'account and tool bodies, no provider: ' + dial.nodes);
-    assert.ok(!(await exec("return !!document.querySelector('.ov.b')")), 'no legend on the scene');
-    assert.equal(await exec("return [...document.querySelectorAll('[data-testid=routes] svg text')].map((t) => t.textContent).join()"), 'accounts', 'only the accounts ring is named');
-    assert.ok(dial.routes > 0 && dial.labels === dial.nodes.filter((n) => /^(a:|t:|router$)/.test(n)).length, 'every account, tool and router body has a label; a dock is named on hover');
-    // no label runs into another, however long its text
-    const overlaps = await exec(`const r = [...document.querySelectorAll('[data-testid=routes] .lb')].map((n) => n.getBoundingClientRect());
-      return r.filter((a, i) => r.some((b, j) => j !== i && a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1)).length;`);
-    assert.equal(overlaps, 0, 'labels do not overlap');
-    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
-    await shot('00b-overview-routes');
-    // the readouts sit in the sidebar, not on the scene; the Overview's limits are its panel, so the sidebar leaves them out
-    assert.ok(await exec("return !!document.querySelector('#nav-stats [data-testid=kpi-cost]') && !document.querySelector('.ov.l .rds')"), 'the readouts are in the sidebar');
-    // a wide page: the dial grows with it
-    const dialR = () => exec("const l = document.querySelector('[data-testid=routes] svg line'); return l ? (l.x2.baseVal.value - l.x1.baseVal.value) / 2 - 20 : 0");
-    const narrowR = await dialR();
-    await page.setViewportSize({ width: 1800, height: 1000 });
-    await waitFor(async () => (await dialR()) > narrowR, 'the dial grew with the page');
-    const wideR = await dialR();
-    assert.ok(wideR >= 380, 'the dial is at least 380px at 1800: ' + wideR);
-    await shot('00c-overview-wide');
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await waitFor(async () => (await dialR()) < wideR, 'the dial back at 1280');
-    // limits as rings in the sidebar, not on the page, and no Running now: Sessions lists the live ones
-    await hasText('[data-testid=nav-limits]', 'codex-main');
-    assert.equal(await exec("return document.querySelector('[data-testid=nav-limit-codex-main] svg text').textContent"), '79%', 'the ring says what is left');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=limits], [data-testid=running-now]')")), 'no Limits or Running now panel on the Overview');
+    await $('[data-testid=lane-claude-main]');
+    // no Limits panel and no rings in the rail: the rings are the tray popup's
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=limits], aside.rail [data-testid=nav-limits]')")), 'no Limits panel, no rings in the rail');
     await hasText('[data-testid=activity]', 'Activity, 53 weeks');
     await $('[data-testid=attention]');
     // a range picks the period; the readouts follow
     await click('[data-testid=range-7d]');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('on')")), '7 days picked');
-    await hasText('[data-testid=basis]', '5 requests');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('active')")), '7 days picked');
+    await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('00c-overview-panels');
     await click('[data-testid=range-today]');
+    // a selected lane names its route under the lanes; Escape returns to the finding's account
+    await click('[data-testid=lane-codex-main]');
+    await hasText('.route-inspector-bar', 'codex-main');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => exec("const l = document.querySelector('.t-lane'); return l && l.classList.contains('selected')"), 'the first lane selected again');
   });
 
-  await test('sidebar: Setup folds and stays as left, a page inside opens it, the pinned projects fold', async () => {
+  await test('sidebar: Setup folds and stays as left, a page inside opens it, the pinned projects fold, the tray popup', async () => {
     await nav('#home');
     const shut = () => exec("return document.getElementById('nav-setup').hidden");
     const was = await shut();
@@ -280,9 +264,13 @@ try {
     if (!(await shut())) { await click('[data-testid=nav-setup]'); await waitFor(async () => shut(), 'shut'); }
     await nav('#skills');
     await waitFor(async () => !(await shut()), 'open for the page shown');
-    // off the Overview the sidebar's foot carries the readouts and every account's limit ring
+    // the rail carries no rings or readouts; the tray popup shows every account's ring and is reached by keyboard
+    await click('[data-testid=tray-trigger]');
     await $('[data-testid=nav-limit-codex-main] svg');
-    await hasText('[data-testid=nav-stats]', 'Tokens');
+    assert.ok(await exec("return !!document.activeElement.closest('.tray-popup')"), 'focus moves into the popup');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return !!document.querySelector('#tray-root .tray-popup')")), 'Escape closes the popup');
+    assert.equal(await exec("return document.activeElement.dataset.testid"), 'tray-trigger', 'focus returns to the trigger');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
     await click('[data-testid=fold-pins]');
@@ -297,10 +285,11 @@ try {
     await $('[data-testid=row-claude-main]');
     await $('[data-testid=row-codex-main]');
     await hasText('[data-testid=row-codex-main]', 'ChatGPT');
-    // every account with plan limits has a ring in the sidebar, read or not
+    // every account with plan limits has a ring in the tray popup, read or not
+    await click('[data-testid=tray-trigger]');
     await hasText('[data-testid=nav-limits]', 'claude-main');
     await hasText('[data-testid=nav-limits]', 'codex-main');
-    await nav('#accounts');
+    await page.keyboard.press('Escape');
     await hasText('[data-testid=row-codex-main]', '79% left');
     await shot('01-accounts');
   });
@@ -309,7 +298,7 @@ try {
     await click('[data-testid=add-account]');
     await type('[data-testid=add-name]', 'work-max');
     await type('[data-testid=add-email]', 'alex@example.com');
-    await hasText('.dlg .clibox', 'hrm add work-max --email alex@example.com');
+    await hasText('[data-testid=add-cli]', 'hrm add work-max --email alex@example.com');
     await shot('02-add-account');
     await click('[data-testid=add-create]');
     await $('[data-testid=login-code]');
@@ -331,7 +320,7 @@ try {
       swap.push([/\\d{5} d \\d+ h/g, () => (resets++ ? '4 d 6 h' : '2 h 14 m')]);
       const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       for (let n; (n = w.nextNode());) for (const [a, b] of swap) n.nodeValue = n.nodeValue.replace(a, b);
-      document.getElementById('toast').className = 'off';
+      document.getElementById('notice').innerHTML = '';
       document.documentElement.dataset.theme = 'dark';`, [os.hostname()]); // the README shows the dark look, Harness
     await sleep(400);
     // HRM_README_SHOT=1 refreshes the tracked copy; otherwise it stays with the other screenshots
@@ -374,7 +363,7 @@ try {
 
   await test('add a Codex account: sign-in opens in a terminal', async () => {
     await click('[data-testid=add-account]');
-    await select('[data-testid=add-harness]', 'codex');
+    await click('[data-testid=add-tool-codex]');
     await type('[data-testid=add-name]', 'codex-personal');
     await click('[data-testid=add-create]');
     await waitFor(() => readLines(termLog).some((t) => JSON.stringify(t.args) === JSON.stringify(['login', 'codex-personal'])), 'login terminal');
@@ -411,12 +400,13 @@ try {
   await test('sessions are grouped by repository across Claude Code and Codex', async () => {
     await nav('#sessions');
     await $('[data-testid=group]');
-    const groups = await exec(`return [...document.querySelectorAll('[data-testid=group]')].map(g => g.innerText)`);
+    // (at 1280 the tool pill shows its icon alone, its name as the title)
+    const groups = await exec(`return [...document.querySelectorAll('[data-testid=group]')].map(g => g.innerText + ' ' + [...g.querySelectorAll('.a-toolpill')].map((t) => t.title).join(' '))`);
     const g = groups.find((x) => x.includes('platform-gitops'));
     assert.ok(g, 'a platform-gitops group');
     assert.ok(g.includes('Claude Code') && g.includes('Codex'), 'both tools in one project');
     // as in the design: a red dot for a session where a command failed
-    assert.ok(await exec("return !!document.querySelector('[data-testid=session-s-main-1] .sdot.bad')"), 'the session with a failed command is marked');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=session-s-main-1] .a-dot.bad')"), 'the session with a failed command is marked');
     await shot('06-sessions');
     // a new session in the project's folder, as any account: the project's latest account comes first
     await exec(`[...document.querySelectorAll('[data-testid=group]')].find((g) => g.innerText.includes('platform-gitops')).querySelector('[data-testid=project-new]').click()`);
@@ -438,10 +428,10 @@ try {
     await waitFor(async () => (await exec(`return document.querySelectorAll('[data-testid=group]').length`)) === 4, 'four tool groups');
     await click('[data-testid=group-project]');
     await type('[data-testid=find]', 'longhorn');
-    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]').length`)) === 1 && (await exec('return location.hash')).includes('q=longhorn'), 'the top bar search asks the index and shows one session');
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.a-srow').length`)) === 1 && (await exec('return location.hash')).includes('q=longhorn'), 'the top bar search asks the index and shows one session');
     await page.fill('[data-testid=find]', '');
     await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
-    await waitFor(async () => (await exec(`return document.querySelectorAll('.srow[data-search]').length`)) > 1, 'every session is back');
+    await waitFor(async () => (await exec(`return document.querySelectorAll('.a-srow').length`)) > 1, 'every session is back');
   });
 
   await test('projects: cost per project, pin, rename and tabs in place, and a project opened in Sessions', async () => {
@@ -455,9 +445,9 @@ try {
     // the sort, the chart's tabs and the page size redraw their part only: the tiles stay the same nodes
     await exec("window.__tiles = document.getElementById('pj-tiles')");
     await click('[data-testid=psort-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('on')"), 'sorted by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('active')"), 'sorted by cost');
     await click('[data-testid=pmetric-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('on')"), 'distribution by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('active')"), 'distribution by cost');
     assert.ok(await exec("return document.getElementById('pj-tiles') === window.__tiles"), 'the tiles were not redrawn');
     assert.ok((await exec('return location.hash')).includes('metric=cost'), 'the choice is in the hash: ' + (await exec('return location.hash')));
     // pin from the row's icon: the sidebar shows it, settings keep it, the page stays
@@ -485,17 +475,17 @@ try {
     // open the project by clicking the row: Sessions shows only it, with its numbers in the header
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).click()");
     await hasText('[data-testid=project-title]', 'platform-gitops');
-    await hasText('[data-testid=project-stats]', 'at list prices');
-    assert.ok(await exec("return [...document.querySelectorAll('.srow[data-search]')].every((r) => r.dataset.search.includes('platform-gitops'))"), 'only the project\'s sessions');
+    await hasText('[data-testid=project-stats]', 'list prices');
+    assert.ok(await exec("return [...document.querySelectorAll('.a-srow')].every((r) => r.innerText.includes('platform-gitops'))"), 'only the project\'s sessions');
     await shot('06e-project-sessions');
     // the header's pin icon pins and unpins too
-    await click('.sesshead [data-act=project-pin]');
+    await click('.page-heading [data-act=project-pin]');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned from the header');
-    await click('.sesshead [data-act=project-pin]');
+    await click('.page-heading [data-act=project-pin]');
     await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned from the header');
     await nav('#sessions');
-    await hasText('#sheet .crumb', 'Sessions');
-    await $('[data-testid=rail-live]'); // the title shows while the list loads; the rail comes with the list
+    await hasText('[data-testid=sessions-finding]', 'sessions');
+    await $('[data-testid=rail-live]'); // the rail comes with the list
     assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
   });
 
@@ -504,15 +494,15 @@ try {
     await click('[data-testid=read-s-main-1]');
     await hasText('[data-testid=session-title]', 'Longhorn backup target');
     // the steps inline in the chat, folded: each says what it ran; a click unfolds its output
-    await hasText('[data-testid=chat] .steps', 'argocd app sync longhorn-staging');
+    await hasText('[data-testid=chat] .a-steps', 'argocd app sync longhorn-staging');
     assert.ok(!(await text('[data-testid=chat]')).includes('connection closed'), 'output folded');
-    await click('[data-testid=chat] .si:has(.negT) [data-act=step-open]');
+    await click('[data-testid=chat] .a-step:has(.a-bad) [data-act=step-open]');
     await hasText('[data-testid=chat]', 'connection closed');
     // the conversation as a chat: the prompt on the right, then the steps, then the answer, in the order they happened
-    await hasText('[data-testid=chat] .msg.you', 'Add a Longhorn backup target');
-    await hasText('[data-testid=chat] .msg.ai', 'What changed');
-    const order = await exec("return [...document.querySelectorAll('#chat > .msg, #chat > .steps')].map((e) => e.className.split(' ')[0] + (e.classList.contains('you') ? ':you' : e.classList.contains('ai') ? ':ai' : ''))");
-    assert.deepEqual(order, ['msg:you', 'steps', 'msg:ai'], 'prompt, steps, answer');
+    await hasText('[data-testid=chat] .a-msg.you', 'Add a Longhorn backup target');
+    await hasText('[data-testid=chat] .a-msg.ai', 'What changed');
+    const order = await exec("return [...document.querySelectorAll('#chat > .a-msg, #chat > .a-steps')].map((e) => e.className.split(' ')[0] + (e.classList.contains('you') ? ':you' : e.classList.contains('ai') ? ':ai' : ''))");
+    assert.deepEqual(order, ['a-msg:you', 'a-steps', 'a-msg:ai'], 'prompt, steps, answer');
     await shot('07-session');
     await click('[data-testid=mode-changes]');
     await click('[data-testid=chat] [data-act=step-open]');
@@ -538,10 +528,10 @@ try {
     await hasText('[data-testid=chat]', 'First answer.');
     // the sandbox has no running console, so start the watcher the page starts for an open session
     // (each redraw re-reads whether the session is open, so it is started again after each one)
-    const live = () => exec("return import('./views.js').then((v) => import('./core.js').then((c) => v.watchLive({ ...c.S.cache.transcript.meta, open: true })))");
+    const live = () => exec("return import('./sessions.js').then((v) => import('./core.js').then((c) => v.watchLive({ ...c.S.cache.transcript.meta, open: true })))");
     await live();
     const atEnd = () => exec("const c = document.getElementById('chat'); return c.scrollHeight - c.scrollTop - c.clientHeight < 40");
-    const shown = () => exec("return !document.querySelector('.toend').hidden");
+    const shown = () => exec("return !document.querySelector('.a-toend').hidden");
     // not at the end: the button shows; it jumps to the end and follows
     assert.ok(!(await atEnd()) && (await shown()), 'opened at the top with the button showing');
     await click('[data-testid=follow-end]');
@@ -568,7 +558,7 @@ try {
     await nav('#sessions');
     await $('[data-testid=session-s-main-1]');
     // the + on the row opens the editor; Enter adds a tag; Save writes it and the row shows the chip
-    await click('[data-testid=session-s-main-1] .tagb');
+    await click('[data-testid=session-s-main-1] .a-tagbtn');
     await type('[data-testid=tag-new]', 'release\n');
     await waitFor(async () => exec("return [...document.querySelectorAll('#tg-list input:checked')].map((i) => i.value).includes('release')"), 'release ticked');
     await click('[data-testid=tag-save]');
@@ -576,23 +566,23 @@ try {
     assert.ok(JSON.parse(hrm('tags', '--json')).some((t) => t.tag === 'release' && t.sessions === 1), 'the CLI lists it');
     // Group by Tag: a release group and an untagged one; the chip filters to the tagged session
     await click('[data-testid=group-tag]');
-    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid=group] .gname')].map((e) => e.textContent.trim())")).join(',').includes('release'), 'a release group');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid=group] .a-gname')].map((e) => e.textContent.trim())")).join(',').includes('release'), 'a release group');
     await hasText('#sheet', 'untagged');
     // (the toast sits over the row at this window size, so the chip is clicked by script)
-    await exec("document.querySelector('[data-testid=session-s-main-1] .tags a.tagc').click()");
+    await exec("document.querySelector('[data-testid=session-s-main-1] .a-tags a.a-tag').click()");
     await $('[data-testid=chip-tag]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) === 1, 'only the tagged session');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 1, 'only the tagged session');
     assert.ok(await exec("return !!document.querySelector('[data-testid=rail-tag-release]')"), 'the rail lists the tag');
     await shot('06f-sessions-tags');
     // a project's tag reaches its sessions: tag platform-gitops from the Projects page, then filter by it
     await nav('#projects');
     await $('[data-testid=project-cards]');
-    await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('.tagb').click()");
+    await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('.a-tagbtn').click()");
     await type('[data-testid=tag-new]', 'client-x\n');
     await click('[data-testid=tag-save]');
     await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).innerText")).includes('client-x'), 'the card shows it');
     await nav('#sessions?tag=client-x');
-    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) >= 2, 'every session of the project carries the project tag');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) >= 2, 'every session of the project carries the project tag');
     assert.ok(hrm('sessions', '--tag', 'client-x').includes('platform-gitops'), 'the CLI filters by tag too');
     await click('[data-testid=chip-tag]');
     await click('[data-testid=rail-all]');
@@ -625,10 +615,10 @@ try {
       { type: 'response_item', timestamp: now, payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Migration done.' }] } }]));
     await nav('#session?profile=codex-main&id=cx-long');
     await hasText('[data-testid=chat]', 'Migration done.');
-    assert.equal(await exec("return document.querySelectorAll('#chat .si').length"), 11, 'first 5, a link, last 5');
+    assert.equal(await exec("return document.querySelectorAll('#chat .a-step, #chat .a-more').length"), 11, 'first 5, a link, last 5');
     await hasText('[data-testid=more-steps]', 'Show 1,990 more steps');
     await click('[data-testid=more-steps]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('#chat .si').length")) === 2000, 'all steps shown');
+    await waitFor(async () => (await exec("return document.querySelectorAll('#chat .a-step').length")) === 2000, 'all steps shown');
   });
 
   await test('export a session as Markdown', async () => {
@@ -652,101 +642,103 @@ try {
     await page.mouse.move(2, 2); // no hover colour on the button being measured
     const d = await exec(`
       const cs = (sel) => getComputedStyle(document.querySelector(sel));
-      const on = document.querySelector('nav.nav a.on');
+      const on = document.querySelector('.nav a.active');
       return {
-        frame: getComputedStyle(document.body).backgroundColor,
-        sheetBg: cs('.sheet').backgroundColor, sheetRadius: cs('.sheet').borderTopLeftRadius, sheetShadow: cs('.sheet').boxShadow,
-        side: document.querySelector('aside.side').getBoundingClientRect().width,
-        top: document.querySelector('header.top').getBoundingClientRect().height,
-        navActive: getComputedStyle(on).backgroundColor, navLabel: on.textContent.replace(on.querySelector('.count')?.textContent || '', '').trim(),
-        font: getComputedStyle(document.body).fontFamily, inter: document.fonts.check('14px "Inter"'), mark: !!document.querySelector('#brand-mark svg linearGradient'),
-        groups: [...document.querySelectorAll('[data-testid=accounts-table] .acg > header b')].map((t) => t.textContent),
-        primary: cs('.btn.primary').backgroundColor,
-        chips: [...document.querySelectorAll('.fbar .toolfilter a')].map((a) => a.textContent.trim()),
+        frame: cs('.frame').backgroundColor, railBg: cs('aside.rail').backgroundColor, topBg: cs('.topbar').backgroundColor, sheetBg: cs('.sheet').backgroundColor,
+        rail: document.querySelector('aside.rail').getBoundingClientRect().width,
+        navActive: getComputedStyle(on).backgroundColor, navLabel: on.querySelector('.nav-item-left span').textContent.trim(),
+        font: getComputedStyle(document.body).fontFamily, inter: document.fonts.check('13px "Inter"'), mark: !!document.querySelector('#brand-mark svg linearGradient'),
+        groups: [...document.querySelectorAll('[data-testid=accounts-table] .tool-group-header .panel-title')].map((t) => t.textContent),
+        primary: cs('.btn-primary').backgroundColor, panel: [cs('.panel-card').borderTopLeftRadius, cs('.panel-card').backgroundColor],
+        chips: [...document.querySelectorAll('.horizon-filterbar .filter-chip')].map((a) => a.textContent.trim().replace(/ \\(\\d+\\)$/, '')),
       };`);
-    assert.equal(d.frame, 'rgb(227, 234, 236)', 'the porcelain ground');
-    assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the ground');
-    assert.equal(d.sheetRadius, '0px', 'no framed sheet');
-    assert.equal(d.sheetShadow, 'none', 'no shadow on the page');
-    assert.equal(d.side, 256, 'sidebar 16rem');
-    assert.equal(d.top, 52, 'top bar 3.25rem');
-    assert.ok(d.navActive !== 'rgba(0, 0, 0, 0)' && d.navActive !== d.frame, 'the active item is shaded: ' + d.navActive);
+    assert.equal(d.frame, 'rgb(242, 246, 248)', 'the canvas');
+    assert.equal(d.railBg, 'rgb(233, 239, 242)', 'the rail');
+    assert.equal(d.topBg, 'rgb(255, 255, 255)', 'the top bar is a panel');
+    assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the canvas');
+    assert.equal(d.rail, 192, 'rail 192 px');
+    assert.equal(d.navActive, 'rgba(8, 101, 108, 0.1)', 'the active item is shaded with the accent');
     assert.equal(d.navLabel, 'Accounts');
     assert.ok(d.font.includes('Inter') && d.inter, 'Inter loaded');
-    assert.ok(d.mark, 'the Interlocking H in the sidebar');
+    assert.ok(d.mark, 'the Interlocking H in the rail');
     assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'accounts grouped by tool, one card each');
-    assert.equal(d.primary, 'rgb(14, 126, 136)', 'the primary button in the accent');
+    assert.equal(d.primary, 'rgb(8, 101, 108)', 'the primary button in the accent');
+    assert.deepEqual(d.panel, ['10px', 'rgb(255, 255, 255)'], 'panel cards: radius 10, white');
     assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool');
     // a tool chip shows only that tool; a group header folds its accounts away
     await click('[data-testid=chip-codex]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .acg').length")) === 1, 'only Codex');
+    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .tool-group-card').length")) === 1, 'only Codex');
     await click('[data-testid=chip-all]');
     await click('[data-testid=group-claude] [data-act=acct-fold]');
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-claude-main]')")), 'Claude Code folded');
     await click('[data-testid=group-claude] [data-act=acct-fold]');
     await $('[data-testid=row-claude-main]');
     await click('[data-testid=add-account]');
-    const dlg = await exec("const s = getComputedStyle(document.querySelector('.dlg')); return { radius: s.borderTopLeftRadius, tab: getComputedStyle(document.querySelector('.dseg a.on')).boxShadow };");
+    const dlg = await exec("const m = document.querySelector('.modal-card'), s = getComputedStyle(m); return { radius: s.borderTopLeftRadius, width: m.getBoundingClientRect().width, kind: getComputedStyle(document.querySelector('.kind-pick-card.active')).borderColor, tool: getComputedStyle(document.querySelector('.tool-pick-card.active')).borderColor };");
     assert.equal(dlg.radius, '12px', 'Add account is a dialog over the list');
-    assert.ok(dlg.tab.includes('rgb(14, 126, 136)'), 'the accent under the selected tab');
+    assert.equal(dlg.width, 640, 'the dialog is 640 wide');
+    assert.equal(dlg.kind, 'rgb(8, 101, 108)', 'the chosen kind in the accent');
+    assert.equal(dlg.tool, 'rgb(8, 101, 108)', 'the chosen tool in the accent');
     await exec("document.querySelector('[data-act=dialog-close]').click()");
     await nav('#session?profile=claude-main&id=s-main-1');
     await $('[data-testid=chat]');
-    const r = await exec("return { panel: !!document.querySelector('[data-testid=conv-panel]'), modes: [...document.querySelectorAll('[data-testid=conv-panel] .seg3 a')].map((a) => a.textContent.trim()), resume: document.querySelector('[data-testid=resume]').textContent.trim() }");
+    const r = await exec("return { panel: !!document.querySelector('[data-testid=conv-panel]'), modes: [...document.querySelectorAll('[data-tour=modes] button')].map((a) => a.textContent.trim()), resume: document.querySelector('[data-testid=resume]').textContent.trim() }");
     assert.ok(r.panel, 'the Conversation panel');
     assert.deepEqual(r.modes, ['All', 'Changes', 'Failed']);
     assert.ok(r.resume.startsWith('Resume in'));
   });
 
-  // The approved foundation (docs/overview-redesign-2026-11): rem spacing 4/8/12/16/24, reading sizes fixed, headings in
-  // clamp(), round controls; the window must use the same.
+  // The approved reference (docs/design-committee-2026-11/round2/app, measured in Edge at 1280): the rail 192, the page
+  // padded 12 / 16 / 20 with its parts 12 apart, Inter 13 for text and 22 / 700 for the finding, cards of radius 10.
   await test('measurements match the design pages', async () => {
     await nav('#account?name=claude-main');
-    await $('.ovk');
+    await $('.account-stat');
     const d = await exec(`
-      const cs = (el) => getComputedStyle(el), q = (s) => document.querySelector(s);
-      const box = (s) => q(s).getBoundingClientRect();
-      const sheet = cs(q('#sheet')), h1 = cs(q('#sheet h1')), panel = cs(q('.panel')), ph2 = cs(q('.panel h2')), kpi = cs(q('.ovk')), kv = cs(q('.ovk strong'));
-      const nav = q('nav.nav a'), btn = q('.btn.primary'), seg = cs(q('.tabs2') ? q('.seg3') || q('.tabs2') : q('.seg3'));
+      const cs = (el) => getComputedStyle(el), q = (s) => document.querySelector(s), box = (s) => q(s).getBoundingClientRect();
+      const body = cs(q('.page-body')), h1 = cs(q('.page-heading h1')), panel = cs(q('.panel-card')), pt = cs(q('.panel-title')), stat = cs(q('.account-stat')), sb = cs(q('.account-stat > b'));
+      const nav = q('.nav-item'), btn = q('.btn-primary'), tab = q('.page-tabs .filter-chip.active');
       return {
-        side: box('aside.side').width, top: box('header.top').height, padTop: sheet.paddingTop, padLeft: sheet.paddingLeft, gap: sheet.rowGap,
-        h1: [h1.fontWeight, h1.fontFamily.split(',')[0].replace(/"/g, ''), parseFloat(h1.fontSize)], body: [cs(document.body).fontSize, cs(document.body).fontFamily.split(',')[0]],
-        panel: [panel.borderTopLeftRadius, panel.paddingTop, panel.paddingLeft], h2: [ph2.fontSize, ph2.fontWeight],
-        kpi: [kpi.borderTopLeftRadius, kpi.paddingTop, kpi.paddingLeft], kv: [kv.fontWeight, kv.fontFamily.split(',')[0].replace(/"/g, '')],
-        nav: [nav.getBoundingClientRect().height, cs(nav).borderTopLeftRadius], btn: [btn.getBoundingClientRect().height, cs(btn).borderTopLeftRadius],
-        search: [box('.search').height, cs(q('.search')).borderTopLeftRadius],
-        gaps: (() => { const k = [...document.querySelectorAll('.ovk')].map((e) => e.getBoundingClientRect()); return Math.round(k[1].left - k[0].right); })(),
+        rail: box('aside.rail').width, top: box('.topbar').height, pad: [body.paddingTop, body.paddingRight, body.paddingBottom, body.paddingLeft], gap: body.rowGap,
+        h1: [h1.fontWeight, h1.fontFamily.split(',')[0].replace(/"/g, ''), h1.fontSize], body: [cs(document.body).fontSize, cs(document.body).fontFamily.split(',')[0].replace(/"/g, '')],
+        panel: [panel.borderTopLeftRadius, panel.paddingTop, panel.paddingLeft, panel.rowGap], title: [pt.fontSize, pt.fontWeight],
+        stat: [stat.borderTopLeftRadius, stat.paddingTop, stat.paddingLeft], statB: [sb.fontWeight, sb.fontSize], statGap: cs(q('.account-stats')).columnGap,
+        nav: [Math.round(nav.getBoundingClientRect().height * 2) / 2, cs(nav).borderTopLeftRadius, cs(nav).fontSize], btn: [Math.round(btn.getBoundingClientRect().height), cs(btn).borderTopLeftRadius, cs(btn).fontSize],
+        search: [Math.round(box('.search-box').height), cs(q('.search-box')).borderTopLeftRadius, box('.search-box').width], tab: cs(tab).color,
+        avatar: [box('.account-avatar').width, cs(q('.account-avatar')).borderTopLeftRadius], icon: box('.icon-btn').width,
       };`);
-    assert.equal(d.side, 256, 'sidebar 16rem');
-    assert.equal(d.top, 52, 'top bar 3.25rem');
-    assert.deepEqual([d.padTop, d.padLeft, d.gap], ['16px', '24px', '16px'], 'page padding 16 / 24, parts 16 apart');
-    assert.ok(d.h1[0] === '600' && d.h1[1] === 'Inter' && d.h1[2] >= 17.6 && d.h1[2] <= 23.2, 'the finding: Inter 600, between 1.1rem and 1.45rem: ' + d.h1);
-    assert.deepEqual([d.body[0], d.body[1].replace(/"/g, '')], ['14px', 'Inter'], 'body 14 px Inter');
-    assert.deepEqual(d.panel, ['12px', '16px', '16px'], 'panels: radius 12, padding 16');
-    assert.deepEqual(d.h2, ['14px', '600'], 'panel titles 14 px, 600');
-    assert.deepEqual(d.kpi, ['12px', '12px', '16px'], 'tiles: radius 12, padding 12 / 16');
-    assert.deepEqual(d.kv, ['400', 'Inter'], 'key numbers: Inter, light weight');
-    assert.equal(d.gaps, 12, '12 px between tiles');
-    assert.deepEqual(d.nav, [34, '7px'], 'nav items 2.125rem, radius 7');
-    assert.deepEqual(d.btn, [32, '999px'], 'buttons 2rem, round');
-    assert.deepEqual(d.search, [34, '7px'], 'search 2.125rem, radius 7');
+    assert.equal(d.rail, 192, 'rail 192 px');
+    assert.ok(d.top >= 47 && d.top <= 50, 'top bar about 48 px: ' + d.top);
+    assert.deepEqual([...d.pad, d.gap], ['12px', '16px', '20px', '16px', '12px'], 'page padding 12 / 16 / 20, parts 12 apart');
+    assert.deepEqual(d.h1, ['700', 'Inter', '22px'], 'the page finding: Inter 22 / 700');
+    assert.deepEqual(d.body, ['13px', 'Inter'], 'body 13 px Inter');
+    assert.deepEqual(d.panel, ['10px', '11px', '13px', '9px'], 'panel cards: radius 10, padding 11 / 13, parts 9 apart');
+    assert.deepEqual(d.title, ['12.5px', '700'], 'section titles 12.5 / 700');
+    assert.deepEqual(d.stat, ['10px', '12px', '12px'], 'readout tiles: radius 10, padding 12');
+    assert.deepEqual(d.statB, ['700', '18px'], 'readout values 18 / 700 at 1280');
+    assert.equal(d.statGap, '10px', '10 px between tiles');
+    assert.deepEqual(d.nav, [31.5, '7px', '12.5px'], 'nav items 31.5 px, radius 7, 12.5 px');
+    assert.deepEqual(d.btn, [29, '7px', '12px'], 'the primary button 29 px, radius 7, 12 px');
+    assert.deepEqual(d.search, [31, '7px', 310], 'search 31 px, radius 7, 310 wide');
+    assert.equal(d.tab, 'rgb(8, 101, 108)', 'the current tab in the accent');
+    assert.deepEqual(d.avatar, [44, '10px'], 'the avatar 44, radius 10');
+    assert.equal(d.icon, 28, 'icon buttons 28');
   });
 
   // Each page has the design page's sections, in its order: the titles of the design (rendered from the canvas)
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Activity, 53 weeks', 'Latest replies'],
-      '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'By model'],
-      '#account?name=claude-main': ['claude-main', 'Limits', 'Tokens per day, 30 days', 'Login and folder', 'Recent sessions'],
-      '#projects': ['Projects', 'Where the tokens and the cost went'],
-      '#sessions': ['Sessions', 'platform-gitops'],
+      '#home': ['Period readouts', 'Needs attention', 'Activity, 53 weeks', 'Latest replies'],
+      '#accounts': ['Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
+      '#account?name=claude-main': ['claude-main', 'Limits', 'Login and folder', 'Tokens per day · 30 days', 'By model · 30 days', 'Recent sessions'],
+      '#projects': ['Where the tokens and the cost went'],
+      '#sessions': ["Every tool's sessions", 'platform-gitops'],
       '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
-      '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
-      '#mcp': ['MCP servers'], '#skills': ['Skills'], '#prompts': ['System prompts'],
-      '#apps': ['Apps', 'Harness Manager'],
+      '#routing': ['Local router', 'Routes', 'Providers', 'Recent requests through the router'],
+      '#mcp': ['1 server shared', 'Write to each tool'], '#skills': ['No skills yet', 'Installed'], '#prompts': ['CLAUDE.md is the file Claude Code reads', 'The file now'],
+      '#apps': ['Installed', 'Harness Manager'],
       '#settings': ['Settings', 'Appearance', 'Window and terminal', 'Updates', 'Usage and limits', 'Connections', 'Diagnostic log', 'Maintenance', 'Backups'],
-      '#cli': ['CLI reference', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
+      '#cli': ['Every desktop action has an hrm command', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
     };
     // the replies panel as the design opens it (an earlier test left the full log open)
     await nav('#home');
@@ -757,7 +749,7 @@ try {
       await nav(h);
       await waitFor(async () => (await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
       await waitFor(async () => {
-        const got = await exec("return [...document.querySelectorAll('#sheet .crumb, #sheet h1, #sheet h2')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
+        const got = await exec("return [...document.querySelectorAll('#sheet .crumb, #sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
         let i = 0;
         for (const g of got) if (i < titles.length && g.startsWith(titles[i])) i++;
         return i === titles.length;
@@ -766,20 +758,21 @@ try {
     // Settings: as many rows in each section as the design counts
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    const counts = await exec("return [...document.querySelectorAll('.sset')].map((s) => s.querySelectorAll('.frow').length)");
-    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them');
+    const counts = await exec("return [...document.querySelectorAll('.b-section')].map((s) => s.querySelectorAll('.b-setting').length)");
+    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 4], 'settings per section, as the design counts them');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
     await nav('#accounts');
-    await $('[data-testid=usage-panel] [data-testid=usage-chart]');
+    await click('[data-testid=usage-panel] [data-act=acct-fold]');
+    await $('[data-testid=usage-panel] [data-testid=usage-ledger]');
     // the Claude session priced from the catalogue; Codex's gpt-6 too
     await waitFor(async () => /\$\d+\.\d\d/.test(await text('[data-testid=cost-claude-main]')), 'a cost on the Claude row');
-    await hasText('[data-testid=group-codex] header', 'tokens');
+    await hasText('[data-testid=group-codex] .tool-group-header', 'tokens');
     await click('[data-testid=u-days-30]');
-    await hasText('[data-testid=row-claude-main]', '30 days');
+    await hasText('[data-testid=row-claude-main]', '30-day pace');
     await click('[data-testid=u-days-7]');
-    await hasText('[data-testid=row-claude-main]', '7 days');
+    await hasText('[data-testid=row-claude-main]', '7-day pace');
     await shot('09-usage');
     // the old page's address opens Accounts
     await nav('#usage');
@@ -840,11 +833,11 @@ try {
     assert.ok(await exec(`return document.querySelector('[data-testid=mc-to-claude]').checked`));
     await click('[data-testid=mc-save]');
     await waitFor(() => JSON.stringify(claudeMcp().fs) === JSON.stringify({ type: 'stdio', command: 'npx', args, env: { ROOT: 'C:\\work' } }), 'fs in .claude.json, with its arguments and env');
-    await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'back on the list');
+    await waitFor(async () => !(await exec("return !!document.querySelector('#dialog-root .modal-card')")), 'the dialog closed');
     await click('[data-testid=t-mcp-fs-codex]');
     await waitFor(() => fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8').includes('[mcp_servers.fs]'), 'fs in config.toml');
     await shot('11-mcp');
-    await waitFor(async () => (await exec(`const t = document.querySelector('[data-testid=mcp-matrix]'); return t.tHead.rows[0].cells[document.querySelector('[data-testid=t-mcp-fs-codex]').closest('td').cellIndex].title`)) === 'Codex: 1 servers', 'the Codex count follows the tick');
+    await waitFor(async () => (await exec(`const t = document.querySelector('[data-testid=mcp-matrix]'); return t.tHead.rows[0].cells[document.querySelector('[data-testid=t-mcp-fs-codex]').closest('td').cellIndex].title`)) === 'Codex: 1', 'the Codex count follows the tick');
     await click('[data-testid=t-mcp-fs-codex]');
     await waitFor(() => !fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8').includes('[mcp_servers.fs]'), 'fs removed from config.toml');
     // edit as JSON: the form's server comes out as Claude Code writes it, and goes back in
@@ -866,7 +859,7 @@ try {
     await $('[data-testid=t-mcp-solo-claude]');
     // the top bar's search narrows the list as you type
     await type('[data-testid=find]', 'solo');
-    await waitFor(async () => exec(`return document.querySelector('[data-testid=mcp-row-fs]').hidden && !document.querySelector('[data-testid=mcp-row-solo]').hidden`), 'only solo shown');
+    await waitFor(async () => exec(`return !document.querySelector('[data-testid=mcp-row-fs]') && !!document.querySelector('[data-testid=mcp-row-solo]')`), 'only solo shown');
     await type('[data-testid=find]', '');
     // import from apps reads the tools again; the info dialog says which file of each tool holds a server
     await click('[data-testid=mcp-import]');
@@ -882,13 +875,13 @@ try {
     for (let i = 0; i < 30; i++) cj.mcpServers[`bulk-${String(i).padStart(2, '0')}`] = { type: 'stdio', command: 'mcp-bulk' };
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify(cj));
     await click('[data-testid=mcp-import]');
-    await $('[data-testid=mcp-page-1]');
-    const onPage = () => exec("return document.querySelectorAll('[data-testid=mcp-matrix] tbody tr[data-search]:not([hidden]):not(.paged)').length");
+    await $('[data-testid=mcp-next]:not([disabled])');
+    const onPage = () => exec("return document.querySelectorAll('[data-testid=mcp-matrix] tbody tr[data-key]').length");
     assert.equal(await onPage(), 25, '25 on the first page');
-    await click('[data-testid=mcp-page-1]');
+    await click('[data-testid=mcp-next]');
     await waitFor(async () => (await onPage()) === 8, 'the rest on the second page');
-    await click('[data-testid=mcp-per-50]');
-    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=mcp-page-1]')")), 'one page at 50');
+    await select('[data-testid=mcp-per]', '50');
+    await waitFor(async () => (await onPage()) === 33 && !(await exec("return !!document.querySelector('[data-testid=mcp-next]:not([disabled])')")), 'one page at 50');
   });
 
   await test('skills: install from a folder and link into Codex', async () => {
@@ -911,11 +904,11 @@ try {
     write(path.join(home, '.agents', 'skills', 'loose', 'SKILL.md'), '---\nname: loose\ndescription: Put here by hand\n---\n');
     await nav('#home');
     await nav('#skills');
-    await $('.unmcard [data-testid=skill-row-loose]');
-    await hasText('.unmcard', 'Not managed');
+    await $('#sk-unmanaged [data-testid=skill-row-loose]');
+    await hasText('#sk-unmanaged', 'Not managed');
     await hasText('[data-testid=skill-row-loose]', 'Put here by hand');
     await click('[data-testid=skill-adopt-loose]');
-    await waitFor(async () => (await exec("return !document.querySelector('.unmcard [data-testid=skill-row-loose]') && !!document.querySelector('[data-testid=skill-row-loose]')")), 'managed now');
+    await waitFor(async () => (await exec("return !document.querySelector('#sk-unmanaged [data-testid=skill-row-loose]') && !!document.querySelector('[data-testid=skill-row-loose]')")), 'managed now');
     await click('[data-testid=t-skill-loose-codex]');
     await waitFor(() => fs.existsSync(path.join(home, '.codex', 'skills', 'loose', 'SKILL.md')), 'and linked into Codex');
     // Claude Code already has its own copy of loose: the sync leaves it alone and offers to replace it with the link
@@ -935,27 +928,35 @@ description: Bulk skill ${i}
     await nav('#home');
     await nav('#skills');
     await click('[data-testid=skill-adopt-all]');
-    await $('[data-testid=sk-page-1]');
-    assert.equal(await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length"), 25, '25 on the first page');
-    await click('[data-testid=sk-page-1]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length")) < 25, 'the rest on the second page');
-    await click('[data-testid=sk-per-50]');
-    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=sk-page-1]')")), 'one page at 50');
+    await $('[data-testid=sk-next]:not([disabled])');
+    const onPage = () => exec("return document.querySelectorAll('[data-testid=skill-matrix] tbody tr[data-key]').length");
+    assert.equal(await onPage(), 25, '25 on the first page');
+    await click('[data-testid=sk-next]');
+    await waitFor(async () => (await onPage()) < 25, 'the rest on the second page');
+    await select('[data-testid=sk-per]', '50');
+    await waitFor(async () => (await onPage()) > 25 && !(await exec("return !!document.querySelector('[data-testid=sk-next]:not([disabled])')")), 'one page at 50');
     await type('[data-testid=find]', 'bulk-07');
-    await waitFor(async () => (await exec("return document.querySelectorAll('table.sklist tbody tr[data-search]:not([hidden]):not(.paged)').length")) === 1, 'the search narrows to one');
+    await waitFor(async () => (await onPage()) === 1, 'the search narrows to one');
     await page.fill('[data-testid=find]', '');
     await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
   });
 
   await test('skills: Discover lists the skills of each repository and installs one into the store', async () => {
     await nav('#skills');
+    // a local skill for the source filter below, when this test runs on its own
+    if (!(await exec("return !!document.querySelector('[data-testid=skill-row-my-skill]')"))) {
+      await click('[data-testid=skill-install]');
+      await type('[data-testid=sk-src]', path.join(home, 'my-skill'));
+      await click('[data-testid=sk-save]');
+      await $('[data-testid=skill-row-my-skill]');
+    }
     await click('[data-testid=sk-tab-discover]');
     await hasText('[data-testid=discover]', 'Says hello in every language');
     await hasText('[data-testid=discover]', 'Reviews a change line by line');
     // three default repositories, one download each
     assert.equal(codeloadHits.filter((u) => u.includes('/zip/')).length, 3, 'one download per repository: ' + codeloadHits);
     await type('[data-testid=dc-search]', 'review');
-    await waitFor(async () => exec(`return document.querySelector('[data-testid=dc-hello]').hidden`), 'search narrows the list');
+    await waitFor(async () => exec(`return !document.querySelector('[data-testid=dc-hello]') && !!document.querySelector('[data-testid=dc-review]')`), 'search narrows the list');
     await page.fill('[data-testid=dc-search]', '');
     await exec(`document.querySelector('[data-testid=dc-search]').dispatchEvent(new Event('input'))`);
     await click('[data-testid=dc-install-hello]');
@@ -967,7 +968,7 @@ description: Bulk skill ${i}
     await hasText('[data-testid=skill-row-hello]', 'anthropics/skills');
     await hasText('[data-testid=skill-row-hello]', 'Says hello in every language');
     await select('#sk-filter', 'Local');
-    await waitFor(async () => exec(`return document.querySelector('[data-testid=skill-row-hello]').hidden && !document.querySelector('[data-testid=skill-row-my-skill]').hidden`), 'filtered to local skills');
+    await waitFor(async () => exec(`return !document.querySelector('[data-testid=skill-row-hello]') && !!document.querySelector('[data-testid=skill-row-my-skill]')`), 'filtered to local skills');
     await select('#sk-filter', '');
     // a newer version at the source shows Update, which installs it
     write(path.join(repoDir, 'skills', 'hello', 'SKILL.md'), '---\nname: hello\ndescription: Says hello, now louder\n---\nHELLO.');
@@ -996,8 +997,8 @@ description: Bulk skill ${i}
   await test('prompts: write a prompt into the tool file, keeping the old content', async () => {
     write(path.join(home, '.codex', 'AGENTS.md'), 'hand-written instructions');
     await nav('#prompts');
-    await click('.tabs2 a[data-v=codex]');
-    await $('.tabs2 a.on[data-v=codex]');
+    await click('[data-testid=prompt-tabs] [data-v=codex]');
+    await $('[data-testid=prompt-tabs] .active[data-v=codex]');
     await click('[data-testid=prompt-new]');
     await type('#pr-body', 'Be brief and cite files.');
     await click('[data-testid=prompt-enable]');
@@ -1039,15 +1040,15 @@ description: Bulk skill ${i}
     await exec('window.__TAURI__.dialog.save = async () => arguments[0]', [out]);
     await click('[data-testid=backup-export]');
     await waitFor(() => fs.existsSync(out) && fs.statSync(out).size > 200, 'exported');
-    await select('[data-testid=st-bkhours]', '6');
+    await click('[data-testid=st-bkhours] [data-v="6"]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).backup_hours === 6, 'the interval saved');
     await shot('14b-backups');
   });
 
   await test('appearance: dark theme, limits as used, and a hidden tool left out of the pages', async () => {
     await nav('#settings');
-    await click('[data-testid=st-theme] a[data-v=dark]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(4, 14, 18)', 'the page turns to night');
+    await click('[data-testid=st-theme] button[data-v=dark]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(9, 17, 21)', 'the page turns to night');
     await shot('17-dark-settings');
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
@@ -1056,12 +1057,12 @@ description: Bulk skill ${i}
     await $('[data-testid=activity]');
     await sleep(600);
     await shot('17c-dark-overview');
-    await exec("document.querySelector('[data-testid=routes]').scrollIntoView()");
-    await shot('17d-dark-overview-routes');
+    await exec("document.querySelector('[data-testid=horizon]').scrollIntoView()");
+    await shot('17d-dark-overview-horizon');
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
-    for (const [h, n] of [['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'], ['#account?name=claude-main', 'account'],
+    for (const [h, n] of [['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'],
       ['#routing', 'routing'], ['#mcp', 'mcp'], ['#skills', 'skills'], ['#prompts', 'prompts'], ['#apps', 'apps'], ['#cli', 'cli']]) {
       const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);
@@ -1069,22 +1070,22 @@ description: Bulk skill ${i}
       await sleep(500);
       await shot('18-dark-' + n);
       // the design's measurements on every page: page padding, title, and every card's corners
-      const m = await exec(`const cs = (e) => getComputedStyle(e), sh = cs(document.getElementById('sheet')), h1 = cs(document.querySelector('#sheet h1'));
-        const cards = [...document.querySelectorAll('#sheet .panel, #sheet .acg, #sheet .grp, #sheet .tcard, #sheet .apgroup, #sheet .mcpmain, #sheet .sset, #sheet .plist')];
+      const m = await exec(`const cs = (e) => getComputedStyle(e), sh = cs(document.querySelector('#sheet > .page-body')), h1 = cs(document.querySelector('#sheet h1'));
+        const cards = [...document.querySelectorAll('#sheet .panel-card, #sheet .a-grp')];
         return { gap: sh.rowGap, pad: [sh.paddingTop, sh.paddingLeft], h1: h1.fontWeight, cards: cards.length, radius: [...new Set(cards.map((c) => cs(c).borderTopLeftRadius))] };`);
-      assert.deepEqual(m.pad, ['16px', '24px'], n + ': page padding 16 / 24');
-      assert.equal(m.gap, '16px', n + ': the page parts sit 16 px apart, as drawn');
-      assert.equal(m.h1, '600', n + ': the finding, 600');
+      assert.deepEqual(m.pad, ['12px', '16px'], n + ': page padding 12 / 16, as the reference');
+      assert.equal(m.gap, '12px', n + ': the page parts sit 12 px apart, as drawn');
+      assert.equal(m.h1, '700', n + ': the finding, 700');
       assert.ok(m.cards > 0, n + ': drawn in cards');
-      assert.deepEqual(m.radius, ['12px'], n + ': card corners 12 px');
+      assert.deepEqual(m.radius, ['10px'], n + ': card corners 10 px');
       // card padding, table rows and type as the design pages set them
       const want = {
-        sessions: [['.grp .gh', 'padding', '12px 16px'], ['.srow', 'padding', '8px 16px'], ['.grp .gh h2.gname', 'fontSize', '14px']],
-        session: [['.panel', 'padding', '16px']], account: [['.panel', 'padding', '16px']],
-        routing: [['.panel', 'padding', '16px']], apps: [['.panel', 'padding', '16px']],
-        mcp: [['.mcpmain', 'padding', '0px'], ['.mcpmain th', 'padding', '12px 6px 12px 16px'], ['.mcpmain .mn b', 'font', '13px/600']],
-        skills: [['.tcard:has(> .sklist)', 'padding', '0px'], ['.sklist td', 'padding', '12px 6px 12px 16px'], ['.sklist .mn b', 'fontWeight', '600']],
-        prompts: [['.pgrid > div:last-child', 'padding', '16px']], cli: [['.cliex', 'padding', '12px 16px'], ['.cligrid .panel', 'padding', '16px']],
+        sessions: [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
+        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']], account: [['.panel', 'padding', '16px']],
+        routing: [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']], apps: [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
+        mcp: [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],
+        skills: [['.b-toolbar', 'display', 'flex'], ['.b-toolbar', 'flexWrap', 'wrap']],
+        prompts: [['.b-prompt-grid', 'display', 'grid']], cli: [['.b-cli-grid', 'display', 'grid'], ['.b-cli-row', 'display', 'grid']],
       }[n] || [];
       for (const [sel, prop, v] of want) {
         const got = await exec(`const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return 'missing'; const c = getComputedStyle(e);
@@ -1094,23 +1095,23 @@ description: Bulk skill ${i}
     }
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).padding"), '0px 16px 4px', 'settings sections: padding as drawn');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.sset')).maxWidth"), '960px', 'settings: at most a 60rem column, as drawn');
-    await click('[data-testid=st-theme] a[data-v=light]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(227, 234, 236)', 'light again');
+    assert.equal(await exec("return getComputedStyle(document.querySelector('.b-section')).padding"), '11px 13px', 'settings sections: a panel card, as drawn');
+    assert.equal(await exec("return getComputedStyle(document.querySelector('.b-section-nav')).position"), 'sticky', 'settings: the section chips stay in view');
+    await click('[data-testid=st-theme] button[data-v=light]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(242, 246, 248)', 'light again');
     // the VektraGrid theme: ivory ground, EB Garamond headings from the app's own font file; Harness again after
-    await click('[data-testid=st-brand] a[data-v=vg]');
+    await click('[data-testid=st-brand] button[data-v=vg]');
     await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(239, 233, 222)', 'the ivory ground');
     await waitFor(async () => exec(`return document.fonts.check('20px "EB Garamond"') && getComputedStyle(document.querySelector('#sheet h1')).fontFamily.includes('EB Garamond')`), 'EB Garamond loaded for the headings');
     await shot('17f-vektragrid-settings');
-    await click('[data-testid=st-brand] a[data-v=hm]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(227, 234, 236)', 'Harness again');
-    await click('[data-testid=st-quota] a[data-v=used]');
+    await click('[data-testid=st-brand] button[data-v=hm]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(242, 246, 248)', 'Harness again');
+    await click('[data-testid=st-quota] button[data-v=used]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).quota_display === 'used', 'saved');
     await nav('#accounts');
     await hasText('[data-testid=row-codex-main]', '% used');
     await nav('#settings');
-    await click('[data-testid=st-quota] a[data-v=left]');
+    await click('[data-testid=st-quota] button[data-v=left]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).quota_display === 'left', 'back to left');
     // Apps > Show off: the tool leaves Accounts and MCP servers
     await nav('#apps');
@@ -1137,6 +1138,7 @@ description: Bulk skill ${i}
     // the offer is out of date (the release is the version running, as after an update): installing says so and withdraws it
     latestVersion = await exec("return document.querySelector('.sheet').textContent.match(/you have (\\d+\\.\\d+\\.\\d+)/)[1]");
     await click('[data-testid=self-install]');
+    await click('#confirm-ok');
     await hasText('#toast', `Harness Manager ${latestVersion} is the newest version`);
     await $('[data-testid=self-check]');
     assert.ok(await exec("return document.getElementById('settings-upd').hidden"), 'the dot is gone');
@@ -1147,9 +1149,9 @@ description: Bulk skill ${i}
 
   await test('settings: change the terminal', async () => {
     await nav('#settings');
-    await click('[data-testid=st-term] a[data-v=console]');
+    await click('[data-testid=st-term] button[data-v=console]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).terminal === 'console', 'settings saved');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=st-term] a.on')?.dataset.v")) === 'console', 'drawn with Console picked');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=st-term] button.active')?.dataset.v")) === 'console', 'drawn with Console picked');
     await shot('14-settings');
     // switches save at once
     const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
@@ -1175,7 +1177,10 @@ description: Bulk skill ${i}
     await exec(`localStorage.removeItem('hm.tour.accounts')`);
     await nav('#home');
     await nav('#accounts');
-    await waitFor(async () => (await tour()).includes('1 of'), 'the tour starts on the first visit');
+    await $('[data-testid=accounts-table]');
+    assert.ok(!(await tour()), 'no tour opens on its own');
+    await click('[data-testid=tour-start]');
+    await waitFor(async () => (await tour()).includes('1 of'), 'the ? starts the tour');
     assert.ok((await tour()).includes('Add an account'));
     assert.ok(await exec(`return !!document.querySelector('.tour-spot')`), 'the part is highlighted');
     await click('[data-testid=tour-next]');
@@ -1203,7 +1208,8 @@ description: Bulk skill ${i}
     await hasText('#tip-refresh', 'Default: 5');
     await shot('16-settings-tooltip');
     await click('[data-testid=guides-reset]');
-    await waitFor(async () => (await tour()).includes('1 of'), 'Show the tours again starts the tour of this page');
+    await click('[data-testid=tour-start]');
+    await waitFor(async () => (await tour()).includes('1 of'), 'Show the tours again, then ? starts the tour of this page');
     await click('[data-testid=tour-skip]');
     await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1')`, [TOURED]);
   });
@@ -1233,7 +1239,7 @@ description: Bulk skill ${i}
     const codexHome = JSON.parse(hrm('show', 'codex-personal', '--json')).home;
     await nav('#accounts');
     await click('[data-testid=menu-codex-personal]');
-    await click('.menu a.danger');
+    await click('.menu button.danger');
     await $('[data-testid=remove-confirm]');
     await click('[data-testid=remove-confirm]');
     await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid=row-codex-personal]')`)), 'row gone');
@@ -1241,7 +1247,7 @@ description: Bulk skill ${i}
     assert.ok(!JSON.parse(hrm('list', '--json')).some((p) => p.name === 'codex-personal'));
     // a main profile: no "delete its folder" choice, and the tool's own folder stays
     await click('[data-testid=menu-codex-main]');
-    await click('.menu a.danger');
+    await click('.menu button.danger');
     await $('[data-testid=remove-confirm]');
     assert.ok(!(await exec(`return !!document.querySelector('[data-testid=remove-home]')`)), 'no folder delete for a main profile');
     await click('[data-testid=remove-confirm]');
@@ -1270,20 +1276,20 @@ description: Bulk skill ${i}
     await $('[data-testid=sec-computers] [data-testid=sync-folder]');
     const d = await exec(`return {
       name: document.getElementById('st-devname').value,
-      folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('on'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
-      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubLive: !document.querySelector('[data-testid=sync-hub] [data-testid=hub-join]').disabled && !document.querySelector('[data-testid=sync-hub]').classList.contains('on'),
+      folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('active'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
+      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubLive: !document.querySelector('[data-testid=sync-hub] [data-testid=hub-join]').disabled && !document.querySelector('[data-testid=sync-hub]').classList.contains('active'),
       direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
       transcripts: document.querySelector('[data-testid=st-transcripts]').checked, presence: document.querySelector('[data-testid=st-presence]').checked,
-      pills: [...document.querySelectorAll('[data-testid=computers] .pill')].map((p) => p.textContent.trim()),
-      cards: [...document.querySelectorAll('[data-testid=computer-cards] .dev b')].map((b) => b.textContent.trim()),
+      pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()),
+      cards: [...document.querySelectorAll('[data-testid=computer-cards] .b-computer .b-name b')].map((b) => b.textContent.trim()),
       syncNow: !!document.querySelector('[data-testid=computers-now]'), chip: document.getElementById('pcs').hidden,
-      order: [...document.querySelectorAll('.sset h2 .fold')].map((h) => h.firstChild.textContent.trim()) }`);
+      order: [...document.querySelectorAll('.b-section > summary .panel-title')].map((h) => h.textContent.trim()) }`);
     assert.ok(d.name, 'this computer has a name');
     assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
     assert.ok(d.folderText.includes('No folder'), 'no folder yet');
     assert.ok(d.hub.includes('A hub you host') && d.hubLive, 'the hub card is live, not chosen (phase 5)');
     assert.ok(!d.direct && !d.pair, 'the direct connection and pairing are live (phase 2)');
-    assert.ok(!d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('this one'), d.pills.join(','));
+    assert.ok(!d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('This one'), d.pills.join(','));
     assert.ok(d.transcripts && d.presence, 'transcripts and presence default to on');
     assert.deepEqual(d.cards, [d.name], 'only this computer');
     assert.equal(d.syncNow, false, 'no Sync now while sync is off');
@@ -1300,9 +1306,9 @@ description: Bulk skill ${i}
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc')")), 'the Overview is as before: no computer switch, no computer dots');
     await nav('#sessions');
     await $('[data-testid=group]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .srow .pc, .srow.withpc')")), 'Sessions as before');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .a-srow .a-pc')")), 'Sessions as before');
     await nav('#projects');
-    await $('[data-testid=project-cards] .pcrow');
+    await $('[data-testid=project-cards] .a-pcard');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pcard-pcs]')")), 'Projects as before');
   });
 
@@ -1444,7 +1450,7 @@ description: Bulk skill ${i}
     await nav('#settings');
     await $('[data-testid=sec-computers] [data-testid=pair]');
     const d = await exec(`return { direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
-      pills: [...document.querySelectorAll('[data-testid=computers] .pill')].map((p) => p.textContent.trim()), port: document.querySelector('[data-testid=listen-port]').textContent, change: !!document.querySelector('[data-testid=listen-port-change]') }`);
+      pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()), port: document.querySelector('[data-testid=listen-port]').textContent, change: !!document.querySelector('[data-testid=listen-port-change]') }`);
     assert.ok(!d.direct && !d.pair, 'the switch and Pair are live');
     assert.ok(!d.pills.includes('phase 2'), d.pills.join(','));
     assert.ok(d.port && d.change, 'the listen port and Change… sit in the popover');
@@ -1458,7 +1464,7 @@ description: Bulk skill ${i}
     await $('[data-testid=sec-computers] [data-testid=pair]');
     await click('[data-testid=pair]');
     await $('[data-testid=pair-tabs]');
-    assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] a')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
+    assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] button')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
     // Show a code asks computers_pair_start: six digits, three and three
     await waitFor(async () => /\d{3} \d{3}/.test(await text('[data-testid=pair-show-body]')), 'a code in the dialog');
     await shot('41-pair-show-code');
@@ -1584,7 +1590,7 @@ description: Bulk skill ${i}
     // reading it: fetched from the folder, shown through Claude Code's parser
     await click('[data-testid=read-laptop-s7]');
     await hasText('[data-testid=session-title]', 'Rotate the staging certificates (laptop)');
-    await hasText('[data-testid=chat] .msg.ai', 'Certificates rotated on the laptop.');
+    await hasText('[data-testid=chat] .a-msg.ai', 'Certificates rotated on the laptop.');
     await hasText('[data-testid=session-from]', 'LAPTOP');
     assert.ok(fs.existsSync(path.join(data, 'transcripts', dev, 'claude', 'claude-main', 'laptop-s7.jsonl')), 'the fetched copy sits in the data folder');
     await shot('42-session-remote');
@@ -1617,8 +1623,8 @@ description: Bulk skill ${i}
   await test('hub: the card is live, the Join dialog takes a code or the admin token, an unreachable hub is the error text, the first-run choice offers both cards', async () => {
     await nav('#settings');
     await $('[data-testid=sec-computers] [data-testid=hub-join]');
-    const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('on'), url: document.querySelector('[data-testid=hub-url]').textContent,
-      pills: [...document.querySelectorAll('[data-testid=sync-hub] .pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter]') }`);
+    const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('active'), url: document.querySelector('[data-testid=hub-url]').textContent,
+      pills: [...document.querySelectorAll('[data-testid=sync-hub] .plan-pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter]') }`);
     assert.ok(!d.on && d.url.includes('Not joined') && !d.pills.length && !d.ring, JSON.stringify(d));
     await click('[data-testid=hub-join]');
     await $('[data-testid=hub-url-in]');
@@ -1644,7 +1650,7 @@ description: Bulk skill ${i}
     // the first-run choice: both cards, Not now closes it, the hub card opens the Join dialog
     await exec(`return import('./computers.js').then((m) => m.firstRunDialog())`);
     await $('[data-testid=firstrun-hub]');
-    assert.deepEqual(await exec("return [...document.querySelectorAll('#dialog-root .mcard b')].map((b) => b.textContent.trim())"), ['A shared folder', 'A hub you host']);
+    assert.deepEqual(await exec("return [...document.querySelectorAll('#dialog-root .b-sync-choice > b')].map((b) => b.firstChild.textContent.trim())"), ['A shared folder', 'A hub you host']);
     await shot('52-first-run-choice');
     await click('[data-testid=firstrun-hub]');
     await $('[data-testid=hub-url-in]');
@@ -1673,7 +1679,7 @@ description: Bulk skill ${i}
       await shot('53-recovery-key');
       await click('[data-testid=ring-saved]');
       await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the key dialog closed');
-      await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')"), 'the hub card chosen', 15000);
+      await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')"), 'the hub card chosen', 15000);
       assert.ok((await text('[data-testid=hub-line]')).includes('joined'), 'the status line says joined');
       assert.equal((await text('[data-testid=hub-url]')).trim(), hubUrl);
       assert.ok(await exec("return !!document.querySelector('[data-testid=ring-show]') && !!document.querySelector('[data-testid=hub-invite]')"), 'Show again and Invite a computer… are there');
@@ -1725,7 +1731,7 @@ description: Bulk skill ${i}
       await nav('#settings');
       await click('[data-testid=hub-leave]');
       await click('#confirm-ok');
-      await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')")), 'the hub card off after leaving', 15000);
+      await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')")), 'the hub card off after leaving', 15000);
     } finally { hub.kill(); }
   });
 
@@ -1736,9 +1742,9 @@ description: Bulk skill ${i}
     const { createHash } = await import('node:crypto');
     await nav('#settings');
     await $('[data-testid=sec-backups-and-archive] [data-testid=archive-now]');
-    const d = await exec(`return { title: document.querySelector('[data-testid=sec-backups-and-archive] h2 .fold').firstChild.textContent.trim(),
+    const d = await exec(`return { title: document.querySelector('[data-testid=sec-backups-and-archive] summary .panel-title').textContent.trim(),
       folder: document.querySelector('[data-testid=st-bk-folder]').checked, transcripts: document.querySelector('[data-testid=st-bk-transcripts]').checked,
-      days: document.querySelector('[data-testid=st-archive-days] a.on')?.textContent, sync: document.querySelector('[data-testid=st-archive-sync]').checked,
+      days: document.querySelector('[data-testid=st-archive-days] button.active')?.textContent, sync: document.querySelector('[data-testid=st-archive-sync]').checked,
       dir: document.querySelector('[data-testid=st-archive-dir]').textContent, restore: !!document.querySelector('[data-testid=restore-open]') }`);
     assert.equal(d.title, 'Backups and archive');
     assert.ok(d.folder && !d.transcripts, 'backups go to the sync folder; transcripts stay out by default');
@@ -1771,7 +1777,7 @@ description: Bulk skill ${i}
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-s-old-1] [data-act=resume]')")), 'no Resume on an archived session');
     await shot('45-sessions-archived');
     await click('[data-testid=read-s-old-1]');
-    await hasText('[data-testid=chat] .msg.ai', 'The old manifests are tidy.');
+    await hasText('[data-testid=chat] .a-msg.ai', 'The old manifests are tidy.');
     await hasText('[data-testid=resume-reason]', 'archived');
     await shot('46-session-archived');
     // Restore… from a backup made now: the preview counts this computer's history and names it; merging adds nothing
@@ -1821,7 +1827,7 @@ description: Bulk skill ${i}
     await click('[data-testid=welcome-new]');
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=welcome-back]')")), 'the dialog closed');
     await nav('#sessions?days=all');
-    await hasText('[data-testid=session-desk-s1] .pc', 'DESK');
+    await hasText('[data-testid=session-desk-s1] .a-pc', 'DESK');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-desk-s1] [data-act=resume]')")), 'a past computer\'s session is not resumed here as a local one');
   });
 
@@ -1841,16 +1847,16 @@ description: Bulk skill ${i}
     ]));
     await waitFor(() => exec("return !!document.querySelector('[data-testid=session-s-watched-1]')"), 'the new session on the page without a reload', 2000);
     console.log(`     indexed and drawn in ${Date.now() - t0} ms`);
-    assert.ok((await exec("return document.querySelector('#sheet .crumb').textContent")).includes('Sessions'), 'still the Sessions page');
+    assert.ok((await exec("return document.querySelector('[data-testid=sessions-count]').textContent")).includes('sessions'), 'still the Sessions page');
     const st = JSON.parse(hrm('index', 'status', '--json'));
     assert.ok(st.watcher === true && st.sessions >= 5 && st.tools.some((x) => x.harness === 'claude'), JSON.stringify(st));
     // the search: a word of the title, through the top bar and the CLI
     await type('[data-testid=find]', 'velero');
-    await waitFor(async () => (await exec("return [...document.querySelectorAll('.srow[data-search]')].map((r) => r.dataset.testid)")).join() === 'session-s-watched-1', 'only the Velero session');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('.a-srow')].map((r) => r.dataset.testid)")).join() === 'session-s-watched-1', 'only the Velero session');
     assert.ok(hrm('sessions', '--search', 'velero').includes('s-watched-1'), 'the CLI searches the same index');
     await page.fill('[data-testid=find]', '');
     await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
-    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 1, 'every session is back');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) > 1, 'every session is back');
     // paging: 60 more sessions, 50 on the first page and the rest on the next
     for (let i = 0; i < 60; i++) {
       const at = new Date(Date.now() - (i + 1) * 60000).toISOString();
@@ -1859,17 +1865,17 @@ description: Bulk skill ${i}
     hrm('index', 'refresh');
     await nav('#sessions?days=all&group=tool');
     await $('[data-testid=s-pager]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) === 50, '50 rows on the first page');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 50, '50 rows on the first page');
     const count = await text('[data-testid=sessions-count]');
     assert.ok(+(count.match(/^(\d+) sessions/) || [])[1] >= 61, count); // the 60 seeded here and every earlier test's
     await click('[data-testid=page-next]');
-    await waitFor(async () => (await exec("return location.hash")).includes('page=1') && (await exec("return document.querySelectorAll('.srow[data-search]').length")) < 50 && (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 0, 'the rest on the next page');
+    await waitFor(async () => (await exec("return location.hash")).includes('page=1') && (await exec("return document.querySelectorAll('.a-srow').length")) < 50 && (await exec("return document.querySelectorAll('.a-srow').length")) > 0, 'the rest on the next page');
     await shot('60-sessions-paged');
     // a group's Show all fetches its rows beyond the page
     await nav('#sessions?days=all&group=tool');
     await $('[data-testid=s-more-claude]');
     await click('[data-testid=s-more-claude]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('.srow[data-search]').length")) > 60, 'every Claude Code session in the group');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) > 60, 'every Claude Code session in the group');
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

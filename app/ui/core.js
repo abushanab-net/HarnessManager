@@ -1,6 +1,7 @@
-// Shared runtime: backend calls, app state, navigation, toasts, dialogs and menus.
+// Shared runtime: backend calls, app state, navigation, the keyed reconciler that redraws a page in place, the one
+// dialog controller, the popover menu, the one notice channel, theme, the sidebar's folds and pins.
 
-import { esc, ic, dur } from './lib.js';
+import { esc, dur } from './lib.js';
 
 export const S = { state: null, route: { view: 'accounts', params: {} }, cache: {}, timers: [] };
 
@@ -11,7 +12,7 @@ export async function call(op, args = {}) {
   return t.core.invoke('call', { op, args });
 }
 
-/** The number of tools with a newer version, beside Apps in the sidebar. */
+/** The number of tools with a newer version, beside Setup and Apps in the rail. */
 export function setAppUpdates(n) {
   for (const el of document.querySelectorAll('#apps-count, #n-apps')) {
     el.textContent = n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '';
@@ -23,17 +24,16 @@ export function setAppUpdates(n) {
 // drawn as SVG squares snapped to device pixels, so a lit one is a flat colour, not a blurred glow at 125 % scaling
 export const liveGrid = (n) => (n ? `<svg class="lgrid" width="11" height="11" viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 3}" y="${Math.floor(i / 4) * 3}" width="2" height="2" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
 
-/** The pinned projects under Projects in the sidebar (at most five), and the project count. */
+/** The pinned projects under Projects in the rail (at most five), and the project count. */
 export function drawPins(list) {
   const el = document.getElementById('nav-pins');
   if (!el) return;
   const cur = S.route.view === 'sessions' ? S.route.params.project : '';
-  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="sub ${p.key === cur ? 'on' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><i class="dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="count ${p.live ? 'live' : ''}">${p.live ? liveGrid(p.live) : p.sessions || ''}</span><span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">${ic.x}</span></a>`).join('');
-  // beside Projects: only the live grid, and only while the pinned rows (which carry their own) are folded away
-  setNavCounts({ 'n-projects': liveGrid(list.filter((p) => p.live).length) });
+  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="nav-subitem ${p.key === cur ? 'active' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><span>${esc(p.name)}</span><span class="nav-badge">${p.live ? `<span class="live-n">●${p.live}</span>` : p.sessions || ''}<span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">✕</span></span></a>`).join('');
+  setNavCounts({ 'n-projects': String(list.length || '') });
 }
 
-/** The counts beside the pages in the sidebar; each one only when known. Our own markup: a number, or a number with a live grid. */
+/** The counts beside the pages in the rail; each one only when known. Our own markup: a number, or a number with a live grid. */
 export function setNavCounts(c) {
   for (const [id, v] of Object.entries(c)) { const el = document.getElementById(id); if (el) el.innerHTML = v || ''; }
 }
@@ -44,7 +44,7 @@ export function setFresh() {
   if (!st || !el) return;
   const now = Date.now(), ago = (t) => (now - t < 60000 ? 'just now' : dur(now - t) + ' ago');
   const read = st.profiles.map((p) => p.quota && p.quota.fetched_at).filter(Boolean);
-  el.textContent = [read.length ? 'Limits read ' + ago(Math.max(...read)) : '', S.usageAt ? 'usage ' + ago(S.usageAt) : ''].filter(Boolean).join(' · ');
+  el.textContent = [read.length ? 'Limits read ' + ago(Math.max(...read)) : 'Limits not read', S.usageAt ? 'usage ' + ago(S.usageAt) : ''].filter(Boolean).join(' · ');
 }
 
 /** The name an account is shown by (its label), from its id; the id when unknown. */
@@ -76,43 +76,36 @@ export function refreshText(r) {
   ].filter(Boolean).join('. ') + '.';
 }
 
+// ---------- the one notice channel: the bar under the top bar; cleared when the page changes ----------
 let toastTimer;
-export function toast(msg, isErr = false) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = isErr ? 'err' : '';
+function bar(text, { warn = false, toast: isToast = false, act = null, id } = {}) {
+  const el = document.getElementById('notice');
+  if (!el) return;
   clearTimeout(toastTimer);
-  // long enough to read: about 60 ms a character
-  toastTimer = setTimeout(() => { el.className = 'off'; el.textContent = ''; }, Math.max(isErr ? 7000 : 3500, msg.length * 60));
+  el.innerHTML = `<div class="notice-bar ${warn ? 'warn' : ''} ${isToast ? 'toast' : ''}" role="${warn ? 'alert' : 'status'}"><span id="${id}">${esc(text)}</span>${act ? `<button class="filter-chip notice-act" data-act="${esc(act.act)}" ${Object.entries(act.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} data-testid="notice-act">${esc(act.label)}</button>` : ''}<button class="filter-chip" data-act="notice-close" aria-label="Dismiss">Dismiss</button></div>`;
 }
+/** A short confirmation after an action, or an error; it stays long enough to read (about 60 ms a character), then goes. */
+export function toast(msg, isErr = false) {
+  bar(msg, { warn: isErr, toast: true, id: 'toast' });
+  toastTimer = setTimeout(clearNotice, Math.max(isErr ? 7000 : 3500, msg.length * 60));
+}
+/** A failure that stays on screen until dismissed, with an optional offer beside it; the next failure replaces it. */
+export function notice(msg, act) { bar(msg, { warn: true, act, id: 'notice-text' }); }
+export function clearNotice() { clearTimeout(toastTimer); const el = document.getElementById('notice'); if (el) el.innerHTML = ''; }
 
-/** Run an action; show its error as a toast instead of failing silently. */
+/** Run an action; show its error instead of failing silently. */
 export async function attempt(fn, okMsg) {
   try {
     const r = await fn();
     if (okMsg) toast(okMsg);
     return r;
   } catch (e) {
-    const msg = String(e).replace(/^Error: /, '');
-    toast(msg, true);
-    notice(msg);
+    notice(String(e).replace(/^Error: /, ''));
     return undefined;
   }
 }
 
-/** A failure that stays on screen until dismissed, unlike a toast; the next failure replaces it. */
-export function notice(msg, act) {
-  const el = document.getElementById('notice');
-  if (!el) return;
-  const t = document.getElementById('notice-text');
-  t.textContent = msg;
-  // an offer beside the words: what to do about it, as a button with its own action
-  el.querySelector('.btn')?.remove();
-  if (act) t.insertAdjacentHTML('afterend', `<button class="btn sm" data-act="${act.act}" ${Object.entries(act.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} data-testid="notice-act">${esc(act.label)}</button>`);
-  el.className = '';
-}
-
-/** Something changed on disk: forget the cached state, refresh the sidebar's counts, and draw the page again. */
+/** Something changed on disk: forget the cached state, refresh the rail's counts, and draw the page again. */
 export async function changed() {
   await Promise.all([loadState().catch(() => {}), call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {}),
     call('projects', { days: 30 }).then(drawPins).catch(() => {})]);
@@ -127,6 +120,7 @@ export async function mutate(fn, okMsg) {
   return r;
 }
 
+// ---------- the router ----------
 const routes = {};
 export function view(name, render) { routes[name] = render; }
 
@@ -156,27 +150,75 @@ async function renderNow() {
   S.lastHash = location.hash;
   S.route = parseHash();
   S.pageFind = null; // a page that lists things sets its own filter for the top bar's search
-  document.querySelectorAll('nav.nav a[data-nav]').forEach((a) => {
+  document.querySelectorAll('.nav a[data-nav]').forEach((a) => {
     const on = a.dataset.nav === S.route.view || (a.dataset.nav === 'accounts' && S.route.view === 'account') || (a.dataset.nav === 'sessions' && S.route.view === 'session') || (a.dataset.nav === 'mcp' && S.route.view === 'mcp-edit');
+    a.classList.toggle('active', on);
     a.classList.toggle('on', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
-  document.querySelectorAll('nav.nav a[data-nav-project]').forEach((a) => a.classList.toggle('on', S.route.view === 'sessions' && a.dataset.navProject === S.route.params.project));
-  // a page inside a shut fold of the sidebar opens the fold
-  const fold = document.querySelector('nav.nav a[data-nav].on')?.closest('.navfold');
+  document.querySelectorAll('.nav a[data-nav-project]').forEach((a) => a.classList.toggle('active', S.route.view === 'sessions' && a.dataset.navProject === S.route.params.project));
+  // a page inside a shut fold of the rail opens the fold
+  const fold = document.querySelector('.nav a[data-nav].active')?.closest('.nav-sublist');
   if (fold && fold.hidden) setFold(fold.id, false);
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
-  if (!sameHash) delete sheet.dataset.warm;
+  if (!sameHash) { delete sheet.dataset.warm; sheet.scrollTop = 0; }
   try {
     await fn(sheet, S.route.params);
     const top = S.sheetTop; // what the reader had before fn replaced the content; the replacement's own scroll event has not fired yet
     if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
-    // pages can add to a freshly drawn sheet (the first-run tips in guide.js)
+    // pages can add to a freshly drawn sheet (the tour in guide.js)
     document.dispatchEvent(new CustomEvent('rendered', { detail: { sheet, view: routes[S.route.view] ? S.route.view : 'home' } }));
   } catch (e) {
     sheet.className = 'sheet';
-    sheet.innerHTML = `<h1>Something went wrong</h1><p class="find err">${esc(String(e))}</p><p><button class="btn outline" data-act="reload">Try again</button></p>`;
+    sheet.innerHTML = `<div class="page-body"><section class="panel-card empty-state"><h1>Something went wrong</h1><span class="negT">${esc(String(e))}</span><div><button class="btn-secondary" data-act="reload">Try again</button></div></section></div>`;
+  }
+}
+
+// ---------- the keyed reconciler: a page redraws in place, keeping what the reader had ----------
+// Children are matched by id, data-key or data-testid (else by position and tag), so a redraw after a refresh keeps the
+// existing elements: scroll positions, the focused control with its caret and selection, open folds, and the animated
+// nodes with their phase. A page draws with patch(sheet, html) instead of sheet.innerHTML = html.
+const nodeKey = (n) => (n.nodeType !== 1 ? null : n.id ? '#' + n.id : n.dataset.key ? 'k:' + n.dataset.key : n.dataset.testid ? 't:' + n.dataset.testid : null);
+function patchNode(cur, next) {
+  if (cur.nodeType !== next.nodeType || cur.nodeName !== next.nodeName) { const r = next.cloneNode(true); cur.replaceWith(r); return r; }
+  if (cur.nodeType !== 1) { if (cur.nodeValue !== next.nodeValue) cur.nodeValue = next.nodeValue; return cur; }
+  for (const a of [...cur.attributes]) if (!next.hasAttribute(a.name)) cur.removeAttribute(a.name);
+  for (const a of [...next.attributes]) if (cur.getAttribute(a.name) !== a.value) cur.setAttribute(a.name, a.value);
+  const keyed = new Map();
+  for (const c of cur.childNodes) { const k = nodeKey(c); if (k && !keyed.has(k)) keyed.set(k, c); }
+  let cursor = cur.firstChild;
+  for (const child of [...next.childNodes]) {
+    const k = nodeKey(child);
+    let m = k ? keyed.get(k) : cursor && !nodeKey(cursor) && cursor.nodeName === child.nodeName ? cursor : null;
+    if (m && k) keyed.delete(k);
+    if (!m) { m = child.cloneNode(true); cur.insertBefore(m, cursor); }
+    else { if (m !== cursor) cur.insertBefore(m, cursor); m = patchNode(m, child); }
+    cursor = m.nextSibling;
+  }
+  while (cursor) { const n = cursor.nextSibling; cursor.remove(); cursor = n; }
+  if (cur instanceof HTMLInputElement) {
+    if (cur.type === 'checkbox' || cur.type === 'radio') { if (document.activeElement !== cur) cur.checked = next.checked; }
+    else if (document.activeElement !== cur && cur.value !== next.value) cur.value = next.value;
+  }
+  if ((cur instanceof HTMLSelectElement || cur instanceof HTMLTextAreaElement) && document.activeElement !== cur && cur.value !== next.value) cur.value = next.value;
+  return cur;
+}
+const focusKey = (el) => (el && el !== document.body ? (el.id ? '#' + CSS.escape(el.id) : el.dataset.testid ? `[data-testid="${CSS.escape(el.dataset.testid)}"]` : el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : null) : null);
+export function patch(root, html) {
+  const scrolls = [...root.querySelectorAll('*')].filter((el) => el.scrollTop || el.scrollLeft).map((el) => [el, el.scrollTop, el.scrollLeft]);
+  const active = document.activeElement, sel = root.contains(active) ? focusKey(active) : null;
+  const range = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  const next = document.createElement(root.tagName);
+  next.append(t.content);
+  for (const a of [...root.attributes]) next.setAttribute(a.name, a.value);
+  patchNode(root, next);
+  for (const [el, top, left] of scrolls) if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; }
+  if (sel && !root.contains(document.activeElement)) {
+    const el = root.querySelector(sel);
+    if (el) { el.focus({ preventScroll: true }); if (range && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(range[0], range[1], range[2]); } catch {} } }
   }
 }
 
@@ -193,23 +235,22 @@ export function applyTheme(st) {
   if (!st || !st.settings) return;
   themeSetting = st.settings.theme || 'system';
   document.documentElement.dataset.brand = st.settings.brand === 'vg' ? 'vg' : 'hm';
+  document.documentElement.dataset.motion = st.settings.moving_routes === false ? 'still' : 'live';
   setTheme();
 }
 
-/** The live count in the side menu and the strip in the top bar: this computer's running sessions plus every other computer's, from their presence. */
+/** The live count in the rail and the chip in the top bar: this computer's running sessions plus every other computer's, from their presence. */
 export function redrawLive() {
   if (!S.state) return;
   const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
   const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
   const live = running.length + elsewhere;
-  setNavCounts({ 'n-live': liveGrid(live) });
-  // the live strip in the top bar: one session here opens straight away, otherwise the live list
+  setNavCounts({ 'n-live': live ? liveGrid(live) + `<span>${live}</span>` : '' });
   const strip = document.getElementById('live-strip');
   if (strip) {
     strip.hidden = !live;
-    const one = live === 1 && running.length === 1 ? running[0] : null;
-    strip.textContent = live ? `${live} live${one && one.cwd ? ' · ' + one.cwd.split(/[\\/]/).filter(Boolean).pop() : elsewhere ? ' · ' + elsewhere + ' elsewhere' : ''}` : '';
-    strip.href = one && one.session_id ? `#session?profile=${encodeURIComponent(one.profile)}&id=${encodeURIComponent(one.session_id)}` : '#sessions?live=1';
+    strip.querySelector('.live-n').textContent = `${running.length} live · ${elsewhere} elsewhere`;
+    strip.href = '#sessions?live=1';
   }
 }
 
@@ -223,75 +264,96 @@ export async function loadState() {
   applyTheme(S.state);
   const n = S.state.profiles.length;
   document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
-  setNavCounts({ 'n-accounts': n });
+  setNavCounts({ 'n-accounts': String(n) });
   redrawLive();
   setFresh();
   return S.state;
 }
 
-// ---------- dialogs ----------
-export function openDialog(html, { onClose } = {}) {
+// ---------- the dialog controller: one modal at a time, focus trapped inside and restored to its opener ----------
+const frame = () => document.querySelector('.frame');
+let opener = null;
+export function openDialog(html, { onClose, size = '', label = '' } = {}) {
   closeDialog();
+  closeMenu();
+  opener = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
   const root = document.getElementById('dialog-root');
-  root.innerHTML = `<div class="dimA" data-act="dialog-close"></div><div class="dlg" role="dialog" aria-modal="true">${html}</div>`;
+  root.innerHTML = `<div class="modal-backdrop" data-act="dialog-close"><div class="modal-card dlg ${size}" role="dialog" aria-modal="true" ${label ? `aria-label="${esc(label)}"` : ''} tabindex="-1">${html}</div></div>`;
   root._onClose = onClose;
-  const first = root.querySelector('input:not([type=hidden]),select,textarea,button.primary');
-  if (first) first.focus();
-  return root.querySelector('.dlg');
+  frame().inert = true;
+  focusFirst(root.querySelector('.modal-card'));
+  return root.querySelector('.modal-card');
+}
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]';
+function focusFirst(card) {
+  if (!card) return;
+  const first = card.querySelector('input:not([type=hidden]):not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled]), .tool-pick-card.active, button.btn-primary:not([disabled])') || card.querySelector(FOCUSABLE);
+  (first || card).focus({ preventScroll: true });
 }
 
 export function closeDialog() {
   const root = document.getElementById('dialog-root');
+  if (!root.innerHTML) return;
   if (root._onClose) { const f = root._onClose; root._onClose = null; f(); }
   root.innerHTML = '';
+  frame().inert = false;
+  if (opener && opener.isConnected) opener.focus({ preventScroll: true });
+  opener = null;
   // a background refresh that arrived while the dialog was open catches up now
   if (S.dirty) { S.dirty = false; render(); }
 }
+export const dialogOpen = () => !!document.getElementById('dialog-root').innerHTML;
 
-export const dlgHead = (title) => `<div class="dh"><b>${esc(title)}</b><button class="iconbtn" data-act="dialog-close" aria-label="Close">${ic.x}</button></div>`;
+export const dlgHead = (title) => `<div class="modal-head dh"><h2>${esc(title)}</h2><button class="icon-btn" data-act="dialog-close" aria-label="Close">✕</button></div>`;
 
 /** Ask before something that cannot be undone. Resolves true when confirmed. */
 export function confirmDialog(title, body, okLabel = 'Confirm', danger = true) {
   return new Promise((resolve) => {
     let done = false;
-    openDialog(`${dlgHead(title)}<div class="df" style="grid-template-columns:1fr"><div>${body}</div></div>
-      <div class="dfoot"><span class="acts"><button class="btn" data-act="dialog-close">Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" id="confirm-ok">${esc(okLabel)}</button></span></div>`,
-    { onClose: () => { if (!done) resolve(false); } });
+    openDialog(`${dlgHead(title)}<div class="dlg-text">${body}</div>
+      <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="${danger ? 'btn-secondary negT' : 'btn-primary'}" id="confirm-ok">${esc(okLabel)}</button></span></div>`,
+    { onClose: () => { if (!done) resolve(false); }, size: 'sm', label: title });
     document.getElementById('confirm-ok').onclick = () => { done = true; closeDialog(); resolve(true); };
   });
 }
 
-// ---------- menus ----------
+// ---------- the popover menu under a ⋯ ----------
+let menuEl = null, menuAnchor = null, outside = null;
 export function openMenu(anchor, items) {
   closeMenu();
   const r = anchor.getBoundingClientRect();
   const m = document.createElement('div');
   m.className = 'menu';
-  m.innerHTML = items.map((it, i) => `<a data-i="${i}" class="${it.danger ? 'danger' : ''}">${esc(it.label)}</a>`).join('');
+  m.setAttribute('role', 'menu');
+  // an item may carry its own html (an icon or a dot before the label), a testid, and `on` for the current choice
+  m.innerHTML = items.map((it, i) => `<button type="button" role="menuitem" data-i="${i}" class="${it.danger ? 'danger' : ''} ${it.on ? 'on' : ''}" ${it.on ? 'aria-current="true"' : ''} ${it.testid ? `data-testid="${esc(it.testid)}"` : ''}>${it.html || esc(it.label)}</button>`).join('');
   document.body.appendChild(m);
+  menuEl = m; menuAnchor = anchor;
+  anchor.setAttribute('aria-expanded', 'true');
   const left = Math.min(r.left, window.innerWidth - m.offsetWidth - 8);
   m.style.left = left + 'px';
   // near the bottom of the window the menu opens upward, so every item stays reachable
   m.style.top = (r.bottom + 4 + m.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - 4 - m.offsetHeight) : r.bottom + 4) + 'px';
-  m.onclick = (e) => {
-    const a = e.target.closest('a[data-i]');
-    if (a) { closeMenu(); items[+a.dataset.i].run(); }
+  m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); items[+b.dataset.i].run(); } };
+  m.onkeydown = (e) => {
+    const bs = [...m.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); bs[(i - 1 + bs.length) % bs.length].focus(); }
+    else if (e.key === 'Tab') { e.preventDefault(); closeMenu(); }
   };
-  setTimeout(() => {
-    outside = (e) => { if (!m.contains(e.target)) closeMenu(); };
-    document.addEventListener('click', outside);
-  }, 0);
+  m.querySelector('button')?.focus();
+  setTimeout(() => { outside = (e) => { if (!m.contains(e.target)) closeMenu(); }; document.addEventListener('click', outside); }, 0);
 }
-let outside = null;
 export function closeMenu() {
   if (outside) { document.removeEventListener('click', outside); outside = null; }
-  document.querySelectorAll('.menu').forEach((m) => m.remove());
+  if (menuEl) { menuEl.remove(); menuEl = null; }
+  if (menuAnchor) { menuAnchor.removeAttribute('aria-expanded'); if (menuAnchor.isConnected) menuAnchor.focus({ preventScroll: true }); menuAnchor = null; }
 }
 
 // ---------- actions by data-act ----------
 const actions = {
   'dialog-close': () => closeDialog(),
-  'notice-close': () => { document.getElementById('notice').className = 'off'; },
+  'notice-close': () => clearNotice(),
   reload: () => render(),
 };
 export function action(name, fn) { actions[name] = fn; }
@@ -299,6 +361,8 @@ export function action(name, fn) { actions[name] = fn; }
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
+  // the backdrop closes the dialog only when the click is on it, not inside the card
+  if (el.classList.contains('modal-backdrop') && e.target !== el) return;
   const fn = actions[el.dataset.act];
   // a dropdown acts when its choice changes (below), not when it is clicked open
   if (el.tagName === 'SELECT') return;
@@ -310,13 +374,32 @@ document.addEventListener('change', (e) => {
   if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
 });
 
+/** The open modal or tray, whose Tab order is trapped. */
+const trapRoot = () => document.querySelector('#dialog-root .modal-card') || document.querySelector('#tray-root .tray-popup');
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('dialog-root').innerHTML) closeDialog();
-  if (e.key === 'k' && e.ctrlKey) { e.preventDefault(); document.getElementById('find').focus(); }
+  const trap = trapRoot();
+  if (e.key === 'Tab' && trap) {
+    const f = [...trap.querySelectorAll(FOCUSABLE)].filter((x) => x.offsetParent !== null || x === trap);
+    if (f.length) {
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === trap)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      else if (!trap.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    }
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (dialogOpen()) { closeDialog(); return; }
+    if (menuEl) { closeMenu(); return; }
+    if (document.querySelector('#tray-root .tray-popup')) { actions['toggle-tray']?.(document.querySelector('[data-act=toggle-tray]')); return; }
+  }
+  if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('find').focus(); }
   // a non-button element acting as one (role="button") answers Enter and Space like a button
-  const rb = e.target.closest && e.target.closest('[role=button][data-act]');
-  if (rb && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); rb.click(); }
+  const rb = e.target.closest && e.target.closest('[role=button][data-act], [tabindex="0"][data-act]');
+  if (rb && rb.tagName !== 'BUTTON' && rb.tagName !== 'INPUT' && rb.tagName !== 'SELECT' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); rb.click(); }
 });
+// moving to another page: the dialog, the menu and the notice of the page left go with it
+window.addEventListener('hashchange', () => { closeDialog(); closeMenu(); clearNotice(); });
 
 /** A folder picker from the dialog plugin; resolves to a path or null. */
 export async function pickFolder() {
@@ -338,7 +421,7 @@ export async function pickFile(filter) {
   return await d.open({ multiple: false, directory: false, filters: [filter] });
 }
 
-// ---------- the sidebar's folds and pins ----------
+// ---------- the rail's folds and pins ----------
 // the pinned projects and the Setup pages fold; the shut ones are remembered on this computer (Setup starts shut)
 const FOLD_KEY = 'hm.nav.shut';
 const shutFolds = () => { try { const v = JSON.parse(localStorage.getItem(FOLD_KEY)); return Array.isArray(v) ? v : ['nav-setup']; } catch { return ['nav-setup']; } };
@@ -346,12 +429,13 @@ export function setFold(id, shut, save = true) {
   const f = document.getElementById(id), head = document.querySelector(`[data-fold="${id}"]`);
   if (!f || !head) return;
   f.hidden = shut;
-  (head.closest('a') || head).classList.toggle('shut', shut);
+  head.classList.toggle('shut', shut);
+  head.setAttribute('aria-expanded', String(!shut));
   if (save) { const v = shutFolds().filter((x) => x !== id); if (shut) v.push(id); try { localStorage.setItem(FOLD_KEY, JSON.stringify(v)); } catch {} }
 }
 export function restoreFolds() { const shut = shutFolds(); for (const id of ['nav-pins', 'nav-setup']) setFold(id, shut.includes(id), false); }
 action('nav-fold', (el) => setFold(el.dataset.fold, !document.getElementById(el.dataset.fold).hidden));
-// the ✕ beside a pinned project in the sidebar
+// the ✕ beside a pinned project in the rail
 action('pin-off', async (el) => {
   await attempt(() => call('project_pin', { key: el.dataset.key, on: false }));
   call('projects', { days: 30 }).then(drawPins).catch(() => {});

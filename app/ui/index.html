@@ -1,49 +1,71 @@
 <!doctype html>
-<html lang="en" data-brand="hm" data-theme="dark">
+<html lang="en" data-brand="hm" data-theme="dark" data-motion="live">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Harness Manager</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="pages-sessions.css">
+<link rel="stylesheet" href="pages-setup.css">
+<link rel="stylesheet" href="pages-system.css">
 </head>
 <body>
+<svg width="0" height="0" class="svg-defs" aria-hidden="true"><defs>
+  <pattern id="starve-stripe" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="10"/></pattern>
+</defs></svg>
 <div class="frame">
-  <aside class="side">
-    <div class="brand" id="brand"><span id="brand-mark"></span><div><b>Harness Manager</b><small id="brand-sub">Loading…</small></div></div>
-    <div id="nav-stats" class="navstats" data-testid="nav-stats"></div>
-    <nav class="nav" id="nav-main">
-      <a data-nav="home" href="#home" data-testid="nav-home"><span data-icon="dash"></span><span>Overview</span><span class="count" id="today-cost"></span></a>
-      <a data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span data-icon="term"></span><span>Sessions</span><span class="count live" id="n-live" data-act="go-live" role="link" title="The sessions running now" data-testid="nav-live"></span></a>
-      <a data-nav="projects" href="#projects" data-testid="nav-projects"><span data-icon="folder"></span><span>Projects</span><span class="count" id="n-projects"></span><span class="caret" data-act="nav-fold" data-fold="nav-pins" role="button" tabindex="0" aria-label="Show or hide the pinned projects" data-testid="fold-pins"></span></a>
-      <div id="nav-pins" class="navfold" data-testid="nav-pins"></div>
-      <a data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span data-icon="users"></span><span>Accounts</span><span class="count" id="n-accounts"></span></a>
-      <div class="navgap"></div>
-      <a class="grp" href="#" data-act="nav-fold" data-fold="nav-setup" role="button" aria-label="Show or hide the setup pages" data-testid="nav-setup"><span data-icon="grid"></span><span>Setup</span><span class="count upd" id="apps-count" data-act="go-apps" role="link"></span><span class="caret"></span></a>
-      <div id="nav-setup" class="navfold">
-        <a class="sub" data-nav="mcp" href="#mcp" data-testid="nav-mcp"><span>MCP servers</span><span class="count" id="n-mcp"></span></a>
-        <a class="sub" data-nav="skills" href="#skills" data-testid="nav-skills"><span>Skills</span><span class="count" id="n-skills"></span></a>
-        <a class="sub" data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span>System prompts</span></a>
-        <a class="sub" data-nav="routing" href="#routing" data-testid="nav-routing"><span>API keys &amp; routing</span></a>
-        <a class="sub" data-nav="apps" href="#apps" data-testid="nav-apps"><span>Apps</span><span class="count upd" id="n-apps"></span></a>
-      </div>
-    </nav>
-    <div id="nav-limits" class="navlims" data-testid="nav-limits"></div>
-    <nav class="nav bottom">
-      <a data-nav="cli" href="#cli" data-testid="nav-cli"><span data-icon="book"></span><span>CLI reference</span></a>
-      <a data-nav="settings" href="#settings" data-testid="nav-settings"><span data-icon="gear"></span><span>Settings</span><i class="udot" id="settings-upd" title="A newer Harness Manager is available" hidden data-testid="settings-upd"></i></a>
-      <span class="ver mono" id="nav-version" title="The version of Harness Manager running" data-testid="nav-version"></span>
-    </nav>
+  <aside class="rail" data-region="rail" aria-label="Main navigation">
+    <div class="rail-top">
+      <div class="brand-box" id="brand"><div class="brand-logo" id="brand-mark"></div><div class="brand-text"><b>Harness Manager</b><small id="brand-sub">Loading…</small></div></div>
+      <nav class="nav-section nav" id="nav-main" aria-label="Primary pages">
+        <a class="nav-item" data-nav="home" href="#home" data-testid="nav-home"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Overview</span></span><span class="nav-badge" id="today-cost"></span></a>
+        <a class="nav-item" data-nav="sessions" href="#sessions" data-testid="nav-sessions"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 6 5 6-5 6m8 0h6"/></svg><span>Sessions</span></span><span class="nav-badge" id="n-live" data-act="go-live" role="link" title="The sessions running now" data-testid="nav-live"></span></a>
+        <div>
+          <a class="nav-item" data-nav="projects" href="#projects" data-testid="nav-projects"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2-3h9v16H3z"/></svg><span>Projects</span></span><span class="nav-badge" id="n-projects"></span></a>
+          <button class="nav-fold-chip" data-act="nav-fold" data-fold="nav-pins" aria-label="Show or hide the pinned projects" data-testid="fold-pins">Pinned</button>
+          <div id="nav-pins" class="nav-sublist" data-testid="nav-pins"></div>
+        </div>
+        <a class="nav-item" data-nav="accounts" href="#accounts" data-testid="nav-accounts"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-3a8 8 0 0 1 16 0v3"/></svg><span>Accounts</span></span><span class="nav-badge" id="n-accounts"></span></a>
+        <div class="rail-divider"></div>
+        <div>
+          <a class="nav-item fold-head" href="#" data-act="nav-fold" data-fold="nav-setup" role="button" aria-label="Show or hide the setup pages" data-testid="nav-setup"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M15 5l4-2 2 2-2 4-5 1-4 4-1 5-4 2-2-2 2-4 5-1 4-4z"/></svg><span>Setup</span></span><span class="nav-badge warn" id="apps-count" data-act="go-apps" role="link"></span></a>
+          <div id="nav-setup" class="nav-sublist">
+            <a class="nav-subitem" data-nav="mcp" href="#mcp" data-testid="nav-mcp"><span>MCP servers</span><span id="n-mcp"></span></a>
+            <a class="nav-subitem" data-nav="skills" href="#skills" data-testid="nav-skills"><span>Skills</span><span id="n-skills"></span></a>
+            <a class="nav-subitem" data-nav="prompts" href="#prompts" data-testid="nav-prompts"><span>System prompts</span><span></span></a>
+            <a class="nav-subitem" data-nav="routing" href="#routing" data-testid="nav-routing"><span>API keys &amp; routing</span><span></span></a>
+            <a class="nav-subitem" data-nav="apps" href="#apps" data-testid="nav-apps"><span>Apps</span><span class="warnT" id="n-apps"></span></a>
+          </div>
+        </div>
+      </nav>
+    </div>
+    <div class="rail-bottom">
+      <button class="tray-trigger" data-act="toggle-tray" title="Every account's limit ring, as the tray icon shows them" aria-expanded="false" aria-controls="tray-root" data-testid="tray-trigger"><span>◷ Tray limits popup</span><span class="acT" aria-hidden="true">▴</span></button>
+      <nav class="nav bottom" aria-label="Reference and settings">
+        <a class="nav-item" data-nav="cli" href="#cli" data-testid="nav-cli"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m6 8 4 4-4 4m7 0h5"/></svg><span>CLI reference</span></span></a>
+        <a class="nav-item" data-nav="settings" href="#settings" data-testid="nav-settings"><span class="nav-item-left"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></svg><span>Settings</span></span><i class="update-dot" id="settings-upd" title="A newer Harness Manager is available" hidden data-testid="settings-upd"></i></a>
+      </nav>
+      <div class="ver-row"><span class="mono" id="nav-version" title="The version of Harness Manager running" data-testid="nav-version"></span><span id="tray-state"></span></div>
+    </div>
   </aside>
-  <header class="top">
-    <label class="search"><span data-icon="search"></span><input id="find" aria-label="Find an account or session" placeholder="Find an account, session or setting" autocomplete="off" data-testid="find"><kbd>Ctrl K</kbd></label>
-    <div class="right"><a id="live-strip" class="livestrip" href="#sessions?live=1" hidden data-testid="live-strip"></a><span id="pcs" class="pcs" hidden title="Your computers: teal when heard from within three minutes" data-testid="computers-chip"></span><span id="fresh" data-testid="fresh"></span><button class="iconbtn help" data-act="tour-start" title="Tour of this page" aria-label="Tour of this page" data-testid="tour-start">?</button><button class="iconbtn" data-act="refresh-now" title="Refresh usage and limits" aria-label="Refresh usage and limits"><span data-icon="refresh"></span></button></div>
-  </header>
-  <main class="sheet" id="sheet" tabindex="-1"></main>
+  <div class="workspace">
+    <header class="topbar" data-region="topbar">
+      <label class="search-box"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="find" type="search" aria-label="Find an account, session or setting" placeholder="Find an account, session or setting" autocomplete="off" data-testid="find"><kbd class="kbd">Ctrl K</kbd></label>
+      <div class="topbar-right">
+        <a id="live-strip" class="status-chip livestrip" href="#sessions?live=1" hidden data-testid="live-strip"><i class="live-dot"></i><span class="live-n"></span></a>
+        <span id="pcs" class="status-chip pcs" hidden title="Your computers: teal when heard from within three minutes" data-testid="computers-chip"></span>
+        <span id="fresh" class="freshness-label" data-testid="fresh"></span>
+        <button class="icon-btn" data-act="tour-start" title="Tour of this page" aria-label="Tour of this page" data-testid="tour-start">?</button>
+        <button class="icon-btn" data-act="refresh-now" title="Re-read usage and limits now" aria-label="Re-read usage and limits now"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.6-4.5L3 9M3 4v5h5M4 13a8 8 0 0 0 14.6 4.5L21 15M21 20v-5h-5"/></svg></button>
+      </div>
+    </header>
+    <div id="notice" data-region="notice"></div>
+    <main class="sheet" id="sheet" data-region="page" tabindex="-1"></main>
+  </div>
+  <div id="tray-root" data-region="tray"></div>
 </div>
-<div id="dialog-root"></div>
-<div id="notice" class="off" role="alert"><span id="notice-text"></span><button class="iconbtn" data-act="notice-close" aria-label="Dismiss" title="Dismiss">×</button></div>
-<div id="toast" class="off" role="status"></div>
+<div id="dialog-root" data-region="dialog"></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>

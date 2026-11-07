@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Manager · Design A: The board</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="proto" role="toolbar" aria-label="Prototype controls">
+  <b>Design A · The board</b>
+  <div class="grp"><span>Width</span><span class="seg"><button data-set="w:1280">1280</button><button data-set="w:1536">1536</button><button data-set="w:1920">1920</button></span></div>
+  <div class="grp"><span>Theme</span><span class="seg"><button data-set="theme:light">Harness light</button><button data-set="theme:dark">Harness dark</button></span></div>
+  <div class="grp"><span>Motion</span><span class="seg"><button data-set="still:false">Live</button><button data-set="still:true">Still</button></span></div>
+  <div class="grp"><span>Data</span><span class="seg"><button data-set="data:full">8 accounts</button><button data-set="data:twelve">12 accounts</button><button data-set="data:found">First run · 2 tools found</button><button data-set="data:none">First run · nothing installed</button></span></div>
+  <div class="grp"><span class="seg"><button data-tray>Tray popup</button><button data-notice>Show a notice</button></span></div>
+  <span class="note">Opens from disk · Ctrl K finds · Esc closes</span>
+</div>
+<div class="stage"><div class="frame" id="frame"><div class="app" id="app" data-theme="dark" data-w="1536"></div></div></div>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+/* MCP servers, Skills, System prompts: what the reference's pages need beyond app.css, and the critics' fixes. */
+/* the matrix grows with the page instead of scrolling inside it (two scrollbars at 1280); its head stays put in the sheet */
+.b-page[data-b-page] .b-matrix-wrap { max-height: none; overflow: visible; }
+.b-matrix .b-name .icon-btn.xs { font-size: 11px; }
+.b-matrix .b-name .btn-secondary { padding: 2px 6px; font-size: 11px; }
+.b-matrix .b-actions-cell .icon-btn { vertical-align: middle; }
+/* a tool's hand-made entry: the cell says so under its box, and the box is outlined in amber */
+.b-tool-cell.b-kept input[type=checkbox] { outline: 1px dashed var(--warn); outline-offset: 2px; }
+.b-kept-mark { display: block; margin-top: 4px; font-size: 11px; color: var(--warn); white-space: nowrap; }
+.b-tool-cell small { white-space: nowrap; }
+/* a status pill in a card keeps its natural width; the live file sizes to its text, with a floor */
+.b-editor > .plan-pill, .b-prompt-choice > .plan-pill { align-self: flex-start; }
+.b-live-prompt { min-height: 160px; }
+.b-live-prompt:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.b-prompt-choice { width: 100%; cursor: pointer; }
+.b-prompt-choice:hover { background: var(--bg-card-hover); }
+/* the dialogs (the Add / Edit server form is the wide one) */
+.modal-card.mcp-dlg { max-width: 760px; }
+.dlg .b-kv { display: flex; gap: 8px; align-items: flex-end; }
+.dlg .b-kv .form-field { flex: 1; min-width: 0; }
+.dlg .b-kv .btn-secondary { flex: none; }
+.dlg input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--ac); vertical-align: middle; }
+.dlg .b-dialog-content > b { font-size: 12px; }
+.dlg details > summary { cursor: pointer; font-size: 12px; color: var(--ink-secondary); }
+.dlg details[open] > summary { margin-bottom: 8px; }
+.dlg details .form-field + .form-field { margin-top: 8px; }
+.dlg .b-command { white-space: normal; overflow-wrap: anywhere; }
+.dlg .account-session .mono { overflow-wrap: anywhere; white-space: normal; }
+.dlg label.filter-chip { cursor: pointer; }

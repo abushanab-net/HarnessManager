@@ -1,0 +1,80 @@
+{
+  "status": "passed",
+  "engine": "156.0.4314.58",
+  "screenshots": [
+    {
+      "width": 1280,
+      "theme": "dark",
+      "body": 1280,
+      "viewport": 1280,
+      "ledgerRows": 8,
+      "lastRowBottom": 643.546875,
+      "liveBottom": 759.234375,
+      "appBottom": 765,
+      "mainOverflow": false,
+      "font": true
+    },
+    {
+      "width": 1280,
+      "theme": "light",
+      "body": 1280,
+      "viewport": 1280,
+      "ledgerRows": 8,
+      "lastRowBottom": 643.546875,
+      "liveBottom": 759.234375,
+      "appBottom": 765,
+      "mainOverflow": false,
+      "font": true
+    },
+    {
+      "width": 1536,
+      "theme": "dark",
+      "body": 1536,
+      "viewport": 1536,
+      "ledgerRows": 8,
+      "lastRowBottom": 746.765625,
+      "liveBottom": 826.609375,
+      "appBottom": 909,
+      "mainOverflow": false,
+      "font": true
+    },
+    {
+      "width": 1536,
+      "theme": "light",
+      "body": 1536,
+      "viewport": 1536,
+      "ledgerRows": 8,
+      "lastRowBottom": 746.765625,
+      "liveBottom": 826.609375,
+      "appBottom": 909,
+      "mainOverflow": false,
+      "font": true
+    },
+    {
+      "width": 1920,
+      "theme": "dark",
+      "body": 1920,
+      "viewport": 1920,
+      "ledgerRows": 8,
+      "lastRowBottom": 837.765625,
+      "liveBottom": 833.609375,
+      "appBottom": 1125,
+      "mainOverflow": false,
+      "font": true
+    },
+    {
+      "width": 1920,
+      "theme": "light",
+      "body": 1920,
+      "viewport": 1920,
+      "ledgerRows": 8,
+      "lastRowBottom": 837.765625,
+      "liveBottom": 833.609375,
+      "appBottom": 1125,
+      "mainOverflow": false,
+      "font": true
+    }
+  ],
+  "checks": "rebuttal: findings, readable resets/states, explicit forecast window, None versus unread, real sparks, chart hues and legend, direct follow per project, account/tray rings, one-click start plus options, 720px Add fit, native SVG nav, public 12-account state with cap, zero-cap exhaustion and API key, full redraw phase/focus/dialog/scroll retention, OS motion not persisted, stepped tour, layout, capabilities, subscription login, mismatched identity, API-key onboarding, detected tools, sync, selection, tick, Escape, search, command palette, filters, launch, sessions, activity, request log, account actions, duplicate validation, theme/still persistence, text-token AA contrast, laptop modal footer, modal focus loop, 12-account layout and sticky live rail, routed creation, CSV download, scoped first-run Overview, local filter, reduced motion",
+  "errors": []
+}
