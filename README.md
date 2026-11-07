@@ -42,6 +42,7 @@ Download the installer from the [latest release](https://github.com/abushanab-ne
 | System | File | Notes |
 |---|---|---|
 | **Windows 10/11** | `Harness.Manager_<version>_x64-setup.exe` | Supported and tested. Installs `HarnessManager.exe` and `hrm.exe` for the current user. |
+| Windows on ARM | `Harness.Manager_<version>_arm64-setup.exe` | Since 1.9.4. Cross-compiled; not yet tested on an ARM device. |
 | macOS (Apple silicon) | `Harness.Manager_<version>_aarch64.dmg` | Built but untested. Drag the app into Applications. Signed with a Developer ID and notarized by Apple. |
 | Linux | `.AppImage` or `.deb` | Built but untested. |
 
