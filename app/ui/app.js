@@ -30,14 +30,26 @@ find.addEventListener('keydown', (e) => {
 
 // the backend imports usage in the background, and the folder watcher refreshes the index, and both say when done
 const ev = window.__TAURI__ && window.__TAURI__.event;
-let redraw;
+// A session being written refreshes about once a second, and a page's reads take seconds on a busy database, so the
+// redraws are coalesced: one at a time, at least four seconds apart, and one more afterwards if events kept coming.
+// Queueing a render per event made the renders pile up behind each other and held every other call for half a minute.
+let redraw, drawing = false, again = false, lastDraw = 0;
+const redrawSoon = () => {
+  clearTimeout(redraw);
+  redraw = setTimeout(async () => {
+    if (drawing) { again = true; return; }
+    drawing = true;
+    try {
+      call('today').then(setTodayBadge).catch(() => {});
+      if (document.getElementById('dialog-root').innerHTML) S.dirty = true; // a dialog stays as it is; the page catches up when it closes
+      else if (S.route.view === 'projects') await refreshProjects(); // the tiles and rows take the new numbers where they are
+      else await render();
+    } finally { drawing = false; lastDraw = Date.now(); if (again) { again = false; redrawSoon(); } }
+  }, Math.max(250, 4000 - (Date.now() - lastDraw)));
+};
 if (ev) ev.listen('refreshed', () => {
-  S.usageAt = Date.now(); setFresh(); call('today').then(setTodayBadge).catch(() => {});
-  if (!['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) return;
-  // a dialog stays as it is; the page catches up when it closes
-  if (document.getElementById('dialog-root').innerHTML) S.dirty = true;
-  else if (S.route.view === 'projects') refreshProjects(); // the tiles and rows take the new numbers where they are
-  else { clearTimeout(redraw); redraw = setTimeout(render, 250); } // a session being written refreshes often: one redraw per burst
+  S.usageAt = Date.now(); setFresh();
+  if (['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) redrawSoon();
 });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes

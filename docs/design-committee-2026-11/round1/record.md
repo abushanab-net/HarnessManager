@@ -109,3 +109,13 @@
   html/on/testid); suite 47/47; changed pages re-captured on real data + sessions-6computers demo. Review page
   regenerated. Observation: MCP "entries left alone" = sync_last.conflicts + skipped, which the backend counts across
   MCP and skills (showed 12 earlier, 264 now on the owner's data); same formula as the old page, not a regression.
+- 7 Nov 2026: owner: every page Good, "Commit to develop and release". Committed ca8abf7 (the redesign + the committee
+  record, screenshots excluded) and 395f204 (Release 1.9.0), tag v1.9.0 pushed; release workflow queued on the
+  self-hosted runners.
+- 7 Nov 2026 evening: 1.9.0 in the owner's hands: the tray popup window was blank and the in-window popup took 30 s.
+  Cause: the 'refreshed' event fires about once a second while sessions write; each event queued a full page render
+  (home 3 s, sessions 2 s, state 1.3 s, requests…) plus a popup redraw, all serialised on the one database
+  connection, so a popup's first read waited tens of seconds. Fix (1.9.1): redraws coalesced (one at a time, ≥4 s
+  apart in the window, ≥5 s in the popup); the popup draws its rings from the state read first and patches the
+  forecasts in; the in-window popup draws at once from cached forecasts. Popup first draw 1.7 s on the owner's data.
+  The 1.8.3 in the test captures: the debug build was compiled before the version bump.
