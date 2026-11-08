@@ -36,8 +36,10 @@ impl Dev {
         Dev { id: id.into(), key: SigningKey::from_bytes(&raw), token: String::new() }
     }
 
-    fn record(&self) -> Value {
-        let mut v = json!({"id": self.id, "name": format!("pc-{}", self.id), "os": "windows", "app_version": "1.5.0", "incarnation": "inc1", "roots": {}, "updated_at": 1});
+    fn record(&self) -> Value { self.record_at(1) }
+
+    fn record_at(&self, updated_at: i64) -> Value {
+        let mut v = json!({"id": self.id, "name": format!("pc-{}", self.id), "os": "windows", "app_version": "1.5.0", "incarnation": "inc1", "roots": {}, "updated_at": updated_at});
         v["pubkey"] = json!(b64(&self.key.verifying_key().to_bytes()));
         let sig = self.key.sign(v.to_string().as_bytes());
         v["sig"] = json!(b64(&sig.to_bytes()));
@@ -105,6 +107,42 @@ async fn join_with_the_admin_token_then_an_invite_code() {
     // no token, or a made-up one
     assert_eq!(Client::new().get(format!("{}/v1/devices", hub.url)).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
     assert_eq!(Client::new().get(format!("{}/v1/devices", hub.url)).bearer_auth("made-up").send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_code_does_not_take_over_a_computer_already_here() {
+    let hub = start(2048).await;
+    let mut a = Dev::new("aaaa");
+    assert_eq!(a.join(&hub, json!({"admin_token": ADMIN})).await, StatusCode::OK);
+    let code = |a: &Dev| { let r = a.req(reqwest::Method::POST, &hub, "/v1/invite").send(); async move { r.await.unwrap().json::<Value>().await.unwrap()["code"].as_str().unwrap().to_string() } };
+    let post = |code: String, device: Value| { let url = format!("{}/v1/join", hub.url); async move { Client::new().post(url).json(&json!({"code": code, "device": device})).send().await.unwrap().status() } };
+    // another key under its id
+    let thief = Dev::new("aaaa");
+    assert_eq!(post(code(&a).await, thief.record_at(99)).await, StatusCode::FORBIDDEN);
+    // its own record sent again: every computer here can read that one
+    assert_eq!(post(code(&a).await, a.record()).await, StatusCode::FORBIDDEN);
+    let alive = a.req(reqwest::Method::GET, &hub, "/v1/devices").send().await.unwrap().status();
+    assert_eq!(alive, StatusCode::OK, "its token still works");
+    // the computer itself, with a record only its key can have signed just now
+    assert_eq!(post(code(&a).await, a.record_at(2)).await, StatusCode::OK);
+    // and the admin can always put a computer back
+    let mut again = Dev::new("aaaa");
+    assert_eq!(again.join(&hub, json!({"admin_token": ADMIN})).await, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn wrong_join_attempts_are_held_up() {
+    let hub = start(2048).await;
+    let mut a = Dev::new("aaaa");
+    assert_eq!(a.join(&hub, json!({"admin_token": ADMIN})).await, StatusCode::OK);
+    let inv: Value = a.req(reqwest::Method::POST, &hub, "/v1/invite").send().await.unwrap().json().await.unwrap();
+    let mut b = Dev::new("bbbb");
+    for i in 0..super::JOIN_FAILS_A_MINUTE {
+        let wrong = if inv["code"] == "999999" { format!("99999{}", i % 8) } else { "999999".to_string() };
+        assert_eq!(b.join(&hub, json!({"code": wrong})).await, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(b.join(&hub, json!({"code": inv["code"]})).await, StatusCode::TOO_MANY_REQUESTS, "even the right code waits: a guess must not be told apart");
+    assert_eq!(b.join(&hub, json!({"admin_token": "nope"})).await, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]

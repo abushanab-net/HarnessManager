@@ -69,7 +69,11 @@ pub fn record(c: &Connection, op: &str, key: &str, data: &Value) -> rusqlite::Re
 
 /// Everything this computer has that its outbox does not, in one transaction: once when sync is turned on,
 /// and again should the outbox be found empty beside a full usage table. Returns how many entries were added.
-pub fn backfill(ctx: &Ctx) -> Result<usize> {
+pub fn backfill(ctx: &Ctx) -> Result<usize> { record_missing(ctx, true) }
+
+/// The backfill's work. The limit readings only when asked: `quota_point` journals each with its row, so later
+/// the only rows without an entry are other computers' merged ones, which are not this computer's to publish.
+fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
     let n = ctx.db.with(|c| {
         let tx = c.transaction()?;
         let now = now_ms();
@@ -82,8 +86,12 @@ pub fn backfill(ctx: &Ctx) -> Result<usize> {
         // sessions as the journal knows them (resolved, keyed harness/profile/id); the per-file cache rows have a '|' key
         n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'session', key, json from sessions s
             where device = ?2 and instr(key, '|') = 0 and not exists (select 1 from outbox o where o.op = 'session' and o.key = s.key)", params![now, dev])?;
-        n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'quota', profile || '/' || tier, json_object('used', used, 'resets_at', resets_at, 'at', ts)
-            from quota_hist q where not exists (select 1 from outbox o where o.op = 'quota' and o.key = q.profile || '/' || q.tier and json_extract(o.data, '$.at') = q.ts)", [now])?;
+        // `not in`, one lookup per reading: a correlated `not exists` parsed the JSON of every entry of that limit for each row
+        if quota {
+            n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'quota', profile || '/' || tier, json_object('used', used, 'resets_at', resets_at, 'at', ts)
+                from (select distinct profile, tier, used, resets_at, ts from quota_hist where coalesce(device, ?2) = ?2)
+                where (profile || '/' || tier, ts) not in (select key, coalesce(json_extract(data, '$.at'), 0) from outbox where op = 'quota')", params![now, dev])?;
+        }
         n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
             group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", [now])?;
         tx.execute("insert or replace into kv values('journal:backfilled', '1')", [])?;
@@ -169,7 +177,7 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         }
         "quota" => {
             let (profile, tier) = e.key.split_once('/').context("quota key")?;
-            quota_point_in(tx, profile, tier, e.data["used"].as_f64().unwrap_or(0.0), e.data["resets_at"].as_i64(), e.data["at"].as_i64().unwrap_or(e.ts))?;
+            quota_point_in(tx, profile, tier, e.data["used"].as_f64().unwrap_or(0.0), e.data["resets_at"].as_i64(), e.data["at"].as_i64().unwrap_or(e.ts), Some(device))?;
         }
         "tag" => {
             let (kind, key) = e.key.split_once('/').context("tag key")?;
@@ -203,6 +211,7 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
 /// tries again. Returns the sequence applied up to.
 pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
+    if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
     let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
@@ -249,7 +258,7 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
 /// the key it carries: its name, incarnation, roots and key are kept, the record is cached for relay. The key
 /// is learned once and never replaced by a record.
 pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
-    if dev["id"].as_str() != Some(id) || !identity::record_ok(dev) { return Ok(false); }
+    if !store::safe_origin(id) || dev["id"].as_str() != Some(id) || !identity::record_ok(dev) { return Ok(false); }
     let known = pubkey_of(ctx, id)?;
     if !known.is_empty() && dev["pubkey"].as_str() != Some(&known) {
         crate::log::warn(&format!("computers: {id} presents another key than the one paired; its record is ignored"));
@@ -307,7 +316,7 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
         // and, now and then, rows that reached the database without being recorded (the backfill adds nothing twice)
         let last: i64 = ctx.db.kv_get("journal:catchup_at")?.and_then(|v| v.parse().ok()).unwrap_or(0);
         if now_ms() - last > 600_000 {
-            let n = backfill(ctx)?;
+            let n = record_missing(ctx, false)?;
             if n > 0 { crate::log::info(&format!("journal: {n} entries caught up")); }
             ctx.db.kv_set("journal:catchup_at", &now_ms().to_string())?;
         }
@@ -376,7 +385,7 @@ pub fn open_elsewhere(peers: &[Peer], now: i64) -> std::collections::HashSet<Str
 pub fn status(ctx: &Ctx) -> Result<Value> {
     let s = &ctx.settings;
     let now = now_ms();
-    let last_seq: i64 = ctx.db.with(|c| Ok(c.query_row("select coalesce(max(seq), 0) from outbox", [], |r| r.get(0))?))?;
+    let last_seq: i64 = ctx.db.read(|c| Ok(c.query_row("select coalesce(max(seq), 0) from outbox", [], |r| r.get(0))?))?;
     let published: i64 = ctx.db.kv_get("journal:published_seq")?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let last = ctx.db.kv_get("computers:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
     let pairing = ctx.db.kv_get("pairing:current")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).filter(|p| p["expires_at"].as_i64().unwrap_or(0) > now).unwrap_or(Value::Null);
@@ -548,6 +557,106 @@ mod tests {
         assert_eq!(backfill(&ctx).unwrap(), 0);
         let tags: String = ctx.db.with(|c| Ok(c.query_row("select data from outbox where op='tag'", [], |r| r.get(0))?)).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&tags).unwrap()["tags"], json!(["x", "y"]));
+    }
+
+    #[test]
+    fn a_limit_reading_goes_round_the_computers_once() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let readings = |c: &Ctx| count(c, "select count(*) from quota_hist");
+        // the same account on both: each keeps offering its own cached reading on every page open
+        a.db.quota_point("work", "week", 40.0, Some(9_000), 1_000).unwrap();
+        b.db.quota_point("work", "week", 50.0, Some(9_000), 2_000).unwrap();
+        for _ in 0..3 {
+            round(&a).unwrap();
+            round(&b).unwrap();
+            a.db.quota_point("work", "week", 40.0, Some(9_000), 1_000).unwrap();
+            b.db.quota_point("work", "week", 50.0, Some(9_000), 2_000).unwrap();
+            // the ten-minute catch-up is due each time
+            a.db.kv_set("journal:catchup_at", "0").unwrap();
+            b.db.kv_set("journal:catchup_at", "0").unwrap();
+        }
+        assert_eq!((readings(&a), readings(&b)), (2, 2), "each computer holds the two readings, once");
+        let outbox = |c: &Ctx| count(c, "select count(*) from outbox where op = 'quota'");
+        assert_eq!((outbox(&a), outbox(&b)), (1, 1), "each journals its own reading only");
+        // a new reading is still a new point, and one back to an earlier value too
+        a.db.quota_point("work", "week", 60.0, Some(9_000), 3_000).unwrap();
+        a.db.quota_point("work", "week", 40.0, Some(9_000), 4_000).unwrap();
+        assert_eq!(readings(&a), 4);
+    }
+
+    #[test]
+    fn an_idle_accounts_old_reading_is_stored_once_while_the_others_move_on() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+        let (now, day) = (now_ms(), 86_400_000);
+        let old = now - 61 * day;
+        let n = |sql: &str| count(&ctx, sql);
+        // what a page open does for the idle account, with the other account's readings coming in between
+        for i in 0..4 {
+            ctx.db.quota_point("idle", "week", 40.0, None, old).unwrap();
+            ctx.db.quota_point("busy", "week", i as f64, None, now + i).unwrap();
+        }
+        assert_eq!(n("select count(*) from quota_hist where profile = 'idle'"), 1, "kept, not dropped and stored again");
+        // the same account read elsewhere long since: this computer's stale reading is not news to anyone
+        ctx.db.quota_point("idle", "week", 90.0, None, now).unwrap();
+        ctx.db.quota_point("idle", "week", 40.0, None, old).unwrap();
+        ctx.db.quota_point("idle", "week", 41.0, None, old - day).unwrap();
+        assert_eq!(ctx.db.quota_points("idle", "week", 0).unwrap().len(), 1, "only the newest is left of that limit: {:?}", ctx.db.quota_points("idle", "week", 0).unwrap());
+    }
+
+    #[test]
+    fn turning_sync_off_and_on_publishes_this_computers_readings_only() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        a.db.quota_point("work", "week", 40.0, None, 1_000).unwrap();
+        round(&a).unwrap();
+        round(&b).unwrap();
+        b.db.quota_point("work", "week", 50.0, None, 2_000).unwrap();
+        assert_eq!(count(&b, "select count(*) from quota_hist"), 2, "A's reading merged, and B's own");
+        b.db.with(|c| Ok(c.execute("delete from outbox", [])?)).unwrap();
+        assert_eq!(backfill(&b).unwrap(), 1, "B's own reading, not A's");
+        let at: String = b.db.with(|c| Ok(c.query_row("select data from outbox where op = 'quota'", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&at).unwrap()["at"], 2_000);
+    }
+
+    #[test]
+    fn a_name_with_a_path_in_it_is_no_computers_id() {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+        let evil = "..\\..\\evil";
+        let id = identity::load(&ctx).unwrap();
+        let mut rec = json!({"id": evil, "name": "x"});
+        id.sign_record(&mut rec);
+        assert!(identity::record_ok(&rec), "signed by the key it carries");
+        assert!(!learn_device(&ctx, evil, &rec).unwrap());
+        assert!(apply_manifest(&ctx, evil, &json!({"incarnation": "i", "chunks": []}), &|_| Ok(vec![])).is_err());
+        assert!(!t.path().join("evil").exists() && !t.path().join("A").join("evil").exists());
+        assert!(!store::dir(&ctx, evil).starts_with(t.path().join("evil")) && store::dir(&ctx, evil).starts_with(ctx.data.join("journal-cache")), "and the store stays in its folder");
+        let _ = crate::secrets::delete(&identity::target(&ctx.settings.device_id));
+    }
+
+    #[test]
+    fn readings_copied_many_times_are_kept_once_at_the_next_start() {
+        let t = tempfile::tempdir().unwrap();
+        let (data, home) = (t.path().join("A"), t.path().join("home"));
+        let ctx = Ctx::open_at(&data, &home).unwrap();
+        ctx.db.with(|c| {
+            c.execute_batch("insert into quota_hist(ts, profile, tier, used, resets_at) values(1000, 'work', 'week', 40.0, 9000), (1000, 'work', 'week', 40.0, 9000), (2000, 'work', 'week', 50.0, 9000),
+                (1000, 'work', 'week', 40.0, 9000), (1000, 'home', 'week', 40.0, 9000); delete from kv where k = 'migrated:quota-once';")?;
+            Ok(())
+        }).unwrap();
+        drop(ctx);
+        let ctx = Ctx::open_at(&data, &home).unwrap();
+        assert_eq!(ctx.db.quota_points("work", "week", 0).unwrap(), vec![(1000, 40.0, Some(9000)), (2000, 50.0, Some(9000))]);
+        assert_eq!(ctx.db.quota_points("home", "week", 0).unwrap().len(), 1);
     }
 
     #[test]

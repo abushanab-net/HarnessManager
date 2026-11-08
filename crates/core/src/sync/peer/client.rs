@@ -12,7 +12,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, Serve
 use rustls::{CertificateError, DigitallySignedStruct, Error, SignatureScheme};
 use serde_json::Value;
 
-use super::{identity, mdns};
+use super::{identity, mdns, store};
 use crate::journal::{self, Peer};
 use crate::util::now_ms;
 use crate::Ctx;
@@ -174,7 +174,7 @@ pub fn pull_all(ctx: &Ctx) {
     }
     let connected: HashSet<&str> = via.iter().map(|v| v.0.id.as_str()).collect();
     let mut known: BTreeSet<String> = peers.iter().map(|p| p.id.clone()).collect();
-    for (_, _, h) in &via { known.extend(h["origins"].as_array().into_iter().flatten().filter_map(|o| o.as_str().map(String::from))); }
+    for (_, _, h) in &via { known.extend(h["origins"].as_array().into_iter().flatten().filter_map(|o| o.as_str().filter(|o| store::safe_origin(o)).map(String::from))); }
     for origin in known.iter().filter(|o| o.as_str() != me && !connected.contains(o.as_str())) {
         for (p, c, _) in &via {
             match pull_origin(ctx, c, origin) {

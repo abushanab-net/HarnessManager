@@ -12,7 +12,11 @@ use crate::Ctx;
 
 const KEEP_BYTES: i64 = 50_000_000;
 
-pub fn dir(ctx: &Ctx, origin: &str) -> PathBuf { ctx.data.join("journal-cache").join(origin) }
+/// A computer's id, as it names a folder here: another computer can send any text as one, and `..\` must not
+/// climb out of the store.
+pub fn safe_origin(s: &str) -> bool { !s.is_empty() && !s.starts_with('.') && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_') }
+
+pub fn dir(ctx: &Ctx, origin: &str) -> PathBuf { ctx.data.join("journal-cache").join(if safe_origin(origin) { origin } else { ".invalid" }) }
 
 pub fn manifest(ctx: &Ctx, origin: &str) -> Option<Value> { read_json(&dir(ctx, origin).join("manifest.json")) }
 

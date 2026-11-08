@@ -95,7 +95,7 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
 /// The repositories this computer has, by project key: the root of every folder its usage and sessions name.
 pub fn roots_here(ctx: &Ctx) -> Result<HashMap<String, String>> {
     let reg = ctx.registry()?;
-    let dirs: Vec<String> = ctx.db.with(|c| {
+    let dirs: Vec<String> = ctx.db.read(|c| {
         let mut st = c.prepare("select distinct project from usage where device = ?1 and project <> '' union select distinct cwd from sessions where device = ?1 and instr(key, '|') > 0 and cwd <> ''")?;
         let v = st.query_map([&ctx.db.device], |r| r.get::<_, Option<String>>(0))?.flatten().flatten().collect();
         Ok(v)
@@ -121,7 +121,7 @@ pub fn resumable(s: &SessionMeta, roots: &HashMap<String, String>, reg: &Registr
 
 /// Sessions this computer continued from another: journal key -> the computer it came from.
 pub fn forks(ctx: &Ctx) -> HashMap<String, String> {
-    ctx.db.with(|c| {
+    ctx.db.read(|c| {
         let mut st = c.prepare("select k, v from kv where k like 'forked:%'")?;
         let v = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten()
             .filter_map(|(k, v)| Some((k[7..].to_string(), serde_json::from_str::<Value>(&v).ok()?["from"].as_str()?.to_string()))).collect();

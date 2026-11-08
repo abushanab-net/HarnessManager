@@ -57,12 +57,17 @@ mod tests {
     #[test]
     fn writes_at_or_above_its_level_only() {
         let d = tempfile::tempdir().unwrap();
-        super::init(d.path(), true, "warn");
-        super::info("not this");
-        super::warn("this one");
-        super::init(d.path(), false, "info");
-        super::error("not when off");
-        let text = std::fs::read_to_string(super::file(d.path())).unwrap();
+        // there is one log per process, and any test opening a Ctx points it elsewhere: tried until a pass goes undisturbed
+        let mut text = String::new();
+        for _ in 0..50 {
+            super::init(d.path(), true, "warn");
+            super::info("not this");
+            super::warn("this one");
+            super::init(d.path(), false, "info");
+            super::error("not when off");
+            text = std::fs::read_to_string(super::file(d.path())).unwrap_or_default();
+            if text.contains("this one") { break; }
+        }
         assert!(text.contains("WARN  this one") && !text.contains("not this") && !text.contains("not when off"));
     }
 

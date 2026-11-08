@@ -85,6 +85,28 @@ fn pairing_with_the_right_code_stores_both_peers() {
 }
 
 #[test]
+fn a_stranger_gets_nothing_to_try_codes_on_and_the_real_join_still_works() {
+    use base64::Engine;
+    use spake2::{Ed25519Group, Identity, Password, Spake2};
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    let v = a.rt.pair_start(&a.ctx, Some("127.0.0.1")).unwrap();
+    let url = format!("http://127.0.0.1:{}/pair/start", v["port"]);
+    let http = reqwest::blocking::Client::builder().no_proxy().build().unwrap();
+    // more guesses than the host keeps exchanges for, none of them ever finished
+    for i in 0..40 {
+        let id = format!("stranger-{i}");
+        let (_, msg) = Spake2::<Ed25519Group>::start_a(&Password::new(b"000000"), &Identity::new(id.as_bytes()), &Identity::new(a.ctx.settings.device_id.as_bytes()));
+        let r: Value = http.post(&url).json(&json!({"id": id, "msg": base64::engine::general_purpose::STANDARD.encode(msg)})).send().unwrap().json().unwrap();
+        assert!(r["msg"].is_string() && r.get("payload").is_none(), "nothing sealed under a key not shown yet: {r}");
+    }
+    assert!(journal::status(&a.ctx).unwrap()["this"]["pairing"].is_object(), "silent guesses end nothing");
+    let st = b.rt.pair_join(&b.ctx, v["code"].as_str().unwrap(), v["host_hint"].as_str()).unwrap();
+    assert_eq!(st["peers"][0]["id"], a.ctx.settings.device_id.as_str(), "{st}");
+    assert_eq!(count(&a.ctx, "select count(*) from peers"), 1);
+}
+
+#[test]
 fn a_wrong_code_fails_and_stores_nothing() {
     let t = tempfile::tempdir().unwrap();
     let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
