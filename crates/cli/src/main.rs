@@ -300,6 +300,8 @@ enum RouteCmd {
 }
 
 fn main() {
+    // the detached router has no console: its panics go to the log
+    hrm_core::log::log_panics();
     // `hrm ... | head` closes the pipe early; that is not an error worth a panic message
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

@@ -476,7 +476,12 @@ fn filter_sql(ctx: &Ctx, f: &SessionFilter) -> (String, Vec<rusqlite::types::Val
     }
     if f.scope.as_deref() == Some("here") { q.w.push("device = ?1".into()); }
     else if let Some(d) = &f.device { let a = q.arg(d.clone()); q.w.push(format!("device = {a}")); }
-    if f.open == Some(true) { q.w.push("open = 1".into()); }
+    // open here by the column, open on another computer by its presence (its rows never carry the column)
+    if f.open == Some(true) {
+        let far: Vec<String> = crate::journal::open_elsewhere(&crate::journal::peers(ctx).unwrap_or_default(), now_ms()).into_iter().collect();
+        let a = q.arg(serde_json::to_string(&far).unwrap_or_default());
+        q.w.push(format!("(open = 1 or (device <> ?1 and id in (select value from json_each({a}))))"));
+    }
     if let Some(t) = &f.tag {
         let (a, b) = (q.arg(t.clone()), q.arg(t.clone()));
         q.w.push(format!("((profile || '/' || id) in (select key from tags where kind = 'session' and tag = {a}) or project_key in (select key from tags where kind = 'project' and tag = {b}))"));
@@ -883,7 +888,20 @@ pub fn random_token() -> String {
     out
 }
 
-pub fn router_running(ctx: &Ctx) -> bool { router_answer(ctx).map(|r| r.ends_with("\r\n\r\nok")).unwrap_or(false) }
+pub fn router_running(ctx: &Ctx) -> bool { router_answer(ctx).and_then(|r| health(&r).map(|_| ())).is_some() }
+
+/// A router's `/health` answer: `Some(program file)` when it is a router ("" from one before 1.9.6), None otherwise.
+fn health(answer: &str) -> Option<String> {
+    let body = answer.split_once("\r\n\r\n")?.1;
+    let rest = body.strip_prefix("ok")?;
+    (rest.is_empty() || rest.starts_with('\n')).then(|| rest.trim().to_string())
+}
+
+/// The router this app would start: the same program file (an older install or a dev build is another).
+fn router_is_ours(exe: &str) -> bool {
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).map(|c| c.display().to_string().to_lowercase()).unwrap_or_default();
+    !exe.is_empty() && canon(std::path::Path::new(exe)) == canon(&crate::launch::hrm_exe())
+}
 
 /// What answers `GET /health` on the router port, if anything listens there at all.
 fn router_answer(ctx: &Ctx) -> Option<String> {
@@ -912,11 +930,20 @@ pub fn router_stop(ctx: &Ctx) -> Result<bool> {
 
 /// Start `hrm router serve` in the background when nothing listens on the router port yet.
 pub fn ensure_router(ctx: &Ctx) -> Result<()> {
-    if router_running(ctx) { return Ok(()); }
-    // something else answers on the port: a router started now could not bind it, and the tools' requests
-    // (with the router token) would go to that program
-    if router_answer(ctx).is_some() {
-        bail!("another program is using port {}; choose another router port in Settings", ctx.settings.router_port);
+    let ours = |ctx: &Ctx| router_answer(ctx).and_then(|a| health(&a)).map(|exe| router_is_ours(&exe)).unwrap_or(false);
+    match router_answer(ctx).map(|a| health(&a)) {
+        Some(Some(exe)) if router_is_ours(&exe) => return Ok(()),
+        // a router from another build (an older install, a dev build) on the live data: this build's replaces it
+        Some(Some(exe)) => {
+            crate::log::info(&format!("router: replacing the one from {}", if exe.is_empty() { "an older version" } else { &exe }));
+            router_stop(ctx)?;
+            for _ in 0..50 { if router_answer(ctx).is_none() { break; } std::thread::sleep(std::time::Duration::from_millis(100)); }
+            if router_answer(ctx).is_some() { bail!("a router from another build runs on port {} and could not be stopped; end it in Task Manager", ctx.settings.router_port); }
+        }
+        // something else answers on the port: a router started now could not bind it, and the tools' requests
+        // (with the router token) would go to that program
+        Some(None) => bail!("another program is using port {}; choose another router port in Settings", ctx.settings.router_port),
+        None => {}
     }
     let mut c = std::process::Command::new(crate::launch::hrm_exe());
     c.args(["router", "serve"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
@@ -924,7 +951,7 @@ pub fn ensure_router(ctx: &Ctx) -> Result<()> {
     { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000 | 0x0000_0008); } // no window, detached
     without_inherited_std(|| c.spawn()).context("start the router")?;
     for _ in 0..150 { // fifteen seconds: a loaded computer (the CI runner tests two suites at once) starts a process slowly
-        if router_running(ctx) { return Ok(()); }
+        if ours(ctx) { return Ok(()); }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     bail!("the router did not start on port {}", ctx.settings.router_port)
