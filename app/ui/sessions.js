@@ -87,7 +87,7 @@ view('sessions', async (sheet, params) => {
   const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '', pc = params.pc || '', page = +params.page || 0;
   if (!S.state) await loadState();
   const scope = pc === 'here' ? 'here' : 'all';
-  const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
+  const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' || live ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
   sheet.className = 'sheet';
   // the list already on screen stays while the fresh one is read; from another page, a line says what is coming
   if (!sheet.querySelector('[data-tour=sessions]')) sheet.innerHTML = '<div class="page-body"><h1 class="muted">Reading sessions…</h1></div>';
@@ -107,8 +107,9 @@ view('sessions', async (sheet, params) => {
   S.cache.sessionOrder = all.map((s) => ({ profile: s.profile, id: s.id }));
   const tools = [...new Set(all.map((s) => s.harness))].map((h) => TOOL[h]).join(', ').replace(/, ([^,]*)$/, ' and $1');
   // a running session sits at the top, whatever the grouping, never inside a fold
-  const running = all.filter((s) => s.open);
-  if (!live) groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => !s.open), total: g.total - g.sessions.filter((s) => s.open).length })).filter((g) => g.sessions.length || g.total);
+  const isLive = (s) => s.open || s.open_elsewhere;
+  const running = all.filter(isLive);
+  if (!live) groups = groups.map((g) => ({ ...g, sessions: g.sessions.filter((s) => !isLive(s)), total: g.total - g.sessions.filter(isLive).length })).filter((g) => g.sessions.length || g.total);
   const filtered = !!(q || tag || live || pc || params.profile || params.harness);
   const cur = project ? plist.find((p) => p.key === project) || { key: project, name: (all[0] && all[0].project_name) || project, sessions: total, tokens: all.reduce((a, s) => a + s.tokens, 0), accounts: [...new Set(all.map((s) => s.profile))], live: running.length } : null;
   if (!total && !filtered && !cur && days === 'all') {

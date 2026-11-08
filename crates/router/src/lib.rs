@@ -73,7 +73,8 @@ impl AppState {
 pub fn router(ctx: Arc<Ctx>) -> Router {
     let state = Arc::new(AppState { ctx, client: reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).read_timeout(Duration::from_secs(300)).build().unwrap(), breakers: Mutex::new(HashMap::new()) });
     Router::new()
-        .route("/health", get(|| async { "ok" }))
+        // and which program serves, so Harness Manager can replace a router from another build
+        .route("/health", get(|| async { format!("ok\n{}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()) }))
         .route("/r/{route}/{profile}/v1/messages", post(messages))
         .route("/r/{route}/{profile}/v1/messages/count_tokens", post(count_tokens))
         .route("/r/{route}/{profile}/v1/models", get(models))

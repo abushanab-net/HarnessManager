@@ -32,6 +32,26 @@ pub fn error(msg: &str) { eprintln!("{msg}"); write("error", msg); }
 pub fn warn(msg: &str) { eprintln!("{msg}"); write("warn", msg); }
 pub fn info(msg: &str) { write("info", msg); }
 
+/// Panics go to the log too, with the place, then to the default hook: the app and the detached router have no
+/// console, and a background thread that panics would otherwise stop without a word.
+pub fn log_panics() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let p = info.payload();
+        let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+        let at = info.location().map(|l| l.to_string()).unwrap_or_default();
+        error(&format!("panic in thread {}: {msg} at {at}", std::thread::current().name().unwrap_or("unnamed")));
+        prev(info);
+    }));
+}
+
+/// One round of a background loop: a panic in it is logged (by the hook) and the loop goes on to the next round.
+pub fn round(what: &str, f: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err() {
+        error(&format!("{what}: the round stopped on a panic; the next one runs as usual"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -44,5 +64,12 @@ mod tests {
         super::error("not when off");
         let text = std::fs::read_to_string(super::file(d.path())).unwrap();
         assert!(text.contains("WARN  this one") && !text.contains("not this") && !text.contains("not when off"));
+    }
+
+    #[test]
+    fn a_round_that_panics_does_not_stop_the_loop() {
+        let mut n = 0;
+        for i in 0..3 { super::round("test loop", || { n += 1; if i == 1 { panic!("boom") } }); }
+        assert_eq!(n, 3);
     }
 }

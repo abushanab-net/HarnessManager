@@ -229,6 +229,24 @@ fn another_program_on_the_router_port_is_not_the_router() {
 }
 
 #[test]
+fn a_router_from_another_build_is_not_kept() {
+    use std::io::{Read, Write};
+    let (_dir, mut ctx) = ctx();
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    ctx.settings.router_port = l.local_addr().unwrap().port();
+    // a router answering from another program file, whose pid this data folder does not know (so it cannot be stopped)
+    std::thread::spawn(move || for s in l.incoming().flatten().take(200) {
+        let mut s = s;
+        let mut buf = [0u8; 512];
+        let _ = s.read(&mut buf);
+        let _ = s.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 26\r\n\r\nok\nC:\\elsewhere\\dev\\hrm.exe");
+    });
+    assert!(hrm_core::service::router_running(&ctx), "it is a router");
+    let err = hrm_core::service::ensure_router(&ctx).unwrap_err();
+    assert!(format!("{err:#}").contains("from another build"), "{err:#}");
+}
+
+#[test]
 fn windows_device_names_are_not_account_names() {
     use hrm_core::util::valid_name;
     for bad in ["nul", "CON", "com1", "LPT9", "aux"] { assert!(!valid_name(bad), "{bad}"); }
