@@ -27,6 +27,9 @@ fn unb64(s: &str) -> Result<Vec<u8>> { Ok(base64::engine::general_purpose::STAND
 /// The credential holding the seed: the test prefix keeps tests apart, the id keeps two computers' data folders apart.
 pub(crate) fn target(device_id: &str) -> String { format!("{}:device-key:{device_id}", secrets::prefix()) }
 
+/// This computer's credential store holds that computer's signing key: it can go on as that computer.
+pub fn has_key(device_id: &str) -> bool { secrets::read(&target(device_id)).is_some() }
+
 /// A PEM certificate's DER bytes.
 pub fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
     let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();

@@ -131,9 +131,16 @@ fn candidates(reg: &hrm_core::Registry, route: &Route, model: &str) -> Result<Ve
 }
 
 #[allow(clippy::too_many_arguments)]
-fn log(st: &AppState, route: &str, profile: &str, provider: &str, model: &str, status: u16, started: Instant, first: Option<i64>, input: i64, output: i64) {
-    let _ = st.ctx.db.log_route(route, profile, provider, model, status as i64, started.elapsed().as_millis() as i64, first, input, output);
+fn log(st: &AppState, route: &str, profile: &str, provider: &str, model: &str, status: u16, started: Instant, first: Option<i64>, tokens: (i64, i64, i64, i64)) {
+    let _ = st.ctx.db.log_route(route, profile, provider, model, status as i64, started.elapsed().as_millis() as i64, first, tokens);
 }
+
+/// An Anthropic `usage` as (input, output, cache read, cache write): each apart, as they are priced.
+fn tokens_of(u: &Value) -> (i64, i64, i64, i64) {
+    let n = |k: &str| u[k].as_i64().unwrap_or(0);
+    (n("input_tokens"), n("output_tokens"), n("cache_read_input_tokens"), n("cache_creation_input_tokens"))
+}
+const NO_TOKENS: (i64, i64, i64, i64) = (0, 0, 0, 0);
 
 async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Path<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
     if !authorized(&st, &headers) {
@@ -185,7 +192,7 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
             Err(e) => {
                 st.report(&p.id, false);
                 tried.push(p.id.clone());
-                log(&st, &route_id, &profile, &p.id, &model, 0, started, None, 0, 0);
+                log(&st, &route_id, &profile, &p.id, &model, 0, started, None, NO_TOKENS);
                 last_error = format!("{}: {e}", p.id);
                 if failover { continue } else { break }
             }
@@ -194,7 +201,7 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
         if !status.is_success() {
             let code = status.as_u16();
             let text = resp.text().await.unwrap_or_default();
-            log(&st, &route_id, &profile, &p.id, &model, code, started, None, 0, 0);
+            log(&st, &route_id, &profile, &p.id, &model, code, started, None, NO_TOKENS);
             // the next provider would reject the same request; do not fail over on these
             if matches!(code, 400 | 413 | 422) {
                 st.report(&p.id, true);
@@ -215,16 +222,14 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
             let v: Value = match resp.json().await {
                 Ok(v) => v,
                 Err(e) => {
-                    log(&st, &route_id, &profile, &p.id, &model, 502, started, None, 0, 0);
+                    log(&st, &route_id, &profile, &p.id, &model, 502, started, None, NO_TOKENS);
                     return err(StatusCode::BAD_GATEWAY, "api_error", format!("{} sent a reply that is not JSON: {e}", p.id));
                 }
             };
             let out = if p.format == "openai" { convert::openai_to_anthropic(&v, &model) } else { v };
             // not streamed: the first chunk is the whole answer
             let ms = started.elapsed().as_millis() as i64;
-            // shortcut: router_log has no cache column, so cache hits (DeepSeek) are counted into input; split them when it gets one
-            let input = out["usage"]["input_tokens"].as_i64().unwrap_or(0) + out["usage"]["cache_read_input_tokens"].as_i64().unwrap_or(0);
-            log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), input, out["usage"]["output_tokens"].as_i64().unwrap_or(0));
+            log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), tokens_of(&out["usage"]));
             Json(out).into_response()
         };
     }
@@ -239,14 +244,15 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
         // bytes, cut at line ends only: a line, or a multi-byte character, split across chunks waits for its rest
         let mut buf: Vec<u8> = Vec::new();
         let mut conv = convert::StreamConv::new(&model);
-        let (mut input, mut output) = (0i64, 0i64);
+        // Anthropic format: the input and cache numbers come with message_start, the output grows with message_delta
+        let mut tokens = NO_TOKENS;
         let mut broken = None;
         let mut first: Option<i64> = None;
         while let Some(chunk) = upstream.next().await {
             let chunk = match chunk { Ok(c) => c, Err(e) => { broken = Some(e.to_string()); break } };
             if first.is_none() { first = Some(started.elapsed().as_millis() as i64); }
             // Anthropic format: passed through unchanged, read on the way for the usage numbers
-            if !openai && tx.send(Ok(chunk.clone())).await.is_err() { log(&st, &route, &profile, &p.id, &model, 499, started, first, input, output); return; }
+            if !openai && tx.send(Ok(chunk.clone())).await.is_err() { log(&st, &route, &profile, &p.id, &model, 499, started, first, tokens); return; }
             buf.extend_from_slice(&chunk);
             while let Some(i) = buf.iter().position(|b| *b == b'\n') {
                 let raw: Vec<u8> = buf.drain(..=i).collect();
@@ -254,8 +260,8 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
                 let Some(data) = line.trim().strip_prefix("data:").map(str::trim) else { continue };
                 if !openai {
                     if let Ok(v) = serde_json::from_str::<Value>(data) {
-                        if let Some(i) = v["message"]["usage"]["input_tokens"].as_i64() { input = i; }
-                        if let Some(o) = v["usage"]["output_tokens"].as_i64() { output = o; }
+                        if v["message"]["usage"].is_object() { tokens = tokens_of(&v["message"]["usage"]); }
+                        if let Some(o) = v["usage"]["output_tokens"].as_i64() { tokens.1 = o; }
                     }
                     continue;
                 }
@@ -263,27 +269,24 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
                 for e in events {
                     if tx.send(Ok(Bytes::from(e))).await.is_err() {
                         // 499: the client went away (Esc in Claude Code); the tokens so far were still used
-                        log(&st, &route, &profile, &p.id, &model, 499, started, first, conv.input_tokens, conv.output_tokens);
+                        log(&st, &route, &profile, &p.id, &model, 499, started, first, (conv.input_tokens - conv.cache_read, conv.output_tokens, conv.cache_read, 0));
                         return;
                     }
                 }
             }
         }
-        if openai {
-            input = conv.input_tokens;
-            output = conv.output_tokens;
-        }
+        if openai { tokens = (conv.input_tokens - conv.cache_read, conv.output_tokens, conv.cache_read, 0); }
         if let Some(e) = broken.or_else(|| conv.error.take()) {
             // never end a cut-off answer as if it were complete
             let ev = json!({"type": "error", "error": {"type": "api_error", "message": format!("{} stopped mid-answer: {e}", p.id)}});
             let _ = tx.send(Ok(Bytes::from(format!("event: error\ndata: {ev}\n\n")))).await;
-            log(&st, &route, &profile, &p.id, &model, 502, started, first, input, output);
+            log(&st, &route, &profile, &p.id, &model, 502, started, first, tokens);
             return;
         }
         if openai {
             for e in conv.finish() { let _ = tx.send(Ok(Bytes::from(e))).await; }
         }
-        log(&st, &route, &profile, &p.id, &model, 200, started, first, input, output);
+        log(&st, &route, &profile, &p.id, &model, 200, started, first, tokens);
     });
     Response::builder().header("content-type", "text/event-stream").header("cache-control", "no-cache").body(Body::from_stream(s)).unwrap()
 }

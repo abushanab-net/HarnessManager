@@ -30,6 +30,9 @@ use tokio::sync::broadcast;
 
 const MB: u64 = 1024 * 1024;
 const INVITE_MS: i64 = 10 * 60 * 1000;
+/// Wrong join attempts a minute, from anyone: at this pace a six-digit code holds for its ten minutes (at most 100
+/// tries of a million). Past it every join waits for the minute's end; a flood can delay a join, not guess one.
+const JOIN_FAILS_A_MINUTE: u32 = 10;
 
 pub struct Config {
     pub data_dir: PathBuf,
@@ -45,6 +48,8 @@ struct Hub {
     admin_hash: String,
     db: Mutex<Connection>,
     events: broadcast::Sender<String>,
+    /// Wrong join attempts: when the count began, and the count.
+    join_fails: Mutex<(i64, u32)>,
 }
 
 type St = State<Arc<Hub>>;
@@ -73,7 +78,7 @@ pub async fn serve(cfg: Config) -> Result<(SocketAddr, axum_server::Handle<Socke
     let handle = axum_server::Handle::new();
     let server = axum_server::from_tcp(l)?.handle(handle.clone());
     let limit = (cfg.max_blob_mb * MB) as usize;
-    let hub = Arc::new(Hub { admin_hash: sha_hex(cfg.admin_token.as_bytes()), cfg, db: Mutex::new(db), events: broadcast::channel(64).0 });
+    let hub = Arc::new(Hub { admin_hash: sha_hex(cfg.admin_token.as_bytes()), cfg, db: Mutex::new(db), events: broadcast::channel(64).0, join_fails: Mutex::new((0, 0)) });
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/join", post(join))
@@ -150,6 +155,19 @@ impl Hub {
 
     fn emit(&self, kind: &str, id: &str) { let _ = self.events.send(json!({"kind": kind, "id": id}).to_string()); }
 
+    /// One wrong join attempt more, and the answer that says so.
+    fn join_failed(&self, status: StatusCode, msg: &str) -> Response {
+        let mut f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
+        if now_ms() - f.0 >= 60_000 { *f = (now_ms(), 0); }
+        f.1 += 1;
+        fail(status, msg)
+    }
+
+    fn joins_held(&self) -> bool {
+        let f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
+        now_ms() - f.0 < 60_000 && f.1 >= JOIN_FAILS_A_MINUTE
+    }
+
     fn device_list(&self, db: &Connection) -> rusqlite::Result<Vec<Value>> {
         let mut st = db.prepare("select d.record, d.last_seen, coalesce((select max(to_seq) from chunks c where c.origin = d.id), 0) from devices d order by d.joined_at")?;
         let rows = st.query_map([], |r| {
@@ -186,6 +204,13 @@ impl Hub {
     }
 }
 
+/// A code does not take over a computer already here: its key must be the one the hub holds, and the record newer
+/// than the one held, since that one is readable by every computer on the hub and could be sent again.
+fn known_ok(known: Option<&str>, record: &Value) -> bool {
+    let Some(k) = known.and_then(|k| serde_json::from_str::<Value>(k).ok()) else { return known.is_none() };
+    k["pubkey"] == record["pubkey"] && record["updated_at"].as_i64().unwrap_or(0) > k["updated_at"].as_i64().unwrap_or(0)
+}
+
 #[derive(Deserialize)]
 struct JoinBody {
     code: Option<String>,
@@ -193,18 +218,21 @@ struct JoinBody {
     device: Value,
 }
 
-/// With the admin token or a live invite code: mint a token for the record's id (a second join by the same
-/// computer replaces its token) and answer with every device known.
+/// With the admin token or a live invite code: mint a token for the record's id and answer with every device known.
+/// A second join by the same computer replaces its token; with a code it must prove it is that computer (see `known_ok`).
 async fn join(State(hub): St, Json(body): Json<JoinBody>) -> Reply {
     let (id, record) = checked_record(&body.device)?;
+    if hub.joins_held() { return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many wrong attempts; try again in a minute")); }
     let db = hub.lock();
     match (body.admin_token.as_deref(), body.code.as_deref()) {
         (Some(t), _) if !t.is_empty() => {
-            if sha_hex(t.as_bytes()) != hub.admin_hash { return Err(fail(StatusCode::UNAUTHORIZED, "wrong admin token")); }
+            if sha_hex(t.as_bytes()) != hub.admin_hash { return Err(hub.join_failed(StatusCode::UNAUTHORIZED, "wrong admin token")); }
         }
         (_, Some(code)) if !code.is_empty() => {
             let n = db.execute("update invites set used = 1 where code = ? and used = 0 and expires_at > ?", params![code, now_ms()]).map_err(internal)?;
-            if n == 0 { return Err(fail(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")); }
+            if n == 0 { return Err(hub.join_failed(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")); }
+            let known: Option<String> = db.query_row("select record from devices where id = ?", [&id], |r| r.get(0)).optional().map_err(internal)?;
+            if !known_ok(known.as_deref(), &record) { return Err(fail(StatusCode::FORBIDDEN, "a computer with this id is on the hub already, under another key")); }
         }
         _ => return Err(fail(StatusCode::BAD_REQUEST, "send a code or the admin token")),
     }
