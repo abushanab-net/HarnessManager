@@ -1521,6 +1521,12 @@ body.popup .tray-rings-grid { max-height: none; }
   color: var(--ink-primary);
 }
 
+/* Start and its ▾ folder menu, joined as one split button */
+.split-start { display: inline-flex; }
+.split-start .btn-lane-start:first-child { border-radius: 6px 0 0 6px; }
+.split-start .btn-lane-start.caret { border-radius: 0 6px 6px 0; border-left: none; padding: 4px 6px; }
+.t-lane .btn-lane-start[aria-expanded] { opacity: 1; pointer-events: auto; }
+
 .btn-lane-start:hover,
 .btn-lane-start.primary {
   background: var(--ac);
