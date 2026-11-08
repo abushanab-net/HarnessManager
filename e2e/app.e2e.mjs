@@ -208,6 +208,13 @@ try {
     await $('[data-testid=lane-codex-main]');
     assert.equal(await exec("return document.querySelector('[data-testid=lane-codex-main] .ring-val').textContent"), '79%', 'the ring says what is left');
     await hasText('[data-testid=lane-codex-main]', 'Wk ↻');
+    // a lane's Start has a ▾ beside it: choose a folder, or the full Start in a folder dialog
+    await page.hover('[data-testid=lane-codex-main]');
+    await click('[data-testid=lane-start-menu-codex-main]');
+    await $('[data-testid=sm-choose]');
+    await click('[data-testid=sm-dialog]');
+    await $('[data-testid=sd-dir]');
+    await click('.dlg .dh [data-act=dialog-close]');
     assert.deepEqual(await exec("return [...document.querySelectorAll('.axis-tick')].map((t) => t.textContent)"), ['NOW', '+2d', '+4d', '+6d', '+7d'], 'a linear 7-day ruler');
     // the latest replies carry no tokens-per-second; Request log opens the whole log in a dialog, every number column right-aligned
     await hasText('[data-testid=latest-replies]', 'claude-opus-5-5');

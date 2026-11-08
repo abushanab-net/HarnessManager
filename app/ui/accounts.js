@@ -351,6 +351,11 @@ async function startDialog(name) {
   };
 }
 action('start-in-folder', (el) => startDialog(el.dataset.name));
+// the ▾ beside a lane's Start: pick a folder and go, or the full dialog (recent folders, flags, arguments)
+action('start-menu', (el) => openMenu(el, [
+  { label: 'Choose folder…', testid: 'sm-choose', run: async () => { const dir = await pickFolder(); if (dir) attempt(() => call('start', { name: el.dataset.name, cwd: dir }), `Opened ${acctName(el.dataset.name)} in ${dir}`); } },
+  { label: 'Recent folders and options…', testid: 'sm-dialog', run: () => startDialog(el.dataset.name) },
+]));
 action('sd-acct', (el) => { closeDialog(); startDialog(el.value); });
 
 /** A new session in a project's folder, or in a folder picked here when no project is given, as any account
