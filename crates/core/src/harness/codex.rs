@@ -328,16 +328,21 @@ impl Harness for Codex {
         let norm = |s: &str| crate::projects::normalize(s).to_lowercase();
         let mut recent: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).filter(|(m, _)| now - m < 120_000).collect();
         recent.sort_by(|a, b| b.0.cmp(&a.0));
+        if recent.is_empty() { return vec![]; }
+        // the desktop app and the editor extension run one app-server for every thread, in a folder of its own: it
+        // counts for the threads of the Codex home it writes to (its CODEX_HOME, else .codex in its user's home)
+        let mine = norm(&self.home(ctx, p).display().to_string());
+        let home_of = |pid: u32| crate::procs::env_of(pid, "CODEX_HOME")
+            .or_else(|| crate::procs::env_of(pid, if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(|h| Path::new(&h).join(".codex").display().to_string()));
+        let server = procs.iter().find(|(pid, _, _)| home_of(*pid).map(|h| norm(&h) == mine).unwrap_or(false));
         let mut out = vec![];
         for (m, f) in recent {
             let Some(meta) = first_line(&f).and_then(|l| serde_json::from_str::<Value>(&l).ok()) else { continue };
             let cwd = meta["payload"]["cwd"].as_str().unwrap_or("");
             let id = meta["payload"]["id"].as_str().unwrap_or("").to_string();
-            // a codex process working in this session's folder; else the desktop app or the editor extension, whose one
-            // app-server writes every thread from a folder of its own
-            // shortcut: any codex process stands in for the app-server, so a terminal codex that just quit reads open for up to two minutes
+            // a codex process working in this session's folder, else the app-server of this Codex home
             let free = |pid: &u32, c: &Option<String>| !out.iter().any(|r: &RunningConsole| r.pid == *pid) && c.as_deref().map(|c| norm(c) == norm(cwd)).unwrap_or(false);
-            if let Some((pid, start, pcwd)) = procs.iter().find(|(pid, _, c)| free(pid, c)).or(procs.first()) {
+            if let Some((pid, start, pcwd)) = procs.iter().find(|(pid, _, c)| free(pid, c)).or(server) {
                 out.push(RunningConsole { pid: *pid, started_at: Some((*start).min(m)), cwd: Some(cwd.to_string()).filter(|c| !c.is_empty()).or(pcwd.clone()), session_id: Some(id) });
             }
         }
