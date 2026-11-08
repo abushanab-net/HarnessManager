@@ -87,7 +87,7 @@ struct Shared {
 
 impl Shared {
     fn end(&self, v: Value) {
-        *self.done.lock().unwrap() = Some(v.clone());
+        *self.done.lock().unwrap_or_else(|e| e.into_inner()) = Some(v.clone());
         let _ = self.ctx.db.with(|c| { c.execute("delete from kv where k='pairing:current'", [])?; Ok(()) });
         (self.on_event)("computers-pairing", v);
         // the answer to the last request goes out first
@@ -111,7 +111,7 @@ impl Host {
     }
 
     /// `{ok, peer?, error?}` once it ended, by pairing or by failing.
-    pub fn result(&self) -> Option<Value> { self.shared.done.lock().unwrap().clone() }
+    pub fn result(&self) -> Option<Value> { self.shared.done.lock().unwrap_or_else(|e| e.into_inner()).clone() }
 
     pub fn status(&self) -> Value { json!({"code": self.code, "expires_at": self.expires_at, "host_hint": self.host_hint, "port": self.port}) }
 }
@@ -132,7 +132,7 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, host_name
     let (h2, s2) = (handle.clone(), shared.clone());
     rt.spawn(async move {
         tokio::time::sleep(Duration::from_millis(LIVES_MS as u64)).await;
-        if s2.done.lock().unwrap().is_none() { s2.end(json!({"ok": false, "error": "the code expired"})); }
+        if s2.done.lock().unwrap_or_else(|e| e.into_inner()).is_none() { s2.end(json!({"ok": false, "error": "the code expired"})); }
         h2.shutdown();
     });
     let expires_at = now_ms() + LIVES_MS;
@@ -154,7 +154,7 @@ async fn start_route(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Resp
     let ctx = s.ctx.clone();
     let mine = tokio::task::spawn_blocking(move || payload(&ctx)).await.expect("payload");
     let sealed = match mine.and_then(|m| seal(&key, &m)) { Ok(p) => p, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response() };
-    let mut keys = s.keys.lock().unwrap();
+    let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner());
     keys.retain(|(id, _)| id != &joiner);
     keys.push((joiner, key));
     Json(json!({"id": s.ctx.settings.device_id, "msg": b64(&outbound), "payload": sealed})).into_response()
@@ -163,7 +163,7 @@ async fn start_route(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Resp
 /// The joiner's sealed payload: opened with its key, the peer is stored; otherwise one failure more.
 async fn finish(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Response {
     let joiner = a["id"].as_str().unwrap_or("").to_string();
-    let key = { let mut keys = s.keys.lock().unwrap(); keys.iter().position(|(id, _)| id == &joiner).map(|i| keys.remove(i).1) };
+    let key = { let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner()); keys.iter().position(|(id, _)| id == &joiner).map(|i| keys.remove(i).1) };
     let Some(key) = key else { return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "start first"}))).into_response() };
     match open(&key, a["payload"].as_str().unwrap_or("")) {
         Ok(p) => {

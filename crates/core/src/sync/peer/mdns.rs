@@ -35,7 +35,7 @@ fn note(me: &str, r: &ResolvedService) {
     // an IPv4 address first: the VPN and most home networks route it
     let Some(ip) = r.addresses.iter().map(|a| a.to_ip_addr()).min_by_key(|a| a.is_ipv6()) else { return };
     let f = Found { ip, port: txt("port").parse().unwrap_or(r.port), name: txt("name"), pairing_port: (txt("pairing") == "1").then(|| txt("pairing_port").parse().ok()).flatten() };
-    FOUND.lock().unwrap().insert(id, f);
+    FOUND.lock().unwrap_or_else(|e| e.into_inner()).insert(id, f);
 }
 
 impl Mdns {
@@ -48,7 +48,7 @@ impl Mdns {
             while let Ok(ev) = rx.recv() {
                 match ev {
                     ServiceEvent::ServiceResolved(r) => note(&me, &r),
-                    ServiceEvent::ServiceRemoved(_, fullname) => { FOUND.lock().unwrap().retain(|id, _| !fullname.starts_with(id.as_str())); }
+                    ServiceEvent::ServiceRemoved(_, fullname) => { FOUND.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| !fullname.starts_with(id.as_str())); }
                     _ => {}
                 }
             }
@@ -77,9 +77,9 @@ impl Mdns {
 }
 
 /// Where a computer answered from, by id.
-pub fn lookup(id: &str) -> Option<(IpAddr, u16)> { FOUND.lock().unwrap().get(id).map(|f| (f.ip, f.port)) }
+pub fn lookup(id: &str) -> Option<(IpAddr, u16)> { FOUND.lock().unwrap_or_else(|e| e.into_inner()).get(id).map(|f| (f.ip, f.port)) }
 
 /// A computer showing a pairing code: (address, pairing port, id).
 pub fn pairing_host() -> Option<(IpAddr, u16, String)> {
-    FOUND.lock().unwrap().iter().find_map(|(id, f)| f.pairing_port.map(|p| (f.ip, p, id.clone())))
+    FOUND.lock().unwrap_or_else(|e| e.into_inner()).iter().find_map(|(id, f)| f.pairing_port.map(|p| (f.ip, p, id.clone())))
 }

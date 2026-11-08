@@ -89,6 +89,18 @@ pub fn cwd_of(pid: u32) -> Option<String> {
     sys.process(pid).and_then(|p| p.cwd()).map(|c| c.display().to_string()).filter(|s| !s.is_empty())
 }
 
+/// A variable of a running process's environment (the name in any case), when the OS lets us read it.
+pub fn env_of(pid: u32, name: &str) -> Option<String> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new().ok()?;
+    let pid = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing().with_environ(UpdateKind::Always));
+    sys.process(pid)?.environ().iter().find_map(|e| {
+        let e = e.to_string_lossy();
+        e.split_once('=').filter(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.to_string())
+    })
+}
+
 pub fn kill(pid: u32) -> anyhow::Result<()> {
     #[cfg(windows)]
     unsafe {

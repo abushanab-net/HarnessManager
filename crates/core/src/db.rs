@@ -200,8 +200,11 @@ create trigger if not exists sessions_fts_au after update of title, cwd, profile
 
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(10))?;
+        // a write transaction takes the write lock when it begins: a deferred one that read first fails at once
+        // (SQLITE_BUSY_SNAPSHOT, no busy wait) when the router or the CLI wrote in between
+        conn.set_transaction_behavior(rusqlite::TransactionBehavior::Immediate);
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // pages read from the mapped file, not one ReadFile each: the year of usage the Overview adds up is ~3x faster
         conn.pragma_update(None, "mmap_size", 1i64 << 30)?;
