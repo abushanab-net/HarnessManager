@@ -139,7 +139,7 @@ function lane(a, selected, used, pcs, now) {
     <div class="lane-id">${renderRingSvg(a, used)}<div class="lane-name-box"><div class="lane-name-top">${toolIcon(a.tool, 14)}<span class="lane-acct-name">${esc(a.name)}</span><span class="pc-dots">${a.computers.map((id) => pcDot(pcs, id, 'Active on ' + ((pcs.find((c) => c.id === id) || {}).name || id))).join('')}</span></div><div class="lane-sub-meta"><span class="plan-pill">${esc(a.plan)}</span>${a.openSessions ? `<span class="lane-open"><i class="live-pulse-dot"></i>${a.openSessions} open</span>` : '<span>idle</span>'}</div></div></div>
     ${capacityColumn(a, used)}${runwayTrack(a, now)}
     <div class="lane-readout"><span class="lane-readout-primary">${top}</span><span class="lane-readout-sub ${cls}">${sub}</span></div>
-    <div class="lane-action">${a.needsLogin ? `<button class="btn-lane-start neg" data-act="login" data-name="${esc(a.id)}">Sign in</button>` : `<button class="btn-lane-start" data-act="start" data-name="${esc(a.id)}" data-testid="lane-start-${esc(a.id)}">▶ Start</button>`}</div></div>`;
+    <div class="lane-action">${a.needsLogin ? `<button class="btn-lane-start neg" data-act="login" data-name="${esc(a.id)}">Sign in</button>` : `<span class="split-start"><button class="btn-lane-start" data-act="start" data-name="${esc(a.id)}" data-testid="lane-start-${esc(a.id)}">▶ Start</button><button class="btn-lane-start caret" data-act="start-menu" data-name="${esc(a.id)}" aria-haspopup="menu" aria-label="Start ${esc(a.name)} in a folder" title="Start in a folder" data-testid="lane-start-menu-${esc(a.id)}">▾</button></span>`}</div></div>`;
 }
 
 // ---------- the latest replies and the request log ----------
