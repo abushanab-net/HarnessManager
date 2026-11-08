@@ -55,13 +55,13 @@ fn project_name(p: &str) -> String {
 pub fn spent_today(ctx: &Ctx, profile: &str) -> Result<f64> {
     let prices = crate::pricing::load(ctx);
     let midnight = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(chrono::Local).earliest()).map(|t| t.timestamp_millis()).unwrap_or(0);
-    let rows: Vec<(String, i64, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select model, sum(input), sum(output) from router_log where profile = ? and ts >= ? group by model")?;
-        let v = st.query_map(rusqlite::params![profile, midnight], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+    let rows: Vec<(String, i64, i64, i64, i64)> = ctx.db.read(|c| {
+        let mut st = c.prepare("select model, sum(input), sum(output), sum(cache_read), sum(cache_write) from router_log where profile = ? and ts >= ? group by model")?;
+        let v = st.query_map(rusqlite::params![profile, midnight], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
     // + 0.0: an empty sum of floats is -0.0, which would read "$-0.00"
-    Ok(rows.iter().map(|(m, i, o)| crate::pricing::find(&prices, m).map(|p| p.cost(*i, *o, 0, 0)).unwrap_or(0.0)).sum::<f64>() + 0.0)
+    Ok(rows.iter().map(|(m, i, o, cr, cw)| crate::pricing::find(&prices, m).map(|p| p.cost(*i, *o, *cr, *cw)).unwrap_or(0.0)).sum::<f64>() + 0.0)
 }
 
 /// Everything the Overview shows for the last `hours`, optionally for one tool; `scope` "here" keeps to this computer.
@@ -264,7 +264,7 @@ pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
                 e["requests"] = json!(e["requests"].as_i64().unwrap_or(0) + a["requests_5m"].as_i64().unwrap_or(0));
             }
         }
-        let mut st = c.prepare("select provider, sum(input + output), count(*), sum(status <> 200), avg(first_ms) from router_log where ts >= ? group by provider")?;
+        let mut st = c.prepare("select provider, sum(input + output + cache_read + cache_write), count(*), sum(status <> 200), avg(first_ms) from router_log where ts >= ? group by provider")?;
         let providers: serde_json::Map<String, Value> = st.query_map([since], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, Option<f64>>(4)?)))?
             .filter_map(|r| r.ok()).map(|(p, t, n, e, f)| (p, json!({"tokens": t, "requests": n, "errors": e, "first_ms": f.map(|x| x.round() as i64)}))).collect();
         let mut st = c.prepare("select substr(k, 9), v from kv where k like 'breaker:%'")?;

@@ -128,13 +128,20 @@ fn read_folder(root: &Path, h: &mut History) -> Result<()> {
         h.device(&id, dev["name"].as_str().unwrap_or(""));
         let Some(man) = crate::sync::folder::read_manifest(&dir) else { continue };
         let inc = man["incarnation"].as_str().unwrap_or("").to_string();
-        let mut last = 0;
+        // how far the sync merge need not go again: up to the first chunk not read here, which it must still fetch
+        let (mut last, mut gap) = (0, false);
         for ch in man["chunks"].as_array().into_iter().flatten() {
             let file = ch["file"].as_str().unwrap_or("");
             if file.is_empty() || file.contains(['/', '\\']) { continue; }
-            let Ok(text) = std::fs::read_to_string(dir.join("journal").join(file)) else { continue };
+            // a OneDrive placeholder, a half-copied file: not this chunk, by what its manifest says of it
+            let bytes = std::fs::read(dir.join("journal").join(file)).ok().filter(|b| crate::util::sha256_hex(b) == ch["sha256"].as_str().unwrap_or(""));
+            let Some(text) = bytes.and_then(|b| String::from_utf8(b).ok()) else {
+                crate::log::warn(&format!("restore: {file} of {id} could not be read yet; the next sync rounds bring it"));
+                gap = true;
+                continue;
+            };
             for e in text.lines().filter_map(|l| serde_json::from_str::<crate::journal::Entry>(l).ok()) {
-                last = last.max(e.seq);
+                if !gap { last = last.max(e.seq); }
                 match e.op.as_str() {
                     "usage" => { let mut d = e.data; d["device"] = json!(id); h.usage(d); }
                     "session" => { if let Ok(m) = serde_json::from_value::<SessionMeta>(e.data) { h.session(&e.key, m, &id); } }
@@ -196,7 +203,7 @@ fn counts(ctx: &Ctx, h: &History, src: &Source) -> Value {
     let newest = h.usage.values().filter_map(|r| r["ts"].as_i64()).chain(h.sessions.values().map(|(m, _)| m.last_active_at)).max();
     let (kind, path) = match src { Source::Zip(p) => ("zip", p), Source::Folder(p) => ("folder", p) };
     json!({"source": kind, "path": path, "computers": computers, "requests": h.usage.len(), "tokens": tokens, "sessions": h.sessions.len(), "accounts": accounts.len(),
-        "archived": h.archived.len(), "newest": newest, "this": this_computer(ctx, h).map(|(id, name)| json!({"id": id, "name": name})),
+        "archived": h.archived.len(), "newest": newest, "this": this_computer(ctx, h).map(|(id, name)| json!({"id": id, "name": name, "can_adopt": crate::sync::peer::identity::has_key(&id)})),
         "empty": h.usage.is_empty() && h.sessions.is_empty() && h.archived.is_empty() && h.quotas.is_empty()})
 }
 
@@ -217,6 +224,8 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
     let adopted = if adopt {
         let (id, name) = this.clone().context("no record of this computer's name in it: restore as a new computer instead")?;
         if live_peer(ctx, &id)? { bail!("another computer uses this identity"); }
+        // the key is not in any backup: under a new one every other computer would refuse this one for good
+        if !crate::sync::peer::identity::has_key(&id) { bail!("this computer does not hold the signing key of {name}, so the other computers would not accept it as {name}: restore as a new computer instead"); }
         Some((id, name))
     } else { None };
     let mut quotas = h.quotas.clone();
@@ -231,9 +240,7 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
         }
         for (key, (m, device)) in &h.sessions { n[1] += upsert_session(&tx, key, m, device)?; }
         for (p, t, used, resets, at) in &quotas {
-            // a reading already here (from sync, or a restore before) is not a new point, whatever came after it
-            if tx.prepare("select 1 from quota_hist where profile=? and tier=? and ts=? and used=?")?.exists(params![p, t, at, used])? { continue; }
-            if quota_point_in(&tx, p, t, *used, *resets, *at)? { n[2] += 1; }
+            if quota_point_in(&tx, p, t, *used, *resets, *at, None)? { n[2] += 1; }
         }
         for (kk, tags) in &h.tags {
             let Some((kind, key)) = kk.split_once('/') else { continue };
@@ -404,9 +411,66 @@ mod tests {
     }
 
     #[test]
+    fn a_chunk_not_read_yet_is_left_for_the_sync_merge() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let mut a = computer(t.path(), "A");
+        a.settings.sync_mode = "folder".into();
+        a.settings.sync_folder = shared.display().to_string();
+        a.save_settings().unwrap();
+        let a = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+        crate::journal::round(&a).unwrap();
+        // a second chunk, then the first as a placeholder that cannot be read yet
+        a.db.insert_usage(&[row("claude:3", 3_000)], &Prices::new()).unwrap();
+        crate::journal::round(&a).unwrap();
+        let dir = shared.join("devices").join(&a.settings.device_id);
+        let man = crate::sync::folder::read_manifest(&dir).unwrap();
+        let (first, second) = (man["chunks"][0].clone(), man["chunks"][1].clone());
+        let path = dir.join("journal").join(first["file"].as_str().unwrap());
+        let good = std::fs::read(&path).unwrap();
+        std::fs::write(&path, "not yet").unwrap();
+        let b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        let r = run(&b, &Source::Folder(shared.clone()), false).unwrap();
+        assert_eq!(r["usage"], 1, "the chunk it could read came in: {r}");
+        assert_eq!(count(&b, "select count(*) from cursors2"), 1);
+        assert_eq!(count(&b, "select seq from cursors2"), 0, "the cursor waits before the gap");
+        // once the file is there, the merge brings it, and the later chunk adds nothing twice
+        std::fs::write(&path, good).unwrap();
+        let cur = crate::journal::apply_manifest(&b, &a.settings.device_id, &man, &|f| Ok(std::fs::read(dir.join("journal").join(f))?)).unwrap();
+        assert_eq!(cur, second["to"].as_i64().unwrap());
+        assert_eq!(count(&b, "select count(*) from usage"), 3);
+        let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&a.settings.device_id));
+    }
+
+    #[test]
+    fn adopt_needs_the_signing_key_of_that_computer() {
+        let t = tempfile::tempdir().unwrap();
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let a = computer(t.path(), "A");
+        let zip = crate::backup::dir(&a).join(crate::backup::create(&a, "Manual").unwrap().name);
+        let src = Source::Zip(zip);
+        let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&a.settings.device_id));
+        // a reinstalled computer with A's name: the backup is here, the key is not
+        let mut b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        b.settings.device_name = "A".into();
+        b.save_settings().unwrap();
+        let b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        assert_eq!(preview(&b, &src).unwrap()["this"]["can_adopt"], false);
+        let id = b.settings.device_id.clone();
+        assert!(run(&b, &src, true).unwrap_err().to_string().contains("signing key of A"));
+        assert_eq!(Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap().settings.device_id, id, "it stays itself");
+        // as a new computer the same backup is fine
+        assert_eq!(run(&b, &src, false).unwrap()["usage"], 2);
+    }
+
+    #[test]
     fn adopt_takes_the_id_and_a_new_incarnation_and_is_refused_for_a_live_peers_id() {
         let t = tempfile::tempdir().unwrap();
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
         let a = computer(t.path(), "A");
+        crate::sync::peer::identity::load(&a).unwrap();
         let zip = crate::backup::dir(&a).join(crate::backup::create(&a, "Manual").unwrap().name);
         let src = Source::Zip(zip);
         // a fresh computer with A's name
@@ -433,5 +497,6 @@ mod tests {
         // a fresh computer with another name cannot adopt
         let c = Ctx::open_at(&t.path().join("C"), &t.path().join("home-c")).unwrap();
         assert!(run(&c, &src, true).unwrap_err().to_string().starts_with("no record of this computer's name"));
+        let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&a.settings.device_id));
     }
 }

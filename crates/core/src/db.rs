@@ -71,13 +71,29 @@ pub fn upsert_usage(c: &Connection, r: &UsageRow, device: &str, cost: Option<f64
         r.input, r.output, r.cache_read, r.cache_write, r.ttft_ms, r.gen_ms, device, cost, rev])
 }
 
-/// A limit reading into the history, when it differs from the last one of that limit; true when it was new.
-pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> rusqlite::Result<bool> {
-    let last: Option<(f64, Option<i64>)> = c.query_row("select used, resets_at from quota_hist where profile=? and tier=? order by ts desc limit 1",
-        params![profile, tier], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-    if last == Some((used, resets_at)) { return Ok(false); }
-    c.execute("insert into quota_hist values(?,?,?,?,?)", params![at, profile, tier, used, resets_at])?;
-    c.execute("delete from quota_hist where ts < ?", [at - 60 * 86_400_000])?;
+/// The history already says this about that moment: the reading is there, or the one in force then is the same.
+/// Not compared with the newest: another computer's later reading would make every older one look new, and
+/// each page open and each merge stored and journaled it again, between the computers, without end.
+fn quota_known(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> rusqlite::Result<bool> {
+    if c.prepare_cached("select 1 from quota_hist where profile=? and tier=? and ts=? and used=?")?.exists(params![profile, tier, at, used])? { return Ok(true); }
+    // older than the history keeps: stored it would only be dropped again, and offered as new again, from a computer that sits idle
+    let newest: Option<i64> = c.query_row("select max(ts) from quota_hist where profile=? and tier=?", params![profile, tier], |r| r.get(0))?;
+    if newest.is_some_and(|n| at < n - QUOTA_KEEP_MS) { return Ok(true); }
+    let before: Option<(f64, Option<i64>)> = c.query_row("select used, resets_at from quota_hist where profile=? and tier=? and ts<=? order by ts desc limit 1",
+        params![profile, tier, at], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    Ok(before == Some((used, resets_at)))
+}
+
+/// How far back one limit's history goes, from its newest reading.
+const QUOTA_KEEP_MS: i64 = 60 * 86_400_000;
+
+/// A limit reading into the history, unless it is known already (`quota_known`); true when it was new. `device`:
+/// the computer it was read on; None when that is not known (a restore).
+pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64, device: Option<&str>) -> rusqlite::Result<bool> {
+    if quota_known(c, profile, tier, used, resets_at, at)? { return Ok(false); }
+    c.execute("insert into quota_hist(ts, profile, tier, used, resets_at, device) values(?,?,?,?,?,?)", params![at, profile, tier, used, resets_at, device])?;
+    // this limit's own old readings only: an idle account's last reading stays while the others move on
+    c.execute("delete from quota_hist where profile=? and tier=? and ts < ?", params![profile, tier, at - QUOTA_KEEP_MS])?;
     Ok(true)
 }
 
@@ -218,9 +234,22 @@ impl Db {
         // sessions learned their failed tool calls later: read each one again
         let done: bool = conn.prepare("select 1 from kv where k = 'migrated:session-failed'")?.exists([])?;
         if !done { conn.execute_batch("delete from sessions; insert or replace into kv values('migrated:session-failed', '1');")?; }
+        // each reading once: they used to be copied back and forth between computers (see `quota_known`). Only a
+        // tidy-up: should it fail (another process writing), the next start does it
+        if !conn.prepare("select 1 from kv where k = 'migrated:quota-once'")?.exists([])?
+            && conn.execute_batch("begin immediate; delete from quota_hist where rowid not in (select min(rowid) from quota_hist group by profile, tier, ts, used);
+                insert or replace into kv values('migrated:quota-once', '1'); commit;").is_err() {
+            let _ = conn.execute_batch("rollback");
+        }
         // the router's time to the first chunk came later too
         let has: bool = conn.prepare("select 1 from pragma_table_info('router_log') where name = 'first_ms'")?.exists([])?;
         if !has { conn.execute_batch("alter table router_log add column first_ms integer;")?; }
+        // a request's cached tokens, priced apart from its input; older rows have them counted into input, or not at all
+        let has: bool = conn.prepare("select 1 from pragma_table_info('router_log') where name = 'cache_read'")?.exists([])?;
+        if !has { conn.execute_batch("alter table router_log add column cache_read integer not null default 0; alter table router_log add column cache_write integer not null default 0;")?; }
+        // a limit reading says which computer read it, so a later backfill publishes only this computer's
+        let has: bool = conn.prepare("select 1 from pragma_table_info('quota_hist') where name = 'device'")?.exists([])?;
+        if !has { conn.execute_batch("alter table quota_hist add column device text;")?; }
         // Codex replies are timed since: read its logs once more so earlier replies get their timing
         let done: bool = conn.prepare("select 1 from kv where k = 'migrated:codex-timing'")?.exists([])?;
         if !done {
@@ -402,7 +431,7 @@ impl Db {
     }
 
     pub fn get_quota(&self, profile: &str) -> Result<Option<Quota>> {
-        self.with(|c| {
+        self.read(|c| {
             let s: Option<String> = c.query_row("select json from quota where profile=?", [profile], |r| r.get(0)).optional()?;
             Ok(s.and_then(|s| serde_json::from_str(&s).ok()))
         })
@@ -480,7 +509,7 @@ impl Db {
 
     /// Every tag of one kind ("session": profile/id, "project": the project key), by key.
     pub fn tags_of(&self, kind: &str) -> Result<std::collections::HashMap<String, Vec<String>>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select key, tag from tags where kind=? order by rowid")?;
             let mut m: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
             for r in st.query_map([kind], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten() { m.entry(r.0).or_default().push(r.1); }
@@ -503,7 +532,7 @@ impl Db {
 
     /// Every tag with how many sessions and projects carry it, oldest first (so each keeps its colour).
     pub fn tag_list(&self) -> Result<Vec<(String, i64, i64)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select tag, sum(kind='session'), sum(kind='project') from tags group by tag order by min(rowid)")?;
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(v)
@@ -535,12 +564,13 @@ impl Db {
         self.with(|c| { c.execute("insert or replace into kv values(?,?)", [k, v])?; Ok(()) })
     }
 
-    /// One request the router handled; `first_ms` is the time to the first chunk of the answer, when one came.
+    /// One request the router handled; `first_ms` is the time to the first chunk of the answer, when one came;
+    /// `tokens` is (input, output, cache read, cache write), the input without the cached ones.
     #[allow(clippy::too_many_arguments)]
-    pub fn log_route(&self, route: &str, profile: &str, provider: &str, model: &str, status: i64, ms: i64, first_ms: Option<i64>, input: i64, output: i64) -> Result<()> {
+    pub fn log_route(&self, route: &str, profile: &str, provider: &str, model: &str, status: i64, ms: i64, first_ms: Option<i64>, tokens: (i64, i64, i64, i64)) -> Result<()> {
         self.with(|c| {
-            c.execute("insert into router_log(ts, route, profile, provider, model, status, ms, first_ms, input, output) values(?,?,?,?,?,?,?,?,?,?)",
-                params![crate::util::now_ms(), route, profile, provider, model, status, ms, first_ms, input, output])?;
+            c.execute("insert into router_log(ts, route, profile, provider, model, status, ms, first_ms, input, output, cache_read, cache_write) values(?,?,?,?,?,?,?,?,?,?,?,?)",
+                params![crate::util::now_ms(), route, profile, provider, model, status, ms, first_ms, tokens.0, tokens.1, tokens.2, tokens.3])?;
             Ok(())
         })
     }
@@ -562,7 +592,7 @@ impl Db {
 
     /// The latest events, newest first.
     pub fn events(&self, limit: i64) -> Result<Vec<serde_json::Value>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select ts, level, kind, text from events order by ts desc limit ?")?;
             let rows = st.query_map([limit], |r| Ok(serde_json::json!({"ts": r.get::<_, i64>(0)?, "level": r.get::<_, String>(1)?,
                 "kind": r.get::<_, String>(2)?, "text": r.get::<_, String>(3)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -572,8 +602,10 @@ impl Db {
 
     /// A limit reading, kept only when it differs from the last one of that limit.
     pub fn quota_point(&self, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> Result<()> {
+        // every page open offers every account's reading, nearly always a known one: that answer never waits behind a write
+        if self.read(|c| Ok(quota_known(c, profile, tier, used, resets_at, at)?))? { return Ok(()); }
         self.with(|c| {
-            if quota_point_in(c, profile, tier, used, resets_at, at)? && self.journal {
+            if quota_point_in(c, profile, tier, used, resets_at, at, Some(&self.device))? && self.journal {
                 crate::journal::record(c, "quota", &format!("{profile}/{tier}"), &serde_json::json!({"used": used, "resets_at": resets_at, "at": at}))?;
             }
             Ok(())
@@ -582,7 +614,7 @@ impl Db {
 
     /// Readings of one limit since `since`, oldest first: (when, % used, when it resets).
     pub fn quota_points(&self, profile: &str, tier: &str, since: i64) -> Result<Vec<(i64, f64, Option<i64>)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select ts, used, resets_at from quota_hist where profile=? and tier=? and ts >= ? order by ts")?;
             let rows = st.query_map(params![profile, tier, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
@@ -591,8 +623,8 @@ impl Db {
 
     /// Requests the router handled, newest first.
     pub fn route_log(&self, limit: i64) -> Result<Vec<serde_json::Value>> {
-        self.with(|c| {
-            let mut st = c.prepare("select ts, route, profile, provider, model, status, ms, input, output, first_ms from router_log order by ts desc limit ?")?;
+        self.read(|c| {
+            let mut st = c.prepare("select ts, route, profile, provider, model, status, ms, input + cache_read + cache_write, output, first_ms from router_log order by ts desc limit ?")?;
             let rows = st.query_map([limit], |r| Ok(serde_json::json!({"ts": r.get::<_, i64>(0)?, "route": r.get::<_, String>(1)?, "profile": r.get::<_, String>(2)?,
                 "provider": r.get::<_, String>(3)?, "model": r.get::<_, String>(4)?, "status": r.get::<_, i64>(5)?, "ms": r.get::<_, i64>(6)?,
                 "input": r.get::<_, i64>(7)?, "output": r.get::<_, i64>(8)?, "first_ms": r.get::<_, Option<i64>>(9)?})))?.collect::<rusqlite::Result<Vec<_>>>()?;

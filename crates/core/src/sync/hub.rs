@@ -4,7 +4,6 @@
 //! with the **ring key**, a 32-byte secret shared by the owner's computers (carried in the pairing payload, or
 //! typed as the recovery key). Only the signed device records are plaintext, by design.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -212,8 +211,10 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
     })?;
     let tok = r["token"].as_str().filter(|t| !t.is_empty()).context("the hub answered without a token")?;
     write_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token", tok)?;
-    // the first computer makes the ring; a computer joining with a code gets it by pairing or the recovery key
-    if admin.is_some() && !has_ring(ctx) { ring_make(ctx)?; }
+    // the first computer makes the ring; any other gets it by pairing or the recovery key, whichever way it joined:
+    // with a ring of its own it could read nothing of theirs, nor they of it
+    let others = r["devices"].as_array().into_iter().flatten().any(|d| split_device(d).0["id"].as_str().is_some_and(|i| i != ctx.settings.device_id));
+    if admin.is_some() && !others && !has_ring(ctx) { ring_make(ctx)?; }
     crate::log::info(&format!("hub: joined {base} ({} computers there)", r["devices"].as_array().map(|d| d.len()).unwrap_or(0)));
     journal::configure(&ctx.data, &ctx.home, &json!({"sync_mode": "hub", "hub_url": base}))
 }
@@ -246,11 +247,13 @@ fn push_chunks(ctx: &Ctx, hub: &Hub, key: &[u8; 32]) -> Result<usize> {
     let Some(man) = store::manifest(ctx, me) else { return Ok(0) };
     let inc = man["incarnation"].as_str().unwrap_or("");
     let there = hub.get_json(&format!("/v1/chunks/{me}?since=0&incarnation={inc}"))?.unwrap_or(Value::Null);
-    let have: HashSet<String> = if there["incarnation"].as_str() == Some(inc) { there["chunks"].as_array().into_iter().flatten().filter_map(|c| c["file"].as_str().map(String::from)).collect() } else { HashSet::new() };
+    // up to its newest chunk the hub has them, or dropped them by its retention: chunks go up in order, so a gap
+    // below that is its choice, and sending those again would push out others, round after round
+    let top = if there["incarnation"].as_str() == Some(inc) { there["chunks"].as_array().into_iter().flatten().filter_map(|c| c["to"].as_i64()).max().unwrap_or(0) } else { 0 };
     let mut n = 0;
     for ch in man["chunks"].as_array().into_iter().flatten() {
         let file = ch["file"].as_str().unwrap_or("");
-        if file.is_empty() || have.contains(file) { continue; }
+        if file.is_empty() || ch["to"].as_i64().unwrap_or(0) <= top { continue; }
         let bytes = store::chunk(ctx, me, file)?;
         hub.put(&format!("/v1/chunks/{me}/{file}"), encrypt(key, &bytes)?, &[("X-From", ch["from"].to_string()), ("X-To", ch["to"].to_string()),
             ("X-Sha256", ch["sha256"].as_str().unwrap_or("").into()), ("X-Sig", ch["sig"].as_str().unwrap_or("").into())])?;
@@ -290,7 +293,27 @@ fn split_device(d: &Value) -> (Value, Option<i64>, Option<i64>) {
 pub fn push_presence(ctx: &Ctx) -> Result<()> {
     if !ctx.settings.sync_presence { return Ok(()); }
     let hub = Hub::open(ctx)?;
-    hub.put("/v1/presence", encrypt(&ring_key(ctx)?, folder::presence(ctx)?.to_string().as_bytes())?, &[])
+    hub.put("/v1/presence", encrypt(&ring_key(ctx)?, folder::presence(ctx)?.to_string().as_bytes())?, &[])?;
+    note(ctx, "hub:presence_at");
+    Ok(())
+}
+
+/// The record up when it says something new (its time and signature change with every making). Each write to the
+/// hub is an event to every computer, and each answers an event with a round: a round that always writes never ends.
+fn push_device(ctx: &Ctx, hub: &Hub) -> Result<()> {
+    let rec = folder::device_record(ctx)?;
+    let mut said = rec.clone();
+    if let Some(o) = said.as_object_mut() { o.remove("updated_at"); o.remove("sig"); }
+    let said = crate::util::sha256_hex(said.to_string().as_bytes());
+    if ctx.db.kv_get("hub:device_sent")?.as_deref() == Some(&said) { return Ok(()); }
+    hub.put(&format!("/v1/devices/{}", ctx.settings.device_id), rec.to_string().into_bytes(), &[("Content-Type", "application/json".into())])?;
+    ctx.db.kv_set("hub:device_sent", &said)
+}
+
+/// A round's presence: at most once in a while, for the same reason. The minute's tick in the app keeps it fresh.
+const PRESENCE_EVERY_MS: i64 = 55_000;
+fn presence_due(ctx: &Ctx) -> bool {
+    now_ms() - ctx.db.kv_get("hub:presence_at").ok().flatten().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0) >= PRESENCE_EVERY_MS
 }
 
 /// Where this computer can be reached for the direct connection: its LAN addresses with the listen port.
@@ -317,8 +340,11 @@ pub fn round(ctx: &Ctx) -> Result<()> {
     let key = ring_key(ctx)?;
     let me = ctx.settings.device_id.clone();
     let n = push_chunks(ctx, &hub, &key)?;
-    hub.put(&format!("/v1/devices/{me}"), folder::device_record(ctx)?.to_string().into_bytes(), &[("Content-Type", "application/json".into())])?;
-    if ctx.settings.sync_presence { hub.put("/v1/presence", encrypt(&key, folder::presence(ctx)?.to_string().as_bytes())?, &[])?; }
+    push_device(ctx, &hub)?;
+    if ctx.settings.sync_presence && presence_due(ctx) {
+        hub.put("/v1/presence", encrypt(&key, folder::presence(ctx)?.to_string().as_bytes())?, &[])?;
+        note(ctx, "hub:presence_at");
+    }
     note(ctx, "hub:last_push");
     if n > 0 { crate::log::info(&format!("hub: {n} chunks pushed")); }
     // every other computer on the hub: its record, then its journal
@@ -387,7 +413,7 @@ pub fn fetch_transcript(ctx: &Ctx, origin: &str, key: &str) -> Result<Vec<u8>> {
 /// `{url, joined, devices, last_push, last_pull, ws, error, ring, ring_shown}`.
 pub fn status(ctx: &Ctx) -> Value {
     let kv = |k: &str| ctx.db.kv_get(k).ok().flatten();
-    let devices: i64 = ctx.db.with(|c| Ok(c.query_row("select count(*) from peers where transport='hub'", [], |r| r.get(0))?)).unwrap_or(0);
+    let devices: i64 = ctx.db.read(|c| Ok(c.query_row("select count(*) from peers where transport='hub'", [], |r| r.get(0))?)).unwrap_or(0);
     let joined = token(ctx).is_some() && !ctx.settings.hub_url.is_empty();
     let last = kv("computers:last").and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
     json!({"url": ctx.settings.hub_url, "joined": joined, "devices": if joined { devices + 1 } else { 0 },
@@ -401,8 +427,11 @@ pub fn status(ctx: &Ctx) -> Value {
 pub type CtxOf = Arc<dyn Fn() -> Arc<Ctx> + Send + Sync>;
 pub type OnStatus = Arc<dyn Fn(Value) + Send + Sync>;
 
-/// One connection to `/v1/events`: each message runs a round (what changed is pulled, and what is new here goes
-/// up), told to `on_status`. Returns when the socket closes or fails.
+/// A hub event about another computer; one about this computer is the echo of its own write.
+fn from_another(event: &str, me: &str) -> bool { serde_json::from_str::<Value>(event).map(|v| v["id"].as_str() != Some(me)).unwrap_or(true) }
+
+/// One connection to `/v1/events`: another computer's message runs a round (what changed is pulled, and what is
+/// new here goes up), a burst of them one round, told to `on_status`. Returns when the socket closes or fails.
 async fn listen(ctx: &Ctx, base: &str, token: &str, ctx_of: &CtxOf, on_status: &OnStatus) -> Result<()> {
     use futures_util::StreamExt;
     let url = format!("{}/v1/events", base.replacen("http", "ws", 1));
@@ -415,8 +444,18 @@ async fn listen(ctx: &Ctx, base: &str, token: &str, ctx_of: &CtxOf, on_status: &
     loop {
         // the hub says what changed (presence, chunks, a device); a quiet socket is checked with a ping
         match tokio::time::timeout(Duration::from_secs(60), ws.next()).await {
-            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(_)))) => {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) => {
                 quiet = 0;
+                if !from_another(t.as_str(), &ctx.settings.device_id) { continue; }
+                // what else arrives in the next second goes with this round
+                let settle = tokio::time::Instant::now() + Duration::from_secs(1);
+                while let Ok(m) = tokio::time::timeout_at(settle, ws.next()).await {
+                    match m {
+                        Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) | None => bail!("the hub closed the events socket"),
+                        Some(Err(e)) => bail!("events socket: {e}"),
+                        Some(Ok(_)) => {}
+                    }
+                }
                 let ctx = ctx_of();
                 let (c2, o2) = (ctx.clone(), on_status.clone());
                 let _ = tokio::task::spawn_blocking(move || { if let Ok(v) = journal::round(&c2) { o2(v); } }).await;

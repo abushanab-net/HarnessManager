@@ -1,8 +1,8 @@
 //! Pairing two computers with a six-digit code. The computer showing the code serves a plain-HTTP route on a
 //! port that lives two minutes; the joiner runs SPAKE2 with the code as the password (the two device ids as the
-//! identities, the joiner as A), both derive a key, and exchange their identity payloads encrypted with it. A
-//! wrong code fails at decryption; three failures or two minutes end it. Both sides then hold the other's
-//! certificate and key.
+//! identities, the joiner as A), both derive a key, and exchange their identity payloads encrypted with it: the
+//! joiner's first, so the host's is only sealed for someone who has shown the code. A wrong code fails at
+//! decryption; three failures or two minutes end it. Both sides then hold the other's certificate and key.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -28,6 +28,8 @@ use crate::{journal, Ctx};
 
 const LIVES_MS: i64 = 120_000;
 const FAILURES: u32 = 3;
+/// Exchanges begun and not finished, kept: the oldest goes when a flood of them comes.
+const OPEN_STARTS: usize = 16;
 
 fn b64(bytes: &[u8]) -> String { base64::engine::general_purpose::STANDARD.encode(bytes) }
 fn unb64(s: &str) -> Result<Vec<u8>> { Ok(base64::engine::general_purpose::STANDARD.decode(s.trim())?) }
@@ -144,23 +146,23 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, host_name
 
 async fn hello(State(s): State<Arc<Shared>>) -> Json<Value> { Json(json!({"id": s.ctx.settings.device_id, "name": s.ctx.settings.device_name})) }
 
-/// The joiner's SPAKE2 message in, ours and our sealed payload out.
+/// The joiner's SPAKE2 message in, ours out. Nothing sealed goes with it: anything sealed under the key would let
+/// a stranger try one code per request at home, unseen, with `finish` never counting a failure.
 async fn start_route(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Response {
     let (joiner, msg) = (a["id"].as_str().unwrap_or("").to_string(), a["msg"].as_str().unwrap_or(""));
     let Ok(inbound) = unb64(msg) else { return StatusCode::BAD_REQUEST.into_response() };
     if joiner.is_empty() { return StatusCode::BAD_REQUEST.into_response(); }
     let (st, outbound) = Spake2::<Ed25519Group>::start_b(&Password::new(s.code.as_bytes()), &Identity::new(joiner.as_bytes()), &Identity::new(s.ctx.settings.device_id.as_bytes()));
     let Ok(key) = st.finish(&inbound) else { return StatusCode::BAD_REQUEST.into_response() };
-    let ctx = s.ctx.clone();
-    let mine = tokio::task::spawn_blocking(move || payload(&ctx)).await.expect("payload");
-    let sealed = match mine.and_then(|m| seal(&key, &m)) { Ok(p) => p, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response() };
     let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner());
     keys.retain(|(id, _)| id != &joiner);
+    if keys.len() >= OPEN_STARTS { keys.remove(0); }
     keys.push((joiner, key));
-    Json(json!({"id": s.ctx.settings.device_id, "msg": b64(&outbound), "payload": sealed})).into_response()
+    Json(json!({"id": s.ctx.settings.device_id, "msg": b64(&outbound)})).into_response()
 }
 
-/// The joiner's sealed payload: opened with its key, the peer is stored; otherwise one failure more.
+/// The joiner's sealed payload: opened with its key, the peer is stored and ours is sealed in the answer;
+/// otherwise one failure more.
 async fn finish(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Response {
     let joiner = a["id"].as_str().unwrap_or("").to_string();
     let key = { let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner()); keys.iter().position(|(id, _)| id == &joiner).map(|i| keys.remove(i).1) };
@@ -168,8 +170,13 @@ async fn finish(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Response 
     match open(&key, a["payload"].as_str().unwrap_or("")) {
         Ok(p) => {
             let (ctx, address) = (s.ctx.clone(), a["address"].as_str().unwrap_or("").to_string());
+            let c2 = ctx.clone();
+            let sealed = match tokio::task::spawn_blocking(move || payload(&c2)).await.expect("payload").and_then(|m| seal(&key, &m)) {
+                Ok(p) => p,
+                Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": format!("{e:#}")}))).into_response(),
+            };
             match tokio::task::spawn_blocking(move || store_peer(&ctx, &p, &address)).await.expect("store") {
-                Ok(peer) => { s.end(json!({"ok": true, "peer": peer})); Json(json!({"ok": true, "name": s.ctx.settings.device_name})).into_response() }
+                Ok(peer) => { s.end(json!({"ok": true, "peer": peer})); Json(json!({"ok": true, "name": s.ctx.settings.device_name, "payload": sealed})).into_response() }
                 Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": format!("{e:#}")}))).into_response(),
             }
         }
@@ -204,13 +211,15 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
     let (st, outbound) = Spake2::<Ed25519Group>::start_a(&Password::new(code.as_bytes()), &Identity::new(me.as_bytes()), &Identity::new(their_id.as_bytes()));
     let r: Value = http.post(format!("{base}/pair/start")).json(&json!({"id": me, "msg": b64(&outbound)})).send()?.error_for_status().context("the other computer refused the pairing")?.json()?;
     let key = st.finish(&unb64(r["msg"].as_str().unwrap_or(""))?).map_err(|_| anyhow!("the pairing exchange failed"))?;
-    let theirs = open(&key, r["payload"].as_str().unwrap_or(""));
     let mine = payload(ctx)?;
-    // the other side learns of a wrong code only from a payload it cannot open: send ours either way
+    // the other side learns of a wrong code only from a payload it cannot open
     let address = if via_host { mine["address_hint"].as_str().unwrap_or("").to_string() } else { String::new() };
     let f = http.post(format!("{base}/pair/finish")).json(&json!({"id": me, "payload": seal(&key, &mine)?, "address": address})).send()?;
-    let theirs = theirs.map_err(|_| anyhow!("the code did not match; check it and try again"))?;
+    if f.status() == reqwest::StatusCode::FORBIDDEN { bail!("the code did not match; check it and try again"); }
     if !f.status().is_success() { bail!("the other computer did not accept the pairing: {}", f.json::<Value>().ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_default()); }
+    let answer: Value = f.json()?;
+    // a computer from before 1.9.7 sent its payload with its first answer
+    let theirs = open(&key, answer["payload"].as_str().or(r["payload"].as_str()).unwrap_or("")).map_err(|_| anyhow!("the code did not match; check it and try again"))?;
     let their_port = theirs["address_hint"].as_str().and_then(|a| a.rsplit_once(':')).map(|(_, p)| p).unwrap_or("0");
     let their_address = if via_host { format!("{addr}:{their_port}") } else { String::new() };
     store_peer(ctx, &theirs, &their_address)?;

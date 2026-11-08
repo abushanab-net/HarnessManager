@@ -155,7 +155,7 @@ pub struct StreamConv {
     /// Every input token, cache hits included (what the log keeps).
     pub input_tokens: i64,
     pub output_tokens: i64,
-    cache_read: i64,
+    pub cache_read: i64,
     done: bool,
     /// An error the provider reported inside the stream; the relay ends the answer with an error event.
     pub error: Option<String>,

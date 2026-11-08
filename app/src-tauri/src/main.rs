@@ -113,7 +113,8 @@ fn compute_page(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
             let first = !pages.contains_key(&page_key(op, args));
             pages.insert(page_key(op, args), Page { value: v.clone(), at: Instant::now(), stamp, busy: false });
             drop(pages);
-            if first { remember_page_call(st, op, args); }
+            // a write: it must not hold the answer behind whatever is writing now
+            if first { let (st, op, args) = (st.clone(), op.to_string(), args.clone()); std::thread::spawn(move || remember_page_call(&st, &op, &args)); }
         }
         Err(_) => { if let Some(p) = pages.get_mut(&page_key(op, args)) { p.busy = false; } }
     }
@@ -122,10 +123,14 @@ fn compute_page(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
 
 /// The page calls this window makes, kept between launches (the last twelve), so they are ready at the next start.
 fn remember_page_call(st: &AppState, op: &str, args: &Value) {
+    // one at a time: two pages opened together must not each write back a list without the other
+    static ONE: Mutex<()> = Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let ctx = st.ctx();
     let mut list: Vec<Value> = ctx.db.kv_get("pages:calls").ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
     let item = json!([op, args]);
-    list.retain(|x| *x != item);
+    // shortcut: a listed call keeps its place, so the oldest listed goes first, not the least used; a commit here would mark every kept page stale at each launch
+    if list.contains(&item) { return; }
     list.insert(0, item);
     list.truncate(12);
     let _ = ctx.db.kv_set("pages:calls", &Value::Array(list).to_string());
