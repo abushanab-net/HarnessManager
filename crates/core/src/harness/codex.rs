@@ -333,10 +333,12 @@ impl Harness for Codex {
             let Some(meta) = first_line(&f).and_then(|l| serde_json::from_str::<Value>(&l).ok()) else { continue };
             let cwd = meta["payload"]["cwd"].as_str().unwrap_or("");
             let id = meta["payload"]["id"].as_str().unwrap_or("").to_string();
-            // a codex process working in this session's folder; other codex processes (the desktop app) do not count
+            // a codex process working in this session's folder; else the desktop app or the editor extension, whose one
+            // app-server writes every thread from a folder of its own
+            // shortcut: any codex process stands in for the app-server, so a terminal codex that just quit reads open for up to two minutes
             let free = |pid: &u32, c: &Option<String>| !out.iter().any(|r: &RunningConsole| r.pid == *pid) && c.as_deref().map(|c| norm(c) == norm(cwd)).unwrap_or(false);
-            if let Some((pid, start, pcwd)) = procs.iter().find(|(pid, _, c)| free(pid, c)) {
-                out.push(RunningConsole { pid: *pid, started_at: Some((*start).min(m)), cwd: pcwd.clone(), session_id: Some(id) });
+            if let Some((pid, start, pcwd)) = procs.iter().find(|(pid, _, c)| free(pid, c)).or(procs.first()) {
+                out.push(RunningConsole { pid: *pid, started_at: Some((*start).min(m)), cwd: Some(cwd.to_string()).filter(|c| !c.is_empty()).or(pcwd.clone()), session_id: Some(id) });
             }
         }
         out

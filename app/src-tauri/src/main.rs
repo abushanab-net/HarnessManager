@@ -32,13 +32,13 @@ impl AppState {
     fn peers(&self) -> Result<&Arc<hrm_core::sync::peer::Runtime>> { self.peers.get().context("the direct connection is not up yet") }
 
     /// Settings were saved by a core function: take them on the next call.
-    fn refresh(&self) { *self.settings_mtime.lock().unwrap() = None; }
+    fn refresh(&self) { *self.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None; }
 
     /// The context, reopened when settings.json changed on disk (for example through `hrm settings`).
     fn ctx(&self) -> Arc<Ctx> {
-        let mut cur = self.ctx.lock().unwrap();
+        let mut cur = self.ctx.lock().unwrap_or_else(|e| e.into_inner());
         let m = std::fs::metadata(cur.data.join("settings.json")).and_then(|m| m.modified()).ok();
-        let mut seen = self.settings_mtime.lock().unwrap();
+        let mut seen = self.settings_mtime.lock().unwrap_or_else(|e| e.into_inner());
         if m != *seen {
             if let Ok(fresh) = Ctx::open_at(&cur.data, &cur.home) { *cur = Arc::new(fresh); }
             *seen = m;
@@ -76,12 +76,12 @@ fn page_key(op: &str, args: &Value) -> String { format!("{op} {args}") }
 /// A page call through the kept answers (see `PAGE_CALLS`).
 fn cached(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
     // the first-run report is handed over once: never kept, never computed in the background
-    if op == "state" && st.first_run.lock().unwrap().is_some() { return dispatch(st, op, args); }
+    if op == "state" && st.first_run.lock().unwrap_or_else(|e| e.into_inner()).is_some() { return dispatch(st, op, args); }
     let key = page_key(op, args);
     let now = stamp(st);
     if now.is_none() { return dispatch(st, op, args); }
     let kept = {
-        let mut pages = st.pages.lock().unwrap();
+        let mut pages = st.pages.lock().unwrap_or_else(|e| e.into_inner());
         match pages.get_mut(&key) {
             // anything changed since it was kept: computed now, so the redraw that follows new data shows it
             Some(p) if p.stamp != now => None,
@@ -106,7 +106,7 @@ fn cached(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
 fn compute_page(st: &Arc<AppState>, op: &str, args: &Value) -> Result<Value> {
     let (stamp, epoch) = (stamp(st), st.epoch.load(Ordering::SeqCst));
     let r = dispatch(st, op, args);
-    let mut pages = st.pages.lock().unwrap();
+    let mut pages = st.pages.lock().unwrap_or_else(|e| e.into_inner());
     match &r {
         Ok(_) if st.epoch.load(Ordering::SeqCst) != epoch => {}
         Ok(v) => {
@@ -201,7 +201,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                 "registry_path": ctx.registry_path(),
                 "computer": std::env::var("COMPUTERNAME").unwrap_or_default(),
                 "version": env!("CARGO_PKG_VERSION"),
-                "first_run": state.first_run.lock().unwrap().take(),
+                "first_run": state.first_run.lock().unwrap_or_else(|e| e.into_inner()).take(),
                 "now": hrm_core::util::now_ms(),
             })
         }
@@ -356,8 +356,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let mut fresh = Arc::new(hrm_core::journal::configure(&ctx.data, &ctx.home, a)?);
             // the listener follows the setting at once (and may pick and save its port)
             if let Some(p) = state.peers.get() { fresh = p.ensure(&fresh)?; }
-            *state.ctx.lock().unwrap() = fresh.clone();
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh.clone();
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
         }
         // the direct connection: pairing with a six-digit code, the computers paired
@@ -381,8 +381,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             fresh.settings.pinned_projects.retain(|k| k != &key);
             if a["on"] == true { fresh.settings.pinned_projects.push(key); }
             fresh.save_settings()?;
-            *state.ctx.lock().unwrap() = Arc::new(fresh);
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(fresh);
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             json!(true)
         }
 
@@ -701,8 +701,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             };
             // its settings take effect now, and the tools follow the restored list
             let fresh = Arc::new(Ctx::open_at(&ctx.data, &ctx.home)?);
-            *state.ctx.lock().unwrap() = fresh.clone();
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh.clone();
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             let synced = serde_json::to_value(items::sync(&fresh, &fresh.registry()?)?)?;
             json!({"restored": r, "sync": synced})
         }
@@ -721,8 +721,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let mut fresh = Ctx::open_at(&ctx.data, &ctx.home)?;
             fresh.settings = settings;
             fresh.save_settings()?;
-            *state.ctx.lock().unwrap() = Arc::new(fresh);
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(fresh);
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             json!(true)
         }
         "live_quota_set" => { ctx.db.kv_set("live_quota", if a["on"] == true { "1" } else { "0" })?; json!(true) }
@@ -752,8 +752,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         // the hub (phase 5): joining with a code or the admin token, inviting, leaving, the recovery key
         "hub_join" | "hub_leave" => {
             let fresh = Arc::new(if op == "hub_join" { hrm_core::sync::hub::join(ctx, &s(a, "url")?, opt(a, "code").as_deref(), opt(a, "admin_token").as_deref())? } else { hrm_core::sync::hub::leave(ctx)? });
-            *state.ctx.lock().unwrap() = fresh.clone();
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh.clone();
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
         }
         "hub_invite" => hrm_core::sync::hub::invite(ctx)?,
@@ -770,8 +770,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             hrm_core::restore::welcome_done(ctx)?;
             // with adopt the settings changed: the identity follows now
             let fresh = Arc::new(Ctx::open_at(&ctx.data, &ctx.home)?);
-            *state.ctx.lock().unwrap() = fresh;
-            *state.settings_mtime.lock().unwrap() = None;
+            *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh;
+            *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             r
         }
         "restore_welcome" => if a["done"] == true { hrm_core::restore::welcome_done(ctx)?; json!(true) } else { hrm_core::restore::welcome(ctx)? },
@@ -825,7 +825,7 @@ async fn call(app: tauri::AppHandle, state: tauri::State<'_, Arc<AppState>>, op:
     }
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if !NO_CHANGE.contains(&op.as_str()) { st.epoch.fetch_add(1, Ordering::SeqCst); st.pages.lock().unwrap().clear(); }
+        if !NO_CHANGE.contains(&op.as_str()) { st.epoch.fetch_add(1, Ordering::SeqCst); st.pages.lock().unwrap_or_else(|e| e.into_inner()).clear(); }
         let r = if PAGE_CALLS.contains(&op.as_str()) { cached(&st, &op, &args) } else { dispatch(&st, &op, &args) };
         r.map_err(|e| format!("{e:#}"))
     })
@@ -861,7 +861,7 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
     use tauri::{PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent};
     static HID: Mutex<Option<Instant>> = Mutex::new(None);
     // the click that took its focus (and so hid it) must not open it again
-    if HID.lock().unwrap().is_some_and(|t| t.elapsed() < Duration::from_millis(400)) { return; }
+    if HID.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < Duration::from_millis(400)) { return; }
     let w = match app.get_webview_window("limits") {
         Some(w) => { if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; } w }
         None => {
@@ -874,7 +874,7 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
                 Err(e) => { hrm_core::log::warn(&format!("limits popup: {e:#}")); return }
             };
             let w2 = w.clone();
-            w.on_window_event(move |e| if let WindowEvent::Focused(false) = e { let _ = w2.hide(); *HID.lock().unwrap() = Some(Instant::now()); });
+            w.on_window_event(move |e| if let WindowEvent::Focused(false) = e { let _ = w2.hide(); *HID.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now()); });
             w
         }
     };
@@ -917,6 +917,7 @@ fn tray(app: &tauri::App) -> tauri::Result<()> {
 }
 
 fn main() {
+    hrm_core::log::log_panics();
     // before any thread starts: set_var is not safe while others read the environment
     #[cfg(not(windows))]
     hrm_core::util::adopt_shell_path();
@@ -950,36 +951,42 @@ fn main() {
             let handle = app.handle().clone();
             let st = state.clone();
             let mut first = true;
+            // each loop's round is guarded: a panic is logged and the next round runs, where it once ended the thread
             std::thread::spawn(move || loop {
-                let ctx = st.ctx();
-                // the servers the tools already have are in the list from the first start, without an Import click
-                if std::mem::take(&mut first) {
-                    let _l = ctx.lock_registry();
-                    if let Err(e) = import_mcp_now(&ctx) { hrm_core::log::warn(&format!("reading the tools' MCP servers: {e:#}")); }
-                }
-                let n = service::import_usage(&ctx).unwrap_or(0);
-                let _ = service::refresh_quotas(&ctx, false);
-                if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
-                if let Err(e) = hrm_core::archive::daily(&ctx) { hrm_core::log::warn(&format!("archive: {e:#}")); }
-                // the index the pages read: every account's folders walked (the watcher's safety net)
-                if let Err(e) = hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All) { hrm_core::log::warn(&format!("index: {e:#}")); }
-                // across computers: out with what is new here, in with what the others published
-                if hrm_core::journal::on(&ctx) {
-                    match hrm_core::journal::round(&ctx) {
-                        Ok(v) => { let _ = handle.emit("computers", v); }
-                        Err(e) => hrm_core::log::warn(&format!("computers: {e:#}")),
+                hrm_core::log::round("background refresh", || {
+                    let ctx = st.ctx();
+                    // the servers the tools already have are in the list from the first start, without an Import click
+                    if std::mem::take(&mut first) {
+                        let _l = ctx.lock_registry();
+                        if let Err(e) = import_mcp_now(&ctx) { hrm_core::log::warn(&format!("reading the tools' MCP servers: {e:#}")); }
+                        // a router left running by an older version or a dev build is replaced by this build's
+                        if service::router_running(&ctx) { if let Err(e) = service::ensure_router(&ctx) { hrm_core::log::warn(&format!("router: {e:#}")); } }
                     }
-                }
-                let _ = handle.emit("refreshed", json!({"new_rows": n}));
-                let mins = ctx.settings.refresh_minutes.max(1) as u64;
-                drop(ctx);
+                    let n = service::import_usage(&ctx).unwrap_or(0);
+                    let _ = service::refresh_quotas(&ctx, false);
+                    if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
+                    if let Err(e) = hrm_core::archive::daily(&ctx) { hrm_core::log::warn(&format!("archive: {e:#}")); }
+                    // the index the pages read: every account's folders walked (the watcher's safety net)
+                    if let Err(e) = hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All) { hrm_core::log::warn(&format!("index: {e:#}")); }
+                    // across computers: out with what is new here, in with what the others published
+                    if hrm_core::journal::on(&ctx) {
+                        match hrm_core::journal::round(&ctx) {
+                            Ok(v) => { let _ = handle.emit("computers", v); }
+                            Err(e) => hrm_core::log::warn(&format!("computers: {e:#}")),
+                        }
+                    }
+                    let _ = handle.emit("refreshed", json!({"new_rows": n}));
+                });
+                let mins = st.ctx().settings.refresh_minutes.max(1) as u64;
                 std::thread::sleep(std::time::Duration::from_secs(mins * 60));
             });
             // what runs here, for the other computers' live views, once a minute
             let st2 = state.clone();
             std::thread::spawn(move || loop {
-                if let Err(e) = hrm_core::journal::presence_tick(&st2.ctx()) { hrm_core::log::warn(&format!("presence: {e:#}")); }
-                if let Err(e) = hrm_core::index::mark_open(&st2.ctx()) { hrm_core::log::warn(&format!("index: open sessions: {e:#}")); }
+                hrm_core::log::round("presence", || {
+                    if let Err(e) = hrm_core::journal::presence_tick(&st2.ctx()) { hrm_core::log::warn(&format!("presence: {e:#}")); }
+                    if let Err(e) = hrm_core::index::mark_open(&st2.ctx()) { hrm_core::log::warn(&format!("index: open sessions: {e:#}")); }
+                });
                 std::thread::sleep(std::time::Duration::from_secs(60));
             });
             // the folder watcher: a changed session file is in the index within a second, and the pages redraw
@@ -997,11 +1004,13 @@ fn main() {
                     let _ = state.peers.set(rt.clone());
                     let h4 = app.handle().clone();
                     std::thread::spawn(move || loop {
-                        let ctx = st3.ctx();
-                        rt.tick(&ctx);
-                        if ctx.settings.direct_connection {
-                            if let Ok(v) = hrm_core::journal::status(&st3.ctx()) { let _ = h4.emit("computers", v); }
-                        }
+                        hrm_core::log::round("direct connection", || {
+                            let ctx = st3.ctx();
+                            rt.tick(&ctx);
+                            if ctx.settings.direct_connection {
+                                if let Ok(v) = hrm_core::journal::status(&st3.ctx()) { let _ = h4.emit("computers", v); }
+                            }
+                        });
                         std::thread::sleep(std::time::Duration::from_secs(10));
                     });
                 }

@@ -45,10 +45,10 @@ impl Runtime {
     /// The listener and mDNS follow the setting. Returns the context to go on with: a fresh one when the port
     /// was just chosen and saved.
     pub fn ensure(&self, ctx: &Arc<Ctx>) -> Result<Arc<Ctx>> {
-        let mut l = self.listener.lock().unwrap();
+        let mut l = self.listener.lock().unwrap_or_else(|e| e.into_inner());
         if !ctx.settings.direct_connection {
             if let Some(lis) = l.take() { lis.stop(); crate::log::info("computers: the direct connection is off"); }
-            if let Some(m) = self.mdns.lock().unwrap().take() { m.stop(); }
+            if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
             return Ok(ctx.clone());
         }
         if l.is_some() { return Ok(ctx.clone()); }
@@ -64,7 +64,7 @@ impl Runtime {
         // a loopback-only listener (the tests) cannot be reached at the addresses mDNS would announce
         if !self.bind.is_loopback() {
             match mdns::Mdns::start(&ctx.settings.device_id, &ctx.settings.device_name, lis.port) {
-                Ok(m) => *self.mdns.lock().unwrap() = Some(m),
+                Ok(m) => *self.mdns.lock().unwrap_or_else(|e| e.into_inner()) = Some(m),
                 Err(e) => crate::log::warn(&format!("computers: mDNS is not available: {e}")),
             }
         }
@@ -74,7 +74,7 @@ impl Runtime {
 
     /// Every ten seconds while on: the listener up, what is new here published, every peer pulled.
     pub fn tick(&self, ctx: &Arc<Ctx>) {
-        let done = self.host.lock().unwrap().as_ref().map(|h| h.result().is_some() || h.expires_at < now_ms()).unwrap_or(false);
+        let done = self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result().is_some() || h.expires_at < now_ms()).unwrap_or(false);
         if done { self.pair_cancel_inner(); }
         match self.ensure(ctx) {
             Ok(ctx) if ctx.settings.direct_connection => {
@@ -88,8 +88,8 @@ impl Runtime {
 
     pub fn stop(&self) {
         self.pair_cancel_inner();
-        if let Some(l) = self.listener.lock().unwrap().take() { l.stop(); }
-        if let Some(m) = self.mdns.lock().unwrap().take() { m.stop(); }
+        if let Some(l) = self.listener.lock().unwrap_or_else(|e| e.into_inner()).take() { l.stop(); }
+        if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
     }
 
     /// The direct connection on (saved) and the listener up, for the pairing ops.
@@ -103,16 +103,16 @@ impl Runtime {
         let ctx = self.ready(ctx)?;
         self.pair_cancel_inner();
         let h = pairing::start(ctx.clone(), self.rt.handle(), self.bind, host_name, self.on_event.clone())?;
-        if let Some(m) = self.mdns.lock().unwrap().as_mut() { let _ = m.advertise(Some(h.port)); }
+        if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { let _ = m.advertise(Some(h.port)); }
         let v = h.status();
-        *self.host.lock().unwrap() = Some(h);
+        *self.host.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
         Ok(v)
     }
 
     fn pair_cancel_inner(&self) {
-        if let Some(h) = self.host.lock().unwrap().take() {
+        if let Some(h) = self.host.lock().unwrap_or_else(|e| e.into_inner()).take() {
             h.cancel();
-            if let Some(m) = self.mdns.lock().unwrap().as_mut() { let _ = m.advertise(None); }
+            if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { let _ = m.advertise(None); }
         }
     }
 
@@ -130,7 +130,7 @@ impl Runtime {
     }
 
     /// The pairing shown now: `{ok, peer?, error?}` once it ended, `null` while it waits; `None` without one.
-    pub fn pair_result(&self) -> Option<Option<Value>> { self.host.lock().unwrap().as_ref().map(|h| h.result()) }
+    pub fn pair_result(&self) -> Option<Option<Value>> { self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result()) }
 }
 
 /// A peer's id from its id or name.

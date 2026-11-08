@@ -363,9 +363,12 @@ pub fn device_names(ctx: &Ctx) -> HashMap<String, String> {
     m
 }
 
+/// A peer's presence seen in the last five minutes: what it says runs there still counts.
+fn fresh(p: &Peer, now: i64) -> bool { p.presence["at"].as_i64().map(|t| now - t < 300_000).unwrap_or(false) }
+
 /// A session id a peer's presence says is open there, by presence seen in the last five minutes.
 pub fn open_elsewhere(peers: &[Peer], now: i64) -> std::collections::HashSet<String> {
-    peers.iter().filter(|p| p.presence["at"].as_i64().map(|t| now - t < 300_000).unwrap_or(false))
+    peers.iter().filter(|p| fresh(p, now))
         .flat_map(|p| p.presence["running"].as_array().into_iter().flatten().filter_map(|r| r["session_id"].as_str().map(String::from)).collect::<Vec<_>>()).collect()
 }
 
@@ -378,7 +381,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
     let last = ctx.db.kv_get("computers:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
     let pairing = ctx.db.kv_get("pairing:current")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).filter(|p| p["expires_at"].as_i64().unwrap_or(0) > now).unwrap_or(Value::Null);
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
-        "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": p.presence["running"].as_array().cloned().unwrap_or_default(),
+        "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": if fresh(&p, now) { p.presence["running"].as_array().cloned().unwrap_or_default() } else { vec![] },
         "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
         "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
@@ -597,6 +600,19 @@ mod tests {
         assert_eq!((remote[0].0.as_str(), remote[0].1.title.as_str(), remote[0].1.project_key.as_str()), (a.settings.device_id.as_str(), "fix the build", "github.com/o/r"));
         let list = crate::service::sessions(&b, &crate::service::SessionFilter::default()).unwrap();
         assert_eq!((list.len(), list[0].device_name.as_str(), list[0].open_elsewhere), (1, "A", false));
+        let live = crate::service::SessionFilter { open: Some(true), ..Default::default() };
+        assert!(crate::service::sessions(&b, &live).unwrap().is_empty());
+        // A's presence names it: B's Live now lists it
+        let p = json!({"at": crate::util::now_ms(), "running": [{"session_id": "abc"}]}).to_string();
+        b.db.with(|c| Ok(c.execute("update peers set presence = ?1 where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
+        let list = crate::service::sessions(&b, &live).unwrap();
+        assert_eq!((list.len(), list[0].open_elsewhere), (1, true));
+        assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(1));
+        // presence older than five minutes: A's console no longer counts anywhere
+        let p = json!({"at": crate::util::now_ms() - 600_000, "running": [{"session_id": "abc"}]}).to_string();
+        b.db.with(|c| Ok(c.execute("update peers set presence = ?1 where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
+        assert!(crate::service::sessions(&b, &live).unwrap().is_empty());
+        assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(0));
         assert!(crate::service::sessions(&b, &crate::service::SessionFilter { scope: Some("here".into()), ..Default::default() }).unwrap().is_empty());
         let projects = crate::service::projects(&b, None, None).unwrap();
         assert_eq!((projects.len(), projects[0].here, projects[0].devices[0]["name"].as_str()), (1, false, Some("A")));
