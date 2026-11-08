@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "fakeharness"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -2072,7 +2072,7 @@ dependencies = [
 
 [[package]]
 name = "hrm"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "hrm-app"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "anyhow",
  "hrm-core",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "hrm-core"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -2147,7 +2147,7 @@ dependencies = [
 
 [[package]]
 name = "hrm-hub"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "anyhow",
  "axum",
@@ -2169,7 +2169,7 @@ dependencies = [
 
 [[package]]
 name = "hrm-router"
-version = "1.9.5"
+version = "1.9.6"
 dependencies = [
  "anyhow",
  "axum",
