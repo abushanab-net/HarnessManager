@@ -42,6 +42,28 @@ mod keep_tests {
     }
 
     #[test]
+    fn another_computers_backup_brings_its_preferences_but_not_its_identity() {
+        let t = tempfile::tempdir().unwrap();
+        let mut a = Ctx::open_at(&t.path().join("A"), &t.path().join("home-a")).unwrap();
+        a.settings.theme = "dark".into();
+        a.settings.sync_mode = "folder".into();
+        std::fs::create_dir_all(t.path().join("A's folder")).unwrap();
+        a.settings.sync_folder = t.path().join("A's folder").display().to_string();
+        a.settings.device_name = "A".into();
+        a.save_settings().unwrap();
+        let a = Ctx::open_at(&t.path().join("A"), &t.path().join("home-a")).unwrap();
+        a.save_registry(&a.registry().unwrap()).unwrap();
+        let zip = dir(&a).join(create(&a, "Manual").unwrap().name);
+        let b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        let (id, inc, name) = (b.settings.device_id.clone(), b.settings.incarnation.clone(), b.settings.device_name.clone());
+        restore_file(&b, &zip).unwrap();
+        let b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        assert_eq!(b.settings.theme, "dark", "the preference came");
+        assert_eq!((b.settings.device_id, b.settings.incarnation, b.settings.device_name), (id, inc, name), "still itself");
+        assert_eq!((b.settings.sync_mode.as_str(), b.settings.sync_folder.as_str()), ("off", ""), "and not in A's folder");
+    }
+
+    #[test]
     fn the_zip_holds_the_history_files_and_with_the_switch_the_transcripts() {
         let t = tempfile::tempdir().unwrap();
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
@@ -315,7 +337,8 @@ pub fn rename(ctx: &Ctx, name: &str, label: &str) -> Result<String> {
 
 /// Put a backup back: the account list, settings, ledger and saved state, and the skill folders that are
 /// missing from the store (folders still there are left as they are). The state before is backed up first.
-/// Returns what was put back. The settings take effect when the context is opened again.
+/// Returns what was put back. The settings take effect when the context is opened again; who this computer is and
+/// how it syncs stay as they are: a backup from another computer must not make this one a copy of it.
 pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(zip_path).with_context(|| format!("open {}", zip_path.display()))?)
         .context("not a Harness Manager backup (not a zip)")?;
@@ -333,8 +356,12 @@ pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
     create(ctx, "Before restore")?;
     write_atomic(&ctx.registry_path(), reg_text.as_bytes())?;
     if let Some(s) = settings {
-        let _: crate::ctx::Settings = serde_json::from_str(&s).context("the backup's settings are not valid")?;
-        write_atomic(&ctx.data.join("settings.json"), s.as_bytes())?;
+        let mut b: crate::ctx::Settings = serde_json::from_str(&s).context("the backup's settings are not valid")?;
+        let here = ctx.settings.clone();
+        (b.device_id, b.device_name, b.incarnation, b.registry_path) = (here.device_id, here.device_name, here.incarnation, here.registry_path);
+        (b.sync_mode, b.sync_folder, b.hub_url, b.sync_transcripts, b.sync_presence, b.direct_connection, b.listen_port) =
+            (here.sync_mode, here.sync_folder, here.hub_url, here.sync_transcripts, here.sync_presence, here.direct_connection, here.listen_port);
+        write_atomic(&ctx.data.join("settings.json"), serde_json::to_string_pretty(&b)?.as_bytes())?;
     }
     ctx.db.with(|c| {
         let tx = c.transaction()?;

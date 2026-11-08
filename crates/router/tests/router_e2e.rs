@@ -220,6 +220,9 @@ data: [DONE]
 
 "#.as_slice()].concat();
                     (vec![a, b], true)
+                } else if path.starts_with("/cached") {
+                    (vec![b"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"cache_read_input_tokens\":1000,\"cache_creation_input_tokens\":100,\"output_tokens\":1}}}\n\n".to_vec(),
+                        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n".to_vec()], true)
                 } else if path.starts_with("/usage") {
                     (vec![b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_t".to_vec(), b"okens\":42}}\n\n".to_vec()], true)
                 } else {
@@ -274,6 +277,27 @@ async fn streams_survive_split_chunks_and_report_a_dropped_provider() {
     assert!(log.iter().any(|r| r["provider"] == "p-drop" && r["status"] == 502), "{log:?}");
     assert!(log.iter().any(|r| r["provider"] == "p-split" && r["output"] == 5 && r["status"] == 200), "{log:?}");
 
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_answer_counts_its_cached_tokens_toward_the_days_spend() {
+    let s = setup().await;
+    let raw = raw_provider().await;
+    // a dollar a token; cached reads at a tenth and cache writes at a quarter more, as the catalog's defaults
+    s.ctx.db.kv_set("pricing:catalog", &json!({"anthropic": {"models": {"claude-sonnet-5-5": {"cost": {"input": 1_000_000.0, "output": 1_000_000.0}}}}}).to_string()).unwrap();
+    s.ctx.db.kv_set("pricing:at", &hrm_core::util::now_ms().to_string()).unwrap();
+    let mut reg = s.ctx.registry().unwrap();
+    reg.providers.push(Provider { id: "p-cached".into(), name: "p-cached".into(), base_url: format!("{raw}/cached"), format: "anthropic".into(), models: vec![] });
+    reg.routes.push(Route { id: "cached".into(), mode: "failover".into(), providers: vec!["p-cached".into()], default_provider: None });
+    hrm_core::secrets::set_key(&hrm_core::secrets::provider_target("p-cached"), "k").unwrap();
+    s.ctx.save_registry(&reg).unwrap();
+    post_msg(&s, "cached", &body("claude-sonnet-5-5", true), Some(&s.token)).await.text().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let log = s.ctx.db.route_log(10).unwrap();
+    assert!(log.iter().any(|r| r["provider"] == "p-cached" && r["input"] == 1110 && r["output"] == 5), "the log shows every token: {log:?}");
+    // 10 in + 5 out + 1000 read at $0.10 + 100 written at $1.25
+    let spent = hrm_core::dash::spent_today(&s.ctx, "acct").unwrap();
+    assert!((spent - 240.0).abs() < 1e-6, "{spent}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

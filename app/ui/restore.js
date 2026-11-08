@@ -26,12 +26,13 @@ export async function restoreDialog(src, { welcome = false, preview = null } = {
       <ul class="a-rlist" data-testid="restore-counts"><li><b>${fmt(p.tokens)}</b> tokens across <b>${p.requests.toLocaleString()}</b> requests, <b>${p.sessions.toLocaleString()}</b> sessions, <b>${p.accounts}</b> ${p.accounts === 1 ? "account's" : "accounts'"} limit history, and <b>${p.archived.toLocaleString()}</b> archived transcripts.</li>
         <li>Keys and logins are not in it: each account asks you to log in again when first used.</li>
         <li>Nothing is counted twice: what this computer already has stays as it is.</li></ul>
+      ${name && !p.this.can_adopt ? `<span class="a-hint" data-testid="restore-no-key">This computer does not hold the signing key of ${esc(name)} (keys are never in a backup), so the others would not accept it as ${esc(name)}. Restore it as a new computer: its history stays, and this computer syncs under its own identity.</span>` : ''}
       ${comps.length ? `<span class="a-hint" data-testid="restore-computers">${comps.map((c) => `${esc(c.name || c.id)} · ${c.requests.toLocaleString()} requests · ${c.sessions} sessions`).join('<br>')}</span>` : ''}
       <span class="a-hint mono a-path">${esc(p.path)}</span>
     </div>
     <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close" data-testid="welcome-fresh">${welcome ? 'Start fresh' : 'Cancel'}</button>
-      <button class="${name ? 'btn-secondary' : 'btn-primary'}" id="rs-new" data-testid="welcome-new">${mine ? 'Restore' : 'Restore as a new computer'}</button>
-      ${name ? `<button class="btn-primary" id="rs-adopt" data-testid="welcome-adopt">Restore and continue as ${esc(name)}</button>` : ''}</span></div>`, { onClose: done, label: welcome ? 'Welcome back' : 'Restore' });
+      <button class="${name && p.this.can_adopt ? 'btn-secondary' : 'btn-primary'}" id="rs-new" data-testid="welcome-new">${mine ? 'Restore' : 'Restore as a new computer'}</button>
+      ${name && p.this.can_adopt ? `<button class="btn-primary" id="rs-adopt" data-testid="welcome-adopt">Restore and continue as ${esc(name)}</button>` : ''}</span></div>`, { onClose: done, label: welcome ? 'Welcome back' : 'Restore' });
   const run = async (adopt) => {
     const btns = [...document.querySelectorAll('#rs-new, #rs-adopt')];
     btns.forEach((b) => { b.disabled = true; });

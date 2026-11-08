@@ -30,12 +30,12 @@ mod fake {
         tokens: Mutex<HashMap<String, String>>,
         codes: Mutex<HashSet<String>>,
         devices: Mutex<BTreeMap<String, Value>>,
-        chunks: Mutex<HashMap<String, Vec<Value>>>,
+        pub chunks: Mutex<HashMap<String, Vec<Value>>>,
         pub blobs: Mutex<HashMap<String, Vec<u8>>>,
         presence: Mutex<HashMap<String, (i64, String)>>,
         pub transcripts: Mutex<HashMap<String, Vec<u8>>>,
         rendezvous: Mutex<HashMap<String, Value>>,
-        events: tokio::sync::broadcast::Sender<String>,
+        pub events: tokio::sync::broadcast::Sender<String>,
         next_code: AtomicU32,
         pub handle: axum_server::Handle<SocketAddr>,
     }
@@ -432,6 +432,71 @@ fn transcripts_go_to_the_hub_sealed_and_are_fetched_on_demand() {
     let fetched = crate::transcripts::fetch(&b.ctx, &a.ctx.settings.device_id, "claude", "claude-main", "s1").unwrap();
     assert_eq!(std::fs::read(&fetched.path).unwrap(), std::fs::read(&f).unwrap());
     assert_eq!(crate::transcripts::status(&b.ctx).unwrap()["fetched"], 1);
+}
+
+#[test]
+fn a_round_with_nothing_new_writes_nothing_so_the_computers_do_not_keep_each_other_going() {
+    let rt = runtime();
+    let (url, hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (a, _b) = joined(t.path(), &url);
+    journal::round(&a.ctx).unwrap();
+    let mut events = hub.events.subscribe();
+    journal::round(&a.ctx).unwrap();
+    assert!(events.try_recv().is_err(), "nothing changed, nothing told");
+    // what is new still goes up, and the others hear of it
+    a.ctx.db.insert_usage(&[row("claude:1", 1_000)], &Prices::new()).unwrap();
+    journal::round(&a.ctx).unwrap();
+    let told = |events: &mut tokio::sync::broadcast::Receiver<String>| std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>().join(" ");
+    assert!(told(&mut events).contains("\"chunks\""));
+    // the minute's presence too, by the app's tick
+    push_presence(&a.ctx).unwrap();
+    assert!(told(&mut events).contains("\"presence\""));
+}
+
+#[test]
+fn an_event_about_this_computer_is_the_echo_of_its_own_write() {
+    assert!(!from_another(r#"{"kind":"presence","id":"me"}"#, "me"));
+    assert!(from_another(r#"{"kind":"chunks","id":"you"}"#, "me"));
+    assert!(from_another("something this version does not know", "me"), "when in doubt, look");
+}
+
+#[test]
+fn a_chunk_the_hub_dropped_is_not_sent_again() {
+    let rt = runtime();
+    let (url, hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (a, _b) = joined(t.path(), &url);
+    let id = a.ctx.settings.device_id.clone();
+    let held = || hub.chunks.lock().unwrap().get(&id).map(|c| c.len()).unwrap_or(0);
+    for (i, r) in ["claude:1", "claude:2"].iter().enumerate() {
+        a.ctx.db.insert_usage(&[row(r, 1_000 + i as i64)], &Prices::new()).unwrap();
+        journal::round(&a.ctx).unwrap();
+    }
+    assert_eq!(held(), 2);
+    hub.chunks.lock().unwrap().get_mut(&id).unwrap().remove(0);
+    journal::round(&a.ctx).unwrap();
+    assert_eq!(held(), 1, "retention dropped it; another upload would only push out the next one");
+    // and a new one still goes up
+    a.ctx.db.insert_usage(&[row("claude:3", 3_000)], &Prices::new()).unwrap();
+    journal::round(&a.ctx).unwrap();
+    assert_eq!(held(), 2);
+}
+
+#[test]
+fn a_second_computer_with_the_admin_token_does_not_make_a_ring_of_its_own() {
+    let rt = runtime();
+    let (url, _hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (mut a, mut b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    a.ctx = join(&a.ctx, &url, None, Some("admin-secret")).unwrap();
+    assert_eq!(status(&a.ctx)["ring"], true, "the first computer makes it");
+    b.ctx = join(&b.ctx, &url, None, Some("admin-secret")).unwrap();
+    assert_eq!(status(&b.ctx)["ring"], false, "the second asks for it, and says so");
+    let st = journal::round(&b.ctx).unwrap();
+    assert!(st["error"].as_str().unwrap_or("").contains("enter the recovery key"), "{st}");
+    ring_enter(&b.ctx, &ring_show(&a.ctx).unwrap()).unwrap();
+    assert_eq!(journal::round(&b.ctx).unwrap()["error"], Value::Null);
 }
 
 #[test]
