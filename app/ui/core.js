@@ -79,7 +79,10 @@ export function refreshText(r) {
 // ---------- the one notice channel: the bar under the top bar; cleared when the page changes ----------
 let toastTimer;
 function bar(text, { warn = false, toast: isToast = false, act = null, id } = {}) {
-  const el = document.getElementById('notice');
+  // an open dialog covers the page's bar: a failure in it is said in it, above its buttons
+  const card = warn && document.querySelector('#dialog-root .modal-card');
+  if (card) document.getElementById('notice').innerHTML = '';
+  const el = card ? (card.querySelector('.dlg-notice') || card.insertBefore(Object.assign(document.createElement('div'), { className: 'dlg-notice' }), card.querySelector('.modal-foot'))) : document.getElementById('notice');
   if (!el) return;
   clearTimeout(toastTimer);
   el.innerHTML = `<div class="notice-bar ${warn ? 'warn' : ''} ${isToast ? 'toast' : ''}" role="${warn ? 'alert' : 'status'}"><span id="${id}">${esc(text)}</span>${act ? `<button class="filter-chip notice-act" data-act="${esc(act.act)}" ${Object.entries(act.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} data-testid="notice-act">${esc(act.label)}</button>` : ''}<button class="filter-chip" data-act="notice-close" aria-label="Dismiss">Dismiss</button></div>`;
@@ -91,7 +94,7 @@ export function toast(msg, isErr = false) {
 }
 /** A failure that stays on screen until dismissed, with an optional offer beside it; the next failure replaces it. */
 export function notice(msg, act) { bar(msg, { warn: true, act, id: 'notice-text' }); }
-export function clearNotice() { clearTimeout(toastTimer); const el = document.getElementById('notice'); if (el) el.innerHTML = ''; }
+export function clearNotice() { clearTimeout(toastTimer); for (const el of document.querySelectorAll('#notice, .dlg-notice')) el.innerHTML = ''; }
 
 /** Run an action; show its error instead of failing silently. */
 export async function attempt(fn, okMsg) {

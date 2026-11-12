@@ -117,7 +117,7 @@ enum Cmd {
     /// Open the desktop app
     Open,
     /// Resume a session from another computer here, as a fork: <computer>/<tool>/<account>/<session id>
-    ResumeHere { session: String },
+    ResumeHere { session: String, #[arg(long)] cwd: Option<PathBuf> },
     /// Transcripts carried to the folder and known from the other computers
     Transcripts { #[command(flatten)] j: Json },
     /// The hub you host: join it, invite a computer, its status
@@ -721,13 +721,13 @@ fn real_main(cli: Cli) -> Result<i32> {
                     fmt_reset(p["last_seen"].as_i64()), p["applied_seq"], p["last_seq"], p["running"].as_array().map(|r| r.len()).unwrap_or(0));
             }
         }
-        Cmd::ResumeHere { session } => {
+        Cmd::ResumeHere { session, cwd } => {
             let parts: Vec<&str> = session.splitn(4, '/').collect();
             let [computer, harness, profile, id] = parts[..] else { bail!("give <computer>/<tool>/<account>/<session id>") };
             // the computer by name or id
             let names = hrm_core::journal::device_names(&ctx);
             let device = names.iter().find(|(id, n)| *id == computer || n.eq_ignore_ascii_case(computer)).map(|(id, _)| id.clone()).with_context(|| format!("no computer named {computer}"))?;
-            let r = hrm_core::transcripts::resume_here(&ctx, &device, harness, profile, id)?;
+            let r = hrm_core::transcripts::resume_here(&ctx, &device, harness, profile, id, cwd.as_deref())?;
             println!("Resumed {id} from {computer} in {}: {}", r["cwd"].as_str().unwrap_or(""), r["note"].as_str().unwrap_or(""));
         }
         Cmd::Transcripts { j } => {
