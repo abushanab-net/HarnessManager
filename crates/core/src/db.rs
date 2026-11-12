@@ -88,10 +88,12 @@ fn quota_known(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: 
 const QUOTA_KEEP_MS: i64 = 60 * 86_400_000;
 
 /// A limit reading into the history, unless it is known already (`quota_known`); true when it was new. `device`:
-/// the computer it was read on; None when that is not known (a restore).
-pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64, device: Option<&str>) -> rusqlite::Result<bool> {
+/// the computer it was read on; `account`: the login it was read for (a profile name can be another account on
+/// another computer); either None when not known (a restore, an older version).
+#[allow(clippy::too_many_arguments)]
+pub fn quota_point_in(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64, device: Option<&str>, account: Option<&str>) -> rusqlite::Result<bool> {
     if quota_known(c, profile, tier, used, resets_at, at)? { return Ok(false); }
-    c.execute("insert into quota_hist(ts, profile, tier, used, resets_at, device) values(?,?,?,?,?,?)", params![at, profile, tier, used, resets_at, device])?;
+    c.execute("insert into quota_hist(ts, profile, tier, used, resets_at, device, account) values(?,?,?,?,?,?,?)", params![at, profile, tier, used, resets_at, device, account])?;
     // this limit's own old readings only: an idle account's last reading stays while the others move on
     c.execute("delete from quota_hist where profile=? and tier=? and ts < ?", params![profile, tier, at - QUOTA_KEEP_MS])?;
     Ok(true)
@@ -250,6 +252,8 @@ impl Db {
         // a limit reading says which computer read it, so a later backfill publishes only this computer's
         let has: bool = conn.prepare("select 1 from pragma_table_info('quota_hist') where name = 'device'")?.exists([])?;
         if !has { conn.execute_batch("alter table quota_hist add column device text;")?; }
+        let has: bool = conn.prepare("select 1 from pragma_table_info('quota_hist') where name = 'account'")?.exists([])?;
+        if !has { conn.execute_batch("alter table quota_hist add column account text;")?; }
         // Codex replies are timed since: read its logs once more so earlier replies get their timing
         let done: bool = conn.prepare("select 1 from kv where k = 'migrated:codex-timing'")?.exists([])?;
         if !done {
@@ -601,12 +605,15 @@ impl Db {
     }
 
     /// A limit reading, kept only when it differs from the last one of that limit.
-    pub fn quota_point(&self, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> Result<()> {
+    pub fn quota_point(&self, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64) -> Result<()> { self.quota_point_of(profile, tier, used, resets_at, at, None) }
+
+    /// `quota_point` with the login it was read for (its email), which goes to the other computers with it.
+    pub fn quota_point_of(&self, profile: &str, tier: &str, used: f64, resets_at: Option<i64>, at: i64, account: Option<&str>) -> Result<()> {
         // every page open offers every account's reading, nearly always a known one: that answer never waits behind a write
         if self.read(|c| Ok(quota_known(c, profile, tier, used, resets_at, at)?))? { return Ok(()); }
         self.with(|c| {
-            if quota_point_in(c, profile, tier, used, resets_at, at, Some(&self.device))? && self.journal {
-                crate::journal::record(c, "quota", &format!("{profile}/{tier}"), &serde_json::json!({"used": used, "resets_at": resets_at, "at": at}))?;
+            if quota_point_in(c, profile, tier, used, resets_at, at, Some(&self.device), account)? && self.journal {
+                crate::journal::record(c, "quota", &format!("{profile}/{tier}"), &serde_json::json!({"used": used, "resets_at": resets_at, "at": at, "account": account}))?;
             }
             Ok(())
         })

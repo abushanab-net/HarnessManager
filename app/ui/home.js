@@ -99,6 +99,8 @@ function attention(m, accts, d, now) {
 
 // ---------- the Reset Horizon lanes ----------
 const axisTicks = () => [0, 2, 4, 6, 7].map((d) => `<span class="axis-tick t${d} ${d === 0 ? 'now' : d === 7 ? 'end' : ''}" data-key="tick-${d}">${d === 0 ? 'NOW' : '+' + d + 'd'}</span>`).join('');
+/** A per-model limit's short name: "Fable" of "Week · Fable". */
+const modelName = (w) => w.label.split(' · ').pop();
 /** Column 2: capacity left (or used), fixed-width bars never multiplied by time. */
 function capacityColumn(a, used) {
   if (a.cap) {
@@ -108,7 +110,9 @@ function capacityColumn(a, used) {
   if (!a.measured) return `<div class="lane-cap-col"><div class="lane-cap-note">${a.noPlan ? 'No plan limits' : '— not read'}</div><div class="lane-cap-note ${a.needsLogin ? 'neg' : 'dim'}">${a.needsLogin ? 'Login expired' : a.noPlan ? 'Usage only' : 'Sign in to read'}</div></div>`;
   const row = (w, lbl) => { const v = used ? w.used : w.left, tone = w.left === 0 ? 'neg' : w.kind === '5h' ? (w.left <= 25 ? 'warn' : w.open && w.resetMs <= 2 * H && w.left >= 75 ? 'pos' : '') : (w.outMs != null || w.left <= 30 ? 'warn' : ''); return `<div class="cap-mini-row" title="${esc(w.label)}: ${w.left}% left (${w.used}% used)"><span class="cap-mini-lbl">${lbl}</span><svg class="cap-mini-track" aria-hidden="true"><rect class="cap-mini-fill ${tone}" width="${v}%" height="100%" rx="2"/></svg><span class="cap-mini-pct">${v}%</span></div>`; };
   const w5 = w5of(a), wk = wkof(a);
-  return `<div class="lane-cap-col">${w5 ? row(w5, '5h') : ''}${wk && wk !== w5 ? row(wk, 'Wk') : ''}</div>`;
+  // a model's own weekly limit (Claude's Fable) under the shared ones, named by the part after "Week · "
+  const models = a.windows.filter((w) => w.kind === 'model' && w !== wk);
+  return `<div class="lane-cap-col">${w5 ? row(w5, '5h') : ''}${wk && wk !== w5 ? row(wk, 'Wk') : ''}${models.map((w) => row(w, esc(modelName(w)))).join('')}</div>`;
 }
 /** Column 3: the time to each reset on a linear scale; the 5-hour window on its own 0–5 h zoom, the week on 0–7 d. */
 function runwayTrack(a, now) {
@@ -129,7 +133,9 @@ function lane(a, selected, used, pcs, now) {
   if (a.measured && wk) {
     const parts = [w5 && w5.open ? `5h ↻ ${fmtDuration(w5.resetMs)}` : '', wk.open && wk !== w5 ? `Wk ↻ ${fmtDuration(wk.resetMs)}` : ''].filter(Boolean);
     top = parts.map((x) => `<span class="fact">${x}</span>`).join(' · ');
+    const spent = a.windows.find((w) => w.kind === 'model' && w.open && w.left === 0);
     if (w5 && w5.open && w5.left === 0) { sub = `Exhausted (5h ↻ ${fmtDuration(w5.resetMs)})`; cls = 'danger'; }
+    else if (spent) { sub = `${modelName(spent)} used up (↻ ${fmtDuration(spent.resetMs)})`; cls = 'danger'; }
     else if (wk.outAt) { sub = `≈ Out ${fmtAbsoluteReset(wk.outAt, now)}`; cls = 'warn'; }
     else if (w5 && w5.open && w5.resetMs <= 2 * H && w5.left >= 75) { sub = `Use ${w5.left}% before ${fmtAbsoluteReset(w5.resetsAt, now)}`; cls = 'good'; }
     else if (wk.forecastAtReset != null) { sub = `≈ ${100 - wk.forecastAtReset}% left at reset`; cls = 'good'; }
@@ -260,6 +266,6 @@ action('home-sync', async () => {
   if (r) { S.lastSync = Date.now(); toast(refreshText(r)); changed(); }
 });
 // Escape with nothing open returns the selection to the finding's account
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.route.view === 'home' && st.selected && !dialogOpen() && !document.querySelector('.menu, #tray-root .tray-popup')) { st.selected = null; render(); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.route.view === 'home' && st.selected && !dialogOpen() && !document.querySelector('.menu')) { st.selected = null; render(); } });
 // cards that open another page
 document.addEventListener('click', (e) => { const a = e.target.closest('[data-href]'); if (a && !e.target.closest('button, a')) location.hash = a.dataset.href; });
