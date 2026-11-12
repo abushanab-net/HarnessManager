@@ -28,7 +28,8 @@
     "shortDescription": "Run AI coding tools under several accounts side by side",
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "./installer-hooks.nsh"
       }
     }
   },
