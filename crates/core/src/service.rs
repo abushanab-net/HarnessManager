@@ -102,6 +102,7 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
     if let Some(at) = quota.as_ref().and_then(|q| q.fetched_at) {
         for t in &quota.as_ref().unwrap().tiers { let _ = ctx.db.quota_point(&p.name, &t.id, t.used, t.resets_at, at); }
     }
+    let quota = newer_elsewhere(ctx, &p.name, quota);
     ProfileView {
         name: p.name.clone(),
         label: p.label.clone().unwrap_or_else(|| p.name.clone()),
@@ -130,6 +131,23 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
 
 impl Profile {
     fn expected_email(&self) -> Option<String> { self.email.clone().filter(|e| !e.is_empty()) }
+}
+
+/// The account's limits as the newest reading anyone has of them: an account used on another computer was read
+/// there later than here, and limits are the account's, not the computer's.
+pub fn newer_elsewhere(ctx: &Ctx, profile: &str, here: Option<Quota>) -> Option<Quota> {
+    let since = here.as_ref().and_then(|q| q.fetched_at).unwrap_or(0);
+    let rows: Vec<(String, f64, Option<i64>, i64)> = ctx.db.read(|c| {
+        let mut st = c.prepare("select tier, used, resets_at, ts from quota_hist where profile = ?1 and ts > ?2 and ts = (select max(ts) from quota_hist where profile = ?1) order by rowid")?;
+        let v = st.query_map(rusqlite::params![profile, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    }).unwrap_or_default();
+    let Some(at) = rows.first().map(|r| r.3) else { return here };
+    // the labels this computer gives the same limits; one it has never read gets a plain one
+    let label = |id: &str| here.as_ref().and_then(|q| q.tier(id)).map(|t| t.label.clone())
+        .unwrap_or_else(|| match id { "session" => "5-hour session".into(), "week" => "Week".into(), other => other.into() });
+    Some(Quota { tiers: rows.iter().map(|(id, used, resets_at, _)| QuotaTier { id: id.clone(), label: label(id), used: *used, resets_at: *resets_at }).collect(),
+        fetched_at: Some(at), source: "elsewhere".into() })
 }
 
 pub fn list_views(ctx: &Ctx) -> Result<Vec<ProfileView>> {

@@ -109,17 +109,18 @@ fn reach(ctx: &Ctx, id: &identity::Identity, p: &Peer) -> Option<(Client, Value,
 }
 
 /// Another computer's transcript from any paired computer that answers and holds it (the origin itself, or one
-/// that fetched it): the compressed bytes when their sha256 is the journal entry's.
-pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &str, session: &str, sha: &str) -> Option<Vec<u8>> {
+/// that fetched it): the compressed bytes when their sha256 is the journal entry's. Without an entry (`sha`
+/// None) only the origin is asked, for its current copy.
+pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &str, session: &str, sha: Option<&str>) -> Option<Vec<u8>> {
     let id = identity::load(ctx).ok()?;
     let peers = journal::peers(ctx).ok()?;
     // the origin first, then the rest
     let mut order: Vec<&Peer> = peers.iter().filter(|p| !p.cert_pem.is_empty()).collect();
     order.sort_by_key(|p| p.id != origin);
-    for p in order {
+    for p in order.into_iter().filter(|p| sha.is_some() || p.id == origin) {
         let Some((c, _, _)) = reach(ctx, &id, p) else { continue };
         match c.bytes(&format!("/v1/transcript/{origin}/{harness}/{profile}/{session}")) {
-            Ok(b) if crate::util::sha256_hex(&b) == sha => { crate::log::info(&format!("transcripts: {harness}/{profile}/{session} came from {}", p.name)); return Some(b); }
+            Ok(b) if sha.is_none_or(|s| crate::util::sha256_hex(&b) == s) => { crate::log::info(&format!("transcripts: {harness}/{profile}/{session} came from {}", p.name)); return Some(b); }
             Ok(_) => crate::log::info(&format!("transcripts: {} holds another version of {harness}/{profile}/{session}", p.name)),
             Err(_) => {}
         }
