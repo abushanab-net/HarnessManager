@@ -144,6 +144,8 @@ impl Harness for Codex {
     fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> {
         let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).collect();
         files.sort_by(|a, b| b.0.cmp(&a.0));
+        // the newest reading by when Codex took it: Codex rewrites old rollouts, so the newest file can hold an old one
+        let mut best: Option<Quota> = None;
         for (_, f) in files.into_iter().take(5) {
             let Ok(text) = read_text(&f) else { continue };
             for line in text.lines().rev() {
@@ -151,11 +153,13 @@ impl Harness for Codex {
                 let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
                 let rl = &v["payload"]["rate_limits"];
                 if rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object()) {
-                    return Some(parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or(""))));
+                    let q = parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or("")));
+                    if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
+                    break;
                 }
             }
         }
-        None
+        best
     }
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {

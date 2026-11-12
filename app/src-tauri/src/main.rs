@@ -259,7 +259,13 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "open_url" => {
             let url = s(a, "url")?;
             if !url.starts_with("https://") { bail!("only https links open"); }
-            std::process::Command::new("explorer").arg(&url).spawn()?;
+            // explorer opens a folder window for a link it does not take as one (the long sign-in link); the URL handler hands any to the browser
+            #[cfg(windows)]
+            std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn()?;
+            #[cfg(target_os = "macos")]
+            std::process::Command::new("open").arg(&url).spawn()?;
+            #[cfg(all(unix, not(target_os = "macos")))]
+            std::process::Command::new("xdg-open").arg(&url).spawn()?;
             json!(true)
         }
         "export_markdown" => {
@@ -748,7 +754,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(rep)
         }
         // resume here (phase 3): a session from another computer as a fork in this computer's clone
-        "session_resume_here" => hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?)?,
+        "session_resume_here" => hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?, opt(a, "cwd").map(PathBuf::from).as_deref())?,
         "session_fetch" => {
             let t = hrm_core::transcripts::fetch(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?)?;
             json!({"path": t.path, "bytes": t.bytes})
