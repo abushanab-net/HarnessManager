@@ -278,7 +278,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                 }
                 for a in &turn.answer { out.push_str(&format!("\n{a}\n\n")); }
             }
-            std::fs::write(s(a, "path")?, out)?;
+            // whole or not at all: a reader (or a test) never sees it half written
+            hrm_core::util::write_atomic(std::path::Path::new(&s(a, "path")?), out.as_bytes())?;
             json!(true)
         }
         "show_window" => {
@@ -334,7 +335,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             for b in service::breakdown(ctx, "profile", Some(days), None)? {
                 out.push_str(&format!("{},{},{},{},{},{},{},{}\n", b.key, b.harness, b.tokens, b.input, b.output, b.cache_read, b.requests, b.cost.map(|c| format!("{c:.4}")).unwrap_or_default()));
             }
-            std::fs::write(s(a, "path")?, out)?;
+            // whole or not at all: a reader (or a test) never sees it half written
+            hrm_core::util::write_atomic(std::path::Path::new(&s(a, "path")?), out.as_bytes())?;
             json!(true)
         }
         "sessions" => {
