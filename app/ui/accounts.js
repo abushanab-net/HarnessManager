@@ -95,12 +95,12 @@ export function renderRingSvg(a, used = showUsed()) {
 /** A room bar: the track with what is left (or used) filled, as an SVG whose width is an attribute. */
 export const winTrack = (pct, tone = '', forecastAt = null) => `<svg class="win-track" aria-hidden="true"><rect class="win-fill ${tone}" width="${Math.max(0, Math.min(100, pct))}%" height="100%" rx="3"/>${forecastAt != null ? `<line class="limit-forecast" x1="${forecastAt}%" x2="${forecastAt}%" y1="-3" y2="9"/>` : ''}</svg>`;
 
-// ---------- the tray popup: every account's ring, in the window beside the rail and in the tray's own window ----------
-export function trayHtml(accts, inWindow) {
+// ---------- the tray popup: every account's ring, in the tray's own window (limits.html) ----------
+export function trayHtml(accts) {
   const { bestRoomAcct: best } = metricsOf(accts), b5 = best && w5of(best);
   const line = (a) => { const wk = a.measured && wkof(a); return wk && wk.open ? `↻ ${fmtDuration(wk.resetMs)}` : a.cap ? `Daily cap · ${money(a.cap.limitUsd - a.cap.spentUsd)} left` : a.kind === 'api_key' ? 'Pay per use' : a.needsLogin ? '— sign in to read' : a.noPlan ? 'No plan limits' : '— unread'; };
   return `<aside class="tray-popup" role="dialog" aria-label="Limits of every account" tabindex="-1">
-    <div class="tray-head"><span class="tray-title"><span class="brand-logo" id="tray-mark"></span>Limits · ${accts.length} ${accts.length === 1 ? 'account' : 'accounts'}</span>${inWindow ? '<button class="icon-btn xs" data-act="toggle-tray" aria-label="Close the limits popup">✕</button>' : ''}</div>
+    <div class="tray-head"><span class="tray-title"><span class="brand-logo" id="tray-mark"></span>Limits · ${accts.length} ${accts.length === 1 ? 'account' : 'accounts'}</span></div>
     <div class="tray-next">${best ? `Use next: <b>${esc(best.name)}</b>${b5 && b5.open ? ` (${b5.left}% 5h · ↻ ${fmtDuration(b5.resetMs)})` : ''}` : accts.length ? '— Limits not read; no recommendation' : 'No accounts configured'}</div>
     ${accts.length ? `<div class="tray-rings-grid" data-testid="nav-limits">${accts.map((a) => `<button class="tray-ring-card" data-act="tray-open" data-name="${esc(a.id)}" data-key="${esc(a.id)}" title="Inspect ${esc(a.name)}" data-testid="nav-limit-${esc(a.id)}">${renderRingSvg(a)}<span class="who"><span class="name">${toolIcon(a.tool, 14)}<b>${esc(a.name)}</b></span><span class="sub">${esc(line(a))}</span></span></button>`).join('')}</div>` : '<div class="tray-empty">No accounts configured. Add one on Accounts.</div>'}
   </aside>`;
@@ -108,26 +108,11 @@ export function trayHtml(accts, inWindow) {
 /** Draw the popup window's content (limits.html) from the state read; the mark is drawn by the caller. */
 export async function drawTray(root) {
   // the rings first, from the state already read; the forecasts patch in when their read returns (seconds, on a busy database)
-  const html = (x) => trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), false);
+  const html = (x) => trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers));
   if (root.innerHTML) patch(root, html(S.cache.extra || {})); else root.innerHTML = html(S.cache.extra || {});
   const x = await call('limits_extra').catch(() => null);
   if (x) { S.cache.extra = x; patch(root, html(x)); }
 }
-action('toggle-tray', async (el) => {
-  const root = document.getElementById('tray-root'), trigger = document.querySelector('[data-act=toggle-tray].tray-trigger');
-  if (root.innerHTML) { root.innerHTML = ''; trigger.setAttribute('aria-expanded', 'false'); trigger.focus({ preventScroll: true }); return; }
-  // drawn at once from the state in hand (the forecasts from the last read, if any); the fresh forecasts patch in when
-  // they arrive, since that read can wait seconds behind a busy database
-  root.innerHTML = trayHtml(accountViews(S.state, S.cache.extra || {}, Date.now(), S.cache.computers), true);
-  document.dispatchEvent(new CustomEvent('hm:tray'));
-  trigger.setAttribute('aria-expanded', 'true');
-  (root.querySelector('.tray-ring-card') || root.querySelector('.tray-popup')).focus({ preventScroll: true });
-  call('limits_extra').then((x) => { S.cache.extra = x; if (root.innerHTML) patch(root, trayHtml(accountViews(S.state, x, Date.now(), S.cache.computers), true)); }).catch(() => {});
-});
-action('tray-open', (el) => { document.getElementById('tray-root').innerHTML = ''; document.querySelector('.tray-trigger')?.setAttribute('aria-expanded', 'false'); go('account', { name: el.dataset.name }); });
-// a click outside the open popup closes it
-document.addEventListener('click', (e) => { const root = document.getElementById('tray-root'); if (root && root.innerHTML && !root.contains(e.target) && !e.target.closest('.tray-trigger')) { root.innerHTML = ''; document.querySelector('.tray-trigger')?.setAttribute('aria-expanded', 'false'); } });
-
 // ---------- the Accounts page ----------
 // usage drawn into the rows: the range, each account's breakdown and day series, and the colour it has in the chart
 const au = { days: 7, by: {}, series: {}, color: {}, models: [], days_list: null, fold: new Set(['chart', 'models']) };

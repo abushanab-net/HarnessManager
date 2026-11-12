@@ -240,7 +240,7 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
         }
         for (key, (m, device)) in &h.sessions { n[1] += upsert_session(&tx, key, m, device)?; }
         for (p, t, used, resets, at) in &quotas {
-            if quota_point_in(&tx, p, t, *used, *resets, *at, None)? { n[2] += 1; }
+            if quota_point_in(&tx, p, t, *used, *resets, *at, None, None)? { n[2] += 1; }
         }
         for (kk, tags) in &h.tags {
             let Some((kind, key)) = kk.split_once('/') else { continue };
