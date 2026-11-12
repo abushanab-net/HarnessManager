@@ -100,9 +100,9 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
     let quota = h.quota(ctx, p);
     // every reading is kept (once), for the burn-down and the forecast on Overview
     if let Some(at) = quota.as_ref().and_then(|q| q.fetched_at) {
-        for t in &quota.as_ref().unwrap().tiers { let _ = ctx.db.quota_point(&p.name, &t.id, t.used, t.resets_at, at); }
+        for t in &quota.as_ref().unwrap().tiers { let _ = ctx.db.quota_point_of(&p.name, &t.id, t.used, t.resets_at, at, identity.email.as_deref()); }
     }
-    let quota = newer_elsewhere(ctx, &p.name, quota);
+    let quota = newer_elsewhere(ctx, &p.name, identity.email.as_deref(), quota);
     ProfileView {
         name: p.name.clone(),
         label: p.label.clone().unwrap_or_else(|| p.name.clone()),
@@ -134,12 +134,15 @@ impl Profile {
 }
 
 /// The account's limits as the newest reading anyone has of them: an account used on another computer was read
-/// there later than here, and limits are the account's, not the computer's.
-pub fn newer_elsewhere(ctx: &Ctx, profile: &str, here: Option<Quota>) -> Option<Quota> {
+/// there later than here, and limits are the account's, not the computer's. Only readings taken for the same login
+/// (`account`, its email) count: the same profile name is often another account on another computer.
+pub fn newer_elsewhere(ctx: &Ctx, profile: &str, account: Option<&str>, here: Option<Quota>) -> Option<Quota> {
+    let Some(account) = account.filter(|a| !a.is_empty()) else { return here };
     let since = here.as_ref().and_then(|q| q.fetched_at).unwrap_or(0);
     let rows: Vec<(String, f64, Option<i64>, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select tier, used, resets_at, ts from quota_hist where profile = ?1 and ts > ?2 and ts = (select max(ts) from quota_hist where profile = ?1) order by rowid")?;
-        let v = st.query_map(rusqlite::params![profile, since], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        let mut st = c.prepare("select tier, used, resets_at, ts from quota_hist where profile = ?1 and lower(account) = lower(?3) and ts > ?2
+            and ts = (select max(ts) from quota_hist where profile = ?1 and lower(account) = lower(?3)) order by rowid")?;
+        let v = st.query_map(rusqlite::params![profile, since, account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     }).unwrap_or_default();
     let Some(at) = rows.first().map(|r| r.3) else { return here };
