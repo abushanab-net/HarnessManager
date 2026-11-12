@@ -271,13 +271,8 @@ try {
     if (!(await shut())) { await click('[data-testid=nav-setup]'); await waitFor(async () => shut(), 'shut'); }
     await nav('#skills');
     await waitFor(async () => !(await shut()), 'open for the page shown');
-    // the rail carries no rings or readouts; the tray popup shows every account's ring and is reached by keyboard
-    await click('[data-testid=tray-trigger]');
-    await $('[data-testid=nav-limit-codex-main] svg');
-    assert.ok(await exec("return !!document.activeElement.closest('.tray-popup')"), 'focus moves into the popup');
-    await page.keyboard.press('Escape');
-    await waitFor(async () => !(await exec("return !!document.querySelector('#tray-root .tray-popup')")), 'Escape closes the popup');
-    assert.equal(await exec("return document.activeElement.dataset.testid"), 'tray-trigger', 'focus returns to the trigger');
+    // the rail carries no rings, readouts or limits popup: the limits live in the tray icon's own window
+    assert.ok(!(await exec("return !!document.querySelector('[data-act=toggle-tray], #tray-root')")), 'no limits popup in the window');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
     await click('[data-testid=fold-pins]');
@@ -292,11 +287,9 @@ try {
     await $('[data-testid=row-claude-main]');
     await $('[data-testid=row-codex-main]');
     await hasText('[data-testid=row-codex-main]', 'ChatGPT');
-    // every account with plan limits has a ring in the tray popup, read or not
-    await click('[data-testid=tray-trigger]');
-    await hasText('[data-testid=nav-limits]', 'claude-main');
-    await hasText('[data-testid=nav-limits]', 'codex-main');
-    await page.keyboard.press('Escape');
+    // every account with plan limits has a ring in the tray popup, read or not: what the tray's window draws
+    const tray = await exec("return Promise.all([import('./accounts.js'), import('./core.js')]).then(([a, c]) => a.trayHtml(a.accountViews(c.S.state, {}, Date.now(), null)));");
+    assert.ok(tray.includes('nav-limit-claude-main') && tray.includes('nav-limit-codex-main'), 'a ring for each account');
     await hasText('[data-testid=row-codex-main]', '79% left');
     await shot('01-accounts');
   });

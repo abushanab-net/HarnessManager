@@ -405,7 +405,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (dialogOpen()) { closeDialog(); return; }
     if (menuEl) { closeMenu(); return; }
-    if (document.querySelector('#tray-root .tray-popup')) { actions['toggle-tray']?.(document.querySelector('[data-act=toggle-tray]')); return; }
   }
   if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('find').focus(); }
   // a non-button element acting as one (role="button") answers Enter and Space like a button

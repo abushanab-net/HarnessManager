@@ -88,8 +88,8 @@ fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
             where device = ?2 and instr(key, '|') = 0 and not exists (select 1 from outbox o where o.op = 'session' and o.key = s.key)", params![now, dev])?;
         // `not in`, one lookup per reading: a correlated `not exists` parsed the JSON of every entry of that limit for each row
         if quota {
-            n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'quota', profile || '/' || tier, json_object('used', used, 'resets_at', resets_at, 'at', ts)
-                from (select distinct profile, tier, used, resets_at, ts from quota_hist where coalesce(device, ?2) = ?2)
+            n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'quota', profile || '/' || tier, json_object('used', used, 'resets_at', resets_at, 'at', ts, 'account', account)
+                from (select distinct profile, tier, used, resets_at, ts, account from quota_hist where coalesce(device, ?2) = ?2)
                 where (profile || '/' || tier, ts) not in (select key, coalesce(json_extract(data, '$.at'), 0) from outbox where op = 'quota')", params![now, dev])?;
         }
         n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
@@ -177,7 +177,7 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         }
         "quota" => {
             let (profile, tier) = e.key.split_once('/').context("quota key")?;
-            quota_point_in(tx, profile, tier, e.data["used"].as_f64().unwrap_or(0.0), e.data["resets_at"].as_i64(), e.data["at"].as_i64().unwrap_or(e.ts), Some(device))?;
+            quota_point_in(tx, profile, tier, e.data["used"].as_f64().unwrap_or(0.0), e.data["resets_at"].as_i64(), e.data["at"].as_i64().unwrap_or(e.ts), Some(device), e.data["account"].as_str())?;
         }
         "tag" => {
             let (kind, key) = e.key.split_once('/').context("tag key")?;
@@ -566,7 +566,12 @@ mod tests {
         std::fs::create_dir_all(&shared).unwrap();
         let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
         let _k = keys(&[&a, &b]);
-        let readings = |c: &Ctx| count(c, "select count(*) from quota_hist");
+        let readings = |c: &Ctx| count(c, "select count(*) from quota_hist where tier = 'week'");
+        // the account a reading was taken for goes with it to the other computer
+        a.db.quota_point_of("work", "session", 10.0, Some(9_000), 500, Some("me@work.com")).unwrap();
+        round(&a).unwrap();
+        round(&b).unwrap();
+        assert_eq!(count(&b, "select count(*) from quota_hist where tier = 'session' and account = 'me@work.com'"), 1);
         // the same account on both: each keeps offering its own cached reading on every page open
         a.db.quota_point("work", "week", 40.0, Some(9_000), 1_000).unwrap();
         b.db.quota_point("work", "week", 50.0, Some(9_000), 2_000).unwrap();
@@ -580,7 +585,7 @@ mod tests {
             b.db.kv_set("journal:catchup_at", "0").unwrap();
         }
         assert_eq!((readings(&a), readings(&b)), (2, 2), "each computer holds the two readings, once");
-        let outbox = |c: &Ctx| count(c, "select count(*) from outbox where op = 'quota'");
+        let outbox = |c: &Ctx| count(c, "select count(*) from outbox where op = 'quota' and key like '%/week'");
         assert_eq!((outbox(&a), outbox(&b)), (1, 1), "each journals its own reading only");
         // a new reading is still a new point, and one back to an earlier value too
         a.db.quota_point("work", "week", 60.0, Some(9_000), 3_000).unwrap();
@@ -614,17 +619,26 @@ mod tests {
         let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
         let tier = |id: &str, used: f64| crate::model::QuotaTier { id: id.into(), label: "Week here".into(), used, resets_at: Some(9_000) };
         let here = crate::model::Quota { tiers: vec![tier("week", 0.0)], fetched_at: Some(1_000), source: "codex".into() };
+        let me = Some("me@work.com");
+        let ours = |c: &rusqlite::Connection, used: f64, at: i64, account: Option<&str>| crate::db::quota_point_in(c, "work", "week", used, Some(9_500), at, Some("other"), account);
         // nothing newer anywhere: this computer's own reading
-        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", Some(here.clone())).unwrap().source, "codex");
-        // the other computer read it later
-        ctx.db.with(|c| Ok(crate::db::quota_point_in(c, "work", "week", 66.0, Some(9_500), 2_000, Some("other"))?)).unwrap();
-        let q = crate::service::newer_elsewhere(&ctx, "work", Some(here.clone())).unwrap();
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", me, Some(here.clone())).unwrap().source, "codex");
+        // the same profile name on the other computer, signed in to another account: its limits are not this one's
+        ctx.db.with(|c| Ok(ours(c, 13.0, 2_500, Some("someone@else.com"))?)).unwrap();
+        // and a reading from a version that did not say whose it was: not taken either
+        ctx.db.with(|c| Ok(ours(c, 14.0, 2_600, None)?)).unwrap();
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", me, Some(here.clone())).unwrap().source, "codex", "another account's limits never show here");
+        // the other computer read this account later (the email in any case)
+        ctx.db.with(|c| Ok(ours(c, 66.0, 2_000, Some("Me@Work.com"))?)).unwrap();
+        let q = crate::service::newer_elsewhere(&ctx, "work", me, Some(here.clone())).unwrap();
         assert_eq!((q.tiers[0].used, q.tiers[0].resets_at, q.fetched_at, q.tiers[0].label.as_str()), (66.0, Some(9_500), Some(2_000), "Week here"), "its numbers, this computer's label");
         // a computer that never read it locally still shows it
-        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", None).unwrap().tiers[0].label, "Week");
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", me, None).unwrap().tiers[0].label, "Week");
+        // without knowing which login this is, nothing from elsewhere
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", None, Some(here.clone())).unwrap().source, "codex");
         // read again here, later: this computer's reading again
         let later = crate::model::Quota { fetched_at: Some(3_000), ..here };
-        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", Some(later)).unwrap().fetched_at, Some(3_000));
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", me, Some(later)).unwrap().fetched_at, Some(3_000));
     }
 
     #[test]
