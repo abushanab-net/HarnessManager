@@ -6,7 +6,7 @@
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState } from './core.js';
 import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
-import { resumeData, reasonShort } from './resume.js';
+import { resumeData, reasonShort, canResume } from './resume.js';
 import { nameEl, pinBtn, area, refreshProjects } from './projects.js';
 import './restore.js';
 
@@ -74,7 +74,7 @@ function sessionRow(s, pcs) {
   const where = `${s.continued_from ? `<span data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span> · ` : ''}${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}`;
   // archived: read only; open: follow; from another computer: resume here when its repository and account are here, else why not
   const act = s.archived ? '' : s.open ? `<button class="btn-follow" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote ? `data-device="${esc(s.device)}"` : ''}>Follow</button>`
-    : remote ? (s.resumable === true ? `<button class="btn-lane-start" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>` : `<span class="a-reason" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
+    : remote ? (canResume(s.resumable) ? `<button class="btn-lane-start" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>` : `<span class="a-reason" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
     : `<button class="btn-lane-start" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
   return `<div class="a-srow" data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" ${s.failed ? `title="${plural(s.failed, 'failed command')}"` : 'aria-hidden="true"'}></i>
     <div class="a-tcell"><button class="a-title" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}</b></button><div class="a-tline"><span class="a-where" title="${esc(s.cwd)}">${where}</span>${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</div></div>
@@ -236,7 +236,7 @@ view('session', async (sheet, params) => {
   const body = rv.mode === 'all' ? chatAll : run(picked, 'flat', 30, 10) || `<div class="a-empty">${rv.mode === 'changes' ? 'This session changed no files.' : 'Nothing failed.'}</div>`;
   // archived: read only; from another computer: resume here, or why not; here: resume in the terminal of the setting
   const actions = m.archived ? '<span class="muted" data-testid="resume-reason">archived: it can be read, not resumed</span>'
-    : params.device ? (m.resumable === true ? `<button class="btn-primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
+    : params.device ? (canResume(m.resumable) ? `<button class="btn-primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
     : `<span class="a-split"><button class="btn-secondary" data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button class="btn-secondary" data-act="terminal-menu" aria-label="Choose terminal" aria-haspopup="menu">▾</button>` : ''}</span>`;
   const stat = (title, value, cls = '') => `<div class="account-stat"><span>${title}</span><b class="${cls}">${value}</b><span></span></div>`;
   patch(sheet, `<div class="page-body a-sbody" data-tour="session"><a class="filter-chip back-chip" href="#sessions">← Sessions · ${esc(project)}</a>

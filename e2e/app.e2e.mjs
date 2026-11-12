@@ -1592,7 +1592,11 @@ description: Bulk skill ${i}
     await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
     await nav('#sessions?days=all');
     await $('[data-testid=resume-here-laptop-s7]');
-    await hasText('[data-testid=reason-laptop-s8]', 'not cloned here');
+    // not cloned here: still offered, the dialog asks for a folder before it resumes
+    await click('[data-testid=resume-here-laptop-s8]');
+    await hasText('[data-testid=resume-here-root]', 'not cloned here: choose a folder');
+    assert.ok(await exec("return document.querySelector('[data-testid=resume-here-ok]').disabled"), 'no folder, no resume');
+    await click('.modal-foot [data-act=dialog-close]');
     await shot('41-sessions-resume-here');
     // reading it: fetched from the folder, shown through Claude Code's parser
     await click('[data-testid=read-laptop-s7]');
@@ -1606,6 +1610,7 @@ description: Bulk skill ${i}
     await click('[data-testid=resume-here-laptop-s7]');
     await hasText('[data-testid=resume-here-root]', 'platform-gitops');
     await hasText('[data-testid=resume-here-dialog]', 'the LAPTOP copy stays as it is');
+    await $('[data-testid=resume-here-pick]');
     await shot('43-resume-here-dialog');
     await click('[data-testid=resume-here-ok]');
     const launch = await waitFor(() => readLines(termLog).find((t) => t.args && t.args[3] === '--resume' && String(t.args[4]).endsWith('laptop-s7.jsonl')), 'the fork launched');

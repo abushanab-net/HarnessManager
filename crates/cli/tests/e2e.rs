@@ -365,6 +365,11 @@ fn sessions_group_by_repository_across_claude_and_codex() {
     assert_eq!(st["change"]["path"], "apps/argocd.yaml");
     assert_eq!(st["status"], "ok");
 
+    // an old rollout Codex rewrote later: the newest file, an old reading; the newest reading still wins
+    let old = e.home.join(".codex").join("sessions").join("2026").join("10").join("01");
+    std::fs::create_dir_all(&old).unwrap();
+    write(&old.join("rollout-2026-10-01T10-00-00-old.jsonl"), &jsonl(&[json!({"type": "event_msg", "timestamp": "2026-10-01T10:00:00.000Z", "payload": {"type": "token_count",
+        "rate_limits": {"primary": {"used_percent": 99, "window_minutes": 10080, "resets_at": 4102444800i64}}}})]));
     // codex limits and usage from the rollout, without any token
     let q = e.json(&["quota", "codex-main"]);
     assert_eq!(q["tiers"].as_array().unwrap().iter().find(|t| t["id"] == "week").unwrap()["used"], 21.0);
@@ -718,7 +723,9 @@ fn routed_profile_starts_the_router_and_gets_its_address_and_token() {
 }
 
 /// A one-shot HTTP server: answers the first request with `body` and returns the request it saw.
-fn mock_once(body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+fn mock_once(body: &'static str) -> (String, std::thread::JoinHandle<String>) { mock_reply("200 OK", body) }
+
+fn mock_reply(status: &'static str, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
     use std::io::{Read, Write};
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/api/oauth/usage", l.local_addr().unwrap());
@@ -727,7 +734,7 @@ fn mock_once(body: &'static str) -> (String, std::thread::JoinHandle<String>) {
         let mut buf = [0u8; 8192];
         let n = s.read(&mut buf).unwrap();
         let req = String::from_utf8_lossy(&buf[..n]).to_string();
-        write!(s, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", body.len(), body).unwrap();
+        write!(s, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", body.len(), body).unwrap();
         req
     });
     (url, h)
@@ -748,8 +755,21 @@ fn live_claude_limits_use_the_saved_login_while_valid() {
     // the live reading is newer than Claude Code's cache, so it is what the list shows
     let p = e.profile("live1");
     assert_eq!(p["quota"]["source"], "live");
-    // an expired login is never refreshed by Harness Manager
+    assert_eq!(p["identity"]["needs_login"], false);
+    // Anthropic refuses the saved login (signed out or revoked elsewhere): the account says it needs a new one
+    let (url, h) = mock_reply("401 Unauthorized", r#"{"error":"invalid token"}"#);
+    e.extra.retain(|(k, _)| k != "HRM_ANTHROPIC_USAGE_URL");
+    e.extra.push(("HRM_ANTHROPIC_USAGE_URL".into(), url));
+    assert!(e.fail(&["quota", "live1", "--live"]).contains("log in again"));
+    h.join().unwrap();
+    assert_eq!(e.profile("live1")["identity"]["needs_login"], true, "a refused login shows as expired");
+    // a new login rewrites the file: no longer refused
+    std::thread::sleep(std::time::Duration::from_millis(20));
     let creds = e.home.join(".claude-live1").join(".credentials.json");
+    let saved = std::fs::read_to_string(&creds).unwrap();
+    std::fs::write(&creds, saved).unwrap();
+    assert_eq!(e.profile("live1")["identity"]["needs_login"], false);
+    // an expired login is never refreshed by Harness Manager
     let mut c: Value = serde_json::from_str(&std::fs::read_to_string(&creds).unwrap()).unwrap();
     c["claudeAiOauth"]["expiresAt"] = json!(1);
     std::fs::write(&creds, c.to_string()).unwrap();

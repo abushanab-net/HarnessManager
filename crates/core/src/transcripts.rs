@@ -69,12 +69,12 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).optional()?)
     })?;
     let name = crate::journal::device_names(ctx).get(device).cloned().unwrap_or_else(|| device.to_string());
-    let Some((file, _, sha, source_rel, fetched_at)) = row else { bail!("no transcript from {name} for this session yet: it is carried on that computer's next sync round") };
+    let Some((file, _, sha, source_rel, fetched_at)) = row else { return fetch_direct(ctx, device, &name, harness, profile, id) };
     let path = local_path(ctx, device, harness, profile, &file);
     if fetched_at.is_none() || !path.exists() {
         if file.contains("..") || Path::new(&file).is_absolute() { bail!("transcript entry names a path outside the folder"); }
         // a connected computer first (phase 2's route), then the hub or the folder
-        let raw = match crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, &sha) {
+        let raw = match crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, Some(&sha)) {
             Some(b) => b,
             None if ctx.settings.sync_mode == "hub" => crate::sync::hub::fetch_transcript(ctx, device, &key).context("fetch the transcript from the hub")?,
             None => {
@@ -90,6 +90,24 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
     }
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes })
+}
+
+/// A transcript with no entry: computers paired directly carry none (only the folder and the hub do), so the
+/// computer it ran on is asked for its current copy. shortcut: asked again on every read, no copy is kept as
+/// current; keep one with its sha256 if reading remote sessions over the direct connection gets slow.
+fn fetch_direct(ctx: &Ctx, device: &str, name: &str, harness: &str, profile: &str, id: &str) -> Result<FetchedTranscript> {
+    let raw = crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, None)
+        .with_context(|| format!("could not get this session's transcript from {name}: it is not connected now, or the session is over {} MB; it also comes through a sync folder or a hub", MAX_TRANSCRIPT_BYTES >> 20))?;
+    let plain = zstd::decode_all(&raw[..]).context("decompress the transcript")?;
+    let ext = if harness == "opencode" { "json" } else { "jsonl" };
+    let path = local_path(ctx, device, harness, profile, &format!("{id}.{ext}.zst"));
+    write_atomic(&path, &plain)?;
+    // the file's name where it ran is all the tools need of it (Codex and Pi keep it)
+    let key = format!("{harness}/{profile}/{id}");
+    let src: String = ctx.db.read(|c| Ok(c.query_row("select coalesce(json_extract(json, '$.source_path'), '') from sessions where device=? and key=?", [device, &key], |r| r.get(0)).optional()?))?.unwrap_or_default();
+    let source_rel = src.rsplit(['/', '\\']).next().unwrap_or("").trim_end_matches(".zst").to_string();
+    crate::log::info(&format!("transcripts: {key} came straight from {name} ({} bytes)", plain.len()));
+    Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes: plain.len() as u64 })
 }
 
 /// The repositories this computer has, by project key: the root of every folder its usage and sessions name.
@@ -131,19 +149,23 @@ pub fn forks(ctx: &Ctx) -> HashMap<String, String> {
 
 /// Fetch, materialize and launch a session from another computer as a fork, in this computer's clone of its
 /// repository. Returns `{ok, cwd, args, note}`.
-pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id: &str) -> Result<Value> {
+/// `cwd`: the folder chosen to open it in; None: this computer's clone of the session's repository.
+pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id: &str, cwd: Option<&Path>) -> Result<Value> {
     let (_, s) = ctx.db.remote_sessions()?.into_iter().find(|(d, m)| d == device && m.harness == harness_id && m.profile == profile && m.id == id).context("session not found")?;
     let names = crate::journal::device_names(ctx);
     let reg = ctx.registry()?;
-    let roots = roots_here(ctx)?;
-    let root = roots.get(&s.project_key).with_context(|| format!("not cloned here: open {} once on this computer", s.project_name))?;
+    let root = match cwd {
+        Some(c) if c.is_dir() => c.to_path_buf(),
+        Some(c) => bail!("{} is not a folder on this computer", c.display()),
+        None => PathBuf::from(roots_here(ctx)?.get(&s.project_key).with_context(|| format!("not cloned here: open {} once on this computer", s.project_name))?),
+    };
     let h = harness::by_id(harness_id).context("unknown harness")?;
     let p = reg.profiles.iter().find(|p| p.name == profile && p.harness == harness_id).with_context(|| format!("no account {profile} for {} on this computer", h.label()))?;
     if crate::journal::open_elsewhere(&crate::journal::peers(ctx)?, now_ms()).contains(id) {
         bail!("running on {}: wait until it ends", names.get(device).cloned().unwrap_or_else(|| device.into()));
     }
     let t = fetch(ctx, device, harness_id, profile, id)?;
-    let m = h.materialize(ctx, p, Path::new(root), &t)?;
+    let m = h.materialize(ctx, p, &root, &t)?;
     crate::service::start(ctx, profile, Some(m.cwd.clone()), &m.launch_args)?;
     if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false) { crate::log::warn(&format!("index after resume here: {e:#}")); }
     let key = format!("forked:{harness_id}/{profile}/{}", m.new_session_id.as_deref().unwrap_or(id));
@@ -393,20 +415,20 @@ mod tests {
         let dev = a.settings.device_id.clone();
         let list = || crate::service::sessions(&b, &Default::default()).unwrap();
         // not cloned here
-        let err = resume_here(&b, &dev, "claude", "claude-main", "s1").unwrap_err().to_string();
+        let err = resume_here(&b, &dev, "claude", "claude-main", "s1", None).unwrap_err().to_string();
         assert_eq!(err, "not cloned here: open r once on this computer");
         assert_eq!(list()[0].resumable, Some(json!(err)));
         // cloned: B has usage in its own clone of the same repository
         let cwd_b = repo(&t.path().join("b-side"), "app");
         b.db.insert_usage(&[crate::model::UsageRow { request_id: "claude:b1".into(), profile: "claude-main".into(), harness: "claude".into(), ts: 1, model: "m".into(), project: cwd_b.display().to_string(),
             session_id: "x".into(), input: 1, output: 1, cache_read: 0, cache_write: 0, ttft_ms: None, gen_ms: None }], &Default::default()).unwrap();
-        let err = resume_here(&b, &dev, "claude", "claude-main", "s1").unwrap_err().to_string();
+        let err = resume_here(&b, &dev, "claude", "claude-main", "s1", None).unwrap_err().to_string();
         assert_eq!(err, "no account claude-main for Claude Code on this computer");
         assert_eq!(list()[0].resumable, Some(json!(err)));
         add_profile(&b, "claude-main", "claude");
         // running on A: A's presence says so
         b.db.with(|c| { c.execute("update peers set presence=? where device_id=?", params![json!({"at": now_ms(), "running": [{"session_id": "s1"}]}).to_string(), dev])?; Ok(()) }).unwrap();
-        let err = resume_here(&b, &dev, "claude", "claude-main", "s1").unwrap_err().to_string();
+        let err = resume_here(&b, &dev, "claude", "claude-main", "s1", None).unwrap_err().to_string();
         assert_eq!(err, "running on A: wait until it ends");
         assert_eq!(list()[0].resumable, Some(json!(err)));
         b.db.with(|c| { c.execute("update peers set presence=null where device_id=?", [&dev])?; Ok(()) }).unwrap();
@@ -414,7 +436,7 @@ mod tests {
         // launched: the terminal record carries hrm run <profile> -- <the tool's args>, in the clone
         let log = t.path().join("terminal.jsonl");
         std::env::set_var("HRM_TERMINAL_LOG", &log);
-        let r = resume_here(&b, &dev, "claude", "claude-main", "s1").unwrap();
+        let r = resume_here(&b, &dev, "claude", "claude-main", "s1", None).unwrap();
         let rec: Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().lines().last().unwrap()).unwrap();
         let copy = b.home.join(".claude").join("projects").join(harness::claude::project_dir_name(&cwd_b)).join("s1.jsonl");
         assert_eq!(rec["args"], json!(["run", "claude-main", "--", "--resume", copy.display().to_string(), "--fork-session"]));
@@ -424,8 +446,17 @@ mod tests {
         // the local copy is listed as this computer's session, continued from A; a second Resume here reuses it
         let local = list().into_iter().find(|s| s.device == b.db.device && s.id == "s1").expect("the copy is a session here");
         assert_eq!(local.continued_from.as_deref(), Some("A"));
-        resume_here(&b, &dev, "claude", "claude-main", "s1").unwrap();
+        resume_here(&b, &dev, "claude", "claude-main", "s1", None).unwrap();
         assert_eq!(std::fs::read_dir(copy.parent().unwrap()).unwrap().count(), 1);
+        // a folder chosen in the dialog wins over the clone the index knows, and one that is not here says so
+        let chosen = t.path().join("worktree");
+        std::fs::create_dir_all(&chosen).unwrap();
+        let r = resume_here(&b, &dev, "claude", "claude-main", "s1", Some(&chosen)).unwrap();
+        assert_eq!(r["cwd"], json!(chosen.display().to_string()));
+        let rec: Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().lines().last().unwrap()).unwrap();
+        assert_eq!(rec["cwd"], json!(chosen.display().to_string()));
+        let gone = t.path().join("not-here");
+        assert!(resume_here(&b, &dev, "claude", "claude-main", "s1", Some(&gone)).unwrap_err().to_string().ends_with("is not a folder on this computer"));
         std::env::remove_var("HRM_TERMINAL_LOG");
     }
 }

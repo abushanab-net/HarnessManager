@@ -35,6 +35,12 @@ impl Claude {
     }
 
     fn creds(&self, ctx: &Ctx, p: &Profile) -> Option<Value> { read_json(&self.home(ctx, p).join(".credentials.json")) }
+}
+
+/// When Anthropic last refused an account's login (epoch ms).
+fn rejected_key(p: &Profile) -> String { format!("login:refused:{}", p.name) }
+
+impl Claude {
 
     /// Live limits from Anthropic, using the access token Claude Code saved on this computer. Opt-in;
     /// only while that token is valid: Harness Manager never refreshes, copies or stores it.
@@ -45,14 +51,18 @@ impl Claude {
             bail!("Claude Code's login on this computer has expired; it refreshes the next time this account runs");
         }
         let url = std::env::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|_| "https://api.anthropic.com/api/oauth/usage".into());
-        let v: Value = reqwest::blocking::Client::new()
+        let r = reqwest::blocking::Client::new()
             .get(url)
             .bearer_auth(token)
             .header("anthropic-beta", "oauth-2025-04-20")
             .timeout(std::time::Duration::from_secs(15))
-            .send()?
-            .error_for_status()?
-            .json()?;
+            .send()?;
+        // a refused login is gone (signed out or revoked elsewhere) though its dates look fine: `identity` says so until Claude Code saves a new one
+        if r.status() == reqwest::StatusCode::UNAUTHORIZED {
+            ctx.db.kv_set(&rejected_key(p), &now_ms().to_string())?;
+            bail!("Anthropic refused this account's login: log in again");
+        }
+        let v: Value = r.error_for_status()?.json()?;
         let q = parse_utilization(&v, Some(now_ms()), "live");
         ctx.db.put_quota(&p.name, &q)?;
         Ok(q)
@@ -203,6 +213,10 @@ impl Harness for Claude {
         let oauth = &creds["claudeAiOauth"];
         let logged_in = oauth.get("accessToken").is_some() || (cfg!(target_os = "macos") && acc.is_object());
         let refresh_exp = oauth.get("refreshTokenExpiresAt").and_then(|v| v.as_i64());
+        // refused by Anthropic after the login was saved: a new login (or Claude Code's own refresh) rewrites the file
+        let saved = std::fs::metadata(self.home(ctx, p).join(".credentials.json")).and_then(|m| m.modified()).ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let refused = ctx.db.kv_get(&rejected_key(p)).ok().flatten().and_then(|v| v.parse::<i64>().ok()).is_some_and(|t| t > saved);
         Identity {
             logged_in,
             email: str_at(acc, &["emailAddress"]).map(String::from),
@@ -211,7 +225,7 @@ impl Harness for Claude {
             role: str_at(acc, &["organizationRole"]).map(String::from),
             plan: plan_label(str_at(oauth, &["subscriptionType"]), str_at(oauth, &["rateLimitTier"]).or(str_at(acc, &["organizationRateLimitTier"])),
                 str_at(acc, &["organizationType"]), str_at(acc, &["seatTier"])),
-            needs_login: refresh_exp.map(|t| t < now_ms()).unwrap_or(false),
+            needs_login: logged_in && (refused || refresh_exp.map(|t| t < now_ms()).unwrap_or(false)),
         }
     }
 

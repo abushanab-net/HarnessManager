@@ -609,6 +609,25 @@ mod tests {
     }
 
     #[test]
+    fn an_account_read_later_on_another_computer_shows_that_reading() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+        let tier = |id: &str, used: f64| crate::model::QuotaTier { id: id.into(), label: "Week here".into(), used, resets_at: Some(9_000) };
+        let here = crate::model::Quota { tiers: vec![tier("week", 0.0)], fetched_at: Some(1_000), source: "codex".into() };
+        // nothing newer anywhere: this computer's own reading
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", Some(here.clone())).unwrap().source, "codex");
+        // the other computer read it later
+        ctx.db.with(|c| Ok(crate::db::quota_point_in(c, "work", "week", 66.0, Some(9_500), 2_000, Some("other"))?)).unwrap();
+        let q = crate::service::newer_elsewhere(&ctx, "work", Some(here.clone())).unwrap();
+        assert_eq!((q.tiers[0].used, q.tiers[0].resets_at, q.fetched_at, q.tiers[0].label.as_str()), (66.0, Some(9_500), Some(2_000), "Week here"), "its numbers, this computer's label");
+        // a computer that never read it locally still shows it
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", None).unwrap().tiers[0].label, "Week");
+        // read again here, later: this computer's reading again
+        let later = crate::model::Quota { fetched_at: Some(3_000), ..here };
+        assert_eq!(crate::service::newer_elsewhere(&ctx, "work", Some(later)).unwrap().fetched_at, Some(3_000));
+    }
+
+    #[test]
     fn turning_sync_off_and_on_publishes_this_computers_readings_only() {
         let t = tempfile::tempdir().unwrap();
         let shared = t.path().join("shared");
