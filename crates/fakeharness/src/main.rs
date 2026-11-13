@@ -149,6 +149,12 @@ fn has_cred(target: &str) -> bool {
 }
 
 fn agy(args: &[String]) {
+    // `-p /usage` answers with the limits and is not a run, as in the real agy
+    if args.iter().any(|a| a == "/usage") {
+        println!("{}", json!({"status": "SUCCESS", "command": {"name": "usage", "data": {"groups": [
+            {"name": "Gemini Models", "buckets": [{"window": "weekly", "remaining_fraction": 0.8, "reset_time": "2099-01-01T00:00:00Z"}, {"window": "5h", "remaining_fraction": 0.5, "reset_time": "2099-01-01T00:00:00Z"}]}]}}}));
+        return;
+    }
     // a launch without a saved login is Antigravity's sign-in
     #[cfg(windows)]
     {
