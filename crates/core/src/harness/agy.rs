@@ -57,6 +57,9 @@ impl Agy {
     /// The login in Antigravity's slot is this profile's.
     pub fn owns(&self, ctx: &Ctx, p: &Profile) -> bool { self.owner(ctx).as_deref() == Some(p.name.as_str()) }
 
+    /// A login is in Antigravity's slot: without one, running agy would start a sign-in.
+    pub fn signed_in(&self) -> bool { crate::secrets::read(&live_target()).is_some() }
+
     /// Save the login currently in Antigravity's slot to the profile that owns it.
     fn save_current(&self, ctx: &Ctx) -> Result<()> {
         if let (Some(owner), Some((user, blob))) = (self.owner(ctx), crate::secrets::read(&live_target())) {
@@ -110,6 +113,7 @@ impl Agy {
     pub fn live_quota(&self, ctx: &Ctx, p: &Profile) -> Result<Quota> {
         use std::io::Read;
         if !self.owns(ctx, p) { bail!("Antigravity reads the limits of the account signed in now; start '{}' to read its limits", p.name); }
+        if !self.signed_in() { bail!("Antigravity is not signed in"); }
         let mut c = self.launch(ctx, p, &["-p".into(), "/usage".into(), "--output-format".into(), "json".into()])?.command();
         c.current_dir(std::env::temp_dir()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
         #[cfg(windows)]

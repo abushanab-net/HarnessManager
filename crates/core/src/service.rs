@@ -194,12 +194,19 @@ pub fn refresh_quotas(ctx: &Ctx, force: bool) -> Vec<(String, String)> {
         if !force && !ctx.db.kv_get("live_quota").ok().flatten().map(|v| v == "1").unwrap_or(false) { continue; }
         if let Err(e) = c.live_quota(ctx, p) { errors.push((p.name.clone(), format!("{e:#}"))); }
     }
-    // Antigravity answers /usage itself, locally and at no cost, so it needs no opt-in; only the signed-in account can be read
+    // Antigravity answers /usage itself, locally and at no cost, so it needs no opt-in; only the signed-in account can be
+    // read. It runs a program that can take seconds, so on its own thread, one at a time: the refresh round never waits.
+    static AGY_READING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let agy = harness::agy::Agy;
-    for p in reg.profiles.iter().filter(|p| p.harness == "agy" && p.kind == Kind::Subscription && agy.owns(ctx, p)) {
-        let fresh = agy.quota(ctx, p).and_then(|q| q.fetched_at).map(|t| now_ms() - t < max_age).unwrap_or(false);
-        if fresh && !force { continue; }
-        if let Err(e) = agy.live_quota(ctx, p) { errors.push((p.name.clone(), format!("{e:#}"))); }
+    let due = reg.profiles.into_iter().find(|p| p.harness == "agy" && p.kind == Kind::Subscription && agy.owns(ctx, p) && agy.signed_in()
+        && (force || !agy.quota(ctx, p).and_then(|q| q.fetched_at).map(|t| now_ms() - t < max_age).unwrap_or(false)));
+    if let Some(p) = due.filter(|_| !AGY_READING.swap(true, std::sync::atomic::Ordering::SeqCst)) {
+        let (data, home) = (ctx.data.clone(), ctx.home.clone());
+        std::thread::spawn(move || {
+            let r = std::panic::catch_unwind(|| Ctx::open_at(&data, &home).and_then(|c| agy.live_quota(&c, &p)));
+            if let Ok(Err(e)) = r { crate::log::warn(&format!("Antigravity limits for {}: {e:#}", p.name)); }
+            AGY_READING.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
     }
     errors
 }
