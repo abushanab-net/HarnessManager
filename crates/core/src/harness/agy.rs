@@ -54,6 +54,9 @@ impl Agy {
         self.active(ctx).or_else(|| ctx.registry().ok()?.profiles.into_iter().find(|p| p.harness == "agy" && p.main).map(|p| p.name))
     }
 
+    /// The login in Antigravity's slot is this profile's.
+    pub fn owns(&self, ctx: &Ctx, p: &Profile) -> bool { self.owner(ctx).as_deref() == Some(p.name.as_str()) }
+
     /// Save the login currently in Antigravity's slot to the profile that owns it.
     fn save_current(&self, ctx: &Ctx) -> Result<()> {
         if let (Some(owner), Some((user, blob))) = (self.owner(ctx), crate::secrets::read(&live_target())) {
@@ -101,6 +104,33 @@ impl Agy {
         }
     }
 
+    /// Limits as Antigravity reports them: `agy -p /usage --output-format json` answers from its own login without
+    /// starting a turn, spending quota or leaving a conversation. It reads the login in the slot, so only the account
+    /// that owns it is measured; the others keep their last reading.
+    pub fn live_quota(&self, ctx: &Ctx, p: &Profile) -> Result<Quota> {
+        use std::io::Read;
+        if !self.owns(ctx, p) { bail!("Antigravity reads the limits of the account signed in now; start '{}' to read its limits", p.name); }
+        let mut c = self.launch(ctx, p, &["-p".into(), "/usage".into(), "--output-format".into(), "json".into()])?.command();
+        c.current_dir(std::env::temp_dir()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); } // no console window
+        let mut child = c.spawn()?;
+        let mut out = child.stdout.take().expect("piped");
+        let reader = std::thread::spawn(move || { let mut s = String::new(); let _ = out.read_to_string(&mut s); s });
+        // a sign-in prompt or a stuck network must not hang the refresh
+        let start = std::time::Instant::now();
+        while child.try_wait()?.is_none() {
+            if start.elapsed() > std::time::Duration::from_secs(30) { let _ = child.kill(); bail!("Antigravity did not report its limits within 30 s"); }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let text = reader.join().unwrap_or_default();
+        let v: Value = serde_json::from_str(text.trim()).map_err(|_| anyhow::anyhow!("Antigravity did not report its limits: {}", truncate(text.trim(), 200)))?;
+        let q = parse_usage(&v["command"]["data"], crate::util::now_ms());
+        if q.tiers.is_empty() { bail!("Antigravity reported no limits"); }
+        ctx.db.put_quota(&p.name, &q)?;
+        Ok(q)
+    }
+
     fn conversations(&self, ctx: &Ctx) -> Vec<PathBuf> {
         let dir = self.root(ctx).join("antigravity-cli").join("conversations");
         std::fs::read_dir(dir).map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.extension().map(|e| e == "db").unwrap_or(false)).collect()).unwrap_or_default()
@@ -111,7 +141,7 @@ impl Harness for Agy {
     fn id(&self) -> &'static str { "agy" }
     fn label(&self) -> &'static str { "Antigravity" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: false, subscription_login: true, api_key: false, quota: false, usage: false, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
+        Caps { parallel_accounts: false, subscription_login: true, api_key: false, quota: true, usage: false, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
     }
     fn binary(&self) -> &'static str { "agy" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { self.root(ctx) }
@@ -164,12 +194,14 @@ impl Harness for Agy {
         match blob {
             Some((_, b)) => {
                 let v: Value = serde_json::from_slice(&b).unwrap_or(Value::Null);
-                let email = v["email"].as_str().or(v["account"]["email"].as_str()).map(String::from);
+                let email = v["email"].as_str().or(v["account"]["email"].as_str()).or(v["id_token_email"].as_str()).map(String::from);
                 Identity { logged_in: true, email, plan: Some(if active { "Google · active".into() } else { "Google".into() }), ..Default::default() }
             }
             None => Identity::default(),
         }
     }
+
+    fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> { ctx.db.get_quota(&p.name).ok().flatten() }
 
     fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> {
         if !p.main { return vec![]; }
@@ -230,6 +262,27 @@ impl Harness for Agy {
     }
 }
 
+/// Antigravity's `/usage` payload to tiers. Each model group has a weekly and a 5-hour bucket: the first group's are
+/// the account's "week" and "session", the others are scoped by group name.
+pub fn parse_usage(data: &Value, fetched_at: i64) -> Quota {
+    let mut tiers = vec![];
+    for (i, g) in data["groups"].as_array().into_iter().flatten().enumerate() {
+        let group = g["name"].as_str().unwrap_or("");
+        for b in g["buckets"].as_array().into_iter().flatten() {
+            let Some(left) = b["remaining_fraction"].as_f64() else { continue };
+            let (base, label) = match b["window"].as_str().unwrap_or("") {
+                "weekly" => ("week", "Week"),
+                "5h" => ("session", "5-hour session"),
+                w => (w, b["name"].as_str().unwrap_or(w)),
+            };
+            let (id, label) = if i == 0 { (base.to_string(), label.to_string()) } else { (format!("{base}:{}", group.to_lowercase()), format!("{label} · {group}")) };
+            if tiers.iter().any(|t: &QuotaTier| t.id == id) { continue; }
+            tiers.push(QuotaTier { id, label, used: ((1.0 - left) * 100.0).clamp(0.0, 100.0), resets_at: b["reset_time"].as_str().map(super::parse::ts_ms).filter(|t| *t > 0) });
+        }
+    }
+    Quota { tiers, fetched_at: Some(fetched_at), source: "agy /usage".into() }
+}
+
 /// (id, title, preview, first workspace folder) from Antigravity's summaries database.
 fn summaries(path: &Path) -> Vec<(String, String, String, String)> {
     let Ok(db) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else { return vec![] };
@@ -272,6 +325,22 @@ fn has_uuid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn usage_groups_become_limits() {
+        // trimmed from a real `agy -p /usage --output-format json`
+        let v: serde_json::Value = serde_json::from_str(r#"{"groups":[
+            {"name":"Gemini Models","buckets":[{"id":"gemini-weekly","window":"weekly","remaining_fraction":1,"reset_time":"2026-11-20T13:40:04Z"},{"id":"gemini-5h","window":"5h","remaining_fraction":0.25,"reset_time":"2026-11-13T18:40:04Z"}]},
+            {"name":"Claude and GPT models","buckets":[{"id":"3p-weekly","window":"weekly","remaining_fraction":0.5,"reset_time":"2026-11-20T13:40:04Z"}]},
+            {"name":"Gemini 4 Argon","buckets":[{"id":"argon","window":"weekly","remaining_fraction":0.9717,"reset_time":"2026-11-20T13:30:42Z"},{"id":"bad","window":"weekly"}]}]}"#).unwrap();
+        let q = super::parse_usage(&v, 1);
+        let ids: Vec<_> = q.tiers.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["week", "session", "week:claude and gpt models", "week:gemini 4 argon"]);
+        assert_eq!(q.tier("session").unwrap().used, 75.0);
+        assert_eq!(q.tier("week:claude and gpt models").unwrap().label, "Week · Claude and GPT models");
+        assert!(q.tier("week").unwrap().resets_at.unwrap() > 0);
+        assert!(super::parse_usage(&serde_json::Value::Null, 1).tiers.is_empty());
+    }
+
     #[test]
     fn ids_are_not_text() {
         assert!(super::looks_like_id("$520e7190-198c-47f4-b9f1-988213c43b61\"$c75c1e05"));

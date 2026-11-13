@@ -176,7 +176,7 @@ fn sync_soft(ctx: &Ctx) -> Value {
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
     "login_poll", "login_cancel", "login_terminal", "refresh", "home", "dash", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
-    "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
+    "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "app_uninstall", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
     "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
     "session_resume_here", "session_fetch", "transcripts_status",
@@ -564,6 +564,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "app_update" => json!(hrm_core::apps::update(&s(a, "id")?)?),
         "app_install" => json!(hrm_core::apps::install(&s(a, "id")?, &s(a, "method")?)?),
         "app_remove_copy" => json!(hrm_core::apps::remove_copy(&s(a, "id")?, &s(a, "path")?)?),
+        "app_uninstall" => json!(hrm_core::apps::uninstall(&s(a, "id")?)?),
         // skill folders in the store that the list does not have: added, with the ticks their links already show
         "skill_adopt" => {
             let mut reg = ctx.registry()?;
