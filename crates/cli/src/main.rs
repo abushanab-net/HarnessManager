@@ -459,8 +459,11 @@ fn real_main(cli: Cli) -> Result<i32> {
             let reg = ctx.registry()?;
             let p = reg.get(&name)?;
             let q = if live {
-                if p.harness != "claude" { bail!("live limits are only available for Claude subscription accounts"); }
-                Some(harness::claude::Claude.live_quota(&ctx, p)?)
+                match p.harness.as_str() {
+                    "claude" => Some(harness::claude::Claude.live_quota(&ctx, p)?),
+                    "agy" => Some(harness::agy::Agy.live_quota(&ctx, p)?),
+                    _ => bail!("live limits are only available for Claude and Antigravity subscription accounts"),
+                }
             } else {
                 harness::of(p).quota(&ctx, p)
             };

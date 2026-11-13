@@ -194,6 +194,13 @@ pub fn refresh_quotas(ctx: &Ctx, force: bool) -> Vec<(String, String)> {
         if !force && !ctx.db.kv_get("live_quota").ok().flatten().map(|v| v == "1").unwrap_or(false) { continue; }
         if let Err(e) = c.live_quota(ctx, p) { errors.push((p.name.clone(), format!("{e:#}"))); }
     }
+    // Antigravity answers /usage itself, locally and at no cost, so it needs no opt-in; only the signed-in account can be read
+    let agy = harness::agy::Agy;
+    for p in reg.profiles.iter().filter(|p| p.harness == "agy" && p.kind == Kind::Subscription && agy.owns(ctx, p)) {
+        let fresh = agy.quota(ctx, p).and_then(|q| q.fetched_at).map(|t| now_ms() - t < max_age).unwrap_or(false);
+        if fresh && !force { continue; }
+        if let Err(e) = agy.live_quota(ctx, p) { errors.push((p.name.clone(), format!("{e:#}"))); }
+    }
     errors
 }
 

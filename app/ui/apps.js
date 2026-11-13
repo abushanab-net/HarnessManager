@@ -74,7 +74,7 @@ function watchVersion(id, before) {
     if (Date.now() > end || S.route.view !== 'apps') return clearInterval(t);
     const d = await call('apps').catch(() => null);
     const a = d && d.apps.find((x) => x.id === id);
-    if (a && (a.version || null) !== before) { clearInterval(t); toast(`${a.label} is now ${a.version || 'installed'}`); render(); }
+    if (a && (a.version || null) !== before) { clearInterval(t); toast(a.path ? `${a.label} is now ${a.version || 'installed'}` : `${a.label} is uninstalled`); render(); }
   }, 5000);
 }
 const runIn = (cmd, id, before) => { if (cmd) { toast(`Running in a new terminal: ${cmd}`); watchVersion(id, before); } };
@@ -111,5 +111,13 @@ action('app-menu', (el) => {
     { label: 'Open its folder', run: () => attempt(() => call('open_folder', { path: el.dataset.path.replace(/[\\/][^\\/]+$/, '') })) },
     { label: 'Copy its path', run: async () => { await navigator.clipboard.writeText(el.dataset.path); toast('Copied'); } },
     ...(a.update ? [{ label: 'Copy the update command', run: async () => { await navigator.clipboard.writeText(a.update.command); toast('Copied: ' + a.update.command); } }] : []),
+    { label: 'Uninstall…', danger: true, testid: `app-uninstall-${a.id}`, run: () => uninstall(a) },
   ]);
 });
+async function uninstall(a) {
+  const open = ((S.state && S.state.profiles) || []).filter((p) => p.harness === a.id).reduce((n, p) => n + p.running.length, 0);
+  const copies = a.copies || [];
+  const body = `${copies.length > 1 ? `All ${copies.length} copies of ${esc(a.label)} are` : `${esc(a.label)} at <span class="mono">${esc(a.path)}</span> is`} removed in a terminal window, each the way it was installed. Its accounts, settings and sessions stay, so installing it again picks them up.${open ? ` <b>${open} ${open === 1 ? 'console is' : 'consoles are'} running it: close ${open === 1 ? 'it' : 'them'} first, or the files in use cannot be removed.</b>` : ''}`;
+  if (!(await confirmDialog('Uninstall ' + a.label + '?', body, 'Uninstall'))) return;
+  runIn(await attempt(() => call('app_uninstall', { id: a.id })), a.id, a.version || null);
+}
