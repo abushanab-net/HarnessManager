@@ -401,13 +401,35 @@ pub fn remove_copy(id: &str, path: &str) -> Result<String> {
     let a = list().into_iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("unknown tool {id}"))?;
     let c = a.copies.iter().find(|c| c.path == path).ok_or_else(|| anyhow::anyhow!("{} has no copy at {path}", a.label))?;
     if c.runs && a.copies.len() > 1 { bail!("that is the copy your terminals run; remove the other one, or change PATH first"); }
-    let cmd = match c.kind {
-        Kind::Npm => format!("npm uninstall -g {}", c.package.clone().unwrap_or_default()),
-        Kind::Native | Kind::Unknown => if cfg!(windows) { ps(&format!("Remove-Item -Force '{}'", c.path)) } else { format!("rm -f {}", q(&c.path)) },
-        _ => bail!("remove that copy with the package manager that installed it"),
-    };
+    let cmd = remove_cmd(installer(id), c)?;
     open_shell(&cmd)?;
     Ok(cmd)
+}
+
+/// Uninstall a tool: every copy of it, each the way it was installed, in one terminal window. Its accounts, settings
+/// and sessions stay, so installing it again picks them up.
+pub fn uninstall(id: &str) -> Result<String> {
+    let a = list().into_iter().find(|a| a.id == id).ok_or_else(|| anyhow::anyhow!("unknown tool {id}"))?;
+    if a.copies.is_empty() { bail!("{} is not installed", a.label); }
+    let cmds = a.copies.iter().map(|c| remove_cmd(installer(id), c)).collect::<Result<Vec<_>>>()?;
+    let cmd = cmds.join(if cfg!(windows) { " & " } else { "; " });
+    open_shell(&cmd)?;
+    Ok(cmd)
+}
+
+/// The command that removes one copy, by how it was installed. shortcut: a native copy is its file alone (the
+/// version folders some vendors keep beside it stay); upgrade if a vendor ships an uninstaller.
+fn remove_cmd(ins: Option<&Installer>, c: &Copy) -> Result<String> {
+    let pm = |name: &str, f: fn(&Installer) -> &'static str, fmt: fn(&str) -> String| ins.map(f).filter(|s| !s.is_empty()).map(fmt)
+        .ok_or_else(|| anyhow::anyhow!("remove the copy at {} with {name}, which installed it", c.path));
+    Ok(match c.kind {
+        Kind::Npm => format!("npm uninstall -g {}", c.package.clone().unwrap_or_default()),
+        Kind::Native | Kind::Unknown => if cfg!(windows) { ps(&format!("Remove-Item -Force '{}'", c.path)) } else { format!("rm -f {}", q(&c.path)) },
+        Kind::Winget => pm("winget", |i| i.winget, |s| format!("winget uninstall {s}"))?,
+        Kind::Brew => pm("Homebrew", |i| i.brew, |s| format!("brew uninstall {s}"))?,
+        Kind::Scoop => pm("Scoop", |i| i.scoop, |s| format!("scoop uninstall {s}"))?,
+        Kind::Choco => pm("Chocolatey", |i| i.choco, |s| format!("choco uninstall {s} -y"))?,
+    })
 }
 
 #[cfg(windows)]
@@ -483,5 +505,16 @@ mod tests {
         assert!(agy.contains("antigravity.google/cli/install"), "{agy}");
         let pi = cmd("pi", &PI, c(Kind::Native, r"C:\u\.local\bin\pi.cmd", None));
         if cfg!(windows) { assert!(pi.contains("pi.dev/install.ps1"), "a standalone Pi on Windows runs the installer again: {pi}"); } else { assert_eq!(pi, "\"C:\\u\\.local\\bin\\pi.cmd\" update", "a standalone Pi runs its own updater"); }
+    }
+
+    #[test]
+    fn each_kind_uninstalls_with_what_installed_it() {
+        let c = |kind: Kind, package: Option<&str>| Copy { path: r"C:\u\tool.exe".into(), version: None, kind, package: package.map(String::from), runs: true };
+        assert_eq!(remove_cmd(Some(&CLAUDE), &c(Kind::Npm, Some("@anthropic-ai/claude-code"))).unwrap(), "npm uninstall -g @anthropic-ai/claude-code");
+        assert_eq!(remove_cmd(Some(&OPENCODE), &c(Kind::Scoop, None)).unwrap(), "scoop uninstall opencode");
+        assert_eq!(remove_cmd(Some(&CLAUDE), &c(Kind::Winget, None)).unwrap(), "winget uninstall Anthropic.ClaudeCode");
+        let native = remove_cmd(Some(&AGY), &c(Kind::Native, None)).unwrap();
+        assert!(native.contains(r"C:\u\tool.exe") && (native.contains("Remove-Item") || native.contains("rm -f")), "{native}");
+        assert!(remove_cmd(Some(&CODEX), &c(Kind::Winget, None)).is_err(), "no winget id known: the user is told what installed it");
     }
 }

@@ -10,7 +10,7 @@ import { resumeData, reasonShort } from './resume.js';
 
 export const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 /** The tools whose plans have windows to read; the others show usage only. */
-export const PLAN_TOOLS = ['claude', 'codex'];
+export const PLAN_TOOLS = ['claude', 'codex', 'agy'];
 export const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
 /** "4 h 08 m", "2 d 14 h": the reference's duration. */
 export function fmtDuration(ms) {
