@@ -49,6 +49,9 @@ export function setFresh() {
 
 /** The name an account is shown by (its label), from its id; the id when unknown. */
 export const acctName = (id) => ((S.state && S.state.profiles) || []).find((p) => p.name === id)?.label || id;
+/** The login an account holds now (its email, or the one typed for it); '' when unknown. Sessions do not record
+ * their login, so this is the account's login today. */
+export const acctEmail = (id) => { const p = ((S.state && S.state.profiles) || []).find((x) => x.name === id); return (p && (p.identity.email || p.expected_email)) || ''; };
 
 /** Draw a chart for the width its box has now, and again whenever the window changes size (maximize, restore). */
 const fits = new Set();
