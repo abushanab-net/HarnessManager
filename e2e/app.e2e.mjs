@@ -256,6 +256,10 @@ try {
     // a selected lane names its route under the lanes; Escape returns to the finding's account
     await click('[data-testid=lane-codex-main]');
     await hasText('.route-inspector-bar', 'codex-main');
+    // a double-click on an account renames nothing: the rename box is for a project's name only
+    await page.dblclick('[data-testid=lane-codex-main] .lane-acct-name');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=rename-input]')")), 'no rename box on an account lane');
+    await hasText('[data-testid=lane-codex-main] .lane-acct-name', 'codex-main');
     await page.keyboard.press('Escape');
     await waitFor(async () => exec("const l = document.querySelector('.t-lane'); return l && l.classList.contains('selected')"), 'the first lane selected again');
   });
@@ -400,13 +404,17 @@ try {
   await test('sessions are grouped by repository across Claude Code and Codex', async () => {
     await nav('#sessions');
     await $('[data-testid=group]');
-    // (at 1280 the tool pill shows its icon alone, its name as the title)
-    const groups = await exec(`return [...document.querySelectorAll('[data-testid=group]')].map(g => g.innerText + ' ' + [...g.querySelectorAll('.a-toolpill')].map((t) => t.title).join(' '))`);
+    // (the tool is the icon before the account, its name in the title)
+    const groups = await exec(`return [...document.querySelectorAll('[data-testid=group]')].map(g => g.innerText + ' ' + [...g.querySelectorAll('.a-acct')].map((t) => t.title).join(' '))`);
     const g = groups.find((x) => x.includes('platform-gitops'));
     assert.ok(g, 'a platform-gitops group');
     assert.ok(g.includes('Claude Code') && g.includes('Codex'), 'both tools in one project');
     // as in the design: a red dot for a session where a command failed
     assert.ok(await exec("return !!document.querySelector('[data-testid=session-s-main-1] .a-dot.bad')"), 'the session with a failed command is marked');
+    // the account of a session: its name and the login it holds (at 1280 the narrow column keeps the login in the title)
+    assert.ok((await exec("return document.querySelector('[data-testid=acct-cx-1]').textContent")).includes('alex@example.org'), 'the Codex session names its login');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=acct-cx-1] img[src*=codex]')"), 'with the icon of its tool before it');
+    assert.ok((await exec("return document.querySelector('[data-testid=acct-cx-1]').title")).includes('alex@example.org'), 'and its title does');
     await shot('06-sessions');
     // a new session in the project's folder, as any account: the project's latest account comes first
     await exec(`[...document.querySelectorAll('[data-testid=group]')].find((g) => g.innerText.includes('platform-gitops')).querySelector('[data-testid=project-new]').click()`);
@@ -464,7 +472,7 @@ try {
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('[data-act=project-pin]').click()");
     await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned');
     // rename by double-clicking the name: Enter saves, the row and the CLI show the new name; the pencil renames back
-    await page.dblclick('[data-testid^=pcard-] [data-name]');
+    await page.dblclick('[data-testid^=pcard-] .a-pname');
     await type('[data-testid=rename-input]', 'Platform GitOps\n');
     await waitFor(async () => (await row()).includes('Platform GitOps'), 'renamed on the row');
     assert.ok(hrm('projects', 'list').includes('Platform GitOps'), 'the CLI sees the new name');

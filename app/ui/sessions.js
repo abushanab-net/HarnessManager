@@ -3,7 +3,7 @@
 // The tags shared with Projects and Accounts live here too. Every redraw goes through patch(), so a live arrival
 // keeps the reader's scroll, focus and open folds.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState } from './core.js';
 import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
@@ -63,13 +63,14 @@ const sMore = new Set(), sFold = new Set();
 let railMore = false;
 // the page reads the index in pages of 50 rows; the search, the computer and every filter are the backend's
 const PER = 50;
-const toolPill = (h) => `<span class="a-toolpill" title="${esc(TOOL[h] || h)}">${toolIcon(h, 13)}<span>${esc(TOOL[h] || h)}</span></span>`;
 const seg = (k, opts, cur, label, tid) => `${label ? `<span class="a-lbl">${label}</span>` : ''}<div class="chip-group" role="group" aria-label="${label || k}">${opts.map(([v, l]) => `<button class="filter-chip ${cur === v ? 'active' : ''}" data-act="s-set" data-k="${k}" data-v="${esc(v)}" aria-pressed="${cur === v}" data-testid="${tid(v)}">${esc(l)}</button>`).join('')}</div>`;
 
-/** One row: status dot, title and where, tags, account, tool, computer (sync on), tokens, when, one action. */
+/** One row: status dot, title and where, tags, account (its tool's icon first), computer (sync on), tokens, when, one action. */
 function sessionRow(s, pcs) {
   const sync = syncOn(pcs), remote = !!(pcs && pcs.this && s.device && s.device !== pcs.this.id);
   const device = s.device_name || nameOf(pcs, s.device), far = s.open_elsewhere ? device : '';
+  // the login is this computer's: on another computer the same account name is often another login
+  const mail = remote ? '' : acctEmail(s.profile);
   const path = s.cwd ? s.cwd.split(/[\\/]/).slice(-2).join('\\') : '';
   const where = `${s.continued_from ? `<span data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span> · ` : ''}${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}`;
   // archived: read only; open: follow; from another computer: resume here when its repository and account are here, else why not
@@ -78,7 +79,7 @@ function sessionRow(s, pcs) {
     : `<button class="btn-lane-start" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
   return `<div class="a-srow" data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" ${s.failed ? `title="${plural(s.failed, 'failed command')}"` : 'aria-hidden="true"'}></i>
     <div class="a-tcell"><button class="a-title" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}</b></button><div class="a-tline"><span class="a-where" title="${esc(s.cwd)}">${where}</span>${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</div></div>
-    <span class="a-acct" title="${esc(s.profile)}">${esc(acctName(s.profile))}</span>${toolPill(s.harness)}${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : '<span></span>'}
+    <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 14)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : '<span></span>'}
     <span class="num">${fmt(s.tokens)}</span><span class="a-when ${s.open || far ? 'live' : ''}">${far ? 'running on ' + esc(far) : s.open ? 'live' : esc(when(s.last_active_at))}</span><span class="a-act">${act}</span></div>`;
 }
 
@@ -240,7 +241,7 @@ view('session', async (sheet, params) => {
     : `<span class="a-split"><button class="btn-secondary" data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button class="btn-secondary" data-act="terminal-menu" aria-label="Choose terminal" aria-haspopup="menu">▾</button>` : ''}</span>`;
   const stat = (title, value, cls = '') => `<div class="account-stat"><span>${title}</span><b class="${cls}">${value}</b><span></span></div>`;
   patch(sheet, `<div class="page-body a-sbody" data-tour="session"><a class="filter-chip back-chip" href="#sessions">← Sessions · ${esc(project)}</a>
-    <header class="page-heading"><div><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1><div class="a-meta">${m.open ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span>${esc(acctName(m.profile))} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
+    <header class="page-heading"><div><h1 data-testid="session-title">${esc(m.title || 'Untitled session')}</h1><div class="a-meta">${m.open ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
         ${params.device ? `<span data-testid="session-from">${cdot(pcs, params.device, m.device_name, 'on')} ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
         <span>started ${esc(when(m.started_at))} · ${plural(t.turns.length, 'turn')}</span><span>${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · ' + money(ss.cost) + ' ≈' : ''}</span></div></div>
       <div class="page-actions" data-tour="resume">${params.device ? '' : `<button class="btn-secondary" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${actions}<button class="icon-btn" data-act="session-menu" data-path="${esc(m.source_path)}" data-cwd="${esc(m.cwd)}" aria-label="More" aria-haspopup="menu">⋯</button></div></header>

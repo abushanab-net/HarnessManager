@@ -119,7 +119,7 @@ action('project-open', (el, e) => {
   if (e.target.closest('input')) return;
   clearTimeout(openTimer);
   // a click on the name may be the first half of a double-click (rename): it opens only when no second click comes
-  if (e.target.closest('[data-name]')) openTimer = setTimeout(() => go('sessions', { project: el.dataset.key }), 280);
+  if (e.target.closest('.a-pname[data-name]')) openTimer = setTimeout(() => go('sessions', { project: el.dataset.key }), 280);
   else go('sessions', { project: el.dataset.key });
 });
 // the pin: the icon, the row's menu and the sidebar change; the page does not redraw
@@ -135,7 +135,7 @@ action('project-pin', async (el) => {
 });
 /** Rename a project where its name is: the pencil, a double-click, or the menu. Enter saves, Esc cancels. */
 export function renameProject(key) {
-  const el = document.querySelector(`[data-name="${CSS.escape(key)}"]`);
+  const el = document.querySelector(`.a-pname[data-name="${CSS.escape(key)}"]`);
   if (!el || el.querySelector('input')) return;
   const old = el.textContent;
   el.innerHTML = `<input class="a-rename" value="${esc(old)}" aria-label="Project name" maxlength="80" data-testid="rename-input">`;
@@ -156,11 +156,11 @@ export function renameProject(key) {
   inp.addEventListener('click', (e) => e.stopPropagation());
 }
 action('project-rename', (el) => renameProject(el.dataset.key));
-document.addEventListener('dblclick', (e) => { const n = e.target.closest('[data-name]'); if (n && !n.querySelector('input')) { clearTimeout(openTimer); e.preventDefault(); renameProject(n.dataset.name); } });
+document.addEventListener('dblclick', (e) => { const n = e.target.closest('.a-pname[data-name]'); if (n && !n.querySelector('input')) { clearTimeout(openTimer); e.preventDefault(); renameProject(n.dataset.name); } });
 action('project-menu', (el) => openMenu(el, [
   ...(S.route.view !== 'sessions' || S.route.params.project !== el.dataset.key ? [{ label: 'Open its sessions', run: () => go('sessions', { project: el.dataset.key }) }] : []),
   { label: el.dataset.pinned ? 'Unpin from the sidebar' : 'Pin to the sidebar', run: async () => { if (await attempt(() => call('project_pin', { key: el.dataset.key, on: !el.dataset.pinned }), el.dataset.pinned ? 'Unpinned' : 'Pinned to the sidebar')) { if (S.route.view === 'projects') refreshProjects(); else changed(); } } },
-  { label: 'Rename project', run: () => (document.querySelector(`[data-name="${CSS.escape(el.dataset.key)}"]`) ? renameProject(el.dataset.key) : projectDialog(el.dataset.key, el.dataset.name, 'rename')) },
+  { label: 'Rename project', run: () => (document.querySelector(`.a-pname[data-name="${CSS.escape(el.dataset.key)}"]`) ? renameProject(el.dataset.key) : projectDialog(el.dataset.key, el.dataset.name, 'rename')) },
   { label: 'Merge into another project', run: () => projectDialog(el.dataset.key, el.dataset.name, 'merge') },
   { label: 'Reset name', danger: true, run: () => mutate(() => call('project_alias', { key: el.dataset.key }), 'Reset') },
 ]));
