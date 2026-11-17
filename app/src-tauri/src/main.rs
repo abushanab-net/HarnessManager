@@ -450,7 +450,8 @@ fn main() {
                 .visible(!std::env::args().any(|a| a == "--tray"));
             // end-to-end tests drive the window over the DevTools protocol; only when they ask for it
             if let Some(port) = devtools_port() {
-                win = win.additional_browser_args(&format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"))
+                // scale 1 for the tests only: on a display at 125% a 1 px line measures 0.8 px and the design tests fail
+                win = win.additional_browser_args(&format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --force-device-scale-factor=1 --remote-debugging-port={port}"))
                     // its own browser profile: WebView2 cannot start a second, differently configured browser in the
                     // profile an open Harness Manager window is using, and the test would never get its window
                     .data_directory(state.ctx().data.join("webview"));
