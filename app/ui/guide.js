@@ -63,13 +63,16 @@ const TOURS = {
     ['[data-testid=prompt-new]', 'Versions', 'Keep several prompts and switch with Use this prompt. The file\'s current text is saved in the list before it is replaced.'],
   ],
   settings: [
-    ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
+    // (steps that are on the page whichever section is chosen; Text size shows on Appearance)
+    ['[data-testid=set-nav]', 'One section at a time', 'Pick a section, or type in Search settings to find a row in any of them.'],
+    ['#set-panes .b-tip', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
     ['[data-testid=st-textsize]', 'Text size', 'Compact, Comfortable or Large: the whole window follows, on every page.'],
   ],
   computers: [
-    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
-    ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
-    ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
+    ['[data-testid=computer-cards]', 'Your computers', 'A card per computer: how it is reached, when it was last seen and what runs there. Its ⋯ renames this computer, and syncs with or forgets another.'],
+    ['[data-testid=computers]', 'How your computers sync', 'Pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
+    ['[data-key=setting-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
+    ['[data-testid=pair-head]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget in its ⋯ drops it again.'],
   ],
 };
 
