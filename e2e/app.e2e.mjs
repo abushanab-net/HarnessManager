@@ -452,6 +452,35 @@ try {
     await waitFor(async () => (await exec(`return document.querySelectorAll('.a-srow').length`)) > 1, 'every session is back');
   });
 
+  await test('projects: one list, each project on one row with its share, its numbers and its actions', async () => {
+    await nav('#projects?days=all');
+    await $('[data-testid=project-cards] .a-pcard');
+    const d = await exec(`const rows = [...document.querySelectorAll('.a-pcard')], head = document.querySelector('[data-testid=project-dist] .a-prow.head');
+      // every place outside the tiles that names the project (the Busiest tile names it too)
+      const named = [...document.querySelectorAll('#sheet .page-body > :not(.account-stats) *')].filter((e) => !e.children.length && e.textContent.trim() === 'platform-gitops');
+      const x = (el) => [...el.children].map((c) => Math.round(c.getBoundingClientRect().right));
+      return { keys: rows.map((r) => r.dataset.key), named: named.length, lists: document.querySelectorAll('[data-testid=project-cards]').length, inOne: rows.every((r) => r.closest('[data-testid=project-dist]')),
+        old: !!document.querySelector('.a-pcards, a.a-nm, [data-act=p-dist]'), cols: [x(head), x(rows[0])],
+        parts: rows.map((r) => [!!r.querySelector('.a-share svg rect'), r.querySelectorAll(':scope > .num').length, !!r.querySelector('.a-area'), !!r.querySelector('.a-path'), !!r.querySelector('[data-act=tag-edit]'), !!r.querySelector('[data-act=project-pin]'), !!r.querySelector('[data-act=project-menu]')].join()),
+        h: rows.map((r) => Math.round(r.getBoundingClientRect().height)) };`);
+    assert.ok(d.keys.length >= 2 && new Set(d.keys).size === d.keys.length, 'a row per project: ' + d.keys);
+    assert.equal(d.named, 1, 'platform-gitops is listed once');
+    assert.ok(d.lists === 1 && d.inOne && !d.old, 'one list, in the card that says where the tokens and the cost went; no second table, no cards');
+    assert.ok(d.parts.every((p) => p === 'true,3,true,true,true,true,true'), 'each row: the share bar, cost, tokens and sessions, the sparkline, the path, the tags, the pin and the menu: ' + d.parts);
+    assert.deepEqual(d.cols[0], d.cols[1], 'the columns\' names sit over their columns');
+    assert.ok(d.h.every((h) => h === 52), 'rows 52 px: ' + d.h);
+    // the share follows the metric; the shares of the rows (and the others line, when there is one) add up to all
+    await click('[data-testid=pmetric-sessions]');
+    await hasText('[data-testid=project-dist] .a-prow.head', 'Share of sessions');
+    const sum = await exec("return [...document.querySelectorAll('[data-testid=project-cards] .a-share .num')].reduce((a, e) => a + parseInt(e.textContent, 10), 0)");
+    assert.ok(Math.abs(sum - 100) <= 2, 'the shares add up: ' + sum);
+    // the ⋯ of a row: open its sessions, pin, rename, merge, reset name
+    await click('[data-testid^=pcard-] [data-act=project-menu]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim())"), ['Open its sessions', 'Pin to the sidebar', 'Rename project', 'Merge into another project', 'Reset name']);
+    await page.keyboard.press('Escape');
+    await click('[data-testid=pmetric-tokens]');
+  });
+
   await test('projects: cost per project, pin, rename and tabs in place, and a project opened in Sessions', async () => {
     await nav('#projects');
     await $('[data-testid=project-tiles]');
@@ -463,9 +492,9 @@ try {
     // the sort, the chart's tabs and the page size redraw their part only: the tiles stay the same nodes
     await exec("window.__tiles = document.getElementById('pj-tiles')");
     await click('[data-testid=psort-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('active')"), 'sorted by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('on')"), 'sorted by cost');
     await click('[data-testid=pmetric-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('active')"), 'distribution by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('on')"), 'distribution by cost');
     assert.ok(await exec("return document.getElementById('pj-tiles') === window.__tiles"), 'the tiles were not redrawn');
     assert.ok((await exec('return location.hash')).includes('metric=cost'), 'the choice is in the hash: ' + (await exec('return location.hash')));
     // pin from the row's icon: the sidebar shows it, settings keep it, the page stays
