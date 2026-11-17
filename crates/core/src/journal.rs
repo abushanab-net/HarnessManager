@@ -176,8 +176,8 @@ pub(crate) fn session_key_ok(key: &str) -> bool {
     matches!((p.next(), p.next(), p.next()), (Some(h), Some(a), Some(i)) if crate::harness::by_id(h).is_some() && safe_name(a) && safe_name(i))
 }
 
-/// One entry of another computer's journal into this database.
-fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
+/// One entry of another computer's (`device`) journal into this database, on the computer `here`.
+fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<()> {
     match e.op.as_str() {
         "usage" => {
             let r: UsageRow = serde_json::from_value(e.data.clone()).context("usage entry")?;
@@ -186,6 +186,8 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         "session" => {
             let m: SessionMeta = serde_json::from_value(e.data.clone()).context("session entry")?;
             if !session_key_ok(&e.key) || e.key != crate::db::session_key(&m) { bail!("session entry with names that cannot be used here"); }
+            // a session this computer holds as its own (one continued here) is never another computer's to take over
+            if tx.query_row("select 1 from sessions where key=? and device=?", [e.key.as_str(), here], |_| Ok(())).optional()?.is_some() { bail!("session entry for a session of this computer"); }
             upsert_session(tx, &e.key, &m, device)?;
         }
         "quota" => {
@@ -200,9 +202,9 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
                 tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t])?;
             }
         }
-        // never a usage row: what was spent was spent
+        // never a usage row: what was spent was spent; and of the sessions, only that computer's own
         "tombstone" => match e.key.split_once('/').context("tombstone key")? {
-            ("session", k) => { tx.execute("delete from sessions where key=?", [k])?; }
+            ("session", k) => { tx.execute("delete from sessions where key=? and device=?", [k, device])?; }
             ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
             ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
             (other, _) => bail!("tombstone of {other}"),
@@ -251,7 +253,7 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
             for line in text.lines().filter(|l| !l.trim().is_empty()) {
                 let Ok(e) = serde_json::from_str::<Entry>(line) else { bad += 1; continue };
                 if e.seq <= cur { continue; }
-                match apply(&tx, id, &e) {
+                match apply(&tx, id, &ctx.db.device, &e) {
                     Ok(()) => n += 1,
                     Err(err) => { bad += 1; crate::log::warn(&format!("journal: entry {} of {file} from {id} skipped: {err:#}", e.seq)); }
                 }
@@ -842,5 +844,24 @@ mod tests {
         assert_eq!(keys_of(&ctx, "transcripts"), Vec::<String>::new());
         merge_from(&ctx, "peer-9", &[tr("transcripts/claude/work/s1.jsonl.zst")]);
         assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
+    }
+
+    #[test]
+    fn another_computers_entry_never_takes_or_removes_a_session_that_is_not_its_own() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let mine: SessionMeta = serde_json::from_value(session("codex", "work", "abc", "mine", 5)).unwrap();
+        ctx.db.with(|c| Ok(upsert_session(c, "codex/work/abc", &mine, &ctx.db.device)?)).unwrap();
+        let row = |key: &str| -> Option<(String, String)> { ctx.db.with(|c| Ok(c.query_row("select device, title from sessions where key=?", [key], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)).unwrap() };
+        // the same session, newer, as another computer's; then its removal
+        merge_from(&ctx, "peer-1", &[entry(1, "session", "codex/work/abc", session("codex", "work", "abc", "theirs", 9)), entry(2, "session", "codex/work/other", session("codex", "work", "other", "theirs", 9)),
+            entry(3, "tombstone", "session/codex/work/abc", json!({}))]);
+        assert_eq!(row("codex/work/abc"), Some((ctx.db.device.clone(), "mine".to_string())), "this computer's session stays its own, and stays");
+        assert_eq!(row("codex/work/other"), Some(("peer-1".to_string(), "theirs".to_string())));
+        // a third computer cannot remove the second's; the second can
+        merge_from(&ctx, "peer-2", &[entry(1, "tombstone", "session/codex/work/other", json!({}))]);
+        assert!(row("codex/work/other").is_some());
+        merge_from(&ctx, "peer-1", &[entry(4, "tombstone", "session/codex/work/other", json!({}))]);
+        assert_eq!(row("codex/work/other"), None);
     }
 }
