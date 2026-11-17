@@ -65,7 +65,7 @@ signed by the release key.
 4. **Overview** shows the live routes, every limit on one seven-day line, and which account has the most room.
 5. **MCP servers**, **Skills** and **System prompts:** add something once and tick the tools it should reach.
 
-Press `Ctrl K` to find an account, session or setting. The **?** button replays the page's tour.
+Press `Ctrl K` to run a command or go to an account, a session or a setting; press `/` to filter the page you are on. The **?** button replays the page's tour.
 
 ## Features
 
