@@ -4,6 +4,7 @@
 
 import { S, call, view, go, toast, attempt, mutate, confirmDialog, openMenu, openDialog, closeDialog, dlgHead, action, render, setAppUpdates, patch } from './core.js';
 import { esc, hm, toolIcon } from './lib.js';
+import { pageHead, plural } from './parts.js';
 
 // "2.10.0" is newer than "2.9.3"
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
@@ -13,7 +14,7 @@ const panel = (title, body, testid) => `<section class="panel-card" data-testid=
 
 view('apps', async (sheet) => {
   sheet.className = 'sheet';
-  if (!S.cache.apps) patch(sheet, '<div class="page-body b-page"><header class="page-heading"><div><h1>Reading each tool\'s version…</h1></div></header></div>');
+  if (!S.cache.apps) patch(sheet, `<div class="page-body b-page">${pageHead('apps', 'Reading each tool\'s version…')}</div>`);
   const [d, me] = await Promise.all([call('apps'), call('self_latest').catch(() => null)]);
   const st = S.state || (await call('state'));
   const hidden = st.settings.hidden_tools || [];
@@ -42,10 +43,9 @@ view('apps', async (sheet) => {
       ${a.copies.filter((c) => !c.runs).map((c) => `<tr class="b-copy-row" data-key="copy-${esc(c.path)}" data-testid="app-copy-${a.id}"><td colspan="4"><span class="mono">${esc(c.path)}</span><span class="muted"> · ${esc(c.version || '?')} · ${esc(kindOf(c, a))} · second copy, not on PATH first</span></td><td colspan="2"><button class="btn-secondary" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(c.path)}" data-kind="${esc(kindOf(c, a))}">Remove…</button></td></tr>`).join('')}`;
   };
   const table = (rows) => `<table class="replies-table b-apps"><thead><tr><th>Tool</th><th>Installed</th><th>Newest</th><th>Installed by</th><th>Action</th><th>Show</th></tr></thead><tbody>${rows.map(row).join('')}</tbody></table>`;
-  const finding = updates.length ? `${updates.length} ${updates.length === 1 ? 'tool has' : 'tools have'} an update.` : !installed.length ? 'No tools installed yet.' : !d.latest ? 'Your tools are installed; the newest versions are not checked yet.' : 'Your tools are up to date.';
+  const status = `${installed.length} of ${plural(d.apps.length, 'tool')} installed; ${updates.length ? `${plural(updates.length, 'tool has', 'tools have')} an update` : !d.latest ? 'the newest versions are not checked yet' : 'all up to date'}${d.latest ? ', checked ' + esc(hm(d.latest.at)) : ''}.`;
   patch(sheet, `<div class="page-body b-page" data-b-page="apps">
-    <header class="page-heading"><div><h1>${finding}</h1><div class="heading-facts">${installed.length} installed · ${missing.length} not installed · checked ${d.latest ? esc(hm(d.latest.at)) : '—'}</div></div>
-      <div class="page-actions"><button class="btn-secondary" data-act="apps-check" data-testid="apps-check">Check for updates</button></div></header>
+    ${pageHead('apps', status, '<button class="btn" data-act="apps-check" data-testid="apps-check">Check for updates</button>')}
     ${warn}
     ${panel(`Installed · ${installed.length}`, installed.length ? table(installed) : '<div class="b-empty"><b>None of the tools is installed yet.</b><span class="muted">Install one below.</span></div>', 'apps-installed')}
     ${missing.length ? panel(`Not installed · ${missing.length}`, table(missing), 'apps-missing') : ''}

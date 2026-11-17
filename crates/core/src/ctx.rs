@@ -29,6 +29,8 @@ pub struct Settings {
     pub brand: String,
     /// Limits as what is "left" or what is "used".
     pub quota_display: String,
+    /// How large the window draws everything: "compact", "comfortable" (the default) or "large".
+    pub text_size: String,
     /// Tools left out of every page (their accounts too).
     pub hidden_tools: Vec<String>,
     /// Hours between automatic backups; 0: none.
@@ -76,7 +78,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings { registry_path: String::new(), terminal: "wt".into(), refresh_minutes: 5, quota_max_age_minutes: 10, router_port: 15731,
-            close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), brand: "hm".into(), quota_display: "left".into(), hidden_tools: vec![],
+            close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), brand: "hm".into(), quota_display: "left".into(), text_size: "comfortable".into(), hidden_tools: vec![],
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),

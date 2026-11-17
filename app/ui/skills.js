@@ -2,9 +2,10 @@
 // the "Linked tools" matrix (a header tick per tool links every skill shown), the Not managed panel, Discover with its
 // repositories and "Install into" chips, the Install and Import dialogs. The page draws from its last data.
 
-import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openDialog, closeDialog, dlgHead, openMenu, action, render, shownTools, setNavCounts, patch, pickFolder } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openDialog, closeDialog, dlgHead, openMenu, action, render, shownTools, patch, pickFolder } from './core.js';
+import { pageHead, plural } from './parts.js';
 import { esc, toolIcon, ic } from './lib.js';
-import { syncReport, head, badge, empty, panel, field, dlgFoot, pagerHtml, toolHead, toolCell, findText } from './mcp.js';
+import { syncReport, badge, empty, panel, field, dlgFoot, pagerHtml, toolHead, toolCell, findText } from './mcp.js';
 
 const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false, per: 25, page: 0, dq: '', repo: '' };
 const sourceOf = (s) => (s.source.startsWith('https://github.com/') ? s.source.replace('https://github.com/', '').split('/').slice(0, 2).join('/') : s.source === 'imported' ? 'Imported' : s.source === 'store' ? 'Store' : 'Local');
@@ -21,10 +22,10 @@ const filtered = (d) => { const q = findText(); return d.skills.filter((s) => (!
 
 function draw() {
   const { d, hs } = cache, unm = d.unmanaged, total = d.skills.length + unm.length, upd = Object.values(sk.updates).filter((v) => v === true).length;
-  const h1 = unm.length ? `${unm.length} ${unm.length === 1 ? 'folder' : 'folders'} in the store ${unm.length === 1 ? 'is' : 'are'} not managed yet.` : total ? `${total} ${total === 1 ? 'skill shares' : 'skills share'} one store.` : 'No skills yet.';
-  const top = head(h1, `${total} in store · ${d.skills.length} managed · ${unm.length} not managed · ${upd} ${upd === 1 ? 'update' : 'updates'}`,
-    (sk.tab === 'discover' ? `<button class="btn-secondary" data-act="disc-refresh" data-testid="disc-refresh">Refresh</button>` : `<button class="btn-secondary" data-act="skill-check" data-testid="skill-check">Check for updates</button><button class="btn-secondary" data-act="import-from" data-kind="skill">Import from a tool</button>`)
-    + `<button class="btn-primary" data-act="skill-install" data-testid="skill-install">Install skill</button>`) + tabs(d.skills.length);
+  const status = total ? `${plural(d.skills.length, 'skill')} managed${unm.length ? `; ${plural(unm.length, 'folder')} in the store ${unm.length === 1 ? 'is' : 'are'} not managed yet` : ''}${upd ? `; ${plural(upd, 'update')} available` : ''}.` : 'No skill yet.';
+  const top = pageHead('skills', status,
+    (sk.tab === 'discover' ? `<button class="btn" data-act="disc-refresh" data-testid="disc-refresh">Refresh</button>` : `<button class="btn" data-act="skill-check" data-testid="skill-check">Check for updates</button><button class="btn" data-act="import-from" data-kind="skill">Import from a tool</button>`)
+    + `<button class="btn primary" data-act="skill-install" data-testid="skill-install">Install skill</button>`) + tabs(d.skills.length);
   if (sk.tab === 'discover') return patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="skills">${top}${discover(d, hs)}</div>`);
   const list = filtered(d), pg = pagerHtml(list.length, sk, 'sk');
   const rows = list.slice(sk.page * sk.per, (sk.page + 1) * sk.per).map((s) => {
@@ -63,7 +64,6 @@ function discover(d, hs) {
 view('skills', async (sheet) => {
   sheet.className = 'sheet';
   const d = await call('items');
-  setNavCounts({ 'n-skills': d.skills.length });
   const hs = shownTools(S.state || (await call('state'))).filter((h) => h.caps.skills);
   cache = { d, hs };
   S.pageFind = () => { sk.page = 0; draw(); };

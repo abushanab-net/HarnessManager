@@ -3,11 +3,11 @@
 // dialog with its Form / JSON switch, Import from apps. The page draws from its last data, so the search and the pager
 // never wait on the backend. The helpers at the top are shared with Skills and System prompts.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, shownTools, setNavCounts, notice, clearNotice, patch } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, shownTools, notice, clearNotice, patch } from './core.js';
 import { esc, ic, toolIcon, dur } from './lib.js';
+import { pageHead, plural } from './parts.js';
 
 // ---------- the reference's pieces ----------
-export const head = (title, facts, actions = '') => `<header class="page-heading"><div><h1>${title}</h1><div class="heading-facts">${facts}</div></div><div class="page-actions">${actions}</div></header>`;
 export const badge = (text, tone = 'neutral', title = '') => `<span class="plan-pill b-${tone}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
 export const empty = (title, text = '') => `<div class="b-empty"><b>${esc(title)}</b>${text ? `<span class="muted">${esc(text)}</span>` : ''}</div>`;
 export const panel = (title, body, actions = '', attrs = '') => `<section class="panel-card" ${attrs}><div class="panel-head"><h2 class="panel-title">${title}</h2>${actions}</div>${body}</section>`;
@@ -84,16 +84,14 @@ function draw() {
   const table = `<div class="b-matrix-wrap"><table class="replies-table b-matrix" data-testid="mcp-matrix"><thead><tr><th>Server</th>${hs.map((h) => { const k = d.mcp.filter((it) => keptIn(last, it.name, h.id)).length; return toolHead(h, d.mcp.filter((it) => onFor(d, it.name, h.id)).length, `<small>${d.mcp.filter((it) => onFor(d, it.name, h.id)).length}${k ? ` · ${k} left alone` : ''}</small>`); }).join('')}<th><span class="b-sr">Actions</span></th></tr></thead>
     <tbody>${rows || `<tr><td colspan="${hs.length + 2}">${empty('No server matches the search.')}</td></tr>`}</tbody></table></div>${pg}`;
   patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="mcp">
-    ${head(n ? `${n} ${n === 1 ? 'server' : 'servers'} shared. ${left ? `${left} ${left === 1 ? 'entry' : 'entries'} left alone.` : 'Every entry is in step.'}` : 'No MCP servers yet.',
-    `${n ? written : 0} ${written === 1 ? 'entry' : 'entries'} written · ${hs.length} tools · ${sync ? 'checked ' + dur(Date.now() - sync.at) + ' ago' : 'not synced yet'}`,
-    `<button class="btn-secondary" data-act="mcp-import-all" data-testid="mcp-import">Import from apps</button><button class="btn-primary" data-act="mcp-new" data-testid="mcp-add">Add MCP server</button>`)}
+    ${pageHead('mcp', n ? `<span title="${plural(written, 'entry', 'entries')} written · ${sync ? 'checked ' + dur(Date.now() - sync.at) + ' ago' : 'not synced yet'}">${plural(n, 'server')} shared with ${plural(hs.length, 'tool')}; ${left ? `${plural(left, 'entry', 'entries')} left alone` : 'every entry is in step'}.</span>` : 'No MCP server yet.',
+    `<button class="btn" data-act="mcp-import-all" data-testid="mcp-import">Import from apps</button><button class="btn primary" data-act="mcp-new" data-testid="mcp-add">Add MCP server</button>`)}
     ${n ? `<div class="b-statusline">${badge(`${left} left alone`, left ? 'warn' : 'good')}<span class="muted">${left ? 'Written by hand in a tool\'s file, so not managed here: edit and save the server to take it over.' : 'Handwritten entries stay until you take them over.'}</span></div>${panel('Write to each tool', table, pg)}`
     : panel('Servers', empty('Add a server, or import from your tools.'))}</div>`);
 }
 async function mcpView(sheet) {
   sheet.className = 'sheet';
   const [d, sync, last, hs] = await Promise.all([call('items'), call('sync_last').catch(() => null), call('mcp_last_import').catch(() => null), tools()]);
-  setNavCounts({ 'n-mcp': d.mcp.length });
   cache = { d, hs, sync, last };
   S.pageFind = () => { mp.page = 0; draw(); };
   draw();

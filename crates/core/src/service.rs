@@ -1026,6 +1026,7 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
     if matches!(key, "device_id" | "incarnation" | "sync_mode" | "sync_folder" | "hub_url" | "direct_connection") {
         bail!("{key} is not changed here: the mode, the folder and the direct connection go through `hrm computers set`, a hub through `hrm hub join`, and this computer's ids are made once");
     }
+    if key == "text_size" && !matches!(value.as_str(), Some("compact" | "comfortable" | "large")) { bail!("text_size is compact, comfortable or large"); }
     let mut fresh = Ctx::open_at(&ctx.data, &ctx.home)?;
     let mut v = serde_json::to_value(&fresh.settings)?;
     if v.get(key).is_none() { bail!("no setting named {key}"); }

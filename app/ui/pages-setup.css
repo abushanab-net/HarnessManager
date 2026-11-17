@@ -1,12 +1,12 @@
 /* MCP servers, Skills, System prompts: what the reference's pages need beyond app.css, and the critics' fixes. */
 /* the matrix grows with the page instead of scrolling inside it (two scrollbars at 1280); its head stays put in the sheet */
 .b-page[data-b-page] .b-matrix-wrap { max-height: none; overflow: visible; }
-.b-matrix .b-name .icon-btn.xs { font-size: 11px; }
-.b-matrix .b-name .btn-secondary { padding: 2px 6px; font-size: 11px; }
+.b-matrix .b-name .icon-btn.xs { font-size: var(--fs-small); }
+.b-matrix .b-name .btn-secondary { padding: 2px 6px; font-size: var(--fs-small); }
 .b-matrix .b-actions-cell .icon-btn { vertical-align: middle; }
 /* a tool's hand-made entry: the cell says so under its box, and the box is outlined in amber */
 .b-tool-cell.b-kept input[type=checkbox] { outline: 1px dashed var(--warn); outline-offset: 2px; }
-.b-kept-mark { display: block; margin-top: 4px; font-size: 11px; color: var(--warn); white-space: nowrap; }
+.b-kept-mark { display: block; margin-top: 4px; font-size: var(--fs-small); color: var(--warn); white-space: nowrap; }
 .b-tool-cell small { white-space: nowrap; }
 /* a status pill in a card keeps its natural width; the live file sizes to its text, with a floor */
 .b-editor > .plan-pill, .b-prompt-choice > .plan-pill { align-self: flex-start; }

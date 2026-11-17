@@ -1,25 +1,26 @@
-// Settings, as the reference draws it: the finding, a sticky row of section chips, and every section a folding card
+// Settings, as the reference draws it: the head, a sticky row of section chips, and every section a folding card
 // ("N settings") of rows: a title with its ⓘ (the explanation and the default), a one-line description, the control.
-// Switches and chips save at once; typed fields have a button beside them. Computers (the two sync cards, the rows, a
-// card per computer) and Backups and archive are sections of the same page. Harness Manager's own update lives here.
+// Switches and chips save at once; typed fields have a button beside them. Backups and archive is a section of the
+// same page; Computers is a page of its own (computers-page.js, which draws its rows with the parts exported here).
+// Harness Manager's own update lives here.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, dialogOpen, keyStore } from './core.js';
-import { esc, when, dur } from './lib.js';
-import { winTrack } from './accounts.js';
-import { computersStatus, syncOn, computers, colorIdx, heardOn, transportLine, nameOf, syncChoices } from './computers.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, keyStore } from './core.js';
+import { esc, when } from './lib.js';
+import { computersStatus } from './computers.js';
+import { pageHead, seg } from './parts.js';
 
 // ---------- the parts ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
-const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${esc(id)}" data-testid="tip-${esc(id)}">i</button><span role="tooltip" id="tip-${esc(id)}">${html}</span></span>`;
+export const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${esc(id)}" data-testid="tip-${esc(id)}">i</button><span role="tooltip" id="tip-${esc(id)}">${html}</span></span>`;
 /** A row: the title with its ⓘ, the description, the control. */
-const row = (key, title, tip, text, ctl) => `<div class="b-setting" data-key="setting-${key}"><div><div class="b-name"><b>${title}</b>${tip || ''}</div><div class="muted">${text}</div></div><div class="b-setting-control">${ctl}</div></div>`;
+export const row = (key, title, tip, text, ctl) => `<div class="b-setting" data-key="setting-${key}"><div><div class="b-name"><b>${title}</b>${tip || ''}</div><div class="muted">${text}</div></div><div class="b-setting-control">${ctl}</div></div>`;
 // a switch that saves as soon as it is flipped, and a chip group that does the same
-const sw = (key, on, label, testid, act = 'set-now') => `<label class="b-switch"><input type="checkbox" data-act="${act}" data-key="${key}" ${on ? 'checked' : ''} data-testid="${testid}"> ${label}</label>`;
+export const sw = (key, on, label, testid, act = 'set-now') => `<label class="b-switch"><input type="checkbox" data-act="${act}" data-key="${key}" ${on ? 'checked' : ''} data-testid="${testid}"> ${label}</label>`;
 const chips = (key, cur, opts, testid) => `<div class="chip-group" role="group" aria-label="${esc(key.replaceAll('_', ' '))}" data-testid="${testid}">${opts.map(([v, l]) => `<button class="filter-chip ${String(cur) === String(v) ? 'active' : ''}" aria-pressed="${String(cur) === String(v)}" data-act="set-now" data-key="${key}" data-v="${v}">${l}</button>`).join('')}</div>`;
-const field = (id, label, extra = '') => `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" ${extra}></div>`;
-const btn = (label, act, extra = '') => `<button class="btn-secondary" data-act="${act}" ${extra}>${label}</button>`;
+export const field = (id, label, extra = '') => `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" ${extra}></div>`;
+export const btn = (label, act, extra = '') => `<button class="btn-secondary" data-act="${act}" ${extra}>${label}</button>`;
 const slug = (title) => title.toLowerCase().replace(/[^a-z]+/g, '-');
-const NAV = [['appearance', 'Appearance'], ['window', 'Window'], ['updates', 'Updates'], ['usage', 'Limits'], ['connections', 'Connections'], ['log', 'Log'], ['maintenance', 'Maintenance'], ['computers', 'Computers'], ['backups', 'Backups']];
+const NAV = [['appearance', 'Appearance'], ['window', 'Window'], ['updates', 'Updates'], ['usage', 'Limits'], ['connections', 'Connections'], ['log', 'Log'], ['maintenance', 'Maintenance'], ['backups', 'Backups']];
 /** A section card that folds; its rows stay on the page while folded. */
 function section(id, title, body) {
   const n = (body.match(/class="b-setting"/g) || []).length;
@@ -33,24 +34,26 @@ action('set-fold', (el) => {
 });
 const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const stamp = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + ' ago');
 
 view('settings', async (sheet, params) => {
+  // Computers was a section here until 1.9: an old link to it opens its page
+  if (params && params.tab === 'computers') return location.replace('#computers');
   sheet.className = 'sheet';
   const st = await loadState();
   const s = st.settings;
-  const c = await computersStatus().catch(() => null);
-  const [ts, b, ar] = await Promise.all([c && syncOn(c) ? call('transcripts_status').catch(() => null) : null, call('backups').catch(() => null), call('archive_status').catch(() => null)]);
+  // (the sync folder's state, for the backup rows)
+  const [b, ar] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null), computersStatus().catch(() => null)]);
   // the sign-in entry and the choice of terminal are Windows things; macOS opens Terminal
   const win = !st.os || st.os === 'windows';
   patch(sheet, `<div class="page-body b-page" data-b-page="settings">
-    <header class="page-heading"><div><h1>Settings stay on this computer.</h1><div class="heading-facts">Saved as you change them · keys and logins never enter these files or backups</div></div></header>
+    ${pageHead('settings', 'Saved as you change them. Keys and logins never enter these files or backups.')}
     <nav class="b-section-nav chip-group" aria-label="Settings sections">${NAV.map(([id, label]) => `<button class="filter-chip" data-act="set-jump" data-v="${id}">${label}</button>`).join('')}</nav>
     ${section('appearance', 'Appearance',
       row('brand', 'Theme', info('brand', '<b>Harness (the default):</b> porcelain and night, Inter.<br><b>VektraGrid:</b> ivory and deep green, Garamond headings; deep teal leads, plum marks the router, sand gold is the warning.'), 'The look of this window; light and dark follow the choice below.', chips('brand', s.brand || 'hm', [['hm', 'Harness'], ['vg', 'VektraGrid']], 'st-brand'))
       + row('theme', 'Light and dark', info('theme', '<b>System (the default):</b> follows the light or dark setting of Windows or macOS.<br><b>Light</b> or <b>Dark</b>: always that.'), 'Follow the system, or keep one.', chips('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))
       + row('quota', 'Limits shown as', info('quota', '<b>Left (the default):</b> how much of each limit you still have, as the tools show it.<br><b>Used:</b> how much has gone.'), 'Applies to every ring and bar.', chips('quota_display', s.quota_display, [['left', 'Left'], ['used', 'Used']], 'st-quota'))
-      + row('motion', 'Moving routes', info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live routes on the Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion')))}
+      + row('motion', 'Moving routes', info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live routes on the Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))
+      + row('textsize', 'Text size', info('textsize', '<b>Compact:</b> everything a little smaller, for more on one screen.<br><b>Comfortable (the default):</b> body text at 13 px, nothing under 12 px.<br><b>Large:</b> everything a little larger.'), 'Applies to every page.', seg('Text size', [['compact', 'Compact'], ['comfortable', 'Comfortable'], ['large', 'Large']], s.text_size || 'comfortable', (v) => `data-act="set-now" data-key="text_size" data-v="${v}"`, 'st-textsize')))}
     ${section('window', win ? 'Window and terminal' : 'Window',
       row('tray', 'Close to the tray', info('tray', '<b>On (the default):</b> the window\'s X hides Harness Manager to the tray; usage and limits keep refreshing, and the tray icon opens it again. Quit from the tray menu.<br><b>Off:</b> the X quits.'), 'The window hides and the app keeps refreshing until you choose Quit.', sw('close_to_tray', s.close_to_tray, 'Keep running in the tray', 'st-tray'))
       + (win ? row('auto', 'Launch at sign-in', info('auto', 'Starts Harness Manager in the tray when you sign in to Windows, so usage and limits are current when you open it.<br><b>Default: off.</b>'), 'Starts hidden in the tray.', `<label class="b-switch"><input type="checkbox" data-act="autostart" ${st.autostart ? 'checked' : ''} data-testid="st-autostart"> Start with Windows</label>`) : '')
@@ -73,80 +76,13 @@ view('settings', async (sheet, params) => {
       row('find', 'Find tools again', info('find', 'Adds a main profile for each tool found on this computer that has none yet.<br><b>Default: run manually.</b>'), 'Add the main profiles of detected tools.', btn('Find tools', 'detect'))
       + row('import', 'Old launcher', info('import', 'Reads claude-accounts.json of the old PowerShell launcher on this computer. Keys can only be read on the computer that saved them.<br><b>Default: run manually.</b>'), 'Import accounts and keys from <span class="mono">claude-accounts.json</span> on this computer.', btn('Import…', 'import-ps', 'data-testid="import-ps"'))
       + row('relink', 'Link copies to the main profile', info('relink', 'Accounts made as independent copies of the tool\'s settings are replaced with links to the main profile, so one change reaches every account. The originals are kept in .hrm-backup beside them.<br><b>Default: run manually.</b>'), 'Replace old independent copies with links; keep originals in .hrm-backup.', btn('Link copies…', 'relink')))}
-    ${section('computers', 'Computers', `<div data-testid="computers">${c ? computersSection(c, s, st, ts) : '<div class="b-setting"><span class="muted">Computers could not be read.</span></div>'}</div>`)}
     ${section('backups', 'Backups and archive', b ? backupsSection(b, ar, s) : '<div class="b-setting"><span class="muted">Backups could not be read.</span></div>')}
   </div>`);
-  // #settings?tab=computers (the chip in the top bar, Apps › Settings › Updates): that section into view
+  // #settings?tab=updates (Apps › Settings › Updates): that section into view
   if (params && params.tab) jump(params.tab);
 });
 const jump = (id) => { const d = document.getElementById('sec-' + id); if (!d) return; d.open = true; shut.delete(id); d.scrollIntoView({ block: 'start' }); };
 action('set-jump', (el) => jump(el.dataset.v));
-
-// ---------- Computers: this computer's name, how it syncs, what travels, and a card per computer ----------
-function computersSection(c, s, st, ts) {
-  const on = syncOn(c), now = Date.now(), n = computers(c).length;
-  const hub = c.hub || {}, hubOn = on && c.mode === 'hub';
-  const card = (d) => {
-    const me = d === c.this, seq = d.last_seq || 0, done = me ? (d.published_seq ?? seq) : (d.applied_seq || 0), pct = seq ? Math.min(100, Math.round((done / seq) * 100)) : 100;
-    const stale = !me && !heardOn(d, now);
-    const heard = me ? 'writing now' : d.connected ? 'connected' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';
-    const facts = [d.projects != null ? `${d.projects} ${d.projects === 1 ? 'project' : 'projects'}` : '', d.accounts != null ? `${d.accounts} ${d.accounts === 1 ? 'account' : 'accounts'}` : '', `${(d.running || []).length} running`].filter(Boolean);
-    // a peer: how it is reached now, when it was paired and last pulled (the ⓘ), its address, and Forget
-    const peer = me ? '' : `<span class="muted" data-testid="transport">${esc(transportLine(c, d))} ${info('peer-' + d.id, `${d.direct ? `<b>Paired</b> ${d.paired_at ? esc(stamp(d.paired_at)) : 'yes'}` : '<b>Not paired</b>: known through the folder only'}<br><b>Last pull</b> ${d.last_pull ? esc(ago(d.last_pull)) : 'never'}${d.address ? `<br><b>Address</b> ${esc(d.address)}` : ''}${d.relayed_by ? `<br><b>Relayed through</b> ${esc(nameOf(c, d.relayed_by))}` : ''}`)}</span>
-      <div class="page-actions">${d.direct ? `${field('addr-' + esc(d.id), 'Address', `class="mono" value="${esc(d.address || '')}" placeholder="name:port" maxlength="120" title="Where to reach ${esc(d.name)} when not on this network: a VPN name, with the port" data-testid="addr-${esc(d.id)}"`)}${btn('Save', 'peer-addr', `data-id="${esc(d.id)}" data-testid="addr-save-${esc(d.id)}"`)}` : ''}${btn('Forget…', 'peer-forget', `data-id="${esc(d.id)}" data-name="${esc(d.name)}" data-testid="forget-${esc(d.id)}"`)}</div>`;
-    return `<article class="b-computer" data-key="computer-${esc(d.id || 'this')}" data-testid="computer-${esc(d.id || 'this')}"><div class="b-name"><i class="pc-dot c${colorIdx(c, d.id)}"></i><b>${esc(d.name)}</b>${me ? '<span class="plan-pill">This one</span>' : ''}</div>
-      <span class="${stale ? 'b-warn' : 'muted'}">${esc([me ? { windows: 'Windows', macos: 'macOS', linux: 'Linux' }[st.os] || st.os : d.os, me ? st.version : d.app_version, heard].filter(Boolean).join(' · '))}</span>
-      <div role="progressbar" aria-label="${esc(d.name)} entries ${me ? 'published' : 'applied'}" aria-valuenow="${done}" aria-valuemax="${Math.max(1, seq)}" aria-valuemin="0">${winTrack(pct, pct < 100 && stale ? 'warn' : '')}</div>
-      <span>${done.toLocaleString()} of ${seq.toLocaleString()} entries ${me ? 'published' : 'applied here'}</span><span class="muted">${esc(facts.join(' · '))}</span>${peer}</article>`;
-  };
-  return row('devname', 'This computer', info('devname', 'The name the other computers show for this one, in their lists, on sessions and on the chip at the top.<br><b>Default: the computer name</b> Windows or macOS gives it.'), 'The name your other computers see.',
-      `${field('st-devname', 'Name', `value="${esc(c.this.name)}" maxlength="40" data-testid="st-devname"`)}${btn('Rename', 'computers-set', 'data-key="device_name" data-from="st-devname" data-testid="st-devname-save"')}`)
-    + row('syncmode', 'How your computers sync', info('syncmode', 'Pick one per computer. Each computer writes its own journal there and reads the others\'; keys and logins never go in it. Switching later keeps everything, because the journal is the same either way.<br><b>Default: off.</b>'), 'Pick one transport; changing it keeps merged history.', syncChoices(c))
-    + (hubOn || hub.ring ? row('ring', 'Recovery key', info('ring', 'The ring key seals every chunk, presence report and transcript before it goes to the hub, so the hub stores what it cannot read. It is made on the first computer that joins the hub, kept in ' + esc(keyStore()) + ', carried to paired computers with the pairing, and shown once as the recovery key: 8 groups of 4 letters and digits for your password manager. A computer that is not paired needs it typed in.<br><b>Default: made on the first computer.</b>'), hub.ring ? 'Stored on this computer; paired computers receive it with the pairing. Keep it in your password manager for a computer that is not paired, or a fresh install.' : 'No ring key: this computer cannot read or write the hub. Enter the recovery key shown on the computer that first joined, or pair with it.',
-      `${hub.ring ? btn('Show again…', 'ring-show', 'data-testid="ring-show"') : ''}<button class="${hub.ring ? 'btn-secondary' : 'btn-primary'}" data-act="ring-enter" data-testid="ring-enter">Enter recovery key…</button>`) : '')
-    + row('transcripts', 'Carry transcripts', info('transcripts', `Also share this computer's session transcripts, so they can be read and resumed on another computer. A transcript over 20 MB is not carried; the folder holds up to 200 MB of this computer's transcripts, the oldest going first.${ts ? `<br>Carried ${ts.carried} · ${(ts.bytes / 1048576).toFixed(1)} MB${ts.skipped && ts.skipped.length ? ` · ${ts.skipped.length} skipped` : ''}` : ''}<br><b>Default: on.</b>`), `${ts ? `Carried ${ts.carried} · ${(ts.bytes / 1048576).toFixed(1)} MB · ${(ts.skipped || []).length} skipped. ` : ''}Over 20 MB is skipped; the store holds 200 MB.`, sw('sync_transcripts', s.sync_transcripts !== false, 'Carry transcripts', 'st-transcripts', 'computers-set'))
-    + row('presence', 'Presence', info('presence', 'Writes what is running here every minute while the app is open, so the other computers show it in Running now.<br><b>Default: on.</b>'), 'Share what runs here every minute.', sw('sync_presence', s.sync_presence !== false, 'Share what runs here', 'st-presence', 'computers-set'))
-    + row('direct', 'Direct connection', info('direct', 'Finds your other computers on this network (mDNS) or at an address you give (a VPN name), after pairing once with a six-digit code, and talks to them over TLS: what runs there every ten seconds, their history the moment it is written. The folder keeps working underneath; a computer reached neither way is still merged through it.<br><b>Default: off.</b>'), 'Paired computers talk over TLS. Presence updates every 10 seconds; the folder keeps working.',
-      `${sw('direct_connection', s.direct_connection, 'Connect directly', 'st-direct', 'computers-set')}${btn('Pair a computer…', 'pair', 'data-testid="pair"')}<button class="btn-secondary" data-act="listen-port" data-testid="listen-port-change">Listen port: <span data-testid="listen-port">${c.port || 'chosen at first use'}</span>…</button>`)
-    + `<div class="b-toolbar"><b>${n} ${n === 1 ? 'computer' : 'computers'}</b><span class="muted">${on ? `Synced through a ${c.mode === 'hub' ? 'hub' : 'folder'}${c.last_run ? ' · last round ' + ago(c.last_run) : ''}` : 'Sync is off: only this computer'}</span>${on ? btn('Sync now', 'computers-now', 'data-testid="computers-now"') : ''}${btn('First-run choices…', 'firstrun-open')}</div>
-      ${c.error ? `<div role="alert" class="notice-bar warn" data-testid="sync-error">${esc(c.error)}</div>` : ''}
-      <div class="b-computers" data-testid="computer-cards">${computers(c).map(card).join('')}</div>`;
-}
-// a switch or the name: saved through computers_set, which answers with the new status
-action('computers-set', async (el) => {
-  const value = el.type === 'checkbox' ? el.checked : document.getElementById(el.dataset.from).value.trim();
-  if (el.type !== 'checkbox' && !value) return toast('Enter a computer name.', true);
-  if (await mutate(() => call('computers_set', { [el.dataset.key]: value }), 'Saved') === undefined && el.type === 'checkbox') el.checked = !el.checked;
-});
-action('sync-folder-pick', async () => {
-  const p = await pickFolder();
-  if (p && await mutate(() => call('computers_set', { sync_mode: 'folder', sync_folder: p }), 'Syncing through ' + p) !== undefined) (await import('./restore.js')).welcomeBack(p);
-});
-action('sync-off', async () => { if (await confirmDialog('Stop syncing', 'Leave the folder? Merged history stays on this computer, and the folder keeps what was written.', 'Leave')) mutate(() => call('computers_set', { sync_mode: 'off' }), 'Sync is off; the folder keeps what was written'); });
-action('computers-now', async () => {
-  const r = await attempt(() => call('computers_now'));
-  if (!r) return;
-  const n = (r.peers || []).length;
-  toast(r.error ? 'Sync round: ' + r.error : `Synced with ${n} other ${n === 1 ? 'computer' : 'computers'}`, !!r.error);
-  changed();
-});
-// the port the direct connection listens on, a peer's address, and forgetting a peer
-action('listen-port', () => {
-  openDialog(`${dlgHead('Listen port')}<div class="form-field"><label for="lp-v">Port</label><input class="mono" id="lp-v" type="number" min="0" max="65535" value="${(S.cache.computers || {}).port || 0}" data-testid="lp-v"><span class="muted">0 picks a free port once and keeps it. Your other computers find this one by mDNS or by its address with this port.</span></div>
-    <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="btn-primary" id="lp-ok" data-testid="lp-ok">Save</button></span></div>`, { size: 'sm', label: 'Listen port' });
-  document.getElementById('lp-ok').onclick = async () => {
-    const v = +document.getElementById('lp-v').value;
-    if (!(v >= 0 && v <= 65535)) return toast('A port is 0 to 65535', true);
-    closeDialog();
-    mutate(() => call('computers_set', { listen_port: v }), 'Saved');
-  };
-});
-action('peer-addr', (el) => mutate(() => call('computers_set_peer', { id: el.dataset.id, address: document.getElementById('addr-' + el.dataset.id).value.trim() }), 'Saved'));
-action('peer-forget', async (el) => {
-  if (await confirmDialog('Forget ' + el.dataset.name, `Forget <b>${esc(el.dataset.name)}</b>? This computer stops connecting to it and drops its certificate; what was merged from it stays. Pair again to reconnect.`, 'Forget')) mutate(() => call('computers_forget', { id: el.dataset.id }), 'Forgotten');
-});
-// presence arrives every 10 s while a peer is connected: the page follows in place (the reconciler keeps what is being edited)
-document.addEventListener('presence', () => { if (S.route.view === 'settings' && S.state && !dialogOpen()) render(true); });
 
 // ---------- Backups and archive ----------
 function backupsSection(b, ar, s) {
