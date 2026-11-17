@@ -1,44 +1,41 @@
 // The page tour, started from the ? in the top bar: it highlights one part of the page at a time with
 // a note beside it (Next / Back, or the arrow keys). Close or Esc ends it; the ? button starts it again.
 
-import { S, action, keyStore } from './core.js';
+import { S, action, keyStore, rectOf, windowSize } from './core.js';
 import { esc } from './lib.js';
 
 // [selector of the part to highlight (null: the middle of the window), title, explanation]
 const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode, Antigravity, Pi and Oh My Pi on this computer in one place. The ? at the top shows this tour of a page.'],
-    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts shared between accounts.'],
-    ['[data-testid=use-next]', 'Use next', 'The account to start on now: the most room, or the 5-hour window that resets soonest. Start opens a terminal on it; Folder picks where.'],
-    ['[data-testid=finding]', 'Runs out first', 'The account on pace to run out before its reset, with the measured basis under it. Measured numbers are plain; estimates carry ≈.'],
-    ['[data-testid=running-now]', 'Running now', 'Every console open, on which computer; Follow opens its session as it writes.'],
-    ['[data-testid=horizon]', 'Reset Horizon', 'Each account as a lane: its week ring, the capacity left in each window, and the time to each reset on a 7-day scale (the 5-hour window on its own zoom). Start appears on hover.'],
-    ['[data-testid=kpi-tokens]', 'Key numbers', 'Tokens, cost and the share read from cache, each with its trend and its change against the period before: today, 7 days, 30 days or all time. Cost is what the tokens would cost at API list prices.'],
-    ['[data-testid=attention]', 'Needs attention', 'A limit that runs out before its reset at today\'s pace, a login to renew, a provider the router paused.'],
+    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, Computers to sync your other computers, and under Setup the MCP servers, skills and system prompts shared between accounts and the routing to other providers. A badge appears only for something to act on or watch.'],
+    ['.page-head .actions', 'Key numbers', 'Tokens, cost and the share read from cache for the range beside them: today, 7 days, 30 days or all time; the change against the period before is on hover. Cost is what the tokens would cost at API list prices.'],
+    ['[data-testid=use-next]', 'Use next', 'The account to start on now, of any tool or of the one you pick: the most room, or with "5h first" the 5-hour window that resets soonest. Start opens a terminal on it; Start in folder… picks where.'],
+    ['[data-testid=attention]', 'Needs attention', 'One entry per account: a limit used up or on pace to run out before its reset, a login to renew; then a provider the router paused and a tool with an update. Each has the one button that deals with it.'],
+    ['[data-testid=running-now]', 'Running now', 'Every session open, on which computer; Follow opens it as it writes.'],
+    ['[data-testid=horizon]', 'Accounts runway', 'One row per account: what is left of each limit, a lane from now to +7 d with a tick at the reset (striped where it is on pace to run out first), one verdict, and Start or Log in. Measured numbers are plain; estimates carry ≈; — means not read.'],
     ['[data-testid=activity]', 'Activity, 53 weeks', 'A year clock of daily tokens: 53 weeks around, Monday inside, the busiest day in the centre.'],
     ['[data-testid=latest-replies]', 'Latest replies', 'Newest first, with the account, model, tokens and the time to the first reply; the request log has every call with its cost.'],
-    ['[data-nav=home] .nav-badge', 'Today', 'Today\'s usage at API prices, always in view.'],
   ],
   accounts: [
     ['[data-testid=add-account]', 'Add an account', 'Each account gets its own folder and login. Sign in once; Harness Manager keeps the accounts apart.'],
-    ['[data-testid=usage-panel]', 'Tokens per day', 'Every account\'s tokens for each day of the range, priced at API list prices in the rows below. Subscriptions are not billed per token.'],
-    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets.'],
-    ['[data-testid=accounts-table] .acct-windows-col', 'Limits', 'Every limit of the plan: 5-hour, weekly and per model. The ↻ button beside a Claude account reads its limits from Anthropic right now.'],
-    ['[data-testid=accounts-table] .btn-lane-start', 'Start', 'Opens a terminal running the tool as this account. Log in appears instead when the account has not signed in yet.'],
-    ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Log in again, open the account\'s folder, its settings, or remove it.'],
-    ['[data-testid=best-note]', 'The account with the most room', 'The account furthest from its limits says so: start your next session there.'],
+    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. The ring is what is left of the week.'],
+    ['[data-testid=accounts-table] .lims', 'Limits', 'The limits of the plan in one line: 5-hour, weekly and per model, each with what is left. Point at one for its reset.'],
+    ['[data-testid=accounts-table] .acts .btn', 'Start', 'Opens a terminal running the tool as this account. Log in stands in its place when the account is logged out or its login has expired.'],
+    ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Start in a folder, refresh the limits, rename or edit the account, open its folder, log in again, or remove it.'],
+    ['[data-testid=usage-panel]', 'Tokens per day and by model', 'Folded until you open it: every account\'s tokens for each day of the range, and the range by model, at API list prices. Subscriptions are not billed per token.'],
   ],
   account: [
     ['.page-tabs', 'Overview, Sessions, Projects, Settings', 'Plan, limits and usage; this account\'s sessions and projects; and its email, key or endpoint.'],
     ['[data-act=start-in-folder]', 'Start in a folder', 'Opens the account in the project folder you pick.'],
-    ['.page-actions [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
+    ['.page-head [data-act=account-menu]', 'More', 'Refresh the limits, rename the account, open its folder, log in again, or remove it.'],
   ],
   projects: [
     ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
-    ['[data-testid=project-cards]', 'One card per project', 'Open its sessions, start a new one, pin it to the sidebar, rename or merge it from the card\'s menu.'],
+    ['[data-testid=project-cards]', 'One row per project', 'Its share of the tokens, the cost or the sessions, then its numbers. Click a row for its sessions; start a new one, pin it to the sidebar, rename or merge it from the row\'s buttons.'],
   ],
   sessions: [
-    ['[data-testid=rail]', 'Projects, pinned and recent', 'What runs now, every project, the ones you pinned, and your tags. Pick one to see only its sessions.'],
+    ['[data-testid=filters]', 'One line of filters', 'Group the list, choose the range, and narrow it with the Project and Tag pickers: what runs now, every project, the ones you pinned, and your tags. A filter in force shows as a chip; its ✕ takes it off.'],
     ['[data-act=tag-edit]', 'Tags', 'Your own labels on a session or a project, shared across tools and accounts. Group by Tag, or click a tag to see what carries it.'],
     ['[data-testid=find]', 'Find a session', 'The search above narrows this list by title, folder, account and tool as you type.'],
     ['[data-testid=group]', 'Grouped by project', 'Sessions of the same repository sit together, whichever account or tool ran them. Open one to read it.'],
@@ -65,10 +62,16 @@ const TOURS = {
     ['[data-testid=prompt-new]', 'Versions', 'Keep several prompts and switch with Use this prompt. The file\'s current text is saved in the list before it is replaced.'],
   ],
   settings: [
-    ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
-    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
-    ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
-    ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
+    // (steps that are on the page whichever section is chosen; Text size shows on Appearance)
+    ['[data-testid=set-nav]', 'One section at a time', 'Pick a section, or type in Search settings to find a row in any of them.'],
+    ['#set-panes .b-tip', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
+    ['[data-testid=st-textsize]', 'Text size', 'Compact, Comfortable or Large: the whole window follows, on every page.'],
+  ],
+  computers: [
+    ['[data-testid=computer-cards]', 'Your computers', 'A card per computer: how it is reached, when it was last seen and what runs there. Its ⋯ renames this computer, and syncs with or forgets another.'],
+    ['[data-testid=computers]', 'How your computers sync', 'Pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
+    ['[data-key=setting-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
+    ['[data-testid=pair-head]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget in its ⋯ drops it again.'],
   ],
 };
 
@@ -95,13 +98,13 @@ function show() {
   pop.dataset.testid = 'tour';
   pop.innerHTML = `<div class="tour-step">${tour.i + 1} of ${tour.steps.length}</div><b>${esc(title)}</b><p>${esc(text.replace('{store}', keyStore()))}</p>
     <div class="tour-acts"><button class="btn sm" data-act="tour-skip" data-testid="tour-skip">Close</button><span>
-    ${tour.i ? '<button class="btn outline sm" data-act="tour-back">Back</button>' : ''}
+    ${tour.i ? '<button class="btn sm" data-act="tour-back">Back</button>' : ''}
     <button class="btn primary sm" data-act="tour-next" data-testid="tour-next">${last ? 'Done' : 'Next'}</button></span></div>`;
   document.body.appendChild(pop);
-  const W = window.innerWidth, H = window.innerHeight, pw = pop.offsetWidth, ph = pop.offsetHeight;
+  const [W, H] = windowSize(), pw = pop.offsetWidth, ph = pop.offsetHeight;
   if (target) {
     target.scrollIntoView({ block: 'nearest' });
-    const r = target.getBoundingClientRect();
+    const r = rectOf(target);
     const spot = document.createElement('div');
     spot.className = 'tour-spot';
     Object.assign(spot.style, { left: r.left - 6 + 'px', top: r.top - 6 + 'px', width: r.width + 12 + 'px', height: r.height + 12 + 'px' });

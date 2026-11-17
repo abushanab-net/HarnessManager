@@ -2,9 +2,10 @@
 // the "Linked tools" matrix (a header tick per tool links every skill shown), the Not managed panel, Discover with its
 // repositories and "Install into" chips, the Install and Import dialogs. The page draws from its last data.
 
-import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openDialog, closeDialog, dlgHead, openMenu, action, render, shownTools, setNavCounts, patch, pickFolder } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openDialog, closeDialog, dlgHead, openMenu, action, render, shownTools, patch, pickFolder } from './core.js';
+import { pageHead, plural, seg } from './parts.js';
 import { esc, toolIcon, ic } from './lib.js';
-import { syncReport, head, badge, empty, panel, field, dlgFoot, pagerHtml, toolHead, toolCell, findText } from './mcp.js';
+import { syncReport, badge, empty, panel, field, dlgFoot, pagerHtml, toMatrixTop, toolHead, toolCell, findText } from './mcp.js';
 
 const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false, per: 25, page: 0, dq: '', repo: '' };
 const sourceOf = (s) => (s.source.startsWith('https://github.com/') ? s.source.replace('https://github.com/', '').split('/').slice(0, 2).join('/') : s.source === 'imported' ? 'Imported' : s.source === 'store' ? 'Store' : 'Local');
@@ -13,7 +14,7 @@ const canUpdate = (source) => source.startsWith('https://github.com/') || /^[a-z
 // the tools a skill from Discover is linked into: the last choice, Claude Code to begin with
 const enableKey = 'hm.skill.enable';
 const enabled = () => { try { return JSON.parse(localStorage.getItem(enableKey)) || ['claude']; } catch { return ['claude']; } };
-const tabs = (total) => `<nav class="page-tabs" aria-label="Skills tabs">${[['installed', `Installed ${total}`], ['discover', 'Discover']].map(([t, l]) => `<button class="filter-chip ${sk.tab === t ? 'active' : ''}" data-act="sk-tab" data-v="${t}" aria-current="${sk.tab === t ? 'page' : 'false'}" data-testid="sk-tab-${t}">${l}</button>`).join('')}</nav>`;
+const tabs = (total) => seg('Installed or Discover', [['installed', `Installed ${total}`], ['discover', 'Discover']], sk.tab, (v) => `data-act="sk-tab" data-v="${v}" data-testid="sk-tab-${v}"`);
 
 let cache = null;
 /** The rows the search and the source filter leave; the header ticks act on these. */
@@ -21,16 +22,16 @@ const filtered = (d) => { const q = findText(); return d.skills.filter((s) => (!
 
 function draw() {
   const { d, hs } = cache, unm = d.unmanaged, total = d.skills.length + unm.length, upd = Object.values(sk.updates).filter((v) => v === true).length;
-  const h1 = unm.length ? `${unm.length} ${unm.length === 1 ? 'folder' : 'folders'} in the store ${unm.length === 1 ? 'is' : 'are'} not managed yet.` : total ? `${total} ${total === 1 ? 'skill shares' : 'skills share'} one store.` : 'No skills yet.';
-  const top = head(h1, `${total} in store · ${d.skills.length} managed · ${unm.length} not managed · ${upd} ${upd === 1 ? 'update' : 'updates'}`,
-    (sk.tab === 'discover' ? `<button class="btn-secondary" data-act="disc-refresh" data-testid="disc-refresh">Refresh</button>` : `<button class="btn-secondary" data-act="skill-check" data-testid="skill-check">Check for updates</button><button class="btn-secondary" data-act="import-from" data-kind="skill">Import from a tool</button>`)
-    + `<button class="btn-primary" data-act="skill-install" data-testid="skill-install">Install skill</button>`) + tabs(d.skills.length);
-  if (sk.tab === 'discover') return patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="skills">${top}${discover(d, hs)}</div>`);
+  const status = total ? `${plural(d.skills.length, 'skill')} managed${unm.length ? `; ${plural(unm.length, 'folder')} in the store ${unm.length === 1 ? 'is' : 'are'} not managed yet` : ''}${upd ? `; ${plural(upd, 'update')} available` : ''}.` : 'No skill yet.';
+  const top = pageHead('skills', status,
+    (sk.tab === 'discover' ? `<button class="btn" data-act="disc-refresh" data-testid="disc-refresh">Refresh</button>` : `<button class="btn" data-act="skill-check" data-testid="skill-check">Check for updates</button><button class="btn" data-act="import-from" data-kind="skill">Import from a tool</button>`)
+    + `<button class="btn primary" data-act="skill-install" data-testid="skill-install">Install skill</button>`);
+  if (sk.tab === 'discover') return patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="skills">${top}<div class="b-one">${tabs(d.skills.length)}</div>${discover(d, hs)}</div>`);
   const list = filtered(d), pg = pagerHtml(list.length, sk, 'sk');
   const rows = list.slice(sk.page * sk.per, (sk.page + 1) * sk.per).map((s) => {
     const desc = (d.skill_info[s.name] || {}).description || '';
     return `<tr data-key="skill-${esc(s.name)}" data-name="${esc(s.name)}" data-testid="skill-row-${esc(s.name)}">
-      <td><div class="b-name"><b>${esc(s.name)}</b>${sk.updates[s.name] === true ? `<button class="btn-secondary" data-act="skill-update" data-name="${esc(s.name)}" title="A newer version is at its source" data-testid="skill-update-${esc(s.name)}">Update</button>` : ''}</div>
+      <td><div class="b-name"><b>${esc(s.name)}</b>${sk.updates[s.name] === true ? `<button class="btn sm" data-act="skill-update" data-name="${esc(s.name)}" title="A newer version is at its source" data-testid="skill-update-${esc(s.name)}">Update</button>` : ''}</div>
         ${desc ? `<div class="muted b-clamp" title="${esc(desc)}">${esc(desc)}</div>` : ''}</td>
       <td title="${esc(s.source)}">${esc(sourceOf(s))}</td>
       ${hs.map((h) => toolCell('skill', s.name, h, onFor(d, s.name, h.id))).join('')}
@@ -38,12 +39,14 @@ function draw() {
   }).join('');
   // the header: each tool's tick stands for every skill shown; some ticked shows as indeterminate (set after the draw)
   const thead = `<thead><tr><th>Skill</th><th>Source</th>${hs.map((h) => { const n = list.filter((s) => onFor(d, s.name, h.id)).length; return toolHead(h, n, `<label>${n}<input type="checkbox" data-act="skill-bulk" data-h="${h.id}" data-bulk="${n > 0 && n < list.length ? 'mixed' : ''}" ${n === list.length && n ? 'checked' : ''} aria-label="Every skill shown, for ${esc(h.label)}" data-testid="skill-bulk-${h.id}"></label>`); }).join('')}<th><span class="b-sr">Actions</span></th></tr></thead>`;
-  const table = `<div class="b-matrix-wrap"><table class="replies-table b-matrix" data-testid="skill-matrix">${thead}<tbody>${rows || `<tr><td colspan="${hs.length + 3}">${empty('No skill matches.')}</td></tr>`}</tbody></table></div>${pg}`;
-  const unmRows = unm.filter((u) => { const q = findText(); return !q || (u.name + ' ' + (u.description || '')).toLowerCase().includes(q); }).map((u) => `<div class="account-session" data-key="unmanaged-${esc(u.name)}" data-testid="skill-row-${esc(u.name)}"><div><b>${esc(u.name)}</b><div class="muted">${esc(u.description || '')}${u.description ? ' · ' : ''}${u.linked.length ? 'linked in ' + esc(u.linked.map((id) => (hs.find((h) => h.id === id) || { label: id }).label).join(', ')) : 'not linked'}</div></div><button class="btn-secondary" data-act="skill-adopt" data-name="${esc(u.name)}" data-testid="skill-adopt-${esc(u.name)}">Manage</button></div>`).join('');
+  const table = `<div class="b-matrix-wrap"><table class="replies-table b-matrix" data-testid="skill-matrix">${thead}<tbody>${rows || `<tr><td colspan="${hs.length + 3}">${empty('No skill matches.')}</td></tr>`}</tbody></table></div>`;
+  const unmRows = unm.filter((u) => { const q = findText(); return !q || (u.name + ' ' + (u.description || '')).toLowerCase().includes(q); }).map((u) => `<div class="account-session" data-key="unmanaged-${esc(u.name)}" data-testid="skill-row-${esc(u.name)}"><div><b>${esc(u.name)}</b><div class="muted">${esc(u.description || '')}${u.description ? ' · ' : ''}${u.linked.length ? 'linked in ' + esc(u.linked.map((id) => (hs.find((h) => h.id === id) || { label: id }).label).join(', ')) : 'not linked'}</div></div><button class="btn sm" data-act="skill-adopt" data-name="${esc(u.name)}" data-testid="skill-adopt-${esc(u.name)}">Manage</button></div>`).join('');
+  // ONE line above the matrix: Installed or Discover, the store's folder, the source, the folders not managed, the
+  // pager and the rows a page; it and the tools' header stay in view while the rows scroll
   patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="skills">${top}
-    <div class="b-toolbar"><span class="mono">${esc(d.skill_store)}</span><label>Source <select data-act="sk-source" id="sk-filter" aria-label="Skill source">${['', ...new Set(d.skills.map(sourceOf))].sort().concat(unm.length ? ['Not managed'] : []).map((v) => `<option value="${esc(v)}" ${sk.source === v ? 'selected' : ''}>${esc(v || 'All sources')}</option>`).join('')}</select></label><button class="btn-secondary" data-act="sk-jump" data-testid="skill-jump-unmanaged">Not managed · ${unm.length}</button>${sk.source === 'Not managed' || !d.skills.length ? '' : pg}</div>
-    ${sk.source === 'Not managed' ? '' : d.skills.length ? panel('Linked tools', table) : panel('Installed', empty('No skills yet.', 'Find some under Discover, install one from a folder or a GitHub link, or import a tool\'s own skills.'))}
-    ${unm.length && (!sk.source || sk.source === 'Not managed') ? panel(`Not managed · ${unm.length}`, unmRows, `<button class="btn-primary" data-act="skill-adopt" data-testid="skill-adopt-all">Manage all</button>`, 'id="sk-unmanaged"') : ''}</div>`);
+    <div class="b-one" data-testid="skill-line">${tabs(d.skills.length)}<span class="mono muted trunc grow" title="The store, where every skill is kept once: ${esc(d.skill_store)}">${esc(d.skill_store)}</span><label>Source <select data-act="sk-source" id="sk-filter" aria-label="Skill source">${['', ...new Set(d.skills.map(sourceOf))].sort().concat(unm.length ? ['Not managed'] : []).map((v) => `<option value="${esc(v)}" ${sk.source === v ? 'selected' : ''}>${esc(v || 'All sources')}</option>`).join('')}</select></label>${unm.length ? `<button class="btn sm" data-act="sk-jump" data-testid="skill-jump-unmanaged">Not managed · ${unm.length}</button>` : ''}${sk.source === 'Not managed' || !d.skills.length ? '' : pg}</div>
+    ${sk.source === 'Not managed' ? '' : d.skills.length ? `<section class="panel-card b-matrix-card" aria-label="Linked tools"><h2 class="panel-title b-sr">Linked tools</h2>${table}</section>` : panel('Installed', empty('No skills yet.', 'Find some under Discover, install one from a folder or a GitHub link, or import a tool\'s own skills.'))}
+    ${unm.length && (!sk.source || sk.source === 'Not managed') ? panel(`Not managed · ${unm.length}`, unmRows, `<button class="btn sm" data-act="skill-adopt" data-testid="skill-adopt-all">Manage all</button>`, 'id="sk-unmanaged"') : ''}</div>`);
   document.querySelectorAll('[data-bulk]').forEach((x) => { x.indeterminate = x.dataset.bulk === 'mixed'; });
 }
 
@@ -63,7 +66,6 @@ function discover(d, hs) {
 view('skills', async (sheet) => {
   sheet.className = 'sheet';
   const d = await call('items');
-  setNavCounts({ 'n-skills': d.skills.length });
   const hs = shownTools(S.state || (await call('state'))).filter((h) => h.caps.skills);
   cache = { d, hs };
   S.pageFind = () => { sk.page = 0; draw(); };
@@ -81,7 +83,7 @@ action('dc-enable', () => { localStorage.setItem(enableKey, JSON.stringify([...d
 action('sk-tab', (el) => { sk.tab = el.dataset.v; sk.page = 0; render(); });
 action('sk-source', (el) => { sk.source = el.value; sk.page = 0; draw(); });
 action('sk-jump', () => document.getElementById('sk-unmanaged')?.scrollIntoView({ block: 'start' }));
-action('sk-page', (el) => { sk.page = +el.dataset.v; draw(); document.querySelector('.b-matrix-wrap')?.scrollTo(0, 0); });
+action('sk-page', (el) => { sk.page = +el.dataset.v; draw(); toMatrixTop(); });
 action('sk-per', (el) => { sk.per = +el.value; sk.page = 0; draw(); });
 action('skill-adopt', async (el) => {
   const names = el.dataset.name ? [el.dataset.name] : [];

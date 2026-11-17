@@ -3,23 +3,26 @@
 // dialog with its Form / JSON switch, Import from apps. The page draws from its last data, so the search and the pager
 // never wait on the backend. The helpers at the top are shared with Skills and System prompts.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, shownTools, setNavCounts, notice, clearNotice, patch } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, shownTools, notice, clearNotice, patch } from './core.js';
 import { esc, ic, toolIcon, dur } from './lib.js';
+import { pageHead, plural } from './parts.js';
 
 // ---------- the reference's pieces ----------
-export const head = (title, facts, actions = '') => `<header class="page-heading"><div><h1>${title}</h1><div class="heading-facts">${facts}</div></div><div class="page-actions">${actions}</div></header>`;
 export const badge = (text, tone = 'neutral', title = '') => `<span class="plan-pill b-${tone}"${title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
 export const empty = (title, text = '') => `<div class="b-empty"><b>${esc(title)}</b>${text ? `<span class="muted">${esc(text)}</span>` : ''}</div>`;
 export const panel = (title, body, actions = '', attrs = '') => `<section class="panel-card" ${attrs}><div class="panel-head"><h2 class="panel-title">${title}</h2>${actions}</div>${body}</section>`;
 export const field = (id, label, value, { type = 'text', extra = '', testid = '' } = {}) => `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${extra} ${testid ? `data-testid="${testid}"` : ''}></div>`;
 const dlgError = (msg) => (msg ? `<div class="dlg-text err" role="alert" id="dlg-err">${esc(msg)}</div>` : '');
 export const dlgFoot = (okLabel, okAct, okTestid = '') => `<div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="btn-primary" data-act="${okAct}" ${okTestid ? `data-testid="${okTestid}"` : ''}>${esc(okLabel)}</button></span></div>`;
-/** Previous · "1–25 of 41" · Next · Rows [25 ▾]; clamps st.page to the rows. The actions are `<act>-page` and `<act>-per`. */
+/** "1–25 of 41" ‹ › Rows [25 ▾], for the one line above a matrix; clamps st.page to the rows. The actions are `<act>-page` and `<act>-per`. */
 export function pagerHtml(n, st, act) {
   const max = Math.max(0, Math.ceil(n / st.per) - 1);
   st.page = Math.min(st.page, max);
-  return `<div class="b-pager"><button class="btn-secondary" data-act="${act}-page" data-v="${st.page - 1}" ${st.page === 0 ? 'disabled' : ''} data-testid="${act}-prev">Previous</button><span>${n ? st.page * st.per + 1 : 0}–${Math.min(n, (st.page + 1) * st.per)} of ${n}</span><button class="btn-secondary" data-act="${act}-page" data-v="${st.page + 1}" ${st.page === max ? 'disabled' : ''} data-testid="${act}-next">Next</button><label>Rows <select data-act="${act}-per" aria-label="Rows per page" data-testid="${act}-per">${[25, 50, 100].map((v) => `<option ${st.per === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>`;
+  const step = (by, label, glyph, id) => `<button class="btn sm icon" data-act="${act}-page" data-v="${st.page + by}" ${st.page + by < 0 || st.page + by > max ? 'disabled' : ''} aria-label="${label}" title="${label}" data-testid="${act}-${id}">${glyph}</button>`;
+  return `<div class="b-pager"><span>${n ? st.page * st.per + 1 : 0}–${Math.min(n, (st.page + 1) * st.per)} of ${n}</span>${step(-1, 'Previous page', '‹', 'prev')}${step(1, 'Next page', '›', 'next')}<label>Rows <select data-act="${act}-per" aria-label="Rows per page" data-testid="${act}-per">${[25, 50, 100].map((v) => `<option ${st.per === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>`;
 }
+/** A page of a matrix was turned: its first rows come into view under the line that stays put. */
+export const toMatrixTop = () => document.getElementById('sheet').scrollTo(0, 0);
 export const toolHead = (h, n, inner) => `<th class="b-tool-cell" title="${esc(h.label)}: ${n}" data-label="${esc(h.label)}"><span>${toolIcon(h.id, 24)}<span>${esc(h.label)}</span></span>${inner}</th>`;
 /** One tool's checkbox in a row; a hand-made entry the tool keeps shows "left alone" under it. */
 export const toolCell = (kind, name, h, on, kept = false) => `<td class="b-tool-cell ${kept ? 'b-kept' : ''}"><input type="checkbox" data-act="toggle-target" data-kind="${kind}" data-item="${esc(name)}" data-h="${h.id}" ${on ? 'checked' : ''} aria-label="${esc(name)} for ${esc(h.label)}" data-testid="t-${kind}-${esc(name)}-${h.id}">${kept ? `<span class="b-kept-mark" title="${esc(h.label)} has its own entry of this name, written by hand; it is left alone. Edit and save the server here to take it over.">left alone</span>` : ''}</td>`;
@@ -77,23 +80,23 @@ function draw() {
   const left = sync ? (sync.conflicts || 0) + (sync.skipped || 0) : 0, n = d.mcp.length;
   const pg = pagerHtml(list.length, mp, 'mcp');
   const rows = list.slice(mp.page * mp.per, (mp.page + 1) * mp.per).map((it) => `<tr data-key="mcp-${esc(it.name)}" data-testid="mcp-row-${esc(it.name)}">
-      <td><div class="b-name"><b>${esc(it.name)}</b>${badge(it.transport)}${hs.some((h) => onFor(d, it.name, h.id)) ? '' : badge('Off', 'neutral', 'Not written to any tool')}<button class="icon-btn xs" data-act="mcp-info" data-name="${esc(it.name)}" aria-label="About ${esc(it.name)}" title="Where it is written" data-testid="mcp-info-${esc(it.name)}">${ic.info}</button></div>
+      <td><div class="b-name"><b>${esc(it.name)}</b>${badge(it.transport)}${hs.some((h) => onFor(d, it.name, h.id)) ? '' : badge('Off', 'neutral', 'Not written to any tool')}<button class="icon-btn" data-act="mcp-info" data-name="${esc(it.name)}" aria-label="About ${esc(it.name)}" title="Where it is written" data-testid="mcp-info-${esc(it.name)}">${ic.info}</button></div>
         <div class="mono b-command" title="${esc(line(it))}">${esc(line(it))}</div>${it.description ? `<div class="muted b-clamp" title="${esc(it.description)}">${esc(it.description)}</div>` : ''}</td>
       ${hs.map((h) => toolCell('mcp', it.name, h, onFor(d, it.name, h.id), keptIn(last, it.name, h.id))).join('')}
-      <td class="b-actions-cell"><button class="btn-secondary" data-act="mcp-edit" data-name="${esc(it.name)}" aria-label="Edit ${esc(it.name)}" data-testid="mcp-edit-${esc(it.name)}">Edit</button> <button class="icon-btn" data-act="mcp-menu" data-name="${esc(it.name)}" aria-label="More for ${esc(it.name)}" aria-haspopup="menu">${ic.dots}</button></td></tr>`).join('');
+      <td class="b-actions-cell"><button class="btn sm" data-act="mcp-edit" data-name="${esc(it.name)}" aria-label="Edit ${esc(it.name)}" data-testid="mcp-edit-${esc(it.name)}">Edit</button> <button class="icon-btn" data-act="mcp-menu" data-name="${esc(it.name)}" aria-label="More for ${esc(it.name)}" aria-haspopup="menu">${ic.dots}</button></td></tr>`).join('');
   const table = `<div class="b-matrix-wrap"><table class="replies-table b-matrix" data-testid="mcp-matrix"><thead><tr><th>Server</th>${hs.map((h) => { const k = d.mcp.filter((it) => keptIn(last, it.name, h.id)).length; return toolHead(h, d.mcp.filter((it) => onFor(d, it.name, h.id)).length, `<small>${d.mcp.filter((it) => onFor(d, it.name, h.id)).length}${k ? ` · ${k} left alone` : ''}</small>`); }).join('')}<th><span class="b-sr">Actions</span></th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="${hs.length + 2}">${empty('No server matches the search.')}</td></tr>`}</tbody></table></div>${pg}`;
+    <tbody>${rows || `<tr><td colspan="${hs.length + 2}">${empty('No server matches the search.')}</td></tr>`}</tbody></table></div>`;
+  // ONE line above the matrix (what was left alone, and the pager); it and the tools' header stay in view while the rows scroll
   patch(document.getElementById('sheet'), `<div class="page-body b-page" data-b-page="mcp">
-    ${head(n ? `${n} ${n === 1 ? 'server' : 'servers'} shared. ${left ? `${left} ${left === 1 ? 'entry' : 'entries'} left alone.` : 'Every entry is in step.'}` : 'No MCP servers yet.',
-    `${n ? written : 0} ${written === 1 ? 'entry' : 'entries'} written · ${hs.length} tools · ${sync ? 'checked ' + dur(Date.now() - sync.at) + ' ago' : 'not synced yet'}`,
-    `<button class="btn-secondary" data-act="mcp-import-all" data-testid="mcp-import">Import from apps</button><button class="btn-primary" data-act="mcp-new" data-testid="mcp-add">Add MCP server</button>`)}
-    ${n ? `<div class="b-statusline">${badge(`${left} left alone`, left ? 'warn' : 'good')}<span class="muted">${left ? 'Written by hand in a tool\'s file, so not managed here: edit and save the server to take it over.' : 'Handwritten entries stay until you take them over.'}</span></div>${panel('Write to each tool', table, pg)}`
+    ${pageHead('mcp', n ? `<span title="${plural(written, 'entry', 'entries')} written · ${sync ? 'checked ' + dur(Date.now() - sync.at) + ' ago' : 'not synced yet'}">${plural(n, 'server')} shared with ${plural(hs.length, 'tool')}; ${left ? `${plural(left, 'entry', 'entries')} left alone` : 'every entry is in step'}.</span>` : 'No MCP server yet.',
+    `<button class="btn" data-act="mcp-import-all" data-testid="mcp-import">Import from apps</button><button class="btn primary" data-act="mcp-new" data-testid="mcp-add">Add MCP server</button>`)}
+    ${n ? `<div class="b-one" data-testid="mcp-line">${badge(`${left} left alone`, left ? 'warn' : 'good')}<span class="muted trunc grow">${left ? 'Written by hand in a tool\'s file, so not managed here: edit and save the server to take it over.' : 'Handwritten entries stay until you take them over.'}</span>${pg}</div>
+      <section class="panel-card b-matrix-card" aria-label="Write to each tool"><h2 class="panel-title b-sr">Write to each tool</h2>${table}</section>`
     : panel('Servers', empty('Add a server, or import from your tools.'))}</div>`);
 }
 async function mcpView(sheet) {
   sheet.className = 'sheet';
   const [d, sync, last, hs] = await Promise.all([call('items'), call('sync_last').catch(() => null), call('mcp_last_import').catch(() => null), tools()]);
-  setNavCounts({ 'n-mcp': d.mcp.length });
   cache = { d, hs, sync, last };
   S.pageFind = () => { mp.page = 0; draw(); };
   draw();
@@ -101,7 +104,7 @@ async function mcpView(sheet) {
 view('mcp', mcpView);
 // the old add / edit route: the list, with the dialog open
 view('mcp-edit', async (sheet, params) => { history.replaceState(null, '', '#mcp'); await mcpView(sheet); editMcp(params.name || ''); });
-action('mcp-page', (el) => { mp.page = +el.dataset.v; draw(); document.querySelector('.b-matrix-wrap')?.scrollTo(0, 0); });
+action('mcp-page', (el) => { mp.page = +el.dataset.v; draw(); toMatrixTop(); });
 action('mcp-per', (el) => { mp.per = +el.value; mp.page = 0; draw(); });
 
 /** About one server: its connection, and in each tool's file whether it is written, not written, or left alone. */

@@ -4,6 +4,7 @@
 
 import { S, call, view, go, toast, attempt, mutate, confirmDialog, openMenu, openDialog, closeDialog, dlgHead, action, render, setAppUpdates, patch } from './core.js';
 import { esc, hm, toolIcon } from './lib.js';
+import { pageHead, plural } from './parts.js';
 
 // "2.10.0" is newer than "2.9.3"
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
@@ -13,7 +14,7 @@ const panel = (title, body, testid) => `<section class="panel-card" data-testid=
 
 view('apps', async (sheet) => {
   sheet.className = 'sheet';
-  if (!S.cache.apps) patch(sheet, '<div class="page-body b-page"><header class="page-heading"><div><h1>Reading each tool\'s version…</h1></div></header></div>');
+  if (!S.cache.apps) patch(sheet, `<div class="page-body b-page">${pageHead('apps', 'Reading each tool\'s version…')}</div>`);
   const [d, me] = await Promise.all([call('apps'), call('self_latest').catch(() => null)]);
   const st = S.state || (await call('state'));
   const hidden = st.settings.hidden_tools || [];
@@ -26,31 +27,30 @@ view('apps', async (sheet) => {
     const runs = a.copies.find((c) => c.runs), other = a.copies.find((c) => !c.runs);
     const same = runs.version && other.version && runs.version === other.version;
     return `<div class="notice-bar warn" role="alert" data-testid="app-twice-${a.id}"><span><b>${esc(a.label)} is installed ${a.copies.length} times.</b> Your terminals run the ${esc(kindOf(runs, a))} copy${runs.version ? ' (' + esc(runs.version) + ')' : ''}; the ${esc(kindOf(other, a))} copy in <span class="mono">${esc(other.path)}</span> ${same ? 'is the same version' : other.version ? 'is ' + esc(other.version) : 'could not say its version'}. Keep one.</span>
-      <button class="btn-secondary" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(other.path)}" data-kind="${esc(kindOf(other, a))}" data-testid="app-remove-${a.id}">Remove the ${esc(kindOf(other, a).split(' ')[0])} copy…</button></div>`;
+      <button class="btn sm" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(other.path)}" data-kind="${esc(kindOf(other, a))}" data-testid="app-remove-${a.id}">Remove the ${esc(kindOf(other, a).split(' ')[0])} copy…</button></div>`;
   }).join('');
   // one row per tool: where it is, its version, the newest one, how it was installed, the action and Show; other copies under it
   const row = (a) => {
     const l = latest[a.id], n = upd(a), runs = a.copies.find((c) => c.runs);
     const act = !a.path
-      ? (a.install.length ? `<button class="btn-primary" data-act="app-install" data-id="${a.id}" data-testid="app-install-${a.id}">Install…</button>` : a.download ? `<button class="btn-secondary" data-act="app-site" data-url="${esc(a.download)}">Website</button>` : '')
-      : a.update ? (n ? `<button class="btn-primary" data-act="app-update" data-id="${a.id}" data-label="${esc(a.label)}" data-to="${esc(l)}" title="${esc(a.update.label)}: ${esc(a.update.command)}" data-testid="app-update-${a.id}">Update to ${esc(l)}</button>` : `<span class="muted">${l ? 'Up to date' : 'Not checked'}</span><button class="btn-secondary" data-act="app-update" data-id="${a.id}" data-label="${esc(a.label)}" title="${esc(a.update.label)}: ${esc(a.update.command)}" data-testid="app-update-${a.id}">Update</button>`) : '';
+      ? (a.install.length ? `<button class="btn sm" data-act="app-install" data-id="${a.id}" data-testid="app-install-${a.id}">Install…</button>` : a.download ? `<button class="btn sm" data-act="app-site" data-url="${esc(a.download)}">Website</button>` : '')
+      : a.update ? (n ? `<button class="btn sm" data-act="app-update" data-id="${a.id}" data-label="${esc(a.label)}" data-to="${esc(l)}" title="${esc(a.update.label)}: ${esc(a.update.command)}" data-testid="app-update-${a.id}">Update to ${esc(l)}</button>` : `<span class="muted">${l ? 'Up to date' : 'Not checked'}</span><button class="btn sm" data-act="app-update" data-id="${a.id}" data-label="${esc(a.label)}" title="${esc(a.update.label)}: ${esc(a.update.command)}" data-testid="app-update-${a.id}">Update</button>`) : '';
     const newest = l ? `<span class="${n ? 'b-warn' : ''}" title="${n ? 'Newer than the installed version' : 'The newest version the vendor offers'}">${esc(l)}</span>` : errors[a.id] ? `<span class="muted" title="${esc(errors[a.id])}">could not check</span>` : '<span class="muted">—</span>';
     return `<tr data-key="app-${a.id}" data-testid="app-${a.id}"><td><div class="b-name">${toolIcon(a.id, 16)}<b>${esc(a.label)}</b></div><div class="mono b-command" title="${esc(a.path || '')}">${a.path ? esc(a.path) : a.install.length ? 'Not installed' : 'Not installed; get it from its website'}</div></td>
       <td>${a.path ? esc(a.version || '?') : '—'}</td><td>${newest}</td><td data-testid="app-kind-${a.id}">${runs ? esc(kindOf(runs, a)) : '—'}</td>
       <td><div class="page-actions">${act}${a.path ? `<button class="icon-btn" data-act="app-menu" data-id="${a.id}" data-path="${esc(a.path)}" aria-label="More for ${esc(a.label)}">⋯</button>` : ''}</div></td>
       <td><label class="b-switch"><input type="checkbox" data-act="app-show" data-id="${a.id}" ${hidden.includes(a.id) ? '' : 'checked'} aria-label="Show ${esc(a.label)} on Accounts, MCP servers, Skills and System prompts" data-testid="app-show-${a.id}"> Show</label></td></tr>
-      ${a.copies.filter((c) => !c.runs).map((c) => `<tr class="b-copy-row" data-key="copy-${esc(c.path)}" data-testid="app-copy-${a.id}"><td colspan="4"><span class="mono">${esc(c.path)}</span><span class="muted"> · ${esc(c.version || '?')} · ${esc(kindOf(c, a))} · second copy, not on PATH first</span></td><td colspan="2"><button class="btn-secondary" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(c.path)}" data-kind="${esc(kindOf(c, a))}">Remove…</button></td></tr>`).join('')}`;
+      ${a.copies.filter((c) => !c.runs).map((c) => `<tr class="b-copy-row" data-key="copy-${esc(c.path)}" data-testid="app-copy-${a.id}"><td colspan="4"><span class="mono">${esc(c.path)}</span><span class="muted"> · ${esc(c.version || '?')} · ${esc(kindOf(c, a))} · second copy, not on PATH first</span></td><td colspan="2"><button class="btn sm" data-act="app-remove-copy" data-id="${a.id}" data-path="${esc(c.path)}" data-kind="${esc(kindOf(c, a))}">Remove…</button></td></tr>`).join('')}`;
   };
   const table = (rows) => `<table class="replies-table b-apps"><thead><tr><th>Tool</th><th>Installed</th><th>Newest</th><th>Installed by</th><th>Action</th><th>Show</th></tr></thead><tbody>${rows.map(row).join('')}</tbody></table>`;
-  const finding = updates.length ? `${updates.length} ${updates.length === 1 ? 'tool has' : 'tools have'} an update.` : !installed.length ? 'No tools installed yet.' : !d.latest ? 'Your tools are installed; the newest versions are not checked yet.' : 'Your tools are up to date.';
+  const status = `${installed.length} of ${plural(d.apps.length, 'tool')} installed; ${updates.length ? `${plural(updates.length, 'tool has', 'tools have')} an update` : !d.latest ? 'the newest versions are not checked yet' : 'all up to date'}${d.latest ? ', checked ' + esc(hm(d.latest.at)) : ''}.`;
   patch(sheet, `<div class="page-body b-page" data-b-page="apps">
-    <header class="page-heading"><div><h1>${finding}</h1><div class="heading-facts">${installed.length} installed · ${missing.length} not installed · checked ${d.latest ? esc(hm(d.latest.at)) : '—'}</div></div>
-      <div class="page-actions"><button class="btn-secondary" data-act="apps-check" data-testid="apps-check">Check for updates</button></div></header>
+    ${pageHead('apps', status, '<button class="btn primary" data-act="apps-check" data-testid="apps-check">Check for updates</button>')}
     ${warn}
     ${panel(`Installed · ${installed.length}`, installed.length ? table(installed) : '<div class="b-empty"><b>None of the tools is installed yet.</b><span class="muted">Install one below.</span></div>', 'apps-installed')}
     ${missing.length ? panel(`Not installed · ${missing.length}`, table(missing), 'apps-missing') : ''}
     <section class="panel-card"><div class="panel-head"><h2 class="panel-title">Harness Manager</h2></div>
-      <div class="b-toolbar"><span>${esc(st.version)} · ${me && me.version ? `${esc(me.version)} available` : me ? 'the newest' : 'not checked yet'}</span><span class="plan-pill ${me && me.version ? 'b-warn' : me ? 'b-good' : ''}">${me && me.version ? 'Update available' : me ? 'Up to date' : 'Not checked'}</span><button class="btn-secondary" data-act="go-settings-updates">Settings › Updates</button></div>
+      <div class="b-toolbar"><span>${esc(st.version)} · ${me && me.version ? `${esc(me.version)} available` : me ? 'the newest' : 'not checked yet'}</span><span class="plan-pill ${me && me.version ? 'b-warn' : me ? 'b-good' : ''}">${me && me.version ? 'Update available' : me ? 'Up to date' : 'Not checked'}</span><button class="btn sm" data-act="go-settings-updates">Settings › Updates</button></div>
       <span class="muted">Checks at launch and every hour · signed updates only</span></section>
   </div>`);
   S.cache.apps = d.apps;

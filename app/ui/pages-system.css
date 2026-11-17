@@ -3,7 +3,7 @@
    primary, the CLI's command column, content-sized controls that start after the description). */
 
 /* routing: a stat's word beside its number; a paused provider's chip; a disabled Add route reads as disabled */
-.b-router-stats b small { font-size: 11px; font-weight: 500; margin-left: 4px; }
+.b-router-stats b small { font-size: var(--fs-small); font-weight: 500; margin-left: 4px; }
 .b-chain .candidate-pill.b-warn { border-color: var(--warn-border); }
 .b-chain .candidate-pill.b-warn b, .b-chain .candidate-pill.b-warn span { color: var(--warn); }
 .b-page .btn-primary:disabled { background: var(--bg-card); color: var(--ink-muted); border: 1px solid var(--line-default); box-shadow: none; }
@@ -15,24 +15,16 @@
 .b-apps .b-name img { width: 16px; height: 16px; }
 .b-apps .page-actions { flex-wrap: nowrap; }
 
-/* cli: a command column as wide as its longest command, the meaning 24 px after it; the page at most 1180 px */
+/* cli: in a card the commands are one column, as wide as the longest of them, and every meaning starts 24 px after it
+   (the rows share the card's two columns); the page at most 1180 px */
 .b-page[data-b-page="cli"] { max-width: 1180px; }
-.b-cli-row, .b-cli-examples > div { grid-template-columns: max-content minmax(0, 1fr); gap: 24px; align-items: baseline; }
+.b-cli-grid > section, .b-cli-examples { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 24px; }
+.b-cli-grid > section > .panel-head { grid-column: 1 / -1; }
+.b-cli-row, .b-cli-examples > div { grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 24px; align-items: baseline; }
 .b-cli-row code, .b-cli-examples code { overflow-wrap: anywhere; white-space: normal; }
 
-/* settings: the description column stops at 46ch; controls are sized to their content */
-.b-setting { grid-template-columns: minmax(240px, 46ch) minmax(0, 1fr); }
-.b-setting-control .form-field { flex: 0 1 160px; }
-.b-setting-control .form-field:has(> .wide) { flex: 1 1 320px; }
-.b-setting-control select { width: auto; }
-.b-section > summary .panel-title { font-size: 14px; }
-.b-section:not([open]) > summary { padding-bottom: 0; }
-.b-section-nav { top: -12px; margin: -12px 0 0; }
+/* a list under a toolbar; a warning bar inside a page */
 .b-toolbar + .account-session, .account-session + .account-session { border-top: 0; }
-.b-section-body > .b-toolbar { padding: 12px 0 6px; }
-.b-setting-control .b-command { max-width: 60%; }
-.b-computer .b-name .plan-pill { margin-left: 2px; }
-.b-computer .win-track { width: 100%; height: 6px; display: block; }
 .b-page .notice-bar { border: 1px solid var(--warn-border); border-radius: var(--radius-control); }
 
 /* the dialogs' parts */

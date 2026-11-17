@@ -1,0 +1,81 @@
+/* Settings and Computers (1.10, Option A): the layout of the drawings' a.css for these two pages
+   (docs/project-review-2026-11/mockups), in this app's role tokens. The shared parts (.card, .btn, .seg, .pill,
+   .section, .key) are in app.css. */
+
+/* .b-page hands every control the page's font; on these pages a button and a choice keep the drawings' (12 or 13 px, 600) */
+:is([data-b-page="settings"], [data-b-page="computers"]) .btn { font-size: var(--fs-body); font-weight: 600; }
+:is([data-b-page="settings"], [data-b-page="computers"]) :is(.btn.sm, .seg > *) { font-size: var(--fs-small); font-weight: 600; }
+/* a card of these pages holds its own head and rows, edge to edge */
+.set-pane, .pc { padding: 0; gap: 0; display: block; border-color: var(--line-subtle); min-width: 0; }
+
+/* ---- Settings: the list of sections with the search on top, the chosen section at the right ---- */
+.set { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; }
+.set-nav { padding: 8px; min-width: 0; }
+.set-nav > div { position: sticky; top: 8px; } /* the list stays in view beside a long section */
+.set-find { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; margin-bottom: 8px; border: 1px solid var(--line-default); border-radius: 7px; background: var(--bg-input); color: var(--ink-muted); }
+.set-find:focus-within { border-color: var(--ac); }
+.set-find svg { flex: none; }
+.set-find input { flex: 1; min-width: 0; height: 28px; background: transparent; border: 0; outline: 0; color: var(--ink-primary); }
+.set-find input::placeholder { color: var(--ink-muted); }
+.set-nav a { height: 32px; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; color: var(--ink-secondary); font-weight: 500; text-decoration: none; }
+.set-nav a:hover { background: var(--bg-card-hover); }
+.set-nav a.on { background: var(--ac-soft); color: var(--ac); font-weight: 600; box-shadow: inset 2px 0 0 var(--ac); }
+.set-panes { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pane-head { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--line-subtle); }
+.pane-head > :last-child { margin-left: auto; }
+
+/* a row: the label and its one-line help at the left, the control at the right (also the switch rows on Computers) */
+.srow { min-height: 60px; display: grid; grid-template-columns: minmax(200px, 380px) minmax(0, 1fr); gap: 16px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line-subtle); }
+.srow:last-child { border-bottom: 0; }
+.srow .what { line-height: 18px; min-width: 0; }
+.srow .what b { font-weight: 600; }
+.srow .what p { font-size: var(--fs-small); color: var(--ink-muted); overflow-wrap: anywhere; }
+.srow .what p b { color: var(--ink-secondary); }
+.srow .ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.srow .ctl input:not([type=checkbox]), .srow .ctl select { height: 28px; padding: 0 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--line-default); color: var(--ink-primary); min-width: 0; }
+.srow .ctl input[type=number] { width: 64px; }
+.srow .ctl input.wide { flex: 1 1 240px; }
+.srow .ctl .mono { font-size: var(--fs-small); color: var(--ink-secondary); }
+.srow .ctl span.mono { flex: 1 1 120px; } /* a path takes the room the buttons beside it leave, and is cut with … */
+.chk, .sw { height: 28px; display: inline-flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.b-page .chk input[type=checkbox] { width: 16px; height: 16px; }
+/* a switch: the box itself is invisible over the track, so a click and the keyboard reach it; the word follows its state */
+.sw { position: relative; }
+.b-page .sw input[type=checkbox] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.sw > i { width: 36px; height: 20px; border-radius: 10px; background: var(--line-strong); position: relative; flex: none; transition: background .12s; }
+.sw > i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg-panel); transition: transform .12s; }
+.sw input:checked + i { background: var(--ac); }
+.sw input:checked + i::after { transform: translateX(16px); background: var(--on-ac); }
+.sw input:focus-visible + i { outline: 2px solid var(--line-focus); outline-offset: 2px; }
+.sw > b { width: 22px; font-weight: 600; }
+.sw > b::after { content: "Off"; }
+.sw input:checked ~ b::after { content: "On"; }
+/* what a section lists under a row (the backups), and the line that says there is nothing */
+.set-list { border-bottom: 1px solid var(--line-subtle); }
+.set-item { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 6px 16px 6px 32px; border-bottom: 1px solid var(--line-subtle); line-height: 18px; min-width: 0; }
+.set-item:last-child { border-bottom: 0; }
+.set-item b { font-weight: 600; overflow-wrap: anywhere; }
+.set-item p { font-size: var(--fs-small); color: var(--ink-muted); }
+.set-none { padding: 14px 16px; color: var(--ink-muted); }
+.set-list > .set-none { padding-left: 32px; }
+
+/* ---- Computers: a card per computer, then the two ways to sync ---- */
+.pcs { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; flex: none; }
+.pc-head { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-subtle); min-width: 0; }
+.pc-head .pc-dot { width: 9px; height: 9px; flex: none; }
+.pc-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px 12px; }
+.kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); row-gap: 4px; line-height: 18px; }
+.kv dt { font-size: var(--fs-small); color: var(--ink-muted); }
+.count { text-align: center; min-width: 76px; padding-left: 12px; border-left: 1px solid var(--line-subtle); }
+.count .key { display: block; line-height: 28px; }
+.count span { font-size: var(--fs-small); color: var(--ink-muted); }
+.ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line-subtle); }
+.way { min-height: 68px; display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--line-default); border-radius: 8px; background: var(--bg-card); min-width: 0; }
+.way.on { border-color: var(--ac-border); background: var(--ac-soft); }
+.way .radio { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-strong); flex: none; display: grid; place-items: center; }
+.way.on .radio { border-color: var(--ac); }
+.way.on .radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ac); }
+.way .two { flex: 1; min-width: 0; line-height: 20px; }
+.way .two b { font-weight: 600; }
+.way .mono { font-size: var(--fs-small); }
+.way [data-testid=hub-line] { flex: none; }

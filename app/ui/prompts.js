@@ -4,7 +4,8 @@
 
 import { S, call, view, toast, attempt, mutate, changed, confirmDialog, action, render, shownTools, patch } from './core.js';
 import { esc, toolIcon } from './lib.js';
-import { head, badge, field } from './mcp.js';
+import { badge, field } from './mcp.js';
+import { pageHead, plural } from './parts.js';
 
 const FILE = { claude: 'CLAUDE.md', codex: 'AGENTS.md', opencode: 'AGENTS.md', agy: 'GEMINI.md', pi: 'AGENTS.md', omp: 'AGENTS.md' };
 let promptTool = 'claude', promptSel = null;
@@ -15,17 +16,17 @@ view('prompts', async (sheet) => {
   sheet.className = 'sheet';
   const d = await call('items');
   const hs = shownTools(S.state || await call('state')).filter((h) => h.caps.prompts);
-  if (!hs.length) return patch(sheet, `<div class="page-body b-page">${head('No tools are shown.', 'Choose which tools to show in Apps.', '<button class="btn-primary" data-act="go-apps">Choose tools</button>')}</div>`);
+  if (!hs.length) return patch(sheet, `<div class="page-body b-page">${pageHead('prompts', 'No tool is shown; Apps chooses which tools to show.', '<button class="btn primary" data-act="go-apps">Choose tools</button>')}</div>`);
   if (!hs.some((h) => h.id === promptTool)) promptTool = hs[0].id;
   const t = hs.find((h) => h.id === promptTool), file = FILE[t.id] || 'its prompt file';
   const list = d.prompts.filter((p) => p.harness === promptTool);
   const live = await call('prompt_live', { harness: promptTool }).catch(() => null);
   const sel = list.find((p) => p.id === promptSel) || null, draft = sel ? (drafts[sel.id] || sel) : null;
   const on = list.find((p) => p.enabled), inFile = (p) => !!(live && p.enabled && p.body === live.body);
-  // the finding: the enabled prompt that is not what the file holds comes first; else which file the tool reads
-  const h1 = on && live && !inFile(on) ? `${esc(on.title)} is enabled, but ${file} holds other text.` : live ? `${file} is the file ${esc(t.label)} reads.` : 'No prompt file yet.';
+  // the status: the enabled prompt that is not what the file holds comes first; else which file the tool reads
+  const status = `${on && live && !inFile(on) ? `${esc(on.title)} is enabled, but ${file} holds other text` : live ? `${file} is the file ${esc(t.label)} reads` : `${esc(t.label)} has no prompt file yet`}; ${plural(list.length, 'saved version')}.`;
   const state = (p) => (inFile(p) ? badge('In the file', 'good') : p.enabled ? badge('Enabled · differs from the file', 'warn', 'Saved here with other text than the file holds; write it to apply') : '');
-  patch(sheet, `<div class="page-body b-page" data-b-page="prompts">${head(h1, `${list.length} saved ${list.length === 1 ? 'version' : 'versions'} · previous file saved before replacement`, '<button class="btn-primary" data-act="prompt-new" data-testid="prompt-new">New prompt</button>')}
+  patch(sheet, `<div class="page-body b-page" data-b-page="prompts">${pageHead('prompts', status, `<button class="btn ${sel ? '' : 'primary'}" data-act="prompt-new" data-testid="prompt-new">New prompt</button>`)}
     <nav class="page-tabs" aria-label="Prompt tool" data-testid="prompt-tabs">${hs.map((h) => `<button class="filter-chip ${h.id === promptTool ? 'active' : ''}" data-act="prompt-tool" data-v="${h.id}" title="${esc(h.label)} reads ${FILE[h.id] || 'its prompt file'}" aria-current="${h.id === promptTool ? 'page' : 'false'}">${toolIcon(h.id, 14)} ${esc(h.label)}</button>`).join('')}</nav>
     <div class="b-prompt-grid"><section class="panel-card b-prompt-list" aria-label="Saved prompt versions">
       <button class="b-prompt-choice ${!sel ? 'active' : ''}" data-act="prompt-sel" data-id="" data-key="live"><b>The file now</b>${live ? badge('Live', 'good') : badge('No file')}<span class="muted">${esc(live ? first(live.body) : 'not there yet')}</span></button>
@@ -34,8 +35,8 @@ view('prompts', async (sheet) => {
       <div class="muted">${live ? `Every ${esc(t.label)} account follows this file` : `No profile of ${esc(t.label)} yet`}</div><div class="mono b-command">${esc(live ? live.path : '—')}</div>
       ${sel ? `<label class="b-sr" for="pr-body">Prompt text</label><textarea id="pr-body" rows="16" data-f="body">${esc(draft.body)}</textarea>
         <div class="b-toolbar"><span class="muted">${inFile(sel) ? 'This prompt is in the file now.' : sel.enabled ? 'Saved here, but the file holds other text.' : 'Not in the file yet.'}</span>
-          <button class="btn-secondary" data-act="prompt-delete" data-id="${esc(sel.id)}">Delete…</button><button class="btn-secondary" data-act="prompt-sel" data-id="">Show live file</button>
-          ${inFile(sel) ? '' : `<button class="btn-secondary" data-act="prompt-enable" data-id="${esc(sel.id)}" data-testid="prompt-enable">${sel.enabled ? 'Write to the file' : 'Use this prompt'}</button>`}<button class="btn-primary" data-act="prompt-save" data-id="${esc(sel.id)}" data-testid="prompt-save">Save</button></div>`
+          <button class="btn" data-act="prompt-delete" data-id="${esc(sel.id)}">Delete…</button><button class="btn" data-act="prompt-sel" data-id="">Show live file</button>
+          ${inFile(sel) ? '' : `<button class="btn" data-act="prompt-enable" data-id="${esc(sel.id)}" data-testid="prompt-enable">${sel.enabled ? 'Write to the file' : 'Use this prompt'}</button>`}<button class="btn primary" data-act="prompt-save" data-id="${esc(sel.id)}" data-testid="prompt-save">Save</button></div>`
       : `<pre class="b-live-prompt" tabindex="0" aria-label="The file's text">${esc(live ? live.body || '(the file is empty)' : `No profile of ${t.label} yet.`)}</pre>`}</section></div></div>`);
 });
 document.addEventListener('input', (e) => {

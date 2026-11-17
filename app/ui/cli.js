@@ -3,6 +3,7 @@
 
 import { view, patch, keyStore } from './core.js';
 import { esc } from './lib.js';
+import { pageHead } from './parts.js';
 
 const CLI = [
   ['Accounts', [['list', 'Accounts with plan, limits, tokens and open consoles'], ['show', 'One account in detail'], ['add', 'Add an account (subscription login by default)'],
@@ -26,7 +27,7 @@ const slug = (g) => g.toLowerCase().replace(/[^a-z]+/g, '-');
 view('cli', async (sheet) => {
   sheet.className = 'sheet';
   patch(sheet, `<div class="page-body b-page" data-b-page="cli">
-    <header class="page-heading"><div><h1>Every desktop action has an hrm command.</h1><div class="heading-facts">Add <span class="mono">--json</span> for scripts · static reference</div></div></header>
+    ${pageHead('cli', `${CLI.reduce((a, [, rows]) => a + rows.length, 0)} <span class="mono">hrm</span> commands in ${CLI.length} groups; add <span class="mono">--json</span> to one for scripts.`)}
     <section class="panel-card"><div class="panel-head"><h2 class="panel-title">Start here</h2></div><div class="b-cli-examples">${EX.map(([c, d]) => `<div><code>${esc(c)}</code><span class="muted">${esc(d)}</span></div>`).join('')}</div></section>
     <div class="b-cli-grid">${CLI.map(([g, rows]) => `<section class="panel-card" id="cli-${slug(g)}"><div class="panel-head"><h2 class="panel-title">${esc(g)}</h2></div>${rows.map(([c, d]) => `<div class="b-cli-row"><code>hrm ${esc(c)}</code><span>${esc(d.replace('{store}', keyStore()))}</span></div>`).join('')}</section>`).join('')}</div>
   </div>`);
