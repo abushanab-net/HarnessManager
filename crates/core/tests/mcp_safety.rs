@@ -173,16 +173,15 @@ fn a_value_not_set_on_this_computer_never_replaces_the_one_a_tool_has() {
         let e = &now[if tool == "codex" { "mcp_servers" } else { "mcpServers" }]["github"];
         assert_eq!((&e["args"], &e["env"]["GITHUB_TOKEN"]), (&json!(["-y", "server-github@2"]), &json!("ghp_x")), "{tool}");
     }
-    // reading the tools takes this computer's values into its own store, so the form shows them and new tools get them
+    // reading the tools: a value only the tool has is no difference, so no server is called hand-made; the value stays the tool's
     let mut reg = ctx.registry().unwrap();
-    items::import_mcp_all(&ctx, &mut reg);
+    let report = items::import_mcp_all(&ctx, &mut reg);
+    assert!(report.iter().all(|r| r["kept"].as_array().unwrap().is_empty()), "{report:?}");
     ctx.save_registry(&reg).unwrap();
-    let reg = ctx.registry().unwrap();
-    assert_eq!((reg.mcp[0].env["GITHUB_TOKEN"].as_str(), reg.mcp[1].headers["X-Team"].as_str()), ("ghp_x", "a"));
-    assert!(!std::fs::read_to_string(ctx.registry_path()).unwrap().contains("ghp_x"));
-    items::sync(&ctx, &reg).unwrap();
-    let oc = meaning("opencode", &std::fs::read_to_string(mcp_file(&ctx, "opencode")).unwrap());
-    assert_eq!(oc["mcp"]["github"]["environment"]["GITHUB_TOKEN"], "ghp_x");
+    assert_eq!(ctx.registry().unwrap().mcp[0].env["GITHUB_TOKEN"], "");
+    // one computer saving the shared list writes "not in this file", never an empty value over another computer's
+    let file = std::fs::read_to_string(ctx.registry_path()).unwrap();
+    assert!(file.contains("\"GITHUB_TOKEN\": null") && file.contains("\"X-Team\": null"), "{file}");
 }
 
 #[test]
@@ -290,6 +289,31 @@ fn removing_a_server_or_a_key_removes_its_credentials_and_renaming_moves_them() 
     ctx.save_registry(&reg).unwrap();
     assert_eq!(ctx.registry().unwrap().mcp[0].headers["Authorization"], "Bearer 3");
     assert!(!std::fs::read_to_string(ctx.registry_path()).unwrap().contains("Bearer"), "the store took it");
+}
+
+#[test]
+fn a_value_emptied_in_an_edit_stays_empty() {
+    let s = store();
+    let (_d, ctx) = ctx(&["claude"]);
+    let cred = |key: &str| secrets::get_key(&format!("{}:mcp:github:env:{key}", s.prefix));
+    let mut reg = ctx.registry().unwrap();
+    items::add_mcp(&mut reg, server("github", &[("GITHUB_TOKEN", "ghp_1"), ("ORG", "acme"), ("HOST", "h")], &[])).unwrap();
+    items::add_mcp(&mut reg, server("Github", &[("GITHUB_TOKEN", "ghp_other")], &[])).unwrap();
+    ctx.save_registry(&reg).unwrap();
+    // the edit the form and `hrm mcp add` make: the same server again, one value emptied, one key taken off
+    let mut reg = ctx.registry().unwrap();
+    items::add_mcp(&mut reg, server("github", &[("GITHUB_TOKEN", "ghp_1"), ("ORG", "")], &[])).unwrap();
+    assert_eq!((cred("ORG"), cred("HOST"), cred("GITHUB_TOKEN").as_deref()), (None, None, Some("ghp_1")), "gone before the save, and only those");
+    ctx.save_registry(&reg).unwrap();
+    let reg = ctx.registry().unwrap();
+    let g = reg.mcp.iter().find(|m| m.name == "github").unwrap();
+    assert_eq!((g.env["ORG"].as_str(), g.env.get("HOST"), g.env["GITHUB_TOKEN"].as_str()), ("", None, "ghp_1"));
+    assert_eq!(cred("ORG"), None);
+    // a value that is another server's by Windows' reading of the name is not taken along
+    let mut reg = ctx.registry().unwrap();
+    items::add_mcp(&mut reg, server("Github", &[("GITHUB_TOKEN", "")], &[])).unwrap();
+    ctx.save_registry(&reg).unwrap();
+    assert_eq!(ctx.registry().unwrap().mcp.iter().find(|m| m.name == "github").unwrap().env["GITHUB_TOKEN"], "ghp_1");
 }
 
 #[test]

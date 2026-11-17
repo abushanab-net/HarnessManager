@@ -336,10 +336,10 @@ pub fn import_mcp_from(ctx: &Ctx, reg: &mut Registry, prof: &crate::registry::Pr
     let target = file.display().to_string();
     let (mut added, mut kept) = (vec![], vec![]);
     for s in found {
-        match reg.mcp.iter_mut().find(|m| m.name == s.name) {
+        match reg.mcp.iter().find(|m| m.name == s.name) {
+            // a value not set on this computer is no difference: the tool's own value is its to keep
             Some(m) if to_claude(&localized(m, Some(&s))) != to_claude(&s) => { kept.push(s.name); continue; }
-            // the same server: a value the list does not have on this computer is the one this tool has
-            Some(m) => m.fill_unset(&s),
+            Some(_) => {}
             None => reg.mcp.push(s.clone()),
         }
         let t = Target { kind: "mcp".into(), item: s.name.clone(), harness: harness_id.into(), profile: (!prof.main).then(|| prof.name.clone()) };
@@ -397,8 +397,7 @@ pub fn add_mcp(reg: &mut Registry, s: McpServer) -> Result<()> {
     if !matches!(s.transport.as_str(), "stdio" | "http" | "sse") { bail!("transport must be stdio, http or sse"); }
     if s.transport == "stdio" && s.command.as_deref().unwrap_or("").is_empty() { bail!("a stdio server needs a command"); }
     if s.transport != "stdio" && s.url.as_deref().unwrap_or("").is_empty() { bail!("an {} server needs a URL", s.transport); }
-    reg.mcp.retain(|m| m.name != s.name);
-    reg.mcp.push(s);
+    reg.replace_mcp(s);
     Ok(())
 }
 

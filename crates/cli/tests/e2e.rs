@@ -500,6 +500,10 @@ fn mcp_values_an_older_version_left_in_the_list_move_to_the_credential_store_at_
     let list = std::fs::read_to_string(&path).unwrap();
     assert!(!list.contains("ghp_old") && list.contains("\"GITHUB_TOKEN\": null"), "{list}");
     assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "ghp_old");
+    // the server given again with the value emptied: it stays empty, its credential went with the edit
+    e.ok(&["mcp", "add", "github", "--command", "npx", "--env", "GITHUB_TOKEN="]);
+    assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "");
+    assert!(hrm_core::secrets::read(&format!("{}:mcp:github:env:GITHUB_TOKEN", e.prefix)).is_none());
 }
 
 #[test]

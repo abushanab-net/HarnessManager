@@ -272,6 +272,18 @@ impl Registry {
     /// Each MCP env and header value goes to the credential store, and the file keeps its key with `null`.
     pub fn save(&self, path: &Path) -> Result<()> { self.write(path, true) }
 
+    /// Put an edited server in the place of the one with its name (or add it). A value the edit emptied, or whose key
+    /// it took off, loses its credential now: an empty value is saved as "look in the store", which would bring it back.
+    pub fn replace_mcp(&mut self, mut s: McpServer) {
+        if let Some(mut old) = self.mcp.iter().position(|m| m.name == s.name).map(|i| self.mcp.remove(i)) {
+            // never a credential another server's value, or one of this server's that stays, also goes by
+            let stay: std::collections::BTreeSet<String> = self.mcp.iter_mut().flat_map(McpServer::values).chain(s.values())
+                .filter(|(_, v)| !v.is_empty()).map(|(t, _)| t.to_lowercase()).collect();
+            for (t, _) in old.values().filter(|(t, v)| !v.is_empty() && !stay.contains(&t.to_lowercase())) { let _ = secrets::delete(&t); }
+        }
+        self.mcp.push(s);
+    }
+
     /// `save` for a list put back from a backup: no credential is deleted, so putting the newer list back finds its values.
     pub fn save_restored(&self, path: &Path) -> Result<()> { self.write(path, false) }
 
