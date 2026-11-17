@@ -97,6 +97,9 @@ function stackedChart(days, series, short) {
   }).join('')}</div>`;
 }
 
+// what the list last read: a choice that only changes what is shown (a group folded, the charts opened, a tool chosen)
+// draws from it again, without asking the backend
+let last = null;
 view('accounts', async (sheet) => {
   sheet.className = 'sheet';
   const [st, u, x] = await Promise.all([loadState(), call('usage', { days: au.days }).catch(() => null), call('limits_extra').catch(() => ({}))]); S.cache.extra = x;
@@ -107,6 +110,15 @@ view('accounts', async (sheet) => {
     au.color = Object.fromEntries(u.accounts.map((b, i) => [b.key, i % SERIES]));
     au.days_list = u.summary.days;
   }
+  last = { st, x };
+  draw(sheet);
+});
+/** Draw the list again from what was last read: after a choice that only changes what is shown. */
+function show() {
+  if (last && S.route.view === 'accounts' && S.drawn === location.hash) draw(document.getElementById('sheet')); else render();
+}
+function draw(sheet) {
+  const { st, x } = last;
   const now = st.now, pcs = S.cache.computers, used = showUsed();
   const accts = accountViews(st, x, now, pcs);
   // said once, then marked as told (not removed: the first-run dialog in computers.js reads the same report)
@@ -138,18 +150,18 @@ view('accounts', async (sheet) => {
     <section class="panel-card a-usage" data-testid="usage-panel"><div class="panel-head"><button class="panel-title fold" data-act="acct-fold" data-h="charts" aria-expanded="${chartsOpen}">Tokens per day, by account, and by model · ${au.days} days</button><span class="panel-note">Cost at API list prices ≈</span></div>
       ${chartsOpen ? `<div class="a-charts"><div>${series.length && au.days_list ? `<div class="chart-legend">${series.map((s) => `<span><i class="pc-dot c${s.ci}"></i>${esc(s.name)}</span>`).join('')}</div><div data-testid="usage-ledger">${stackedChart(au.days_list, series, true)}</div>` : '<span class="muted" data-testid="usage-ledger">No usage in this range.</span>'}</div>
         <div data-testid="models-panel"><h3 class="label">By model</h3><div class="model-rows">${au.models.map((m) => `<div class="win-bar-line"><span class="mono trunc" title="${esc(m.key)}">${esc(m.key)}</span>${winTrack(Math.max(4, Math.round((m.tokens / topModel) * 100)))}<span>${fmt(m.tokens)}</span><span class="r">${m.cost == null ? '—' : '≈ ' + money(m.cost)}</span></div>`).join('') || '<span class="muted">No usage yet.</span>'}</div></div></div>` : ''}</section></div>`);
-});
+}
 action('acct-days', (el) => { au.days = +el.dataset.v; render(); });
 action('acct-csv', async () => {
   const to = await saveFile(`Harness Manager usage ${new Date().toISOString().slice(0, 10)}.csv`, { name: 'CSV', extensions: ['csv'] });
   if (to) attempt(() => call('usage_csv', { days: au.days, path: to }), 'Exported');
 });
-action('acct-tool', (el) => { acctTool = el.dataset.v; render(); });
+action('acct-tool', (el) => { acctTool = el.dataset.v; show(); });
 action('acct-fold', (el) => {
   const h = el.dataset.h;
   if (h === 'charts') { chartsOpen = !chartsOpen; try { localStorage.setItem(CHARTS_KEY, chartsOpen ? '1' : '0'); } catch {} }
   else if (folded.has(h)) folded.delete(h); else folded.add(h);
-  render();
+  show();
 });
 // ---------- account detail ----------
 const STARTED_WITH = { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', opencode: 'XDG_CONFIG_HOME', agy: 'its own login', pi: 'PI_CODING_AGENT_DIR', omp: 'PI_CODING_AGENT_DIR' };

@@ -1421,6 +1421,21 @@ try {
     await click('.dlg .dh [data-act=dialog-close]');
   });
 
+  // ---------- 1.11: the detail pane on Sessions and Accounts, and the groundwork in the same files ----------
+  /** Run fn while the window's backend calls are recorded (`ops()` empties the record: "op", or "op:name" for a call
+   * about one account or session). `change(op, a, r)` may alter an answer, `fake(op, a)` may give one without asking. */
+  const withOps = async (fn, change = '', fake = '') => {
+    await exec(`const t = window.__TAURI__, change = new Function('op', 'a', 'r', arguments[0] || ''), fake = new Function('op', 'a', arguments[1] || ''); window.__core = t.core; window.__ops = [];
+      t.core = { ...t.core, invoke: (cmd, a, o) => { if (!a || !a.op) return window.__core.invoke(cmd, a, o);
+        const args = a.args || {}; window.__ops.push(a.op + (args.name || args.id ? ':' + (args.name || args.id) : ''));
+        const f = fake(a.op, args); if (f !== undefined) return Promise.resolve(f);
+        return window.__core.invoke(cmd, a, o).then((r) => { change(a.op, args, r); return r; }); } };`, [change, fake]);
+    try { return await fn(); } finally { await exec('window.__TAURI__.core = window.__core'); }
+  };
+  const ops = () => exec('return window.__ops.splice(0)');
+  /** What a click asks the backend, by the end of the turn it is handled in: the reads of that click and of nothing
+   * else (a background refresh draws in a turn of its own). */
+  const asks = (css) => exec("return new Promise((done) => { window.__ops.length = 0; document.querySelector(arguments[0]).click(); setTimeout(() => done(window.__ops.slice()), 0); })", [css]);
   await test('the tray popup loads the limits alone: none of the Sessions, Projects, Computers, resume or restore modules; Accounts still exports the shared names', async () => {
     // the popup's own page, loaded in a frame of this window: what it fetched is what its window loads
     const loaded = await exec(`return new Promise((done, fail) => { const f = document.createElement('iframe'); f.hidden = true; f.src = 'limits.html';
@@ -1431,6 +1446,40 @@ try {
     const missing = await exec("return import('./accounts.js').then((a) => ['TOOL', 'money', 'fmtDuration', 'fmtAbsoluteReset', 'showUsed', 'acctView', 'accountViews', 'eligible', 'w5of', 'wkof', 'metricsOf', 'renderRingSvg', 'winTrack', 'trayHtml', 'drawTray'].filter((n) => a[n] === undefined))");
     assert.deepEqual(missing, [], 'the names other modules import from accounts.js are still there');
     assert.ok(await exec("return Promise.all([import('./accounts.js'), import('./limits.js')]).then(([a, l]) => a.metricsOf === l.metricsOf && a.drawTray === l.drawTray)"), 'and they are the limits module\'s');
+  });
+
+  await test('a click that only changes what is shown asks the backend nothing: a step unfolded in a session, an Accounts group folded, the charts opened, a tool chosen', async () => {
+    await nav('#session?profile=claude-main&id=s-main-1');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+    await drawn('the session');
+    await withOps(async () => {
+      const step = '[data-testid=chat] .a-step:has(.a-bad) [data-act=step-open]';
+      assert.deepEqual(await asks(step), [], 'unfolding a step reads nothing');
+      await hasText('[data-testid=chat]', 'connection closed');
+      assert.deepEqual(await asks('[data-testid=mode-failed]'), [], 'nor does choosing Failed');
+      await waitFor(async () => !(await text('[data-testid=chat]')).includes('values-staging.yaml'), 'Failed lists only the failed command');
+      assert.deepEqual(await asks('[data-testid=mode-all]'), [], 'nor All');
+      await hasText('[data-testid=chat]', 'values-staging.yaml');
+      assert.deepEqual(await asks(step), [], 'nor folding the step again');
+      await waitFor(async () => !(await text('[data-testid=chat]')).includes('connection closed'), 'folded again');
+      await nav('#accounts');
+      await drawn('accounts');
+      await $('[data-testid=row-codex-main]');
+      const fold = '[data-testid=group-codex] [data-act=acct-fold]';
+      assert.deepEqual(await asks(fold), [], 'folding a group reads nothing');
+      await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-codex-main]')")), 'Codex folded');
+      assert.deepEqual(await asks(fold), [], 'nor does opening it again');
+      await $('[data-testid=row-codex-main]');
+      const charts = '[data-testid=usage-panel] [data-act=acct-fold]', isOpen = () => exec("return document.querySelector(arguments[0]).getAttribute('aria-expanded')", [charts]);
+      const was = await isOpen();
+      assert.deepEqual(await asks(charts), [], 'nor the charts panel, opened');
+      await waitFor(async () => (await isOpen()) !== was, 'the charts panel toggled');
+      assert.deepEqual(await asks(charts), [], 'or folded');
+      await waitFor(async () => (await isOpen()) === was, 'and back');
+      assert.deepEqual(await asks('[data-testid=chip-codex]'), [], 'nor choosing a tool');
+      await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .tool-group-card').length")) === 1, 'only Codex');
+      assert.deepEqual(await asks('[data-testid=chip-all]'), [], 'or every tool again');
+    });
   });
 
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {

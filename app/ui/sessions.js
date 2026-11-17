@@ -88,9 +88,16 @@ function sessionRow(s, pcs, running) {
     <span class="num">${fmt(s.tokens)}</span><span class="a-when ${!running && (s.open || far) ? 'live' : ''}" title="${esc(at)}">${esc(at)}</span><span class="a-act">${act}</span></div>`;
 }
 
+// what the list last read: a choice that only changes what is shown (a group folded) draws from it again, without
+// asking the backend
+let last = null;
+/** The reads of the list, as one text: two addresses that differ only in what is shown share it. */
+const listKey = (params) => JSON.stringify(Object.entries(params).filter(([k]) => k !== 'sel').sort());
+/** The filters of the address, as the page reads them. pc: every computer (''), this one ('here'), or one other
+ * computer (its id); all answered by the index. */
+const filtersOf = (params) => ({ group: params.group || 'project', days: params.days || '7', live: params.live === '1', project: params.project || '', q: params.q || '', tag: params.tag || '', pc: params.pc || '', page: +params.page || 0 });
 view('sessions', async (sheet, params) => {
-  // pc: every computer (''), this one ('here'), or one other computer (its id); all answered by the index
-  const group = params.group || 'project', days = params.days || '7', live = params.live === '1', project = params.project || '', q = params.q || '', tag = params.tag || '', pc = params.pc || '', page = +params.page || 0;
+  const { group, days, live, project, q, tag, pc, page } = filtersOf(params);
   if (!S.state) await loadState();
   const scope = pc === 'here' ? 'here' : 'all';
   const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' || live ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
@@ -100,8 +107,7 @@ view('sessions', async (sheet, params) => {
   let [ans, plist, tlist, pcs] = await Promise.all([call('sessions', { filter, group, scope }), call('projects', { days: days === 'all' ? null : +days }), call('tag_list').catch(() => []), computersStatus().catch(() => null)]);
   S.cache.tags = tlist;
   drawPins(plist);
-  let groups = ans.groups;
-  const total = ans.total, sync = syncOn(pcs);
+  const groups = ans.groups;
   // a group opened in full fetches its own rows: the page carries at most 50 rows across every group
   const gfilter = (k) => ({ ...filter, per: 1000, page: 0, ...{ project: { project: k }, account: { profile: k }, tool: { harness: k }, tag: { tag: k }, date: { day: k } }[group] });
   await Promise.all(groups.filter((g) => sMore.has(group + ':' + g.key) && g.sessions.length < g.total).map(async (g) => {
@@ -109,6 +115,18 @@ view('sessions', async (sheet, params) => {
     const full = r && r.groups.find((x) => x.key === g.key);
     if (full) g.sessions = full.sessions;
   }));
+  last = { key: listKey(params), params, ans, plist, tlist, pcs };
+  draw(sheet);
+});
+/** Draw the list again from what was last read: after a choice that only changes what is shown. */
+function show() {
+  if (last && S.route.view === 'sessions' && S.drawn === location.hash) draw(document.getElementById('sheet')); else render();
+}
+function draw(sheet) {
+  const { params, ans, plist, tlist, pcs } = last;
+  const { group, days, live, project, q, tag, pc, page } = filtersOf(params);
+  let groups = ans.groups;
+  const total = ans.total, sync = syncOn(pcs);
   const all = groups.flatMap((g) => g.sessions);
   // a running session sits at the top, whatever the grouping, never inside a fold
   const isLive = (s) => s.open || s.open_elsewhere;
@@ -177,7 +195,7 @@ view('sessions', async (sheet, params) => {
   let timer;
   S.pageFind = (v) => { clearTimeout(timer); timer = setTimeout(() => { if ((v || '').trim() !== q) sq({ q: (v || '').trim(), page: '' }); }, 250); };
   S.pageFind(find.value); // typed while the page was being drawn (a redraw clears the page's search until it is set again)
-});
+}
 action('s-set', (el) => {
   if (el.dataset.k === 'q') document.getElementById('find').value = el.dataset.v;
   sq({ [el.dataset.k]: el.dataset.v, ...(el.dataset.k === 'page' ? {} : { page: '' }) });
@@ -205,7 +223,7 @@ action('s-pick-project', (el) => {
 action('s-pick-tag', (el) => openMenu(el, pick.tlist.map((t) => ({ html: pk('', `<span class="a-tag ${tagColor(t.tag)}">${esc(t.tag)}</span>`, cnt(t.sessions + t.projects)), on: pick.tag === t.tag, testid: 'pick-tag-' + t.tag, run: () => go('sessions', { ...pick.keep, tag: t.tag }) }))));
 action('s-clear', () => { document.getElementById('find').value = ''; sq({ live: '', tag: '', pc: '', profile: '', harness: '', q: '', page: '' }); });
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
-action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); render(); });
+action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); show(); });
 action('go-live', () => go('sessions', { live: '1' }));
 action('go-apps', () => go('apps'));
 
@@ -230,6 +248,21 @@ view('session', async (sheet, params) => {
   if (tl) S.cache.tags = tl;
   if (!S.state) await loadState();
   if (rv.sessionKey !== key) { rv.sessionKey = key; rv.open = new Set(); rv.more = new Set(); rv.follow = !!t.meta.open; rv.mode = 'all'; }
+  read = { t, ss, params };
+  S.cache.transcript = t;
+  drawSession(sheet);
+  watchLive(t.meta);
+});
+
+// what the session page last read: unfolding a step, showing a long run in full or choosing All, Changes or Failed
+// only changes what is shown, so it draws from this again and asks the backend nothing
+let read = null;
+function showSession() {
+  const p = S.route.params;
+  if (read && S.route.view === 'session' && S.drawn === location.hash && read.params.profile === p.profile && read.params.id === p.id) drawSession(document.getElementById('sheet')); else render();
+}
+function drawSession(sheet) {
+  const { t, ss, params } = read;
   const m = t.meta, pcs = S.cache.computers;
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
   const changes = steps.filter((st) => st.change), failed = steps.filter((st) => st.status === 'error'), files = new Set(changes.map((st) => st.change.path)).size;
@@ -282,7 +315,6 @@ view('session', async (sheet, params) => {
     <section class="panel-card a-conv" data-testid="conv-panel" data-tour="conversation"><div class="panel-head"><h2 class="panel-title">Conversation<span class="muted">${plural(t.turns.length, 'turn')} · ${steps.length.toLocaleString()} steps · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed</span></h2>
         <span data-tour="modes">${seg('Show', [['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']], rv.mode, (v) => `data-act="rv-mode" data-v="${v}" data-testid="mode-${v}"`)}</span></div>
       <div class="a-chat" id="chat" data-testid="chat" tabindex="0" aria-label="Conversation; scroll to read">${body || '<div class="a-empty">This session has no messages yet.</div>'}<div class="a-toend" id="toend" hidden><button class="btn" data-act="follow-end" data-testid="follow-end">↓ Latest${m.open ? ' · follow live' : ''}</button></div></div></section></div>`);
-  S.cache.transcript = t;
   // a live session opens at its end, following; a redraw keeps the reader's place (patch), or the end while following
   const chat = document.getElementById('chat');
   if (rv.follow) chat.scrollTop = chat.scrollHeight;
@@ -290,8 +322,7 @@ view('session', async (sheet, params) => {
   const show = () => { document.getElementById('toend').hidden = atEnd(); };
   chat.onscroll = () => { rv.follow = atEnd(); show(); };
   show();
-  watchLive(m);
-});
+}
 
 // an open session redraws while its tool writes to it: the log file's size and time are checked every 2 s
 let liveTimer;
@@ -317,9 +348,9 @@ action('follow-end', () => {
   const chat = document.getElementById('chat');
   if (chat) chat.scrollTop = chat.scrollHeight;
 });
-action('more-steps', (el) => { rv.more.add(el.dataset.run); render(); });
-action('step-open', (el) => { const k = +el.dataset.k; if (rv.open.has(k)) rv.open.delete(k); else rv.open.add(k); render(); });
-action('rv-mode', (el) => { rv.mode = el.dataset.v; render(); });
+action('more-steps', (el) => { rv.more.add(el.dataset.run); showSession(); });
+action('step-open', (el) => { const k = +el.dataset.k; if (rv.open.has(k)) rv.open.delete(k); else rv.open.add(k); showSession(); });
+action('rv-mode', (el) => { rv.mode = el.dataset.v; showSession(); });
 const terminals = () => [
   { label: 'Open sessions in Windows Terminal', run: () => setTerminal('wt') },
   { label: 'Open sessions in a console window', run: () => setTerminal('console') },
