@@ -7,7 +7,7 @@
 // Invite a computer…, the recovery key dialogs (hub_join | hub_invite | ring_key_show | ring_key_enter), and the
 // first-run choice "Add this computer to your others". The dialogs are drawn as the reference draws them.
 
-import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate, redrawLive } from './core.js';
+import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate, redrawLive, shown } from './core.js';
 import { esc, dur } from './lib.js';
 
 const OFF = { mode: 'off', folder: '', this: null, peers: [], last_run: null, error: null };
@@ -85,8 +85,8 @@ document.addEventListener('rendered', () => { const c = S.cache.computers; (c &&
 // a 'presence' event lets a page redraw what moved (Running now, the computer cards) without drawing itself again
 let tick = 0;
 const live = () => !!((S.state && S.state.settings && S.state.settings.direct_connection) || (S.cache.computers || OFF).peers.some((p) => p.connected));
-setInterval(() => {
-  if (document.visibilityState !== 'visible' || (++tick % 6 && !live())) return;
+setInterval(async () => {
+  if (!(await shown()) || (++tick % 6 && !live())) return;
   computersStatus().then((c) => { drawChip(c); if (live()) document.dispatchEvent(new CustomEvent('presence', { detail: c })); }).catch(() => {});
 }, 10000);
 

@@ -285,6 +285,17 @@ try {
     await waitFor(async () => !(await exec("return document.getElementById('nav-pins').hidden")), 'and shown');
   });
 
+  // (here, before any other test opens Accounts: the report is made once, at the first launch)
+  await test('the first-run report is said on the first visit to Accounts, and only once', async () => {
+    await nav('#accounts');
+    await hasText('#toast', 'installed tools');
+    await nav('#home');
+    await nav('#accounts');
+    await $('[data-testid=accounts-table]');
+    await sleep(600);
+    assert.ok(!(await exec("return document.getElementById('notice').textContent")).includes('installed tools'), 'not said again');
+  });
+
   await test('accounts list shows the main profiles of installed tools', async () => {
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
@@ -1343,10 +1354,10 @@ description: Bulk skill ${i}
     await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
     assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).sync_mode, 'folder', 'saved in settings');
     await nav('#settings');
-    await $('[data-testid=sync-folder].on');
+    await $('[data-testid=sync-folder].active');
     await click('[data-testid=computers-now]');
     await waitFor(async () => (await text('[data-testid=computer-cards]')).includes('LAPTOP'), 'the other computer listed');
-    const cards = await exec(`return [...document.querySelectorAll('[data-testid=computer-cards] .dev')].map((d) => d.innerText.replace(/\\s+/g, ' '))`);
+    const cards = await exec(`return [...document.querySelectorAll('[data-testid=computer-cards] .b-computer')].map((d) => d.innerText.replace(/\\s+/g, ' '))`);
     assert.equal(cards.length, 2);
     assert.ok(/LAPTOP.*(windows|Windows).*1\.3\.2.*(heard|writing)/.test(cards[1]), cards[1]);
     assert.ok(fs.existsSync(path.join(sync, 'devices')) && fs.readdirSync(path.join(sync, 'devices')).length === 2, 'this computer wrote its own record beside the other');
@@ -1359,27 +1370,30 @@ description: Bulk skill ${i}
     assert.equal(chip.on, 2, 'both heard within three minutes');
     assert.equal(chip.text, '2 computers', chip.text);
     assert.ok(chip.names.some((n) => n.includes('LAPTOP')), 'the full name on hover: ' + chip.names);
-    // the Overview: the switch, both computers at the docks and in the legend, the Activity switch, the account's dots
+    // the Overview: the switch, the other computer's session under Running now with a chip per computer, the account's
+    // lane with a dot for the computer it runs on, the Activity switch and each computer's 53-week total
     await nav('#home');
     await $('[data-testid=scope]');
-    await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=routes] [data-node]').length")) > 0, 'the dial drawn');
-    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=routes] [data-node] title')].map((t) => t.textContent).join()")).includes('LAPTOP'), 'the other computer has a dock, named on hover');
-    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] a')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, two letters each with the name on hover');
+    await hasText('[data-testid=running-now]', '0 here · 1 elsewhere');
+    await hasText('[data-testid=running-now] .live-mini-list', 'LAPTOP');
+    assert.equal(await exec("return document.querySelectorAll('[data-testid=running-now] [data-act=home-live-pc]').length"), 3, 'All, and a chip per computer');
+    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=lane-claude-main] .pc-dots .pc-dot')].map((d) => d.title).join()")).includes('LAPTOP'), 'the account running there carries that computer\'s dot, named on hover');
+    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] button')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, with the name on hover');
+    await hasText('[data-testid=activity] .year-clock-pcs', 'LAPTOP');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
-    await $('[data-testid=routes] .lb[data-for="a:claude-main"] .pc');
     await shot('19c-overview-all-computers');
     await click('[data-testid=activity-pc-' + dev + ']');
-    await hasText('[data-testid=activity] .ph', 'LAPTOP');
+    await hasText('[data-testid=activity] .year-clock-center', 'LAPTOP');
     await click('[data-testid=scope-here]');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=scope] a.on')?.dataset.v")) === 'here', 'This computer picked');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=scope] button.active')?.dataset.v")) === 'here', 'This computer picked');
     assert.equal(await exec("return localStorage.getItem('hm.scope')"), 'here', 'remembered');
     await shot('19d-overview-this-computer');
     await click('[data-testid=scope-all]');
     // Sessions: the Computer column, the filter, and the session open on the other computer
     await nav('#sessions?days=all');
-    await $('[data-testid=session-laptop-s1] .pc');
-    assert.ok((await text('[data-testid=session-laptop-s1] .pc')).includes('LAPTOP'));
-    assert.ok((await text('[data-testid=session-s-main-1] .pc')).trim().length > 0, 'this computer named on its own session');
+    await $('[data-testid=session-laptop-s1] .a-pc');
+    assert.ok((await text('[data-testid=session-laptop-s1] .a-pc')).includes('LAPTOP'));
+    assert.ok((await text('[data-testid=session-s-main-1] .a-pc')).trim().length > 0, 'this computer named on its own session');
     await click('[data-testid=pc-' + dev + ']');
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=session-s-main-1]')")) && (await exec("return !!document.querySelector('[data-testid=session-laptop-s1]')")), 'only the other computer\'s sessions');
     await shot('19e-sessions-computer');
@@ -1552,13 +1566,16 @@ description: Bulk skill ${i}
       await click('[data-testid=computers-now]');
       await nav('#sessions?days=all');
       await waitFor(() => exec("return !!document.querySelector('[data-testid=session-laptop-s9]')"), 'the session from the second computer', 30000);
-      await hasText('[data-testid=session-laptop-s9] .pc', 'LAPTOP');
+      await hasText('[data-testid=session-laptop-s9] .a-pc', 'LAPTOP');
       await shot('42b-sessions-from-peer');
-      // Forget: a confirm, then the card is gone
+      // Forget: a confirm, then the pairing is gone, and with it the card's address field. The card goes too, unless
+      // a sync folder still knows the computer (the folder test above leaves one on): then it stays as a folder computer
       await nav('#settings');
+      await $(`[data-testid="addr-${id2}"]`);
       await click(`[data-testid=forget-${id2}]`);
       await click('#confirm-ok');
-      await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid=computer-${id2}]')`)), 'the card removed', 15000);
+      await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid="addr-${id2}"]')`)), 'no longer paired', 15000);
+      assert.ok(!/direct/.test(await exec(`return (document.querySelector('[data-testid=computer-${id2}] [data-testid=transport]') || { textContent: '' }).textContent`)), 'not reached directly any more');
       await shot('42c-forgotten');
     } finally { if (serve) serve.kill(); if (pair.exitCode === null) pair.kill(); }
   });
@@ -1693,7 +1710,7 @@ description: Bulk skill ${i}
       await click('[data-testid=ring-saved]');
       await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the key dialog closed');
       await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')"), 'the hub card chosen', 15000);
-      assert.ok((await text('[data-testid=hub-line]')).includes('joined'), 'the status line says joined');
+      assert.ok((await text('[data-testid=hub-line]')).includes('Joined'), 'the status line says Joined');
       assert.equal((await text('[data-testid=hub-url]')).trim(), hubUrl);
       assert.ok(await exec("return !!document.querySelector('[data-testid=ring-show]') && !!document.querySelector('[data-testid=hub-invite]')"), 'Show again and Invite a computer… are there');
       // Show again sits behind a confirm and shows the same key
@@ -1737,7 +1754,7 @@ description: Bulk skill ${i}
       await shot('55-hub-two-computers');
       await nav('#sessions?days=all');
       await waitFor(() => exec("return !!document.querySelector('[data-testid=session-hub-s5]')"), 'the session from the second computer', 30000);
-      await hasText('[data-testid=session-hub-s5] .pc', 'HUBPC');
+      await hasText('[data-testid=session-hub-s5] .a-pc', 'HUBPC');
       await shot('55b-sessions-from-hub');
       // a used code is refused; Stop syncing leaves the hub
       assert.throws(() => hrm3('hub', 'join', hubUrl, '--code', code), /did not accept/);
@@ -1889,6 +1906,170 @@ description: Bulk skill ${i}
     await $('[data-testid=s-more-claude]');
     await click('[data-testid=s-more-claude]');
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) > 60, 'every Claude Code session in the group');
+  });
+
+  // ---- safety (1.9.15) ----
+  // A redraw nobody asked for (a refresh, a poll) leaves alone what the reader is doing; a failure is said, not lost.
+  // `refreshed` is what the backend emits after each import and after each change the folder watcher sees.
+  const refreshed = () => exec("return window.__TAURI__.event.emit('refreshed', { new_rows: 0 })");
+  const renders = () => exec("if (window.__renders === undefined) { window.__renders = 0; document.addEventListener('rendered', () => window.__renders++); } return window.__renders");
+  const anAccount = () => JSON.parse(hrm('list', '--json'))[0].name;
+
+  await test('a background refresh keeps what was typed into a field that has lost the focus, and Save stores it', async () => {
+    const name = anAccount();
+    await nav(`#account?name=${name}&tab=settings`);
+    await $('#pf-email');
+    await page.fill('#pf-email', 'typed@example.com');
+    await page.press('#pf-email', 'Tab');
+    assert.notEqual(await exec('return document.activeElement.id'), 'pf-email', 'the field lost the focus');
+    const n = await renders();
+    await refreshed();
+    await waitFor(async () => (await renders()) > n, 'the background redraw', 15000);
+    assert.equal(await exec("return document.getElementById('pf-email').value"), 'typed@example.com', 'what was typed is still in the field');
+    await click('[data-act=save-email]');
+    await waitFor(() => JSON.parse(hrm('list', '--json')).find((p) => p.name === name).expected_email === 'typed@example.com', 'the typed email saved');
+    // moving to another account shows that account's own value, not the one typed here
+    await page.fill('#pf-label', 'Typed and left');
+    await page.press('#pf-label', 'Tab');
+    const other = JSON.parse(hrm('list', '--json')).find((p) => p.name !== name);
+    await nav(`#account?name=${other.name}&tab=settings`);
+    await waitFor(async () => (await text('[data-testid=detail-name]')).includes(other.label), 'the other account');
+    assert.equal(await exec("return document.getElementById('pf-label').value"), other.label, 'another page starts from its own values');
+  });
+
+  await test('Enter on a button inside a keyboard row presses the button, not the row', async () => {
+    await nav('#accounts');
+    await $('.acct-row [data-act=start]');
+    const name = await exec("return document.querySelector('.acct-row [data-act=start]').dataset.name");
+    const launches = () => readLines(termLog).filter((t) => JSON.stringify(t.args) === JSON.stringify(['run', name])).length;
+    const before = launches();
+    // the keyboard's way there: the row, then Tab to its Start
+    await page.focus(`[data-testid="row-${name}"]`);
+    for (let i = 0; i < 4 && (await exec('return document.activeElement.dataset.act')) !== 'start'; i++) await page.keyboard.press('Tab');
+    assert.equal(await exec('return document.activeElement.dataset.testid'), 'start-' + name, 'Tab reached the row\'s Start');
+    await page.keyboard.press('Enter');
+    await waitFor(async () => launches() === before + 1 || (await exec('return location.hash')) !== '#accounts', 'Enter did something');
+    assert.equal(await exec('return location.hash'), '#accounts', 'the page did not move to the account');
+    assert.equal(launches(), before + 1, 'the terminal log got the launch');
+    // the row itself still answers Enter
+    await page.focus(`[data-testid="row-${name}"]`);
+    await page.keyboard.press('Enter');
+    await waitFor(async () => (await exec('return location.hash')).startsWith('#account?name='), 'Enter on the row opens the account');
+  });
+
+  await test('Enter opens a Needs attention item, and a chosen filter chip says it is pressed', async () => {
+    // two tools with an update, as a check for updates leaves it: the Overview lists that under Needs attention
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => (a && a.op === 'state' ? { ...r, app_updates: 2 } : r)) };`);
+    try {
+      await nav('#accounts');
+      await nav('#home');
+      const item = '[data-testid=attention] .att-item[data-href="#apps"]';
+      await $(item);
+      await page.focus(item);
+      await page.keyboard.press('Enter');
+      await waitFor(async () => (await exec('return location.hash')) === '#apps', 'the Apps page opened');
+    } finally { await exec('window.__TAURI__.core = window.__core'); }
+    const pressed = (css) => exec('return [...document.querySelectorAll(arguments[0])].map((b) => b.getAttribute("aria-pressed"))', [css]);
+    await nav('#home');
+    await $('[data-testid=tool-all]');
+    assert.deepEqual([...new Set(await pressed('[data-act=home-tool]'))], ['true', 'false'], 'the Overview\'s tool chips: All pressed, the others not');
+    await nav('#accounts');
+    await $('[data-testid=chip-all]');
+    assert.deepEqual([...new Set(await pressed('[data-act=acct-tool]'))], ['true', 'false'], 'the Accounts tool chips: All pressed, the others not');
+  });
+
+  await test('a read that fails behind a page on screen leaves the page and says so in the notice bar', async () => {
+    const name = anAccount();
+    await nav(`#account?name=${name}&tab=settings`);
+    await $('#pf-email');
+    // the reads of this account fail while this is on, as a locked database would make them
+    const locked = (on) => exec(`const t = window.__TAURI__; window.__core ||= t.core;
+      t.core = arguments[0] ? { ...t.core, invoke: (cmd, a, o) => (a && a.op === 'detail' ? Promise.reject(new Error('the database is locked')) : window.__core.invoke(cmd, a, o)) } : window.__core;`, [on]);
+    const said = () => exec("return document.getElementById('notice').textContent.includes('the database is locked')");
+    await locked(true);
+    try {
+      await refreshed();
+      const shown = await waitFor(async () => ((await exec("return !!document.querySelector('#sheet [data-act=reload]')")) ? 'the error page' : (await said()) ? 'the notice' : ''), 'the failed read shown');
+      assert.equal(shown, 'the notice', 'the failure is in the notice bar');
+      assert.ok(await exec("return !!document.getElementById('pf-email')"), 'the page is still on screen');
+      // the read works again: the notice goes with the next redraw
+      await locked(false);
+      await refreshed();
+      await waitFor(async () => !(await said()), 'the notice gone once the page reads again');
+      // moving to a page whose read fails has no page to keep: the error page, with Try again
+      await locked(true);
+      await nav(`#account?name=${name}&tab=overview`);
+      await $('#sheet [data-act=reload]');
+    } finally { await locked(false); }
+    await click('#sheet [data-act=reload]');
+    await $('[data-testid=detail-name]');
+  });
+
+  await test('a menu item that fails says so in the notice bar', async () => {
+    await nav('#accounts');
+    await $('.acct-row [data-act=account-menu]');
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => (a && a.op === 'open_folder' ? Promise.reject(new Error('the folder is gone')) : window.__core.invoke(cmd, a, o)) };`);
+    try {
+      await click('.acct-row [data-act=account-menu]');
+      await page.click('.menu button:has-text("Open folder")');
+      await hasText('#notice', 'the folder is gone');
+    } finally { await exec('window.__TAURI__.core = window.__core'); }
+  });
+
+  await test('a project name being typed in place is not wiped by a background refresh', async () => {
+    await nav('#projects?days=all');
+    await click('[data-testid=project-cards] [data-act=project-rename]');
+    await page.fill('input.a-rename', 'Half typed');
+    await refreshed();
+    await sleep(6000); // a background redraw comes within four seconds, and its reads take a moment
+    assert.equal(await exec("return (document.querySelector('input.a-rename') || {}).value"), 'Half typed', 'the field is still open with what was typed');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return !!document.querySelector('input.a-rename')")), 'the rename closed');
+    await $('[data-testid=project-cards] .a-pcard');
+  });
+
+  await test('the Claude sign-in dialog is drawn again only when what it shows changes', async () => {
+    await nav('#accounts');
+    await click('[data-testid=add-account]');
+    await type('[data-testid=add-name]', 'steady-me');
+    await click('[data-testid=add-create]');
+    try {
+      await $('[data-testid=login-code]');
+      // focus outside the code field (inside it, the dialog was always left alone)
+      await page.focus('#lg-cancel');
+      await exec("window.__lg = document.getElementById('lg-cancel')");
+      await sleep(2500); // two answers of the sign-in poll
+      assert.ok(await exec('return window.__lg.isConnected && document.activeElement === window.__lg'), 'the same dialog, the focus where it was');
+      await click('.dlg .dh [data-act=dialog-close]');
+    } finally { hrm('remove', 'steady-me', '--delete-home'); }
+    await nav('#home');
+    await nav('#accounts');
+  });
+
+  await test('hidden in the tray, the window draws nothing; shown again, it catches up', async () => {
+    const win = (call) => exec(`return window.__TAURI__.window.getCurrentWindow().${call}`);
+    await nav('#accounts');
+    await $('[data-testid=accounts-table]');
+    await win('close()'); // what the title bar's X does
+    // what the tray icon does: show the window and give it the focus
+    const show = () => exec("return window.__TAURI__.core.invoke('call', { op: 'open_main', args: {} })");
+    let n;
+    try {
+      await waitFor(async () => (await win('isVisible()')) === false, 'hidden');
+      // (WebView2 goes on calling a page hidden this way visible, so the app asks the window instead)
+      await sleep(5000); // a redraw already on its way when the window hid ends
+      n = await renders();
+      await refreshed();
+      await sleep(6000);
+      assert.equal(await renders(), n, 'no redraw while hidden');
+    } finally { await show(); }
+    // the focus the tray's show gives the window is the app's sign that it is back; Windows does not always give it
+    // to a window a test shows, so the pointer moves over the window too, the app's other sign
+    await page.mouse.move(400, 300);
+    await page.mouse.move(420, 320);
+    await waitFor(async () => (await renders()) > n, 'the redraw that waited, once the window shows', 15000);
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
