@@ -12,5 +12,5 @@ pub static OMP: PiLike = PiLike {
     binary: "omp",
     home_dir: ".omp/agent",
     resume_flag: "--resume",
-    caps: Caps { parallel_accounts: true, subscription_login: true, api_key: false, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false },
+    caps: Caps { parallel_accounts: true, api_key: false, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false },
 };

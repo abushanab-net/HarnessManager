@@ -13,7 +13,7 @@ use crate::util::write_atomic;
 pub struct Settings {
     /// Absolute path of profiles.json; empty means `<data>/profiles.json`.
     pub registry_path: String,
-    /// "wt" (Windows Terminal), "powershell" or "cmd".
+    /// "wt" (Windows Terminal) or "console" (the classic console window).
     pub terminal: String,
     pub refresh_minutes: u32,
     /// With live limits on, read a Claude account's limits from Anthropic when its cached ones are older than this.
@@ -38,10 +38,6 @@ pub struct Settings {
     pub log_enabled: bool,
     /// "error", "warn" or "info".
     pub log_level: String,
-    /// Overview: the goal for the time to a first reply, 95% of replies within this many seconds.
-    pub first_reply_goal_s: u32,
-    /// Overview: the efficiency score, level and next best moves.
-    pub game_layer: bool,
     /// Overview: particles moving along the live routes; off: a still picture.
     pub moving_routes: bool,
     /// Projects shown in the sidebar, by key, in this order.
@@ -52,7 +48,7 @@ pub struct Settings {
     pub device_name: String,
     /// Made once per fresh database: a restore keeps `device_id` and starts a new incarnation.
     pub incarnation: String,
-    /// "off", "folder" (a shared folder) or "hub" (a hub you host; later).
+    /// "off", "folder" (a shared folder) or "hub" (a hub you host).
     pub sync_mode: String,
     /// The shared folder, absolute, when `sync_mode` is "folder".
     pub sync_folder: String,
@@ -82,7 +78,7 @@ impl Default for Settings {
         Settings { registry_path: String::new(), terminal: "wt".into(), refresh_minutes: 5, quota_max_age_minutes: 10, router_port: 15731,
             close_to_tray: true, check_updates_at_launch: false, theme: "system".into(), brand: "hm".into(), quota_display: "left".into(), hidden_tools: vec![],
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
-            first_reply_goal_s: 20, game_layer: true, moving_routes: true, pinned_projects: vec![],
+            moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
             hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
             archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false }
@@ -145,5 +141,26 @@ impl Ctx {
 
     pub fn save_settings(&self) -> Result<()> {
         write_atomic(&self.data.join("settings.json"), serde_json::to_string_pretty(&self.settings)?.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_settings_file_with_keys_no_longer_known_still_loads() {
+        let t = tempfile::tempdir().unwrap();
+        let data = t.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        // written by 1.9.16 and before: the two Overview settings that changed nothing
+        std::fs::write(data.join("settings.json"), r#"{"terminal": "console", "first_reply_goal_s": 20, "game_layer": true, "moving_routes": false}"#).unwrap();
+        let ctx = Ctx::open_at(&data, &t.path().join("home")).unwrap();
+        assert_eq!(ctx.settings.terminal, "console");
+        assert!(!ctx.settings.moving_routes);
+        // the ids made on this first open are saved: the file is written again without the old keys, and loads again
+        let saved = std::fs::read_to_string(data.join("settings.json")).unwrap();
+        assert!(!saved.contains("game_layer") && !saved.contains("first_reply_goal_s"), "{saved}");
+        assert_eq!(Ctx::open_at(&data, &t.path().join("home")).unwrap().settings.terminal, "console");
     }
 }

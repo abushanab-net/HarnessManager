@@ -10,13 +10,12 @@ use crate::util::which;
 
 /// Everything needed to start a harness for one profile. Secrets go in `env_set` only inside the
 /// `hrm run` process, never on a command line.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Clone, Default)]
 pub struct LaunchSpec {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub env_set: Vec<(String, String)>,
     pub env_unset: Vec<String>,
-    pub cwd: Option<PathBuf>,
 }
 
 impl LaunchSpec {
@@ -28,9 +27,6 @@ impl LaunchSpec {
         }
         for (k, v) in &self.env_set {
             c.env(k, v);
-        }
-        if let Some(d) = &self.cwd {
-            c.current_dir(d);
         }
         c
     }

@@ -10,10 +10,9 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
-use crate::harness::{self, Harness};
+use crate::harness;
 use crate::model::{SessionMeta, Transcript};
 use crate::projects::Resolver;
-use crate::registry::Profile;
 use crate::util::{now_ms, sha256_hex, walk_files, write_atomic};
 use crate::Ctx;
 
@@ -57,11 +56,10 @@ fn rel_path(s: &SessionMeta) -> PathBuf {
 fn archivable(harness: &str) -> bool { matches!(harness, "claude" | "codex" | "pi" | "omp") }
 
 /// One session into every root, verified, then out of the tool's folder and into the table. Returns the bytes of a copy.
-fn archive_one(ctx: &Ctx, h: &dyn Harness, p: &Profile, s: &SessionMeta, roots: &[PathBuf]) -> Result<i64> {
-    let files = h.archive_paths(ctx, p, s);
-    let src = files.first().context("no transcript file")?;
+fn archive_one(ctx: &Ctx, s: &SessionMeta, roots: &[PathBuf]) -> Result<i64> {
+    let src = PathBuf::from(&s.source_path);
     // Codex keeps older rollouts compressed already: every archive copy is zstd of the log itself, as the folder carries it
-    let packed = zstd::encode_all(harness::parse::read_text(src)?.as_bytes(), 3).context("compress the transcript")?;
+    let packed = zstd::encode_all(harness::parse::read_text(&src)?.as_bytes(), 3).context("compress the transcript")?;
     let sha = sha256_hex(&packed);
     let rel = rel_path(s);
     let mut meta = s.clone();
@@ -80,9 +78,7 @@ fn archive_one(ctx: &Ctx, h: &dyn Harness, p: &Profile, s: &SessionMeta, roots: 
         first.get_or_insert(out);
     }
     let first = first.context("no archive location")?;
-    for f in &files {
-        if f.is_file() { std::fs::remove_file(f).with_context(|| format!("remove {}", f.display()))?; }
-    }
+    if src.is_file() { std::fs::remove_file(&src).with_context(|| format!("remove {}", src.display()))?; }
     meta.source_path = first.display().to_string();
     let key = crate::db::session_key(s);
     ctx.db.with(|c| {
@@ -124,7 +120,7 @@ pub fn run(ctx: &Ctx, days: u32) -> Result<Value> {
             let info = res.resolve(&s.cwd);
             s.project_key = info.key;
             s.project_name = info.name;
-            match archive_one(ctx, h, p, &s, &roots) {
+            match archive_one(ctx, &s, &roots) {
                 Ok(b) => { n += 1; bytes += b; }
                 Err(e) => crate::log::warn(&format!("archive: {}/{}/{}: {e:#}", s.harness, s.profile, s.id)),
             }
@@ -149,36 +145,13 @@ pub fn daily(ctx: &Ctx) -> Result<()> {
     run(ctx, ctx.settings.archive_days).map(|_| ())
 }
 
-/// The archived sessions, every computer's, as session rows: `archived`, the computer, and (from another computer)
-/// why they cannot be resumed.
-pub fn sessions(ctx: &Ctx) -> Vec<SessionMeta> {
-    let names = crate::journal::device_names(ctx);
-    let rows: Vec<(String, String)> = ctx.db.with(|c| {
-        tables(c)?;
-        let mut st = c.prepare("select device, json from archived")?;
-        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-        Ok(v)
-    }).unwrap_or_default();
-    rows.into_iter().filter_map(|(dev, j)| {
-        let mut m: SessionMeta = serde_json::from_str(&j).ok()?;
-        m.archived = true;
-        m.open = false;
-        m.open_elsewhere = false;
-        m.device_name = names.get(&dev).cloned().unwrap_or_else(|| dev.clone());
-        m.resumable = (dev != ctx.db.device).then(|| json!(REFUSAL));
-        m.device = dev;
-        Some(m)
-    }).collect()
-}
-
 /// A session of this account and id is in the archive.
 pub fn is_archived(ctx: &Ctx, profile: &str, id: &str) -> bool {
     ctx.db.with(|c| { tables(c)?; Ok(c.prepare("select 1 from archived where profile=? and id=?")?.exists([profile, id])?) }).unwrap_or(false)
 }
 
 /// The archived copy, through the same parser the tool's own sessions use.
-pub fn transcript(ctx: &Ctx, s: &SessionMeta) -> Result<Transcript> {
-    let _ = ctx;
+pub fn transcript(s: &SessionMeta) -> Result<Transcript> {
     let path = Path::new(&s.source_path);
     let text = harness::parse::read_text(path).with_context(|| format!("read the archived copy {}", path.display()))?;
     let mut t = match s.harness.as_str() {
@@ -212,7 +185,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::Kind;
+    use crate::registry::{Kind, Profile};
 
     fn profile(name: &str, harness: &str) -> Profile {
         Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }

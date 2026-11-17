@@ -441,13 +441,6 @@ impl Db {
         })
     }
 
-    pub fn session_cached(&self, key: &str, mtime: i64, len: i64) -> Result<Option<SessionMeta>> {
-        self.with(|c| {
-            let s: Option<String> = c.query_row("select json from sessions where key=? and mtime=? and len=?", params![key, mtime, len], |r| r.get(0)).optional()?;
-            Ok(s.and_then(|s| serde_json::from_str(&s).ok()))
-        })
-    }
-
     /// The cached records of one account's session files, by key: one query instead of one per file.
     pub fn sessions_cached_for(&self, prefix: &str) -> Result<std::collections::HashMap<String, (i64, i64, SessionMeta)>> {
         self.with(|c| {
@@ -540,23 +533,6 @@ impl Db {
             let mut st = c.prepare("select tag, sum(kind='session'), sum(kind='project') from tags group by tag order by min(rowid)")?;
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(v)
-        })
-    }
-
-    /// Rename a tag everywhere; an empty new name deletes it.
-    pub fn tag_rename(&self, from: &str, to: &str) -> Result<()> {
-        self.with(|c| {
-            let tx = c.transaction()?;
-            // the journal carries whole tag lists per key: note which keys change before the old tag is gone
-            let keys: Vec<(String, String)> = if self.journal { tx.prepare("select distinct kind, key from tags where tag=?")?.query_map([from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()? } else { vec![] };
-            if to.is_empty() { tx.execute("delete from tags where tag=?", [from])?; }
-            else { tx.execute("insert or ignore into tags select kind, key, ?2 from tags where tag=?1", [from, to])?; tx.execute("delete from tags where tag=?", [from])?; }
-            for (kind, key) in keys {
-                let tags: Vec<String> = tx.prepare("select tag from tags where kind=? and key=? order by rowid")?.query_map([&kind, &key], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-                crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?;
-            }
-            tx.commit()?;
-            Ok(())
         })
     }
 

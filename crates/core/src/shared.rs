@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::util::write_atomic;
-use crate::Ctx;
 
 /// Folders linked to the main profile. `projects/` is deliberately not linked, so usage stays per account.
 pub const LINKED: &[&str] = &["skills", "commands", "agents", "plugins", "rules", "output-styles"];
@@ -16,15 +15,6 @@ pub const LINKED: &[&str] = &["skills", "commands", "agents", "plugins", "rules"
 /// Settings that point at a login or another home; never mirrored into a profile.
 const STRIP_ENV: &[&str] = &["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN"];
 const STRIP_KEYS: &[&str] = &["apiKeyHelper", "forceLoginMethod", "forceLoginOrgUUID"];
-
-#[derive(Debug, Default, Serialize)]
-pub struct SyncReport {
-    pub linked: Vec<String>,
-    /// Folders the profile already has with its own content; left alone.
-    pub kept: Vec<String>,
-    pub settings_keys: usize,
-    pub mcp_servers: usize,
-}
 
 #[derive(Default, Serialize, Deserialize)]
 struct MirrorState {
@@ -88,25 +78,22 @@ fn read_obj(path: &Path) -> Result<Option<Map<String, Value>>> {
 }
 
 /// Bring one Claude profile home in step with the main profile. Safe to run again at any time.
-pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) -> Result<SyncReport> {
-    let mut rep = SyncReport::default();
+pub fn sync_claude(main_home: &Path, main_json: &Path, prof: &Path) -> Result<()> {
     std::fs::create_dir_all(prof)?;
 
     for d in LINKED {
         let src = main_home.join(d);
         let dst = prof.join(d);
         if !src.is_dir() || is_link(&dst) {
-            if is_link(&dst) { rep.linked.push(d.to_string()); }
             continue;
         }
         let empty = std::fs::read_dir(&dst).map(|mut r| r.next().is_none()).unwrap_or(false);
+        // a folder the profile already has with its own content: left alone
         if dst.exists() && !empty {
-            rep.kept.push(d.to_string());
             continue;
         }
         if empty { std::fs::remove_dir(&dst)?; }
         link_dir(&src, &dst)?;
-        rep.linked.push(d.to_string());
     }
 
     // CLAUDE.md: one import line, unless the profile wrote its own
@@ -143,7 +130,7 @@ pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) 
         let fresh = cur.is_none() && base.is_none();
         if cur != base && !fresh { continue; }
         match main_settings.get(&k) {
-            Some(v) => { if cur != Some(v) { own.insert(k.clone(), v.clone()); changed = true; } rep.settings_keys += 1; }
+            Some(v) => { if cur != Some(v) { own.insert(k.clone(), v.clone()); changed = true; } }
             None => { if own.remove(&k).is_some() { changed = true; } }
         }
     }
@@ -163,7 +150,7 @@ pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) 
     let pj_sig = crate::util::file_sig(&pj_path);
     let pj_read = read_obj(&pj_path)?;
     // an existing file that reads as empty may be one Claude Code is about to write again: leave it this time
-    if pj_read.is_none() && pj_path.exists() { return Ok(rep); }
+    if pj_read.is_none() && pj_path.exists() { return Ok(()); }
     let mut pj = pj_read.unwrap_or_else(|| {
         let mut m = Map::new();
         m.insert("hasCompletedOnboarding".into(), Value::Bool(true));
@@ -189,8 +176,7 @@ pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) 
     for name in &state.mcp {
         if !main_mcp.contains_key(name) && servers.get(name).map(|cur| ours(name, cur)).unwrap_or(false) { servers.remove(name); }
     }
-    rep.mcp_servers = written.len();
-    if crate::util::file_sig(&pj_path) != pj_sig { return Ok(rep); } // Claude Code wrote it meanwhile: next time
+    if crate::util::file_sig(&pj_path) != pj_sig { return Ok(()); } // Claude Code wrote it meanwhile: next time
     if servers != before || !pj_path.exists() {
         pj.insert("mcpServers".into(), Value::Object(servers));
         write_atomic(&pj_path, serde_json::to_string_pretty(&Value::Object(pj))?.as_bytes())?;
@@ -198,7 +184,7 @@ pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) 
     state.mcp = written;
     state.mcp_cfg = written_cfg;
     write_atomic(&state_path, serde_json::to_string_pretty(&state)?.as_bytes())?;
-    Ok(rep)
+    Ok(())
 }
 
 /// Claude Code uses an API key from the environment only when the key's last 20 characters are listed under

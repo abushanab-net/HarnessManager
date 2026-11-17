@@ -14,3 +14,6 @@ docs/design-committee-2026-11/round1/designs/*/screenshots/
 docs/design-committee-2026-11/round2/app/screenshots*/
 docs/design-committee-2026-11/round2/app/review/
 docs/design-committee-2026-11/round2/app/review.html
+.env
+/.claude/
+/app/.astryx-proto/

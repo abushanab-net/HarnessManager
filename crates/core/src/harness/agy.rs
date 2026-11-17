@@ -159,7 +159,7 @@ impl Harness for Agy {
     fn id(&self) -> &'static str { "agy" }
     fn label(&self) -> &'static str { "Antigravity" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: false, subscription_login: true, api_key: false, quota: true, usage: false, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
+        Caps { parallel_accounts: false, api_key: false, quota: true, usage: false, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
     }
     fn binary(&self) -> &'static str { "agy" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { self.root(ctx) }

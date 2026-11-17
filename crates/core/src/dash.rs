@@ -1,5 +1,5 @@
-//! Overview: a period's numbers beside the period before, small trends, reply timing, the usage mix, limit
-//! forecasts from the reading history, live rates on each route, and the score of the game layer.
+//! Overview: a period's numbers beside the period before, small trends, limit forecasts from the reading
+//! history, and live rates on each route.
 
 use std::collections::{HashMap, HashSet};
 
@@ -75,29 +75,23 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&st
     let caps = caps(ctx, &reg);
     let h = harness.unwrap_or("");
     let dev = if scope == Some("here") { ctx.db.device.as_str() } else { "" };
-    type Row = (i64, String, String, String, i64, i64, i64, i64, Option<i64>, Option<f64>, String);
+    type Row = (i64, String, i64, i64, i64, i64, Option<i64>, Option<f64>, String);
     let rows: Vec<Row> = ctx.db.read(|c| {
-        let mut st = c.prepare("select ts, model, profile, project, input, output, cache_read, cache_write, ttft_ms, cost_usd, device from usage where ts >= ?1 and (?2 = '' or harness = ?2) and (?3 = '' or device = ?3)")?;
-        let v = st.query_map(rusqlite::params![since - span, h, dev], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?)))?
+        let mut st = c.prepare("select ts, profile, input, output, cache_read, cache_write, ttft_ms, cost_usd, device from usage where ts >= ?1 and (?2 = '' or harness = ?2) and (?3 = '' or device = ?3)")?;
+        let v = st.query_map(rusqlite::params![since - span, h, dev], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))?
             .collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
     let (mut cur, mut prev) = (Agg::default(), Agg::default());
     let mut spark = vec![Agg::default(); BUCKETS];
-    let mut mix: HashMap<(&str, String), (i64, f64)> = HashMap::new();
     let mut by_device: HashMap<&str, Agg> = HashMap::new();
-    for (ts, model, profile, project, i, o, cr, cw, ttft, cost, device) in &rows {
+    for (ts, profile, i, o, cr, cw, ttft, cost, device) in &rows {
         let b = billed.contains(profile.as_str());
         if *ts < since { prev.add(*cost, b, *i, *o, *cr, *cw, *ttft); continue; }
         cur.add(*cost, b, *i, *o, *cr, *cw, *ttft);
         by_device.entry(device.as_str()).or_default().add(*cost, b, *i, *o, *cr, *cw, *ttft);
         let k = (((ts - since) * BUCKETS as i64) / span).clamp(0, BUCKETS as i64 - 1) as usize;
         spark[k].add(*cost, b, *i, *o, *cr, *cw, *ttft);
-        for key in [("account", profile.clone()), ("model", model.clone()), ("project", project_name(project))] {
-            let e = mix.entry(key).or_default();
-            e.0 += i + o + cr + cw;
-            e.1 += cost.unwrap_or(0.0);
-        }
     }
     // the four tiles split by computer: [{id, name, value}] each, biggest first
     let names = crate::journal::device_names(ctx);
@@ -108,24 +102,9 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&st
     };
     let tiles = json!({"tokens": tile(&|a| json!(a.tokens)), "requests": tile(&|a| json!(a.requests)), "cost": tile(&|a| json!(a.priced.then_some(a.cost))), "hit": tile(&|a| json!(a.hit()))});
 
-    // time to first reply: 16 bars from 0 to a little past the goal or the p95, whichever is later
-    let goal = ctx.settings.first_reply_goal_s.max(1) as i64 * 1000;
-    let cur_json = cur.json();
-    let p95 = cur_json["p95"].as_i64().unwrap_or(0);
-    let top = ((goal * 3 / 2).max(p95 * 5 / 4).max(2000) + 999) / 1000 * 1000;
-    let mut hist = vec![0i64; 16];
-    for t in &cur.ttft { hist[((t * 16) / top).clamp(0, 15) as usize] += 1; }
-    let within = cur.ttft.iter().filter(|t| **t <= goal).count();
-
-    let mixes: serde_json::Map<String, Value> = ["account", "model", "project"].iter().map(|kind| {
-        let mut v: Vec<(&String, &(i64, f64))> = mix.iter().filter(|((k, _), _)| k == kind).map(|((_, n), x)| (n, x)).collect();
-        v.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
-        (kind.to_string(), json!(v.iter().take(6).map(|(n, (t, c))| json!({"key": n, "tokens": t, "cost": c})).collect::<Vec<_>>()))
-    }).collect();
-
     let sparks: Vec<Value> = spark.iter_mut().map(|a| a.json()).collect();
     Ok(json!({
-        "now": now, "hours": hours, "cur": cur_json, "prev": prev.json(),
+        "now": now, "hours": hours, "cur": cur.json(), "prev": prev.json(),
         "spark": {
             "tokens": sparks.iter().map(|s| s["tokens"].clone()).collect::<Vec<_>>(),
             "requests": sparks.iter().map(|s| s["requests"].clone()).collect::<Vec<_>>(),
@@ -133,14 +112,9 @@ pub fn dashboard(ctx: &Ctx, hours: i64, harness: Option<&str>, scope: Option<&st
             "hit": sparks.iter().map(|s| s["hit"].clone()).collect::<Vec<_>>(),
             "p95": sparks.iter().map(|s| s["p95"].clone()).collect::<Vec<_>>(),
         },
-        "latency": {"hist": hist, "top_ms": top, "goal_ms": goal, "within": within},
-        "mix": mixes,
         "tiles": tiles,
         "forecast": forecasts(ctx, now)?,
         "live": live(ctx, now)?,
-        "events": ctx.db.events(8)?,
-        "game": game(ctx, now)?,
-        "fleet": fleet(ctx),
         "caps": caps,
     }))
 }
@@ -271,36 +245,6 @@ pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
         let breakers: serde_json::Map<String, Value> = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok()).filter_map(|(p, v)| serde_json::from_str(&v).ok().map(|v| (p, v))).collect();
         Ok(json!({"window_ms": LIVE_MS, "accounts": accounts, "providers": providers, "breakers": breakers, "running": running}))
-    })
-}
-
-/// Experience from use (a point a reply, ten a day used), and the days since a limit last ran out.
-fn game(ctx: &Ctx, now: i64) -> Result<Value> {
-    ctx.db.read(|c| {
-        let (replies, days): (i64, i64) = c.query_row("select count(*), count(distinct day) from usage", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        let first: Option<i64> = c.query_row("select min(ts) from quota_hist", [], |r| r.get(0))?;
-        let last_hit: Option<i64> = c.query_row("select max(ts) from quota_hist where used >= 99.5", [], |r| r.get(0))?;
-        let streak = last_hit.or(first).map(|t| (now - t) / 86_400_000);
-        Ok(json!({"xp": replies + 10 * days, "streak_days": streak, "since_hit": last_hit.is_some()}))
-    })
-}
-
-/// Health of the parts around the tools: tool updates, the last backup, and errors in today's log.
-fn fleet(ctx: &Ctx) -> Value {
-    let apps = ctx.db.kv_get("apps:latest").ok().flatten().and_then(|v| serde_json::from_str::<Value>(&v).ok());
-    let backup = crate::backup::list(ctx).into_iter().next();
-    // shortcut: reads the whole log; it stays small (warnings only by default), page it if that changes
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let log = std::fs::read_to_string(crate::log::file(&ctx.data)).unwrap_or_default();
-    let errors = log.lines().filter(|l| l.starts_with(&today) && l.contains(" ERROR ")).count();
-    json!({
-        "apps": apps,
-        "backup": backup.map(|b| json!({"at": b.at, "size": b.size})),
-        "backups": crate::backup::list(ctx).len(),
-        "log_errors_today": errors,
-        "log_enabled": ctx.settings.log_enabled,
-        "sync": ctx.db.kv_get("sync:last").ok().flatten().and_then(|v| serde_json::from_str::<Value>(&v).ok()),
-        "self": ctx.db.kv_get("self:latest").ok().flatten().and_then(|v| serde_json::from_str::<Value>(&v).ok()),
     })
 }
 

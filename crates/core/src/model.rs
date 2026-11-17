@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize)]
 pub struct Caps {
     pub parallel_accounts: bool,
-    pub subscription_login: bool,
     pub api_key: bool,
     pub quota: bool,
     pub usage: bool,
@@ -115,11 +114,9 @@ pub struct SessionMeta {
     pub project_name: String,
     #[serde(default)]
     pub open: bool,
-    /// The session's own tags, and the tags of its project (which it inherits in filters).
+    /// The session's own tags.
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub project_tags: Vec<String>,
     /// The computer it ran on, by id and name; `open_elsewhere`: a console on another computer is in it now.
     #[serde(default)]
     pub device: String,

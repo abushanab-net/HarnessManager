@@ -37,7 +37,7 @@ pub fn default_ps_registry(ctx: &Ctx) -> PathBuf {
 
 /// Import `{accounts:[{name,email}], apiKeys:[{name,computer,key}]}` from the PowerShell launcher.
 /// Its account folders (`~/.claude-<name>`) are the same ones Harness Manager uses, so logins carry over.
-pub fn import_powershell(_ctx: &Ctx, reg: &mut Registry, path: &Path, rep: &mut ImportReport) -> Result<()> {
+pub fn import_powershell(reg: &mut Registry, path: &Path, rep: &mut ImportReport) -> Result<()> {
     let Some(v) = read_json(path) else { anyhow::bail!("could not read {}", path.display()) };
     for a in v["accounts"].as_array().cloned().unwrap_or_default() {
         let Some(name) = a["name"].as_str() else { continue };
@@ -82,7 +82,7 @@ pub fn first_run(ctx: &Ctx) -> Result<Option<ImportReport>> {
     detect_main_profiles(ctx, &mut reg, &mut rep);
     let ps = default_ps_registry(ctx);
     if ps.exists() {
-        if let Err(e) = import_powershell(ctx, &mut reg, &ps, &mut rep) { rep.skipped.push(format!("{e:#}")); }
+        if let Err(e) = import_powershell(&mut reg, &ps, &mut rep) { rep.skipped.push(format!("{e:#}")); }
     }
     ctx.save_registry(&reg)?;
     for p in &reg.profiles {

@@ -66,8 +66,8 @@ const PAGE_CALLS: &[&str] = &["state", "home", "today", "projects"];
 const PAGE_FRESH: Duration = Duration::from_secs(10);
 /// Calls that change nothing the pages show. Any other call (a change, a login, a refresh) drops what was kept,
 /// so the page drawn after it is computed fresh.
-const NO_CHANGE: &[&str] = &["state", "home", "today", "projects", "dash", "live", "requests", "usage", "sessions", "detail", "items",
-    "self_latest", "sync_last", "mcp_last_import", "computers_status", "transcripts_status", "archive_status", "hub_status", "account_stats",
+const NO_CHANGE: &[&str] = &["state", "home", "today", "projects", "requests", "usage", "sessions", "detail", "items",
+    "self_latest", "sync_last", "mcp_last_import", "computers_status", "transcripts_status", "archive_status", "account_stats",
     "session_stats", "limits_extra", "routing", "backups", "tag_list", "transcript", "file_stamp", "skill_check", "discover", "prompt_live",
     "open_folder", "open_url", "show_window", "export_markdown"];
 
@@ -192,12 +192,12 @@ fn sync_soft(ctx: &Ctx) -> Value {
 
 /// Operations that never change the registry; they can be slow (network, terminals), so they run without its lock.
 const READS: &[&str] = &["state", "detail", "start", "open_folder", "open_url", "export_markdown", "show_window", "login_start", "login_submit",
-    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "dash", "live", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "tag_rename", "transcript", "file_stamp", "resume",
+    "login_poll", "login_cancel", "login_terminal", "refresh", "home", "requests", "today", "usage", "sessions", "projects", "tag_set", "tag_list", "transcript", "file_stamp", "resume",
     "items", "skill_check", "discover", "apps", "apps_latest", "app_update", "app_install", "app_remove_copy", "app_uninstall", "autostart_set", "backups", "backup_export", "log_open", "prompt_live", "routing", "router_start", "router_stop", "live_quota_set",
     "limits_extra", "account_stats", "session_stats", "sync_last", "self_latest", "mcp_last_import", "usage_csv", "computers_status", "computers_now",
     "computers_pair_start", "computers_pair_cancel", "computers_pair_join", "computers_forget", "computers_set_peer",
-    "session_resume_here", "session_fetch", "transcripts_status",
-    "hub_join", "hub_leave", "hub_invite", "hub_status", "ring_key_show", "ring_key_enter",
+    "session_resume_here", "transcripts_status",
+    "hub_join", "hub_leave", "hub_invite", "ring_key_show", "ring_key_enter",
     "restore_preview", "restore_welcome", "archive_status", "archive_now"];
 
 fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
@@ -333,10 +333,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows},
                    "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h, scope)?, "activity": service::activity(ctx, h, scope)?})
         }
-        // the sidebar's readouts: tokens, cost and the cache share for the range, every tool
-        "dash" => hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(0), None, a["scope"].as_str())?,
-        // the last five minutes of traffic, here and on the other computers
-        "live" => { let now = hrm_core::util::now_ms(); json!({"now": now, "live": hrm_core::dash::live(ctx, now)?}) }
         "requests" => {
             let since = a["hours"].as_i64().map(hrm_core::util::since_hours);
             let (total, rows) = service::request_log_since(ctx, a["days"].as_i64(), since, a["harness"].as_str().filter(|s| !s.is_empty()), a["scope"].as_str(), a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
@@ -406,7 +402,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "tag_list" => json!(ctx.db.tag_list()?.into_iter().map(|(t, s, p)| json!({"tag": t, "sessions": s, "projects": p})).collect::<Vec<_>>()),
-        "tag_rename" => { ctx.db.tag_rename(&s(a, "from")?, a["to"].as_str().unwrap_or("").trim())?; json!(true) }
         // pin or unpin a project in the sidebar
         "project_pin" => {
             let key = s(a, "key")?;
@@ -433,13 +428,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             }).collect();
             json!({"mcp": reg.mcp, "skills": reg.skills, "skill_info": info, "unmanaged": unmanaged, "skill_repos": items::skill_repos(&reg), "prompts": reg.prompts, "targets": reg.targets, "skill_store": store,
                    "profiles": reg.profiles.iter().map(|p| json!({"name": p.name, "harness": p.harness})).collect::<Vec<_>>()})
-        }
-        "mcp_add" => {
-            let mut reg = ctx.registry()?;
-            let server: McpServer = serde_json::from_value(a["server"].clone())?;
-            items::add_mcp(&mut reg, server)?;
-            ctx.save_registry(&reg)?;
-            sync_items(ctx)?
         }
         "item_remove" => {
             let mut reg = ctx.registry()?;
@@ -491,12 +479,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "self_latest" => ctx.db.kv_get("self:latest")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).filter(|v| v["current"] == env!("CARGO_PKG_VERSION")).unwrap_or(Value::Null),
         "sync_last" => ctx.db.kv_get("sync:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null),
         "mcp_last_import" => ctx.db.kv_get("mcp:last_import")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null),
-        "mcp_import" => {
-            let mut reg = ctx.registry()?;
-            let (added, kept) = items::import_mcp(ctx, &mut reg, &s(a, "harness")?)?;
-            ctx.save_registry(&reg)?;
-            json!({"added": added, "kept": kept})
-        }
         "skill_install" => {
             let mut reg = ctx.registry()?;
             let sk = items::install_skill(ctx, &mut reg, &s(a, "source")?, opt(a, "name").as_deref())?;
@@ -757,7 +739,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let mut reg = ctx.registry()?;
             let mut rep = hrm_core::import::ImportReport::default();
             let path = opt(a, "path").map(PathBuf::from).unwrap_or_else(|| hrm_core::import::default_ps_registry(ctx));
-            hrm_core::import::import_powershell(ctx, &mut reg, &path, &mut rep)?;
+            hrm_core::import::import_powershell(&mut reg, &path, &mut rep)?;
             ctx.save_registry(&reg)?;
             for p in &reg.profiles { let _ = harness::of(p).prepare(ctx, p); }
             json!(rep)
@@ -771,10 +753,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         }
         // resume here (phase 3): a session from another computer as a fork in this computer's clone
         "session_resume_here" => hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?, opt(a, "cwd").map(PathBuf::from).as_deref())?,
-        "session_fetch" => {
-            let t = hrm_core::transcripts::fetch(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?)?;
-            json!({"path": t.path, "bytes": t.bytes})
-        }
         "transcripts_status" => hrm_core::transcripts::status(ctx)?,
         // the hub (phase 5): joining with a code or the admin token, inviting, leaving, the recovery key
         "hub_join" | "hub_leave" => {
@@ -784,7 +762,6 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }
         }
         "hub_invite" => hrm_core::sync::hub::invite(ctx)?,
-        "hub_status" => hrm_core::sync::hub::status(ctx),
         "ring_key_show" => json!({"key": hrm_core::sync::hub::ring_show(ctx)?}),
         "ring_key_enter" => {
             hrm_core::sync::hub::ring_enter(ctx, &s(a, "key")?)?;
