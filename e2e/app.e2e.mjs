@@ -1678,6 +1678,9 @@ description: Bulk skill ${i}
         await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = arguments[0]; return document.fonts.ready.then(() => 1)", [theme]);
         await sleep(150);
         await shot(`30-vg-${theme}-${name}`);
+        // OpenCode's icon is black as a file: one shared rule shows it in white on a dark theme, wherever it is drawn
+        const oc = await exec("const i = document.querySelector('#sheet img.ticon[src$=\"opencode.svg\"]'); return i ? getComputedStyle(i).filter : ''");
+        if (oc) assert.equal(oc, theme === 'dark' ? 'invert(1)' : 'none', `${h}: the OpenCode icon on a ${theme} theme`);
       }
       await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
     }

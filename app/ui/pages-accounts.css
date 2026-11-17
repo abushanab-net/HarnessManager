@@ -5,8 +5,6 @@
 /* ---- the list: one line of filters, then one card per tool ---- */
 .a-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; flex: none; min-width: 0; }
 .a-filters > :last-child { margin-left: auto; }
-/* OpenCode's official icon is one ink (black as a file): on a dark ground it takes the page's ink, as the drawing draws it */
-html[data-theme="dark"] :is(.a-filters, .tool-group-header, .page-head .title, .tool-pick-name) img.ticon[src$="opencode.svg"] { filter: invert(1); }
 .a-groups { display: flex; flex-direction: column; gap: 8px; }
 .tool-group-card { overflow: hidden; }
 /* a group's line: the tool, how many accounts, and at the right the next reset and the range's tokens and ≈ cost; a click folds the group */

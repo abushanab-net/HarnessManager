@@ -100,6 +100,8 @@ mark { background: var(--warn-soft); color: inherit; }
 .pc-dot.neg { background: var(--neg); } .pc-dot.warn { background: var(--warn); } .pc-dot.ac { background: var(--ac); }
 .pc-dot.mr { margin-right: 5px; }
 .ticon { display: inline-block; flex: none; vertical-align: middle; }
+/* OpenCode's official icon is one ink, black as a file: on a dark theme it is shown in white, wherever toolIcon draws it */
+html[data-theme="dark"] img.ticon[src$="opencode.svg"] { filter: invert(1); }
 #notice:empty { display: none; }
 .notice-bar.toast { background: var(--ac-soft); border-bottom-color: var(--ac-border); }
 .notice-bar .notice-act { margin-left: auto; }
