@@ -298,7 +298,7 @@ pub fn sync(ctx: &Ctx, reg: &Registry) -> Result<SyncReport> {
         }
         if p.harness == "claude" && !p.main {
             let main = harness::claude::Claude;
-            if let Err(e) = crate::shared::sync_claude(ctx, &harness::Harness::default_home(&main, ctx), &ctx.home.join(".claude.json"), &harness::Harness::home(&main, ctx, p)) {
+            if let Err(e) = crate::shared::sync_claude(&harness::Harness::default_home(&main, ctx), &ctx.home.join(".claude.json"), &harness::Harness::home(&main, ctx, p)) {
                 rep.skipped.push(format!("{}: shared settings not updated: {e:#}", p.name));
             }
         }
@@ -545,7 +545,7 @@ pub fn install_skill(ctx: &Ctx, reg: &mut Registry, source: &str, name: Option<&
     }
     if old.exists() { let _ = std::fs::remove_dir_all(&old); }
     let _ = std::fs::remove_dir_all(&staged);
-    let skill = Skill { name: name.clone(), source: source.into(), hash: dir_hash(&dst) };
+    let skill = Skill { name: name.clone(), source: source.into() };
     reg.skills.retain(|s| s.name != name);
     reg.skills.push(skill.clone());
     Ok(skill)
@@ -654,7 +654,7 @@ pub fn adopt_skills(ctx: &Ctx, reg: &mut Registry, names: &[String]) -> Result<V
     let dirs = linked_dirs(ctx, reg);
     let mut done = vec![];
     for (name, linked) in found.into_iter().filter(|(n, _)| names.is_empty() || names.contains(n)) {
-        reg.skills.push(Skill { name: name.clone(), source: "store".into(), hash: dir_hash(&skill_store(ctx).join(&name)) });
+        reg.skills.push(Skill { name: name.clone(), source: "store".into() });
         for h in &linked {
             let t = Target { kind: "skill".into(), item: name.clone(), harness: h.clone(), profile: None };
             if !reg.targets.contains(&t) { reg.targets.push(t); }
@@ -731,7 +731,7 @@ pub fn import_skills(ctx: &Ctx, reg: &mut Registry, harness_id: &str) -> Result<
         std::fs::remove_dir_all(&p)?;
         crate::shared::link_dir(&dst, &p)?;
         if !reg.skills.iter().any(|s| s.name == name) {
-            reg.skills.push(Skill { name: name.clone(), source: "imported".into(), hash: dir_hash(&dst) });
+            reg.skills.push(Skill { name: name.clone(), source: "imported".into() });
         }
         let t = Target { kind: "skill".into(), item: name.clone(), harness: harness_id.into(), profile: None };
         if !reg.targets.contains(&t) { reg.targets.push(t); }

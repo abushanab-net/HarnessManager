@@ -80,7 +80,7 @@ impl Harness for Codex {
     fn id(&self) -> &'static str { "codex" }
     fn label(&self) -> &'static str { "Codex" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: true, subscription_login: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
+        Caps { parallel_accounts: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
     }
     fn binary(&self) -> &'static str { "codex" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { ctx.home.join(".codex") }
@@ -180,7 +180,7 @@ impl Harness for Codex {
                 (read_text(f)?, None)
             } else {
                 let mut tail = String::new();
-                let Some(cur) = for_new_lines_sig(ctx, &p.name, f, mtime, len, cursors.get(&key).cloned(), |line| { tail.push_str(line); tail.push('\n'); })? else { return Ok(None) };
+                let Some(cur) = for_new_lines_sig(&p.name, f, mtime, len, cursors.get(&key).cloned(), |line| { tail.push_str(line); tail.push('\n'); })? else { return Ok(None) };
                 let mut buf = String::new();
                 {
                     use std::io::BufRead;
@@ -321,7 +321,7 @@ impl Harness for Codex {
             std::fs::create_dir_all(dest.parent().unwrap())?;
             std::fs::copy(&t.path, &dest)?;
         }
-        Ok(crate::transcripts::Materialized { launch_args: vec!["-C".into(), local_root.display().to_string(), "resume".into(), t.id.clone()], cwd: local_root.to_path_buf(), new_session_id: None,
+        Ok(crate::transcripts::Materialized { launch_args: vec!["-C".into(), local_root.display().to_string(), "resume".into(), t.id.clone()], cwd: local_root.to_path_buf(),
             note: "Codex resumes the copied rollout in this folder; the original stays as it is.".into() })
     }
     fn resumes_elsewhere(&self) -> bool { true }

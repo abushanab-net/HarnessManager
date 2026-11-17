@@ -441,13 +441,6 @@ impl Db {
         })
     }
 
-    pub fn session_cached(&self, key: &str, mtime: i64, len: i64) -> Result<Option<SessionMeta>> {
-        self.with(|c| {
-            let s: Option<String> = c.query_row("select json from sessions where key=? and mtime=? and len=?", params![key, mtime, len], |r| r.get(0)).optional()?;
-            Ok(s.and_then(|s| serde_json::from_str(&s).ok()))
-        })
-    }
-
     /// The cached records of one account's session files, by key: one query instead of one per file.
     pub fn sessions_cached_for(&self, prefix: &str) -> Result<std::collections::HashMap<String, (i64, i64, SessionMeta)>> {
         self.with(|c| {

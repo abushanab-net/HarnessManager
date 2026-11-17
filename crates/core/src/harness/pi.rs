@@ -43,7 +43,7 @@ pub static PI: PiLike = PiLike {
     resume_flag: "--session",
     // /login offers OAuth subscriptions (Anthropic, OpenAI Codex, GitHub Copilot, ...) and API keys; mcp.json
     // and models.json (compatible endpoints) are documented; no limits are written anywhere
-    caps: Caps { parallel_accounts: true, subscription_login: true, api_key: true, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: true },
+    caps: Caps { parallel_accounts: true, api_key: true, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: true },
 };
 
 impl PiLike {
@@ -199,7 +199,7 @@ impl Harness for PiLike {
             std::fs::copy(&t.path, &dest)?;
         }
         let args = if self.id == "pi" { vec![self.resume_flag.into(), dest.display().to_string()] } else { self.resume_args(&t.id) };
-        Ok(crate::transcripts::Materialized { launch_args: args, cwd: local_root.to_path_buf(), new_session_id: None, note: format!("{} resumes the copied log in this folder; the original stays as it is.", self.label) })
+        Ok(crate::transcripts::Materialized { launch_args: args, cwd: local_root.to_path_buf(), note: format!("{} resumes the copied log in this folder; the original stays as it is.", self.label) })
     }
     fn resumes_elsewhere(&self) -> bool { true }
 

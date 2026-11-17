@@ -126,8 +126,6 @@ pub struct AppInfo {
     pub path: Option<String>,
     pub version: Option<String>,
     pub kind: Option<Kind>,
-    /// Kept for older readers of the JSON: "npm", "self" (updates itself) or none.
-    pub manager: Option<String>,
     pub package: Option<String>,
     pub download: Option<String>,
     pub auto_updates: bool,
@@ -282,7 +280,6 @@ pub fn list() -> Vec<AppInfo> {
             AppInfo {
                 id: id.into(), label: h.label().into(),
                 path: first.map(|c| c.path.clone()), version: first.and_then(|c| c.version.clone()), kind: first.map(|c| c.kind),
-                manager: match (first.map(|c| c.kind), ins) { (Some(Kind::Npm), _) => Some("npm".into()), (Some(_), Some(i)) if !i.self_update.is_empty() => Some("self".into()), (None, Some(i)) if !i.npm.is_empty() => Some("npm".into()), _ => None },
                 package: first.and_then(|c| c.package.clone()).or_else(|| ins.and_then(|i| i.npm.first().map(|p| p.to_string()))),
                 download: ins.map(|i| i.site.to_string()),
                 auto_updates: ins.map(|i| i.auto_updates).unwrap_or(false),

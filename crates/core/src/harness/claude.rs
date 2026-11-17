@@ -147,7 +147,7 @@ impl Harness for Claude {
     fn id(&self) -> &'static str { "claude" }
     fn label(&self) -> &'static str { "Claude Code" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: true, subscription_login: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: true }
+        Caps { parallel_accounts: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: true }
     }
     fn binary(&self) -> &'static str { "claude" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { ctx.home.join(".claude") }
@@ -157,7 +157,7 @@ impl Harness for Claude {
         let home = self.home(ctx, p);
         std::fs::create_dir_all(&home)?;
         if !p.main {
-            crate::shared::sync_claude(ctx, &self.default_home(ctx), &ctx.home.join(".claude.json"), &home)?;
+            crate::shared::sync_claude(&self.default_home(ctx), &ctx.home.join(".claude.json"), &home)?;
         }
         if p.kind == Kind::ApiKey {
             if let Some(key) = crate::secrets::get_key(&crate::secrets::key_target(&p.name)) {
@@ -267,7 +267,7 @@ impl Harness for Claude {
             // went out at the last user line (prompt or tool result). shortcut: an answer cut by a refresh mid-reply
             // has no start in the second read and shows no timing.
             let (mut sent, mut parts): (i64, std::collections::HashMap<String, (i64, i64, i64)>) = (0, Default::default());
-            let cursor = for_new_lines_sig(ctx, &p.name, f, mtime, len, cursors.get(&f.display().to_string()).cloned(), |line| {
+            let cursor = for_new_lines_sig(&p.name, f, mtime, len, cursors.get(&f.display().to_string()).cloned(), |line| {
                 if !line.contains("\"usage\"") {
                     if line.contains("\"type\":\"user\"") { sent = crate::harness::parse::line_ts(line).unwrap_or(sent); }
                     return;
@@ -365,7 +365,7 @@ impl Harness for Claude {
             std::fs::create_dir_all(dest.parent().unwrap())?;
             std::fs::copy(&t.path, &dest).with_context(|| format!("copy the transcript to {}", dest.display()))?;
         }
-        Ok(crate::transcripts::Materialized { launch_args: vec!["--resume".into(), dest.display().to_string(), "--fork-session".into()], cwd: local_root.to_path_buf(), new_session_id: None,
+        Ok(crate::transcripts::Materialized { launch_args: vec!["--resume".into(), dest.display().to_string(), "--fork-session".into()], cwd: local_root.to_path_buf(),
             note: "Claude Code opens a new session that continues from the transcript; the copy and the original stay as they are.".into() })
     }
     fn resumes_elsewhere(&self) -> bool { true }

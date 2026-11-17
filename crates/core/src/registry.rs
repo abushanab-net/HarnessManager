@@ -143,8 +143,6 @@ pub struct Skill {
     pub name: String,
     /// Where it came from: a GitHub URL, a local folder, or "imported".
     pub source: String,
-    #[serde(default)]
-    pub hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

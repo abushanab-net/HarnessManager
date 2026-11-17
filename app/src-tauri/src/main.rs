@@ -739,7 +739,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             let mut reg = ctx.registry()?;
             let mut rep = hrm_core::import::ImportReport::default();
             let path = opt(a, "path").map(PathBuf::from).unwrap_or_else(|| hrm_core::import::default_ps_registry(ctx));
-            hrm_core::import::import_powershell(ctx, &mut reg, &path, &mut rep)?;
+            hrm_core::import::import_powershell(&mut reg, &path, &mut rep)?;
             ctx.save_registry(&reg)?;
             for p in &reg.profiles { let _ = harness::of(p).prepare(ctx, p); }
             json!(rep)

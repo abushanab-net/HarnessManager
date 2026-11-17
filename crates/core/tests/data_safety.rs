@@ -46,7 +46,7 @@ fn parallel_registry_writers_lose_nothing() {
 
 #[test]
 fn a_half_written_claude_json_is_left_alone() {
-    let (dir, ctx) = ctx();
+    let (dir, _ctx) = ctx();
     let main = dir.path().join("home").join(".claude");
     std::fs::create_dir_all(&main).unwrap();
     std::fs::write(main.join("settings.json"), r#"{"model":"opus"}"#).unwrap();
@@ -54,7 +54,7 @@ fn a_half_written_claude_json_is_left_alone() {
     std::fs::create_dir_all(&prof).unwrap();
     let broken = r#"{"oauthAccount":{"emailAddress":"me@x.com"}, "proj"#;
     std::fs::write(prof.join(".claude.json"), broken).unwrap();
-    let err = hrm_core::shared::sync_claude(&ctx, &main, &dir.path().join("home").join(".claude.json"), &prof).unwrap_err();
+    let err = hrm_core::shared::sync_claude(&main, &dir.path().join("home").join(".claude.json"), &prof).unwrap_err();
     assert!(format!("{err:#}").contains("left unchanged"), "{err:#}");
     assert_eq!(std::fs::read_to_string(prof.join(".claude.json")).unwrap(), broken);
 }
@@ -261,7 +261,7 @@ fn windows_device_names_are_not_account_names() {
 
 #[test]
 fn the_mirror_leaves_a_server_the_profile_changed() {
-    let (dir, ctx) = ctx();
+    let (dir, _ctx) = ctx();
     let home = dir.path().join("home");
     let main = home.join(".claude");
     let prof = home.join(".claude-work");
@@ -270,14 +270,14 @@ fn the_mirror_leaves_a_server_the_profile_changed() {
     let main_json = home.join(".claude.json");
     let cj = |p: &std::path::Path| -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(p.join(".claude.json")).unwrap()).unwrap() };
     std::fs::write(&main_json, r#"{"mcpServers":{"docs":{"url":"https://a"},"wiki":{"url":"https://w"}}}"#).unwrap();
-    hrm_core::shared::sync_claude(&ctx, &main, &main_json, &prof).unwrap();
+    hrm_core::shared::sync_claude(&main, &main_json, &prof).unwrap();
     assert_eq!(cj(&prof)["mcpServers"]["docs"]["url"], "https://a");
     // the profile edits its copy of docs; main changes docs and drops wiki
     let mut pj = cj(&prof);
     pj["mcpServers"]["docs"]["url"] = "https://mine".into();
     std::fs::write(prof.join(".claude.json"), pj.to_string()).unwrap();
     std::fs::write(&main_json, r#"{"mcpServers":{"docs":{"url":"https://b"}}}"#).unwrap();
-    hrm_core::shared::sync_claude(&ctx, &main, &main_json, &prof).unwrap();
+    hrm_core::shared::sync_claude(&main, &main_json, &prof).unwrap();
     let pj = cj(&prof);
     assert_eq!(pj["mcpServers"]["docs"]["url"], "https://mine", "the profile's own edit wins");
     assert!(pj["mcpServers"].get("wiki").is_none(), "an unchanged mirrored server goes when main drops it");
@@ -464,7 +464,7 @@ fn a_backup_brings_back_a_lost_skill_and_the_list_and_keeps_the_state_before() {
     std::fs::create_dir_all(store.join("mine").join("scripts")).unwrap();
     std::fs::write(store.join("mine").join("SKILL.md"), "---\nname: mine\n---").unwrap();
     std::fs::write(store.join("mine").join("scripts").join("x.py"), "print(1)").unwrap();
-    reg.skills.push(hrm_core::registry::Skill { name: "mine".into(), source: "store".into(), hash: String::new() });
+    reg.skills.push(hrm_core::registry::Skill { name: "mine".into(), source: "store".into() });
     ctx.save_registry(&reg).unwrap();
     ctx.db.ledger_set("C:/somewhere", "skill", "mine", true).unwrap();
     let b = backup::create(&ctx, "Manual").unwrap();
@@ -483,4 +483,12 @@ fn a_backup_brings_back_a_lost_skill_and_the_list_and_keeps_the_state_before() {
     backup::prune(&ctx, 1).unwrap();
     assert_eq!(backup::list(&ctx).len(), 1);
     assert!(backup::restore(&ctx, "../evil.zip").is_err());
+}
+
+#[test]
+fn an_account_list_whose_skills_carry_a_hash_still_loads() {
+    // written by 1.9.16 and before: each skill had a "hash" that nothing compared
+    let reg = Registry::from_text(r#"{"version": 2, "skills": [{"name": "mine", "source": "store", "hash": "00ff00ff00ff00ff"}]}"#).unwrap();
+    assert_eq!(reg.skills.len(), 1);
+    assert_eq!((reg.skills[0].name.as_str(), reg.skills[0].source.as_str()), ("mine", "store"));
 }

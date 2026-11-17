@@ -584,7 +584,7 @@ fn project_index(ctx: &Ctx) -> Result<ProjectIndex> {
 /// The rows as the pages show them: tags, the computer's name, what is open here or elsewhere, whether a session
 /// from another computer can be resumed here, and the archived mark.
 fn decorate(ctx: &Ctx, reg: &Registry, list: Vec<(Lite, String)>) -> Result<Vec<SessionMeta>> {
-    let (stags, ptags) = (ctx.db.tags_of("session").unwrap_or_default(), ctx.db.tags_of("project").unwrap_or_default());
+    let stags = ctx.db.tags_of("session").unwrap_or_default();
     let peers = crate::journal::peers(ctx).unwrap_or_default();
     let elsewhere = crate::journal::open_elsewhere(&peers, now_ms());
     let names = crate::journal::device_names(ctx);
@@ -598,7 +598,6 @@ fn decorate(ctx: &Ctx, reg: &Registry, list: Vec<(Lite, String)>) -> Result<Vec<
         m.device_name = names.get(&m.device).cloned().unwrap_or_else(|| m.device.clone());
         if !l.project_key.is_empty() { m.project_key = l.project_key; m.project_name = l.project_name; }
         m.tags = stags.get(&format!("{}/{}", m.profile, m.id)).cloned().unwrap_or_default();
-        m.project_tags = ptags.get(&m.project_key).cloned().unwrap_or_default();
         m.open = l.open && !l.archived;
         m.open_elsewhere = !l.archived && elsewhere.contains(&m.id);
         if l.archived {
@@ -776,7 +775,7 @@ pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcri
         // a session the index has not seen yet (its file was just written): its account's folders are read now
         None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false)?; find()?.context("session not found")? }
     };
-    if s.archived { return crate::archive::transcript(ctx, &s); }
+    if s.archived { return crate::archive::transcript(&s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
     Ok(t)
@@ -1018,8 +1017,6 @@ fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T {
 
 #[cfg(not(windows))]
 fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T { f() }
-
-pub fn registry_snapshot(ctx: &Ctx) -> Result<Registry> { ctx.registry() }
 
 /// One setting changed and saved, for `hrm settings` and the window; the context comes back with it. The keys the
 /// sync's own checks guard are refused, and a value of the wrong type is reported, never saved. A new place for

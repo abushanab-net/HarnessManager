@@ -613,7 +613,7 @@ fn real_main(cli: Cli) -> Result<i32> {
             let mut reg = ctx.registry()?;
             let mut rep = hrm_core::import::ImportReport::default();
             let path = path.unwrap_or_else(|| hrm_core::import::default_ps_registry(&ctx));
-            hrm_core::import::import_powershell(&ctx, &mut reg, &path, &mut rep)?;
+            hrm_core::import::import_powershell(&mut reg, &path, &mut rep)?;
             ctx.save_registry(&reg)?;
             for p in &reg.profiles { let _ = harness::of(p).prepare(&ctx, p); }
             if j.json { return print_json(&rep).map(|_| 0); }

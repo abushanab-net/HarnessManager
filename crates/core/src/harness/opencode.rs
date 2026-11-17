@@ -39,7 +39,7 @@ impl Harness for OpenCode {
     fn id(&self) -> &'static str { "opencode" }
     fn label(&self) -> &'static str { "OpenCode" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: true, subscription_login: true, api_key: false, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
+        Caps { parallel_accounts: true, api_key: false, quota: false, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
     }
     fn binary(&self) -> &'static str { "opencode" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { ctx.home.join(".config").join("opencode") }
@@ -221,7 +221,7 @@ impl Harness for OpenCode {
             { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); }
             let o = c.output()?;
             if o.status.success() {
-                return Ok(crate::transcripts::Materialized { launch_args: self.resume_args(&t.id), cwd: local_root.to_path_buf(), new_session_id: None,
+                return Ok(crate::transcripts::Materialized { launch_args: self.resume_args(&t.id), cwd: local_root.to_path_buf(),
                     note: "OpenCode imported the session for this folder; the original stays as it is.".into() });
             }
             last = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();

@@ -7,7 +7,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::model::SessionMeta;
-use crate::util::{file_sig, truncate};
+use crate::util::truncate;
 use crate::Ctx;
 
 /// Run `work` on every file using all cores, biggest files first, and hand each result to `store` (on this
@@ -107,21 +107,6 @@ impl NewCursor {
     pub fn save(self, ctx: &Ctx) -> Result<()> { ctx.db.set_cursor(&self.key, &self.profile, self.offset, self.mtime, self.len, &self.tail) }
 }
 
-/// Feed the complete lines added to `path` since the last saved cursor to `f`; returns the cursor to save.
-/// A file that shrank or whose bytes before the cursor changed is read again from the start; usage ids
-/// are deduplicated, so a re-read never double counts. Compressed files are re-read whole when their size
-/// or time changes.
-pub fn for_new_lines(ctx: &Ctx, profile: &str, path: &Path, f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
-    let cur = ctx.db.cursor(&path.display().to_string())?;
-    for_new_lines_with(ctx, profile, path, cur, f)
-}
-
-/// `for_new_lines` with the cursor already looked up (an import fetches all of an account's cursors in one query).
-pub fn for_new_lines_with(ctx: &Ctx, profile: &str, path: &Path, cur: Option<(i64, i64, i64, String)>, f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
-    let Some((mtime, len)) = file_sig(path) else { return Ok(None) };
-    for_new_lines_sig(ctx, profile, path, mtime, len, cur, f)
-}
-
 /// A changed session's last cached record, dated by the file: shown now while the file is parsed again later.
 /// Set while the index refreshes: a changed file is parsed now, on the refresh's thread, not later.
 pub static PARSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -147,8 +132,12 @@ pub fn refresh_session_later(ctx: &Ctx, key: String, path: std::path::PathBuf, m
     });
 }
 
-/// `for_new_lines_with` with the file's size and time already known (from the directory listing).
-pub fn for_new_lines_sig(_ctx: &Ctx, profile: &str, path: &Path, mtime: i64, len: u64, cur: Option<(i64, i64, i64, String)>, mut f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
+/// Feed the complete lines added to `path` since the last saved cursor `cur` to `f`; returns the cursor to save.
+/// A file that shrank or whose bytes before the cursor changed is read again from the start; usage ids
+/// are deduplicated, so a re-read never double counts. Compressed files are re-read whole when their size
+/// or time changes. The cursor is looked up by the caller (an import fetches all of an account's cursors in one
+/// query), and the file's size and time come from the directory listing.
+pub fn for_new_lines_sig(profile: &str, path: &Path, mtime: i64, len: u64, cur: Option<(i64, i64, i64, String)>, mut f: impl FnMut(&str)) -> Result<Option<NewCursor>> {
     let key = path.display().to_string();
     let compressed = path.extension().map(|e| e == "zst").unwrap_or(false);
     if let Some((_, m, l, _)) = &cur {

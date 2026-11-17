@@ -49,12 +49,11 @@ pub struct FetchedTranscript {
 }
 
 /// What a tool needs to resume a materialized transcript: the arguments after `hrm run <profile> --`, the
-/// folder to open in, the id of the new session when the tool chose one, and a line for the user.
+/// folder to open in, and a line for the user.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Materialized {
     pub launch_args: Vec<String>,
     pub cwd: PathBuf,
-    pub new_session_id: Option<String>,
     pub note: String,
 }
 
@@ -183,7 +182,7 @@ pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id:
     let m = h.materialize(ctx, p, &root, &t)?;
     crate::service::start(ctx, profile, Some(m.cwd.clone()), &m.launch_args)?;
     if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false) { crate::log::warn(&format!("index after resume here: {e:#}")); }
-    let key = format!("forked:{harness_id}/{profile}/{}", m.new_session_id.as_deref().unwrap_or(id));
+    let key = format!("forked:{harness_id}/{profile}/{id}");
     ctx.db.kv_set(&key, &json!({"from": device, "at": now_ms()}).to_string())?;
     Ok(json!({"ok": true, "cwd": m.cwd, "args": m.launch_args, "note": m.note}))
 }
