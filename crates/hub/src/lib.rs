@@ -67,9 +67,22 @@ create table if not exists rendezvous(id text primary key, addresses text not nu
 
 /// Bind `cfg.bind` (port 0: any free one; the one taken is in the result) and serve from the current tokio
 /// runtime. `handle.shutdown()` stops it.
+/// Remove `*.hub-tmp` files an hour old or more under `dir`: nothing is written for that long.
+fn sweep_tmp(dir: &FsPath, depth: usize) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let Ok(ft) = e.file_type() else { continue };
+        if ft.is_dir() { if depth > 0 { sweep_tmp(&e.path(), depth - 1); } continue; }
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a.as_secs() >= 3600).unwrap_or(false);
+        if ft.is_file() && old && e.path().extension().map(|x| x == "hub-tmp").unwrap_or(false) { let _ = std::fs::remove_file(e.path()); }
+    }
+}
+
 pub async fn serve(cfg: Config) -> Result<(SocketAddr, axum_server::Handle<SocketAddr>)> {
     if cfg.admin_token.is_empty() { return Err(anyhow!("HUB_ADMIN_TOKEN is empty")); }
     std::fs::create_dir_all(cfg.data_dir.join("blobs"))?;
+    // a write the hub did not finish (it stopped between the write and the rename) left its temporary file
+    sweep_tmp(&cfg.data_dir.join("blobs"), 3);
     let db = Connection::open(cfg.data_dir.join("hub.db"))?;
     db.execute_batch(SCHEMA)?;
     let l = std::net::TcpListener::bind(cfg.bind)?;
