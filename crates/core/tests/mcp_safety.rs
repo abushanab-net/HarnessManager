@@ -3,8 +3,10 @@
 // the credential store these tests read is Windows Credential Manager, the only one there is so far
 #![cfg(windows)]
 
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
+use hrm_core::harness;
 use hrm_core::registry::{Kind, McpServer, Profile};
 use hrm_core::{items, secrets, Ctx};
 use serde_json::{json, Value};
@@ -34,11 +36,174 @@ fn ctx(tools: &[&str]) -> (tempfile::TempDir, Ctx) {
     (dir, ctx)
 }
 
+/// The file a tool keeps its MCP servers in.
+fn mcp_file(ctx: &Ctx, tool: &str) -> PathBuf {
+    let reg = ctx.registry().unwrap();
+    let p = reg.get(&format!("{tool}-main")).unwrap();
+    harness::of(p).item_paths(ctx, p).mcp.unwrap().0
+}
+
 fn server(name: &str, env: &[(&str, &str)], headers: &[(&str, &str)]) -> McpServer {
     let map = |x: &[(&str, &str)]| x.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let stdio = headers.is_empty();
     McpServer { name: name.into(), transport: if stdio { "stdio" } else { "http" }.into(), command: stdio.then(|| "npx".to_string()), args: if stdio { vec!["-y".into(), "server-github".into()] } else { vec![] },
         env: map(env), url: (!stdio).then(|| "https://d.example/mcp".to_string()), headers: map(headers), ..Default::default() }
+}
+
+/// The same two servers as each tool writes them by hand: a table of its own for env, keys Harness Manager does not
+/// know, and a server turned off.
+fn fixture(tool: &str) -> String {
+    match tool {
+        "codex" => "model = \"gpt-6\"\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"server-github\"]\nstartup_timeout_sec = 20\nenabled = false\n\n[mcp_servers.github.env]\nGITHUB_TOKEN = \"ghp_x\"\n\n[mcp_servers.docs]\nurl = \"https://d.example/mcp\"\nbearer_token_env_var = \"DOCS_TOKEN\"\nhttp_headers = { \"X-Team\" = \"a\" }\n".into(),
+        "opencode" => json!({"$schema": "https://opencode.ai/config.json", "mcp": {
+            "github": {"type": "local", "command": ["npx", "-y", "server-github"], "environment": {"GITHUB_TOKEN": "ghp_x"}, "enabled": false, "timeout": 5000},
+            "docs": {"type": "remote", "url": "https://d.example/mcp", "headers": {"X-Team": "a"}, "enabled": true, "oauth": false}}}).to_string(),
+        "agy" => json!({"mcpServers": {
+            "github": {"command": "npx", "args": ["-y", "server-github"], "env": {"GITHUB_TOKEN": "ghp_x"}, "disabled": true},
+            "docs": {"serverUrl": "https://d.example/mcp", "headers": {"X-Team": "a"}, "disabledTools": ["search"]}}}).to_string(),
+        _ => json!({"numStartups": 5, "mcpServers": {
+            "github": {"command": "npx", "args": ["-y", "server-github"], "env": {"GITHUB_TOKEN": "ghp_x"}, "timeout": 30000},
+            "docs": {"type": "http", "url": "https://d.example/mcp", "headers": {"X-Team": "a"}, "oauth": {"clientId": "abc"}}}}).to_string(),
+    }
+}
+
+/// A config file as a value, so two texts that say the same compare equal.
+fn meaning(tool: &str, text: &str) -> Value {
+    fn of(i: &toml_edit::Item) -> Value {
+        if let Some(t) = i.as_table_like() { return Value::Object(t.iter().map(|(k, v)| (k.to_string(), of(v))).collect()); }
+        let Some(v) = i.as_value() else { return Value::Null };
+        if let Some(a) = v.as_array() { return a.iter().map(|x| of(&toml_edit::Item::Value(x.clone()))).collect(); }
+        v.as_str().map(Value::from).or(v.as_integer().map(Value::from)).or(v.as_bool().map(Value::from)).unwrap_or(Value::Null)
+    }
+    if tool == "codex" { of(text.parse::<toml_edit::DocumentMut>().unwrap().as_item()) } else { serde_json::from_str(text).unwrap() }
+}
+
+const TOOLS: [&str; 4] = ["claude", "codex", "opencode", "agy"];
+
+#[test]
+fn import_then_sync_leaves_each_tools_config_as_it_was() {
+    let _s = store();
+    let mut lost = vec![];
+    // each tool alone, and Codex once more as Windows editors save it
+    for (tool, text) in TOOLS.iter().map(|t| (*t, fixture(t))).chain([("codex", fixture("codex").replace('\n', "\r\n"))]) {
+        let (_d, ctx) = ctx(&[tool]);
+        let file = mcp_file(&ctx, tool);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, &text).unwrap();
+        let sig = hrm_core::util::file_sig(&file);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let mut reg = ctx.registry().unwrap();
+        let (added, kept) = items::import_mcp(&ctx, &mut reg, tool).unwrap();
+        assert_eq!((added.len(), kept.len()), (2, 0), "{tool}");
+        ctx.save_registry(&reg).unwrap();
+        let rep = items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+        assert!(rep.conflicts.is_empty() && rep.skipped.is_empty(), "{tool}: {rep:?}");
+        let now = std::fs::read_to_string(&file).unwrap();
+        if meaning(tool, &now) != meaning(tool, &text) { lost.push(format!("{tool} changed to: {now}")); }
+        else if now != text || hrm_core::util::file_sig(&file) != sig { lost.push(format!("{tool}: the same content was written again")); }
+    }
+    assert!(lost.is_empty(), "{}", lost.join("\n\n"));
+}
+
+#[test]
+fn a_changed_server_updates_only_its_own_keys_in_each_tools_entry() {
+    let _s = store();
+    for tool in TOOLS {
+        let (_d, ctx) = ctx(&[tool]);
+        let file = mcp_file(&ctx, tool);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, fixture(tool)).unwrap();
+        let mut reg = ctx.registry().unwrap();
+        items::import_mcp(&ctx, &mut reg, tool).unwrap();
+        // edited in the app: another package and token, another address
+        let g = reg.mcp.iter_mut().find(|m| m.name == "github").unwrap();
+        g.args = vec!["-y".into(), "server-github@2".into()];
+        g.env.insert("GITHUB_TOKEN".into(), "ghp_y".into());
+        reg.mcp.iter_mut().find(|m| m.name == "docs").unwrap().url = Some("https://d2.example/mcp".into());
+        ctx.save_registry(&reg).unwrap();
+        let rep = items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+        assert!(rep.conflicts.is_empty() && rep.skipped.is_empty(), "{tool}: {rep:?}");
+        let now = std::fs::read_to_string(&file).unwrap();
+        // the edit and nothing else: the unknown keys, the switch that turns a server off and the env table are as they were
+        let mut want = meaning(tool, &fixture(tool));
+        let list = match tool { "codex" => "mcp_servers", "opencode" => "mcp", _ => "mcpServers" };
+        let (g, d) = (json!(["-y", "server-github@2"]), json!("https://d2.example/mcp"));
+        match tool {
+            "opencode" => { want[list]["github"]["command"] = json!(["npx", "-y", "server-github@2"]); want[list]["github"]["environment"]["GITHUB_TOKEN"] = json!("ghp_y"); want[list]["docs"]["url"] = d; }
+            "agy" => { want[list]["github"]["args"] = g; want[list]["github"]["env"]["GITHUB_TOKEN"] = json!("ghp_y"); want[list]["docs"]["serverUrl"] = d; }
+            _ => { want[list]["github"]["args"] = g; want[list]["github"]["env"]["GITHUB_TOKEN"] = json!("ghp_y"); want[list]["docs"]["url"] = d; }
+        }
+        // Claude Code's entry had no "type"; it is one of the keys written
+        if tool == "claude" { want[list]["github"]["type"] = json!("stdio"); }
+        assert_eq!(meaning(tool, &now), want, "{tool}: {now}");
+        if tool == "codex" { assert!(now.contains("[mcp_servers.github.env]\nGITHUB_TOKEN = \"ghp_y\"") && now.contains("model = \"gpt-6\""), "the env table keeps its form: {now}"); }
+    }
+}
+
+#[test]
+fn a_value_not_set_on_this_computer_never_replaces_the_one_a_tool_has() {
+    let _s = store();
+    let (_d, ctx) = ctx(&TOOLS);
+    // the list as another computer shares it: keys without values, and this computer's store has none
+    let mut reg = ctx.registry().unwrap();
+    for s in [server("github", &[("GITHUB_TOKEN", "")], &[]), server("docs", &[], &[("X-Team", "")])] {
+        let name = s.name.clone();
+        items::add_mcp(&mut reg, s).unwrap();
+        for t in TOOLS { items::set_target(&mut reg, "mcp", &name, t, None, true).unwrap(); }
+    }
+    ctx.save_registry(&reg).unwrap();
+    // Claude Code and Codex have the servers with this computer's values; OpenCode and Antigravity have no entry yet
+    for tool in ["claude", "codex"] {
+        std::fs::create_dir_all(mcp_file(&ctx, tool).parent().unwrap()).unwrap();
+        std::fs::write(mcp_file(&ctx, tool), fixture(tool)).unwrap();
+    }
+    let rep = items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+    assert!(rep.conflicts.is_empty() && rep.skipped.is_empty(), "{rep:?}");
+    for tool in ["claude", "codex"] { assert_eq!(std::fs::read_to_string(mcp_file(&ctx, tool)).unwrap(), fixture(tool), "{tool} keeps its values"); }
+    let oc = meaning("opencode", &std::fs::read_to_string(mcp_file(&ctx, "opencode")).unwrap());
+    assert_eq!(oc["mcp"]["github"]["command"], json!(["npx", "-y", "server-github"]));
+    assert!(oc["mcp"]["github"].get("environment").is_none() && oc["mcp"]["docs"].get("headers").is_none(), "a key without a value is not written: {oc}");
+    // another key of the entry changes: the value the tool has still stays
+    let mut reg = ctx.registry().unwrap();
+    reg.mcp[0].args = vec!["-y".into(), "server-github@2".into()];
+    ctx.save_registry(&reg).unwrap();
+    items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+    for tool in ["claude", "codex"] {
+        let now = meaning(tool, &std::fs::read_to_string(mcp_file(&ctx, tool)).unwrap());
+        let e = &now[if tool == "codex" { "mcp_servers" } else { "mcpServers" }]["github"];
+        assert_eq!((&e["args"], &e["env"]["GITHUB_TOKEN"]), (&json!(["-y", "server-github@2"]), &json!("ghp_x")), "{tool}");
+    }
+    // reading the tools takes this computer's values into its own store, so the form shows them and new tools get them
+    let mut reg = ctx.registry().unwrap();
+    items::import_mcp_all(&ctx, &mut reg);
+    ctx.save_registry(&reg).unwrap();
+    let reg = ctx.registry().unwrap();
+    assert_eq!((reg.mcp[0].env["GITHUB_TOKEN"].as_str(), reg.mcp[1].headers["X-Team"].as_str()), ("ghp_x", "a"));
+    assert!(!std::fs::read_to_string(ctx.registry_path()).unwrap().contains("ghp_x"));
+    items::sync(&ctx, &reg).unwrap();
+    let oc = meaning("opencode", &std::fs::read_to_string(mcp_file(&ctx, "opencode")).unwrap());
+    assert_eq!(oc["mcp"]["github"]["environment"]["GITHUB_TOKEN"], "ghp_x");
+}
+
+#[test]
+fn a_sync_that_changes_nothing_does_not_write_the_tools_files() {
+    let _s = store();
+    let (_d, ctx) = ctx(&TOOLS);
+    let mut reg = ctx.registry().unwrap();
+    for s in [server("github", &[("GITHUB_TOKEN", "ghp_x")], &[]), server("docs", &[], &[("X-Team", "a")])] {
+        let name = s.name.clone();
+        items::add_mcp(&mut reg, s).unwrap();
+        for t in TOOLS { items::set_target(&mut reg, "mcp", &name, t, None, true).unwrap(); }
+    }
+    ctx.save_registry(&reg).unwrap();
+    items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+    let sigs: Vec<_> = TOOLS.iter().map(|t| hrm_core::util::file_sig(&mcp_file(&ctx, t))).collect();
+    assert!(sigs.iter().all(|s| s.is_some()), "the first sync wrote every file");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let rep = items::sync(&ctx, &ctx.registry().unwrap()).unwrap();
+    assert!(rep.conflicts.is_empty() && rep.skipped.is_empty(), "{rep:?}");
+    let again: Vec<&str> = TOOLS.iter().zip(&sigs).filter(|(t, s)| &hrm_core::util::file_sig(&mcp_file(&ctx, t)) != *s).map(|(t, _)| *t).collect();
+    assert!(again.is_empty(), "written again with nothing changed: {again:?}");
 }
 
 /// `profiles.json` inside a backup zip.
