@@ -973,6 +973,8 @@ fn main() {
                     let n = service::import_usage(&ctx).unwrap_or(0);
                     let _ = service::refresh_quotas(&ctx, false);
                     if let Err(e) = hrm_core::backup::auto(&ctx) { hrm_core::log::warn(&format!("automatic backup: {e:#}")); }
+                    // what failed or interrupted operations left behind, at the first round and then hourly
+                    hrm_core::sweep::hourly(&ctx);
                     if let Err(e) = hrm_core::archive::daily(&ctx) { hrm_core::log::warn(&format!("archive: {e:#}")); }
                     // the index the pages read: every account's folders walked (the watcher's safety net)
                     if let Err(e) = hrm_core::index::refresh(&ctx, hrm_core::index::Scope::All) { hrm_core::log::warn(&format!("index: {e:#}")); }

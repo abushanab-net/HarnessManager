@@ -126,6 +126,12 @@ enum Cmd {
     Ring { #[command(subcommand)] cmd: RingCmd },
     /// Where this computer keeps API keys and saved logins, and whether that store works
     Secrets { #[command(subcommand)] cmd: SecretsCmd },
+    /// Remove what failed or interrupted operations left behind (temporary files an hour old or more); the app does this by itself every hour
+    Cleanup {
+        /// Only list what would be removed
+        #[arg(long)] dry_run: bool,
+        #[command(flatten)] j: Json,
+    },
     /// Make a backup now (the account list, settings, the history; never keys or logins)
     Backup {
         /// Also this computer's session transcripts, compressed
@@ -785,6 +791,13 @@ fn real_main(cli: Cli) -> Result<i32> {
             if j.json { return print_json(&s).map(|_| 0); }
             println!("Credentials on this computer are kept in {}.{}", s.name, s.reason.map(|r| format!(" No system credential store was reachable: {r}.")).unwrap_or_default());
             println!("A probe credential was written, read back and deleted.");
+        }
+        Cmd::Cleanup { dry_run, j } => {
+            let s = hrm_core::sweep::sweep(&ctx, dry_run);
+            if j.json { return print_json(&s).map(|_| 0); }
+            for p in &s.what { println!("  {p}"); }
+            for r in &s.repaired { println!("  put right: the skill {r}"); }
+            println!("{} {} leftovers of interrupted operations ({:.1} MB).", if dry_run { "Would remove" } else { "Removed" }, s.files, s.bytes as f64 / 1_048_576.0);
         }
         Cmd::Backup { with_transcripts, j } => {
             let b = hrm_core::backup::create_with(&ctx, "Manual", with_transcripts)?;

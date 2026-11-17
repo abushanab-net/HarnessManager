@@ -17,6 +17,7 @@ pub mod registry;
 pub mod secrets;
 pub mod service;
 pub mod shared;
+pub mod sweep;
 pub mod sync;
 pub mod testenv;
 pub mod transcripts;
