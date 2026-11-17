@@ -472,15 +472,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Quota { name, live, j } => {
             let reg = ctx.registry()?;
             let p = reg.get(&name)?;
-            let q = if live {
-                match p.harness.as_str() {
-                    "claude" => Some(harness::claude::Claude.live_quota(&ctx, p)?),
-                    "agy" => Some(harness::agy::Agy.live_quota(&ctx, p)?),
-                    _ => bail!("live limits are only available for Claude and Antigravity subscription accounts"),
-                }
-            } else {
-                harness::of(p).quota(&ctx, p)
-            };
+            let q = if live { Some(service::quota_live(&ctx, &name)?) } else { harness::of(p).quota(&ctx, p) };
             if j.json { return print_json(&q).map(|_| 0); }
             match q {
                 Some(q) => for t in q.tiers { println!("{:<16} {:>3.0}%  resets {}", t.label, t.used, fmt_reset(t.resets_at)) },
@@ -516,8 +508,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
         // `hrm tag project github.com/o/r release` or `hrm tag session work-max/abc123 release bugfix`
         Cmd::Tag { kind, key, tags } => {
-            if kind != "project" && kind != "session" { bail!("the kind is session or project"); }
-            ctx.db.tag_set(&kind, &key, &tags)?;
+            service::tag_set(&ctx, &kind, &key, &tags)?;
             println!("{} {key}: {}", kind, if tags.is_empty() { "no tags".into() } else { tags.join(", ") });
         }
         Cmd::Tags { j } => {
@@ -544,14 +535,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         },
         Cmd::Sync { relink, j } => {
             let reg = ctx.registry()?;
-            let mut relinked = vec![];
-            if relink {
-                let c = harness::claude::Claude;
-                for p in reg.profiles.iter().filter(|p| p.harness == "claude" && !p.main) {
-                    let done = hrm_core::shared::relink_copies(&harness::Harness::default_home(&c, &ctx), &harness::Harness::home(&c, &ctx, p))?;
-                    if !done.is_empty() { relinked.push(format!("{}: {}", p.name, done.join(", "))); }
-                }
-            }
+            let relinked = if relink { service::relink(&ctx)? } else { vec![] };
             let rep = items::sync(&ctx, &reg)?;
             if j.json { return print_json(&serde_json::json!({"relinked": relinked, "items": rep})).map(|_| 0); }
             for r in relinked { println!("relinked {r}"); }
@@ -565,72 +549,52 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Skills { cmd } => return skills(&ctx, cmd),
         Cmd::Prompts { cmd } => return prompts(&ctx, cmd),
         Cmd::Provider { cmd } => {
-            let mut reg = ctx.registry()?;
             match cmd {
                 ProviderCmd::List { j } => {
+                    let reg = ctx.registry()?;
                     if j.json { return print_json(&reg.providers).map(|_| 0); }
                     for p in &reg.providers { println!("{:<16} {:<10} {}  [{}]", p.id, p.format, p.base_url, p.models.join(", ")); }
                     // presets not added yet, with the command that adds them
                     for p in hrm_core::registry::provider_presets().into_iter().filter(|p| !reg.providers.iter().any(|q| q.id == p.id)) {
                         println!("{:<16} {:<10} {}  [{}]  preset: hrm provider add {} --base-url {} --format {} --models {}", p.id, p.format, p.base_url, p.models.join(", "), p.id, p.base_url, p.format, p.models.join(","));
                     }
-                    return Ok(0);
                 }
                 ProviderCmd::Add { id, base_url, format, models, name } => {
-                    if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id"); }
-                    if !matches!(format.as_str(), "anthropic" | "openai") { bail!("format must be anthropic or openai"); }
+                    // checked before the key is asked for
+                    service::provider_check(&id, &format, &base_url)?;
                     let key = secret_input(&format!("Key for {id}: "))?;
-                    hrm_core::secrets::set_key(&hrm_core::secrets::provider_target(&id), key.trim())?;
-                    reg.providers.retain(|p| p.id != id);
-                    reg.providers.push(Provider { name: name.unwrap_or_else(|| id.clone()), id: id.clone(), base_url, format, models });
+                    service::provider_add(&ctx, Provider { name: name.unwrap_or_else(|| id.clone()), id: id.clone(), base_url, format, models }, Some(&key))?;
                     println!("Added provider {id}");
                 }
                 ProviderCmd::Remove { id } => {
-                    reg.remove_provider(&id)?;
-                    hrm_core::secrets::delete(&hrm_core::secrets::provider_target(&id))?;
+                    service::provider_remove(&ctx, &id)?;
                     println!("Removed provider {id}");
                 }
             }
-            ctx.save_registry(&reg)?;
         }
         Cmd::Route { cmd } => {
-            let mut reg = ctx.registry()?;
             match cmd {
                 RouteCmd::List { j } => {
+                    let reg = ctx.registry()?;
                     if j.json { return print_json(&reg.routes).map(|_| 0); }
                     for r in &reg.routes { println!("{:<16} {:<10} {}", r.id, r.mode, r.providers.join(" → ")); }
-                    return Ok(0);
                 }
                 RouteCmd::Add { id, mode, providers, default } => {
-                    if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id"); }
-                    if !matches!(mode.as_str(), "failover" | "aggregate") { bail!("mode must be failover or aggregate"); }
-                    for p in &providers { if !reg.providers.iter().any(|x| &x.id == p) { bail!("no provider named '{p}'"); } }
-                    if providers.is_empty() { bail!("give at least one provider"); }
-                    reg.routes.retain(|r| r.id != id);
-                    reg.routes.push(Route { id: id.clone(), mode, providers, default_provider: default });
+                    service::route_add(&ctx, Route { id: id.clone(), mode, providers, default_provider: default })?;
                     println!("Added route {id}");
                 }
-                RouteCmd::Remove { id } => { reg.remove_route(&id)?; println!("Removed route {id}"); }
+                RouteCmd::Remove { id } => { service::route_remove(&ctx, &id)?; println!("Removed route {id}"); }
             }
-            ctx.save_registry(&reg)?;
         }
         Cmd::Router { cmd } => return router_cmd::run(&ctx, cmd),
         Cmd::Import { path, j } => {
-            let mut reg = ctx.registry()?;
-            let mut rep = hrm_core::import::ImportReport::default();
-            let path = path.unwrap_or_else(|| hrm_core::import::default_ps_registry(&ctx));
-            hrm_core::import::import_powershell(&mut reg, &path, &mut rep)?;
-            ctx.save_registry(&reg)?;
-            for p in &reg.profiles { let _ = harness::of(p).prepare(&ctx, p); }
+            let rep = service::import_powershell(&ctx, path)?;
             if j.json { return print_json(&rep).map(|_| 0); }
             println!("Imported {} accounts and {} keys", rep.accounts.len(), rep.keys.len());
             for s in rep.skipped { println!("  skipped {s}"); }
         }
         Cmd::Init { j } => {
-            let mut reg = ctx.registry()?;
-            let mut rep = hrm_core::import::ImportReport::default();
-            hrm_core::import::detect_main_profiles(&ctx, &mut reg, &mut rep);
-            ctx.save_registry(&reg)?;
+            let rep = service::detect(&ctx)?;
             if j.json { return print_json(&rep).map(|_| 0); }
             println!("Main profiles added: {}", if rep.main_profiles.is_empty() { "none".into() } else { rep.main_profiles.join(", ") });
         }
@@ -895,7 +859,7 @@ fn mcp(ctx: &Ctx, cmd: McpCmd) -> Result<i32> {
             items::add_mcp(&mut reg, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() })?;
             println!("Added {name}. Enable it with `hrm mcp enable {name} <tool>`.");
         }
-        McpCmd::Remove { name } => { items::remove_item(&mut reg, "mcp", &name)?; println!("Removed {name}"); }
+        McpCmd::Remove { name } => { let rep = service::item_remove(ctx, "mcp", &name)?; println!("Removed {name}"); return Ok(sync_notes(rep)); }
         McpCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), true)?; }
         McpCmd::Disable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), false)?; }
         McpCmd::Import { harness: h } => {
@@ -905,10 +869,14 @@ fn mcp(ctx: &Ctx, cmd: McpCmd) -> Result<i32> {
         }
     }
     ctx.save_registry(&reg)?;
-    let rep = items::sync(ctx, &reg)?;
+    Ok(sync_notes(items::sync(ctx, &reg)?))
+}
+
+/// What a sync after an MCP change could not write, on stderr.
+fn sync_notes(rep: items::SyncReport) -> i32 {
     for c in rep.conflicts { eprintln!("conflict: {c} (a different entry with that name exists; left alone)"); }
     for s in rep.skipped { eprintln!("skipped: {s}"); }
-    Ok(0)
+    0
 }
 
 fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
@@ -921,10 +889,7 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
         }
         SkillCmd::Install { source, name } => { let s = items::install_skill(ctx, &mut reg, &source, name.as_deref())?; println!("Installed {}", s.name); }
         SkillCmd::Remove { name } => {
-            items::remove_item(&mut reg, "skill", &name)?;
-            ctx.save_registry(&reg)?;
-            items::sync(ctx, &reg)?;
-            items::delete_skill_files(ctx, &name)?;
+            service::item_remove(ctx, "skill", &name)?;
             println!("Removed {name}");
             return Ok(0);
         }
