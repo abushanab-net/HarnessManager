@@ -8,7 +8,7 @@ import { esc } from './lib.js';
 const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode, Antigravity, Pi and Oh My Pi on this computer in one place. The ? at the top shows this tour of a page.'],
-    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, and under Setup the MCP servers, skills and system prompts shared between accounts and the routing to other providers. A badge appears only for something to act on or watch.'],
+    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, Computers to sync your other computers, and under Setup the MCP servers, skills and system prompts shared between accounts and the routing to other providers. A badge appears only for something to act on or watch.'],
     ['[data-testid=use-next]', 'Use next', 'The account to start on now: the most room, or the 5-hour window that resets soonest. Start opens a terminal on it; Folder picks where.'],
     ['[data-testid=finding]', 'Runs out first', 'The account on pace to run out before its reset, with the measured basis under it. Measured numbers are plain; estimates carry ≈.'],
     ['[data-testid=running-now]', 'Running now', 'Every console open, on which computer; Follow opens its session as it writes.'],
@@ -65,6 +65,8 @@ const TOURS = {
   ],
   settings: [
     ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
+  ],
+  computers: [
     ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
     ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
     ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],

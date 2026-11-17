@@ -12,7 +12,7 @@
 
 /** Every main page: its address, its stable name, and (for a detail page) the name its own h1 carries. */
 export const PAGES = [
-  ['#home', 'Overview'], ['#sessions', 'Sessions'], ['#projects', 'Projects'], ['#accounts', 'Accounts'],
+  ['#home', 'Overview'], ['#sessions', 'Sessions'], ['#projects', 'Projects'], ['#accounts', 'Accounts'], ['#computers', 'Computers'],
   ['#mcp', 'MCP servers'], ['#skills', 'Skills'], ['#prompts', 'System prompts'], ['#routing', 'API keys & routing'], ['#apps', 'Apps'],
   ['#cli', 'CLI reference'], ['#settings', 'Settings'],
   ['#account?name=claude-main', 'Accounts', 'claude-main'], ['#session?profile=claude-main&id=s-main-1', 'Sessions', 'Longhorn backup target for staging'],
@@ -81,7 +81,7 @@ export async function designTests({ test, exec, nav, $, click, waitFor, assert, 
     const computer = await exec("return import('./core.js').then((c) => c.S.state.computer)");
     assert.equal(d.brandSub, computer, 'under the product name: the computer\'s name, and no account count');
     assert.ok(d.brandLines[0] <= 20 && d.brandLines[1] <= 17, 'each on one line: ' + d.brandLines);
-    assert.deepEqual(d.labels, ['Overview', 'Sessions', 'Projects', 'Accounts', 'Setup', 'MCP servers', 'Skills', 'System prompts', 'API keys & routing', 'Apps', 'CLI reference', 'Settings'], 'the items, in the drawing\'s order');
+    assert.deepEqual(d.labels, ['Overview', 'Sessions', 'Projects', 'Accounts', 'Computers', 'Setup', 'MCP servers', 'Skills', 'System prompts', 'API keys & routing', 'Apps', 'CLI reference', 'Settings'], 'the items, in the drawing\'s order');
     assert.deepEqual(d.item, [34, '7px', '13px', '600', '10px', '10px', 16], 'an item: 34 px, radius 7, 13 / 600, a 16 px icon 10 px from its label');
     assert.deepEqual(d.active, ['rgba(8, 101, 108, 0.1)', 'rgb(8, 101, 108)', 'Accounts', 'page'], 'the lit item: shaded with the accent, and named to a screen reader');
     assert.deepEqual(d.sub, [28, '13px', '500'], 'a Setup page: 28 px, 13 / 500');
@@ -240,7 +240,7 @@ export async function designTests({ test, exec, nav, $, click, waitFor, assert, 
     assert.deepEqual(r.some, ['2 live', '3', '1 update', '2 live'], 'Sessions "2 live", Accounts 3 that need attention, Setup "1 update"');
     assert.deepEqual(r.titles, ['3 accounts need attention', true], 'the Accounts badge: the ▲ and, on hover, what the number counts');
     assert.equal(r.updates, '3 updates');
-    assert.deepEqual(r.rest, ['Overview', 'Sessions', 'Projects', 'Accounts', 'MCP servers', 'Skills', 'System prompts', 'API keys & routing', 'Apps', 'CLI reference', 'Settings'], 'no cost beside Overview, no bare count beside a page');
+    assert.deepEqual(r.rest, ['Overview', 'Sessions', 'Projects', 'Accounts', 'Computers', 'MCP servers', 'Skills', 'System prompts', 'API keys & routing', 'Apps', 'CLI reference', 'Settings'], 'no cost beside Overview, no bare count beside a page');
     assert.deepEqual(r.gone, [], 'the old counts are gone');
   });
 }

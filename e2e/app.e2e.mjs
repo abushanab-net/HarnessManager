@@ -702,6 +702,7 @@ try {
       '#projects': ['Projects', 'Where the tokens and the cost went'],
       '#sessions': ['Sessions', 'platform-gitops'],
       '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
+      '#computers': ['Computers'],
       '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
       '#mcp': ['MCP servers', 'Write to each tool'], '#skills': ['Skills', 'Installed'], '#prompts': ['System prompts', 'The file now'],
       '#apps': ['Apps', 'Installed', 'Harness Manager'],
@@ -1030,7 +1031,7 @@ description: Bulk skill ${i}
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
     for (const [h, n] of [['#account?name=claude-main', 'account'], ['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'],
-      ['#routing', 'routing'], ['#mcp', 'mcp'], ['#skills', 'skills'], ['#prompts', 'prompts'], ['#apps', 'apps'], ['#cli', 'cli']]) {
+      ['#computers', 'computers'], ['#routing', 'routing'], ['#mcp', 'mcp'], ['#skills', 'skills'], ['#prompts', 'prompts'], ['#apps', 'apps'], ['#cli', 'cli']]) {
       await nav(h);
       await drawn(n);
       await sleep(500);
@@ -1198,9 +1199,9 @@ description: Bulk skill ${i}
   // The screens for several computers. The sync core (computers_status, computers_now, computers_set; scope and the
   // per-computer fields of home, sessions, projects and live) is built in parallel: without it every page draws the
   // "sync off" state, which the first tests check. HRM_E2E_SYNC=1 runs the rest against a seeded sync folder.
-  await test('computers: the Settings section in the off state, the chooser, no chip, and the Overview as before', async () => {
-    await nav('#settings');
-    await $('[data-testid=sec-computers] [data-testid=sync-folder]');
+  await test('computers: the page in the off state, the chooser, no chip, and the Overview as before', async () => {
+    await nav('#computers');
+    await $('[data-testid=computers] [data-testid=sync-folder]');
     const d = await exec(`return {
       name: document.getElementById('st-devname').value,
       folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('active'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
@@ -1209,8 +1210,7 @@ description: Bulk skill ${i}
       transcripts: document.querySelector('[data-testid=st-transcripts]').checked, presence: document.querySelector('[data-testid=st-presence]').checked,
       pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()),
       cards: [...document.querySelectorAll('[data-testid=computer-cards] .b-computer .b-name b')].map((b) => b.textContent.trim()),
-      syncNow: !!document.querySelector('[data-testid=computers-now]'), chip: document.getElementById('pcs').hidden,
-      order: [...document.querySelectorAll('.b-section > summary .panel-title')].map((h) => h.textContent.trim()) }`);
+      syncNow: !!document.querySelector('[data-testid=computers-now]'), chip: document.getElementById('pcs').hidden, status: document.querySelector('[data-testid=page-status]').textContent }`);
     assert.ok(d.name, 'this computer has a name');
     assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
     assert.ok(d.folderText.includes('No folder'), 'no folder yet');
@@ -1221,10 +1221,9 @@ description: Bulk skill ${i}
     assert.deepEqual(d.cards, [d.name], 'only this computer');
     assert.equal(d.syncNow, false, 'no Sync now while sync is off');
     assert.equal(d.chip, true, 'no computers chip while sync is off');
-    assert.deepEqual(d.order.slice(-2), ['Computers', 'Backups and archive'], 'the section sits above Backups');
-    await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
-    await shot('19-settings-computers');
-    // the tooltip of the section's first setting, like every other row
+    assert.equal(d.status, 'Sync is off; only this computer is shown.', 'the status says the plain fact');
+    await shot('19-computers');
+    // the tooltip of the page's first setting, like every row of Settings
     await page.hover('[data-testid=tip-devname]');
     await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-devname')).display`)) === 'block', 'tooltip shown');
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
@@ -1237,6 +1236,51 @@ description: Bulk skill ${i}
     await nav('#projects');
     await $('[data-testid=project-cards] .a-pcard');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pcard-pcs]')")), 'Projects as before');
+  });
+
+  await test('computers: a page of its own in the sidebar, which the chip opens; its name, a switch, Pair and the first-run choice work from it; Settings has no Computers section', async () => {
+    const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
+    await nav('#home');
+    await click('[data-testid=nav-computers]');
+    await waitFor(async () => (await exec('return location.hash')) === '#computers', 'opened from the sidebar');
+    await hasText('[data-testid=page-title]', 'Computers');
+    await $('[data-testid=computers] [data-testid=sync-folder]');
+    assert.equal(await exec("return document.querySelector('[data-testid=nav-computers]').getAttribute('aria-current')"), 'page', 'its item is lit');
+    assert.equal(await exec("return document.getElementById('pcs').getAttribute('href')"), '#computers', 'the computers chip in the top bar leads here');
+    // this computer's name: saved, shown on its card, and put back
+    const name = await exec("return document.getElementById('st-devname').value");
+    for (const n of ['E2E-BOX', name]) {
+      await type('[data-testid=st-devname]', n);
+      await click('[data-testid=st-devname-save]');
+      await waitFor(() => saved().device_name === n, 'the name ' + n + ' saved');
+      await hasText('[data-testid=computer-cards]', n);
+    }
+    // a switch saves at once, and again
+    for (const on of [false, true]) {
+      await exec("document.querySelector('[data-testid=st-presence]').dataset.old = '1'");
+      await click('[data-testid=st-presence]');
+      await waitFor(() => saved().sync_presence === on, 'presence ' + on);
+      await waitFor(() => exec("const e = document.querySelector('[data-testid=st-presence]'); return !!e && !e.dataset.old"), 'redrawn');
+    }
+    // the head's one primary button opens the pairing dialog; First-run choices… offers both ways to sync
+    assert.equal(await exec("return document.querySelectorAll('#sheet .page-head .btn.primary').length"), 1);
+    await click('[data-testid=pair-head]');
+    await $('[data-testid=pair-tabs]');
+    await click('.dlg .dh [data-act=dialog-close]');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the pairing dialog closed');
+    await click('#sheet [data-act=firstrun-open]');
+    await $('.modal-card [data-testid=firstrun-folder]');
+    await $('.modal-card [data-testid=firstrun-hub]');
+    await click('.modal-card [data-testid=firstrun-later]');
+    await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the first-run dialog closed');
+    // Settings carries no Computers section and no jump to one; the old address opens the page
+    await nav('#settings');
+    await $('[data-testid=sec-appearance]');
+    const st = await exec("return { sec: !!document.querySelector('#sec-computers, #sheet [data-testid=computers]'), chips: [...document.querySelectorAll('.b-section-nav button')].map((b) => b.textContent.trim()) }");
+    assert.ok(!st.sec && !st.chips.includes('Computers') && st.chips.includes('Backups'), JSON.stringify(st));
+    await nav('#settings?tab=computers');
+    await waitFor(async () => (await exec('return location.hash')) === '#computers', 'the old address opens the Computers page');
+    await $('[data-testid=computers] [data-testid=sync-folder]');
   });
 
   await test('computers: the All computers · This computer choice is remembered on this computer, All by default', async () => {
@@ -1261,7 +1305,13 @@ description: Bulk skill ${i}
     // the folder is chosen (what the Change… button does after the picker), then Sync now runs a round
     await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
     assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).sync_mode, 'folder', 'saved in settings');
-    await nav('#settings');
+    await nav('#computers');
+    await $('[data-testid=sync-folder].active');
+    await hasText('[data-testid=page-status]', 'through a folder');
+    // Stop syncing… asks first; Cancel leaves the folder on
+    await click('[data-testid=sync-off]');
+    await hasText('.modal-card', 'Leave the folder?');
+    await click('.modal-card .modal-foot [data-act=dialog-close]');
     await $('[data-testid=sync-folder].active');
     await click('[data-testid=computers-now]');
     await waitFor(async () => (await text('[data-testid=computer-cards]')).includes('LAPTOP'), 'the other computer listed');
@@ -1269,8 +1319,8 @@ description: Bulk skill ${i}
     assert.equal(cards.length, 2);
     assert.ok(/LAPTOP.*(windows|Windows).*1\.3\.2.*(heard|writing)/.test(cards[1]), cards[1]);
     assert.ok(fs.existsSync(path.join(sync, 'devices')) && fs.readdirSync(path.join(sync, 'devices')).length === 2, 'this computer wrote its own record beside the other');
-    await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
-    await shot('19b-settings-two-computers');
+    await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
+    await shot('19b-two-computers');
     // the chip: a dot per computer, both heard from lately
     const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.cdot').length, on: el.querySelectorAll('.cdot.on').length, text: el.textContent, names: [...el.querySelectorAll('.cdot')].map((a) => a.title) }`);
     assert.equal(chip.hidden, false, 'the chip shows with sync on');
@@ -1377,8 +1427,8 @@ description: Bulk skill ${i}
   // "unknown operation" answer as its error text, which the first test checks. HRM_E2E_PEERS=1 pairs with a second
   // data folder through hrm computers pair, as the contract's Window test describes.
   await test('direct connection: the switch without its pill, the dialog with both tabs, the code input, and an unknown operation shown as the error text', async () => {
-    await nav('#settings');
-    await $('[data-testid=sec-computers] [data-testid=pair]');
+    await nav('#computers');
+    await $('[data-testid=computers] [data-testid=pair]');
     const d = await exec(`return { direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
       pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()), port: document.querySelector('[data-testid=listen-port]').textContent, change: !!document.querySelector('[data-testid=listen-port-change]') }`);
     assert.ok(!d.direct && !d.pair, 'the switch and Pair are live');
@@ -1391,7 +1441,7 @@ description: Bulk skill ${i}
     await page.fill('[data-testid=lp-v]', '0');
     await click('[data-testid=lp-ok]');
     await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the port dialog closed');
-    await $('[data-testid=sec-computers] [data-testid=pair]');
+    await $('[data-testid=computers] [data-testid=pair]');
     await click('[data-testid=pair]');
     await $('[data-testid=pair-tabs]');
     assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] button')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
@@ -1445,13 +1495,13 @@ description: Bulk skill ${i}
     let serve;
     try {
       // this computer: the switch on, then Enter a code with the code and the host
-      await nav('#settings');
+      await nav('#computers');
       await $('[data-testid=st-direct]');
       if (!(await exec("return document.querySelector('[data-testid=st-direct]').checked"))) {
         await click('[data-testid=st-direct]');
         await waitFor(() => exec("return document.querySelector('[data-testid=st-direct]')?.checked"), 'the direct connection on');
       }
-      await waitFor(async () => exec("return !!document.querySelector('[data-testid=pair]')"), 'the Pair button; the section reads: ' + (await exec("return (document.querySelector('[data-testid=sec-computers]') || { innerText: '(no section)' }).innerText.slice(0, 1500)")), 15000);
+      await waitFor(async () => exec("return !!document.querySelector('[data-testid=pair]')"), 'the Pair button; the section reads: ' + (await exec("return (document.querySelector('[data-testid=computers]') || { innerText: '(no section)' }).innerText.slice(0, 1500)")), 15000);
       await click('[data-testid=pair]');
       await click('[data-testid=pair-enter]');
       await page.type('[data-testid=pair-code-in]', code);
@@ -1466,7 +1516,7 @@ description: Bulk skill ${i}
       const card = `[data-testid=computer-${id2}]`;
       await $(card);
       await waitFor(async () => /direct .* connected/.test(await text(card + ' [data-testid=transport]').catch(() => '')), 'the card shows direct and connected', 45000);
-      await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+      await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
       await shot('42-paired-connected');
       const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, on: el.querySelectorAll('.cdot.on').length }`);
       assert.ok(!chip.hidden && chip.on >= 2, 'the chip: this computer and the paired one on (an earlier test may have left a folder peer): ' + JSON.stringify(chip));
@@ -1478,8 +1528,12 @@ description: Bulk skill ${i}
       await shot('42b-sessions-from-peer');
       // Forget: a confirm, then the pairing is gone, and with it the card's address field. The card goes too, unless
       // a sync folder still knows the computer (the folder test above leaves one on): then it stays as a folder computer
-      await nav('#settings');
+      await nav('#computers');
       await $(`[data-testid="addr-${id2}"]`);
+      // its address (a VPN name with the port), saved from its card
+      await type(`[data-testid="addr-${id2}"]`, 'laptop.example:4455');
+      await click(`[data-testid="addr-save-${id2}"]`);
+      await waitFor(async () => ((await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_status', args: {} })")).peers.find((x) => x.id === id2) || {}).address === 'laptop.example:4455', 'the address saved');
       await click(`[data-testid=forget-${id2}]`);
       await click('#confirm-ok');
       await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid="addr-${id2}"]')`)), 'no longer paired', 15000);
@@ -1546,9 +1600,9 @@ description: Bulk skill ${i}
     // the copy is a session of this computer now, marked as continued from the laptop
     await nav('#sessions?days=all');
     await hasText('[data-testid=continued-laptop-s7]', 'continued from LAPTOP');
-    // Settings: the Carry transcripts popover counts what this computer carried
-    await nav('#settings');
-    await $('[data-testid=sec-computers] [data-testid=st-transcripts]');
+    // Computers: the Carry transcripts popover counts what this computer carried
+    await nav('#computers');
+    await $('[data-testid=computers] [data-testid=st-transcripts]');
     await hasText('#tip-transcripts', 'Carried');
     await hasText('#tip-transcripts', '20 MB');
   });
@@ -1559,8 +1613,8 @@ description: Bulk skill ${i}
   // child process and joins it from the card, sees the recovery key once, invites a second data folder that joins with
   // hrm hub join, and sees its session after Sync now.
   await test('hub: the card is live, the Join dialog takes a code or the admin token, an unreachable hub is the error text, the first-run choice offers both cards', async () => {
-    await nav('#settings');
-    await $('[data-testid=sec-computers] [data-testid=hub-join]');
+    await nav('#computers');
+    await $('[data-testid=computers] [data-testid=hub-join]');
     const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('active'), url: document.querySelector('[data-testid=hub-url]').textContent,
       pills: [...document.querySelectorAll('[data-testid=sync-hub] .plan-pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter]') }`);
     assert.ok(!d.on && d.url.includes('Not joined') && !d.pills.length && !d.ring, JSON.stringify(d));
@@ -1605,8 +1659,8 @@ description: Bulk skill ${i}
     try {
       await waitFor(() => fetch(hubUrl + '/health').then((r) => (r.ok ? true : null)).catch(() => null), 'the hub up', 30000);
       // this computer joins with the admin token: the card turns on, and the recovery key is shown once
-      await nav('#settings');
-      await click('[data-testid=sec-computers] [data-testid=hub-join]');
+      await nav('#computers');
+      await click('[data-testid=computers] [data-testid=hub-join]');
       await $('[data-testid=hub-url-in]');
       await page.fill('[data-testid=hub-url-in]', hubUrl);
       await page.fill('[data-testid=hub-admin]', 'e2e-admin');
@@ -1621,6 +1675,10 @@ description: Bulk skill ${i}
       assert.ok((await text('[data-testid=hub-line]')).includes('Joined'), 'the status line says Joined');
       assert.equal((await text('[data-testid=hub-url]')).trim(), hubUrl);
       assert.ok(await exec("return !!document.querySelector('[data-testid=ring-show]') && !!document.querySelector('[data-testid=hub-invite]')"), 'Show again and Invite a computer… are there');
+      // Enter recovery key… opens its dialog (this computer already holds the key, so it is closed again)
+      await click('[data-testid=ring-enter]');
+      await $('[data-testid=ring-in]');
+      await click('.modal-card .modal-foot [data-act=dialog-close]');
       // Show again sits behind a confirm and shows the same key
       await click('[data-testid=ring-show]');
       await click('#confirm-ok');
@@ -1658,7 +1716,7 @@ description: Bulk skill ${i}
       await waitFor(() => exec(`return !!document.querySelector('[data-testid=computer-${id3}]')`), 'the second computer\'s card', 30000);
       await waitFor(async () => /hub/.test(await text(`[data-testid=computer-${id3}] [data-testid=transport]`).catch(() => '')), 'the card says hub');
       assert.ok((await text('[data-testid=hub-line]')).includes('2 computers'), await text('[data-testid=hub-line]'));
-      await exec("document.querySelector('[data-testid=sec-computers]').scrollIntoView()");
+      await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
       await shot('55-hub-two-computers');
       await nav('#sessions?days=all');
       await waitFor(() => exec("return !!document.querySelector('[data-testid=session-hub-s5]')"), 'the session from the second computer', 30000);
@@ -1666,7 +1724,7 @@ description: Bulk skill ${i}
       await shot('55b-sessions-from-hub');
       // a used code is refused; Stop syncing leaves the hub
       assert.throws(() => hrm3('hub', 'join', hubUrl, '--code', code), /did not accept/);
-      await nav('#settings');
+      await nav('#computers');
       await click('[data-testid=hub-leave]');
       await click('#confirm-ok');
       await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')")), 'the hub card off after leaving', 15000);
