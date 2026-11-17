@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>B · Workbench · Now</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="b.css">
+<script src="kit.js"></script>
+<script src="b.js"></script>
+<style>
+  .strip { display: flex; align-items: center; height: 40px; padding: 0 6px 0 0; flex: none; }
+  .strip .ro { display: flex; align-items: baseline; gap: 8px; padding: 0 16px; border-right: 1px solid var(--line-subtle); }
+  .strip .ro b { font-size: var(--fs-section); font-weight: 700; }
+  .run { grid-template-columns: 7px minmax(0, 1fr) 128px 122px 60px 48px 62px; }
+  .acc { grid-template-columns: minmax(0, 1fr) 252px 176px 56px; }
+  .acc .b-lims { grid-template-columns: repeat(3, 76px); }
+  .acc .btn { justify-content: center; padding: 0; }
+</style>
+</head>
+<body>
+<div class="app b">
+<script>shell('now')</script>
+
+<main class="b-main">
+  <div class="b-head">
+    <h1 class="title">Now</h1>
+    <p class="status"><b>codex-main</b> is used up until 15:07; <b>work-max</b> will run out Thursday, before its reset.</p>
+  </div>
+
+  <div class="card strip">
+    <div class="ro"><b>48.2M</b><span class="label">tokens</span></div>
+    <div class="ro"><b>≈ $61.40</b><span class="label">at API list prices</span></div>
+    <div class="ro" style="border:0"><b>94%</b><span class="label">read from cache</span></div>
+    <span class="grow"></span>
+    <div class="seg"><span class="on">Today</span><span>7 d</span><span>30 d</span></div>
+  </div>
+
+  <section class="card b-list">
+    <div class="b-row head run">
+      <div class="row" style="grid-column:1/3;white-space:nowrap"><span class="section">Running now</span><span class="small muted">4 · 3 here, 1 on LAPTOP</span></div>
+      <span class="label">Account</span><span class="label">Computer</span><span class="label num">Elapsed</span><span class="label num">Tokens</span><span></span>
+    </div>
+    <div class="b-row run"><span class="dot live"></span>
+      <div class="two"><div class="t trunc">Longhorn backup target for staging</div><div class="small muted trunc">platform-gitops</div></div>
+      <div class="row"><i data-tool="claude"></i><span class="trunc">work-max</span></div>
+      <div class="row small" style="gap:6px"><span class="dot"></span><span class="trunc">WORKSTATION</span></div>
+      <span class="num">1 h 12 m</span><span class="num">59.8k</span><a class="btn sm">Follow</a></div>
+    <div class="b-row run"><span class="dot live"></span>
+      <div class="two"><div class="t trunc">Bump ArgoCD and fix the sync waves</div><div class="small muted trunc">platform-gitops</div></div>
+      <div class="row"><i data-tool="claude"></i><span class="trunc">work-max</span></div>
+      <div class="row small" style="gap:6px"><span class="dot"></span><span class="trunc">WORKSTATION</span></div>
+      <span class="num">24 m</span><span class="num">18.2k</span><a class="btn sm">Follow</a></div>
+    <div class="b-row run"><span class="dot live"></span>
+      <div class="two"><div class="t trunc">Invoice export: totals off by one cent</div><div class="small muted trunc">billing-api</div></div>
+      <div class="row"><i data-tool="claude"></i><span class="trunc">claude-main</span></div>
+      <div class="row small" style="gap:6px"><span class="dot pc2"></span><span class="trunc">LAPTOP</span></div>
+      <span class="num">41 m</span><span class="num">33.0k</span><a class="btn sm">Follow</a></div>
+    <div class="b-row run"><span class="dot live"></span>
+      <div class="two"><div class="t trunc">Fix the flaky build</div><div class="small muted trunc">web-console</div></div>
+      <div class="row"><i data-tool="codex"></i><span class="trunc">codex-personal</span></div>
+      <div class="row small" style="gap:6px"><span class="dot"></span><span class="trunc">WORKSTATION</span></div>
+      <span class="num">6 m</span><span class="num">4.1k</span><a class="btn sm">Follow</a></div>
+  </section>
+
+  <section class="card b-list">
+    <div class="b-row head" style="display:flex">
+      <span class="section">Accounts</span><span class="small muted">8 · bars show what is left</span>
+      <span class="grow"></span>
+      <span class="label">Use next for</span>
+      <div class="seg"><span>Any</span><span class="on"><i data-tool="claude" data-size="14"></i>Claude Code</span><span><i data-tool="codex" data-size="14"></i>Codex</span></div>
+    </div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="claude"></i><span class="t trunc">work-max</span><span class="pill">Max 20x</span></div>
+      <div class="b-lims">
+        <div class="b-lim"><span>5h</span><b>64%</b><div class="bar"><i style="width:64%"></i></div></div>
+        <div class="b-lim"><span>Week</span><b>41%</b><div class="bar warn"><i style="width:41%"></i></div></div>
+        <div class="b-lim"><span>Fable</span><b>35%</b><div class="bar warn"><i style="width:35%"></i></div></div>
+      </div>
+      <span class="v warn">≈ Out Thu 11:20</span><a class="btn sm">Start</a></div>
+
+    <div class="b-row acc sel">
+      <div class="row"><i data-tool="claude"></i><span class="t trunc">claude-main</span><span class="pill">Max 5x</span><span class="pill ok">Use next</span></div>
+      <div class="b-lims">
+        <div class="b-lim"><span>5h</span><b>100%</b><div class="bar"><i style="width:100%"></i></div></div>
+        <div class="b-lim"><span>Week</span><b>78%</b><div class="bar"><i style="width:78%"></i></div></div>
+        <div class="b-lim"><span>Fable</span><b>80%</b><div class="bar"><i style="width:80%"></i></div></div>
+      </div>
+      <span class="v ok">Lasts until Sun 16:05</span><a class="btn sm">Start</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="claude"></i><span class="t trunc">client-acme</span></div>
+      <span class="b-na">— log in to read</span>
+      <span class="v bad">Login expired</span><a class="btn sm">Log in</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="claude"></i><span class="t trunc">team-ci</span><span class="pill">API key</span></div>
+      <span class="b-na">— no plan limits</span>
+      <span class="v">Pay per use · ≈ $4.20 today</span><a class="btn sm">Start</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="codex"></i><span class="t trunc">codex-main</span><span class="pill">ChatGPT Pro</span></div>
+      <div class="b-lims">
+        <div class="b-lim"><span>5h</span><b>90%</b><div class="bar"><i style="width:90%"></i></div></div>
+        <div class="b-lim"><span>Week</span><b class="bad">0%</b><div class="bar bad"><i style="width:0"></i></div></div>
+      </div>
+      <span class="v bad">Used up · back 15:07</span><a class="btn sm off" aria-disabled="true" title="Used up until 15:07">Start</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="codex"></i><span class="t trunc">codex-personal</span><span class="pill">Plus</span></div>
+      <div class="b-lims">
+        <div class="b-lim"><span>5h</span><b>100%</b><div class="bar"><i style="width:100%"></i></div></div>
+        <div class="b-lim"><span>Week</span><b>88%</b><div class="bar"><i style="width:88%"></i></div></div>
+      </div>
+      <span class="v ok">Lasts until Mon 14:05</span><a class="btn sm">Start</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="opencode"></i><span class="t trunc">opencode-main</span></div>
+      <span class="b-na">— usage only</span>
+      <span class="v muted">No plan limits</span><a class="btn sm">Start</a></div>
+
+    <div class="b-row acc">
+      <div class="row"><i data-tool="agy"></i><span class="t trunc">agy-main</span><span class="pill">Google AI Pro</span></div>
+      <div class="b-lims">
+        <div class="b-lim"><span>5h</span><b>100%</b><div class="bar spare"><i style="width:100%"></i></div></div>
+        <div class="b-lim"><span>Week</span><b>100%</b><div class="bar"><i style="width:100%"></i></div></div>
+      </div>
+      <span class="v ok">Lasts until Tue 14:05</span><a class="btn sm">Start</a></div>
+  </section>
+</main>
+
+<aside class="b-insp" aria-label="Selected account">
+  <div class="b-sec b-ih" style="border-bottom:0;padding-bottom:0">
+    <i data-tool="claude" data-size="28"></i>
+    <div class="grow">
+      <div class="row"><span class="name">claude-main</span><span class="pill">main</span><span class="pill ok">Use next</span></div>
+      <div class="small muted">alex@example.com · Max 5x</div>
+    </div>
+    <a class="btn sm quiet" style="padding:0 6px">Open<i data-ic="open" data-size="14"></i></a>
+  </div>
+  <div class="b-sec">
+    <div class="b-why"><b>Why this one:</b> most room among your Claude Code accounts, and it lasts until its reset.</div>
+    <div class="b-acts"><a class="btn primary grow" style="justify-content:center"><i data-ic="play" data-size="12"></i>Start</a><a class="btn">Start in folder…</a><a class="btn icon" title="More"><i data-ic="more"></i></a></div>
+  </div>
+  <div class="b-tabs"><a class="on">Overview</a><a>Sessions</a><a>Projects</a><a>Settings</a></div>
+
+  <div class="b-sec">
+    <div class="b-ring">
+      <i data-ring="78" data-px="72"></i>
+      <div class="b-wins">
+        <span class="h" style="grid-column:1/3;font-weight:600;color:var(--ink-muted)">Limits</span><span class="h num">left</span><span class="h">resets in</span>
+        <span>5-hour</span><div class="bar"><i style="width:100%"></i></div><b>100%</b><span class="muted">not started</span>
+        <span>Week</span><div class="bar"><i style="width:78%"></i></div><b>78%</b><span class="muted">5 d 2 h</span>
+        <span>Week · Fable</span><div class="bar"><i style="width:80%"></i></div><b>80%</b><span class="muted">5 d 2 h</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="b-sec">
+    <div class="b-sub" style="margin:0"><span>Reset runway</span><span class="grow"></span><span style="font-weight:400">week window, now to +7 d</span></div>
+    <div class="b-run"><i style="width:72.6%"></i><u style="left:72.6%"></u><em style="left:72.6%">resets Sun 16:05</em></div>
+    <div class="b-axis"><span style="left:0">Now</span><span style="left:28.57%">+2 d</span><span style="left:57.14%">+4 d</span><span style="left:85.71%">+6 d</span><span style="left:100%">+7 d</span></div>
+    <div class="small" style="margin-top:8px"><span class="ok" style="font-weight:600">Lasts until the reset</span><span class="muted"> · ≈ 20% left by then at today's pace</span></div>
+  </div>
+
+  <div class="b-sec">
+    <div class="b-sub"><span>Last 7 days</span></div>
+    <div class="b-tiles">
+      <div class="b-tile"><b>96M</b><span class="label">tokens</span></div>
+      <div class="b-tile"><b>≈ $118</b><span class="label">at API list prices</span></div>
+    </div>
+  </div>
+
+  <div class="b-sec">
+    <div class="b-sub"><span>Recent sessions</span><span class="grow"></span><a class="ok">All sessions</a></div>
+    <div class="b-mini"><span class="dot live"></span>
+      <div class="two" style="min-width:0"><div class="trunc" style="font-weight:600">Invoice export: totals off by one cent</div><div class="small muted trunc">billing-api · LAPTOP · 33.0k tokens</div></div>
+      <span class="small ok" style="font-weight:600">live · 41 m</span></div>
+    <div class="b-mini"><span class="dot"></span>
+      <div class="two" style="min-width:0"><div class="trunc" style="font-weight:600">Rotate the staging certificates</div><div class="small muted trunc">infra-terraform · 212k tokens</div></div>
+      <span class="small muted">Today 11:02</span></div>
+    <div class="b-mini"><span class="dot"></span>
+      <div class="two" style="min-width:0"><div class="trunc" style="font-weight:600">Tidy the Terraform variables</div><div class="small muted trunc">infra-terraform · 27k tokens</div></div>
+      <span class="small muted">Mon 16:40</span></div>
+  </div>
+
+  <div class="b-sec foot">
+    <div class="b-cli"><span class="small muted">CLI</span><span class="mono grow trunc">hrm run claude-main</span><a class="btn icon" title="Copy"><i data-ic="copy" data-size="15"></i></a></div>
+  </div>
+</aside>
+</div>
+</body>
+</html>

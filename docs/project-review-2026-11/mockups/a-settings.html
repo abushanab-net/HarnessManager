@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>A · Settings</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="a.css">
+</head>
+<body data-page="settings">
+<div class="app">
+<script src="a.js"></script>
+<main class="page">
+
+  <div class="head">
+    <div class="grow">
+      <h1 class="title">Settings</h1>
+      <p class="status trunc">Saved as you change them. Keys and logins never enter these files or backups.</p>
+    </div>
+  </div>
+
+  <div class="set">
+    <nav class="card set-nav" aria-label="Settings sections">
+      <div class="field"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></svg><span>Search settings</span></div>
+      <a class="on" aria-current="true">Appearance</a>
+      <a>Window and terminal</a>
+      <a>Updates</a>
+      <a>Limits</a>
+      <a>Connections</a>
+      <a>Log</a>
+      <a>Maintenance</a>
+      <a>Backups</a>
+    </nav>
+
+    <section class="card">
+      <div class="pane-head"><h2 class="section">Appearance</h2><span class="small muted">5 settings</span></div>
+      <div class="srow">
+        <div class="what"><b>Theme</b><p>The look of this window.</p></div>
+        <div class="ctl"><div class="seg"><a class="on">Harness</a><a>VektraGrid</a></div></div>
+      </div>
+      <div class="srow">
+        <div class="what"><b>Light and dark</b><p>Follow the system, or keep one.</p></div>
+        <div class="ctl"><div class="seg"><a class="on">System</a><a>Light</a><a>Dark</a></div></div>
+      </div>
+      <div class="srow">
+        <div class="what"><b>Limits shown as</b><p>Applies to every ring and bar.</p></div>
+        <div class="ctl"><div class="seg"><a class="on">Left</a><a>Used</a></div></div>
+      </div>
+      <div class="srow">
+        <div class="what"><b>Moving routes</b><p>Off, or the system's reduced motion, keeps them still.</p></div>
+        <div class="ctl"><label class="chk"><i><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 5.2l2 2L8 3"/></svg></i>Animate the routes</label></div>
+      </div>
+      <div class="srow">
+        <div class="what"><div class="row"><b>Text size</b><span class="pill ok">New</span></div><p>Applies to every page.</p></div>
+        <div class="ctl"><div class="seg"><a>Compact</a><a class="on">Comfortable</a><a>Large</a></div></div>
+      </div>
+    </section>
+  </div>
+
+</main>
+</div>
+<script src="kit.js"></script>
+</body>
+</html>

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>A · Overview</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="a.css">
+</head>
+<body data-page="overview">
+<div class="app">
+<script src="a.js"></script>
+<main class="page">
+
+  <div class="head">
+    <div class="grow">
+      <h1 class="title">Overview</h1>
+      <p class="status trunc">codex-main is used up until 15:07; work-max will run out Thursday, before its reset.</p>
+    </div>
+    <div class="actions">
+      <div class="seg" role="group" aria-label="Range"><a class="on">Today</a><a>7 d</a><a>30 d</a></div>
+      <div class="readouts">
+        <div><b>48.2M</b><span>tokens</span></div>
+        <div><b>≈ $61.40</b><span>at list prices</span></div>
+        <div><b>94%</b><span>cached</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="deck">
+    <section class="card">
+      <div class="card-head">
+        <h2 class="section">Use next</h2>
+        <div class="seg tight" role="group" aria-label="Tool"><a>Any</a><a class="on"><i data-tool="claude" data-size="14"></i>Claude Code</a><a><i data-tool="codex" data-size="14"></i>Codex</a></div>
+      </div>
+      <div class="use-body">
+        <div class="row who" style="gap:10px">
+          <i data-tool="claude" data-size="28"></i>
+          <b>claude-main</b><span class="pill plan">Max 5x</span><span class="pill quiet">main</span>
+        </div>
+        <p class="why trunc">78% of the week left · lasts until its reset</p>
+        <div class="row">
+          <a class="btn primary"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor"/></svg>Start</a>
+          <a class="btn">Start in folder…</a>
+        </div>
+        <div class="row runner small"><span class="muted">Runner-up</span><i data-tool="claude" data-size="14"></i><b>work-max</b><span class="muted trunc">41% left · ≈ out Thu</span></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2 class="section">Needs attention</h2><span class="pill warn">4</span></div>
+      <div class="item"><i data-tool="codex"></i><div class="two"><b>codex-main</b><span class="small bad trunc">Week used up · back 15:07</span></div><a class="btn sm">Open</a></div>
+      <div class="item"><i data-tool="claude"></i><div class="two"><b>work-max</b><span class="small warn trunc">≈ Out 21 h before reset</span></div><a class="btn sm">Open</a></div>
+      <div class="item"><i data-tool="claude"></i><div class="two"><b>client-acme</b><span class="small bad trunc">Login expired</span></div><a class="btn sm">Log in</a></div>
+      <div class="item"><i data-tool="codex"></i><div class="two"><b>Codex</b><span class="small muted trunc">Update 0.169.0 → 0.170.0</span></div><a class="btn sm">Update</a></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2 class="section">Running now</h2><span class="small muted">3 here · 1 on LAPTOP</span></div>
+      <div class="item"><div class="two"><div><b class="trunc grow">Longhorn backup target for staging</b><span class="meta">1 h 12 m</span></div><div class="meta"><span class="trunc">platform-gitops</span><span class="g"><i data-tool="claude" data-size="14"></i>work-max</span><span class="g"><span class="dot"></span>WORKSTATION</span></div></div><a class="btn sm">Follow</a></div>
+      <div class="item"><div class="two"><div><b class="trunc grow">Bump ArgoCD and fix the sync waves</b><span class="meta">24 m</span></div><div class="meta"><span class="trunc">platform-gitops</span><span class="g"><i data-tool="claude" data-size="14"></i>work-max</span><span class="g"><span class="dot"></span>WORKSTATION</span></div></div><a class="btn sm">Follow</a></div>
+      <div class="item"><div class="two"><div><b class="trunc grow">Invoice export: totals off by one cent</b><span class="meta">41 m</span></div><div class="meta"><span class="trunc">billing-api</span><span class="g"><i data-tool="claude" data-size="14"></i>claude-main</span><span class="g"><span class="dot pc2"></span>LAPTOP</span></div></div><a class="btn sm">Follow</a></div>
+      <div class="item"><div class="two"><div><b class="trunc grow">Fix the flaky build</b><span class="meta">6 m</span></div><div class="meta"><span class="trunc">web-console</span><span class="g"><i data-tool="codex" data-size="14"></i>codex-personal</span><span class="g"><span class="dot"></span>WORKSTATION</span></div></div><a class="btn sm">Follow</a></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="tbl-head">
+      <h2 class="section">Accounts runway</h2>
+      <div class="seg" role="group" aria-label="Tool">
+        <a class="on">All <span class="muted">8</span></a>
+        <a><i data-tool="claude" data-size="14"></i>Claude Code <span class="dim">4</span></a>
+        <a><i data-tool="codex" data-size="14"></i>Codex <span class="dim">2</span></a>
+        <a><i data-tool="opencode" data-size="14"></i>OpenCode <span class="dim">1</span></a>
+        <a><i data-tool="agy" data-size="14"></i>Antigravity <span class="dim">1</span></a>
+      </div>
+      <a class="btn sm icon" title="Legend: a bar shows what is left. The lane runs from now to +7 d; the tick is the reset; a striped stretch is an estimated time with nothing left before the reset." aria-label="Legend">i</a>
+    </div>
+    <table class="runway">
+      <colgroup><col style="width:288px"><col style="width:264px"><col><col style="width:200px"><col style="width:90px"></colgroup>
+      <thead><tr><th>Account</th><th>Limits left</th><th><div class="axis"><span>Now</span><span>+7 d</span></div></th><th>Verdict</th><th></th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="row"><i data-tool="claude"></i><b class="trunc">work-max</b><span class="pill plan">Max 20x</span></div></td>
+          <td><div class="lims">
+            <div class="lim"><div class="t"><span>5h</span><b>64%</b></div><div class="bar"><i style="width:64%"></i></div></div>
+            <div class="lim"><div class="t"><span>Wk</span><b>41%</b></div><div class="bar warn"><i style="width:41%"></i></div></div>
+            <div class="lim"><div class="t"><span>Fable</span><b>35%</b></div><div class="bar warn"><i style="width:35%"></i></div></div>
+          </div></td>
+          <td><div class="lane"><i class="fill warn" style="width:26.9%"></i><i class="starve" style="left:26.9%;width:12.9%"></i><i class="tick" style="left:39.8%"></i></div></td>
+          <td><span class="verdict warn">≈ Out Thu 11:20</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="claude"></i><b class="trunc">claude-main</b><span class="pill plan">Max 5x</span><span class="pill quiet">main</span></div></td>
+          <td><div class="lims">
+            <div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+            <div class="lim"><div class="t"><span>Wk</span><b>78%</b></div><div class="bar"><i style="width:78%"></i></div></div>
+            <div class="lim"><div class="t"><span>Fable</span><b>80%</b></div><div class="bar"><i style="width:80%"></i></div></div>
+          </div></td>
+          <td><div class="lane"><i class="fill" style="width:72.6%"></i><i class="tick" style="left:72.6%"></i></div></td>
+          <td><span class="verdict">Lasts until Sun 16:05</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="claude"></i><b class="trunc">client-acme</b></div></td>
+          <td><span class="unread">—</span></td>
+          <td><div class="lane none"></div></td>
+          <td><span class="verdict bad">Login expired</span></td>
+          <td><a class="btn sm">Log in</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="claude"></i><b class="trunc">team-ci</b><span class="pill plan">API key</span></div></td>
+          <td><span class="unread">—</span></td>
+          <td><div class="lane none"></div></td>
+          <td><span class="verdict plain">Pay per use · ≈ $4.20 today</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="codex"></i><b class="trunc">codex-main</b><span class="pill plan">ChatGPT Pro</span><span class="pill quiet">main</span></div></td>
+          <td><div class="lims">
+            <div class="lim"><div class="t"><span>5h</span><b>90%</b></div><div class="bar"><i style="width:90%"></i></div></div>
+            <div class="lim"><div class="t"><span>Wk</span><b class="bad">0%</b></div><div class="bar bad"><i style="width:0"></i></div></div>
+          </div></td>
+          <td><div class="lane"><i class="starve" style="left:0;width:.6%"></i><i class="tick" style="left:6px"></i></div></td>
+          <td><span class="verdict bad">Used up · back 15:07</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="codex"></i><b class="trunc">codex-personal</b><span class="pill plan">Plus</span></div></td>
+          <td><div class="lims">
+            <div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+            <div class="lim"><div class="t"><span>Wk</span><b>88%</b></div><div class="bar"><i style="width:88%"></i></div></div>
+          </div></td>
+          <td><div class="lane"><i class="fill" style="width:85.7%"></i><i class="tick" style="left:85.7%"></i></div></td>
+          <td><span class="verdict">Lasts until Mon 14:05</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="opencode"></i><b class="trunc">opencode-main</b><span class="pill quiet">main</span></div></td>
+          <td><span class="unread">—</span></td>
+          <td><div class="lane none"></div></td>
+          <td><span class="verdict plain">No plan limits</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+        <tr>
+          <td><div class="row"><i data-tool="agy"></i><b class="trunc">agy-main</b><span class="pill plan">Google AI Pro</span><span class="pill quiet">main</span></div></td>
+          <td><div class="lims">
+            <div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+            <div class="lim"><div class="t"><span>Wk</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div>
+          </div></td>
+          <td><div class="lane"><i class="fill" style="width:100%"></i><i class="tick" style="left:100%"></i></div></td>
+          <td><span class="verdict">Lasts until next Tue</span></td>
+          <td><a class="btn sm">Start</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+</main>
+</div>
+<script src="kit.js"></script>
+</body>
+</html>

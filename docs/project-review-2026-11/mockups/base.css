@@ -1,0 +1,111 @@
+/* Shared base for the review mockups: the approved Harness palette (docs/design-committee-2026-11/round2/app/design-language.md),
+   one type scale and the small parts every option uses. An option adds its own layout in its own <style>; it does not redefine these. */
+@font-face{font-family:"Inter";font-style:normal;font-weight:400 700;font-display:swap;src:url(fonts/Inter-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:400 700;font-display:swap;src:url(fonts/JetBrainsMono-latin.woff2) format("woff2")}
+
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-outer:#050a0d; --bg-canvas:#091115; --bg-rail:#0b151a; --bg-panel:#0e1b22; --bg-card:#12232c; --bg-card-hover:#162b36; --bg-elevated:#172d38; --bg-input:#0a1419;
+  --line-subtle:#182a34; --line-default:#203642; --line-strong:#2c4a5a; --line-focus:#3fd6cf;
+  --ink-primary:#eaf2f5; --ink-secondary:#c0d2d9; --ink-muted:#93acb7; --ink-dim:#829ca8;
+  --teal:#3fd6cf; --teal-bright:#5cebe4; --teal-dim:rgba(63,214,207,.14); --teal-border:rgba(63,214,207,.38); --teal-ink:#042222;
+  --emerald:#2ce59b; --emerald-dim:rgba(44,229,155,.14);
+  --amber:#e8ad43; --amber-dim:rgba(232,173,67,.15); --amber-border:rgba(232,173,67,.42);
+  --coral:#f27565; --coral-dim:rgba(242,117,101,.16); --coral-border:rgba(242,117,101,.45);
+  --violet:#9e8cfc; --violet-dim:rgba(158,140,252,.15);
+  --track-bg:#081014;
+  --shadow-lg:0 20px 50px rgba(0,0,0,.55); --shadow-card:0 4px 16px rgba(0,0,0,.25);
+  --starve:repeating-linear-gradient(-45deg,rgba(242,117,101,.34),rgba(242,117,101,.34) 4px,rgba(242,117,101,.08) 4px,rgba(242,117,101,.08) 8px);
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-outer:#dde6ea; --bg-canvas:#f2f6f8; --bg-rail:#e9eff2; --bg-panel:#ffffff; --bg-card:#f8fbfc; --bg-card-hover:#eef5f7; --bg-elevated:#ffffff; --bg-input:#f0f5f7;
+  --line-subtle:#dfe9ed; --line-default:#cddbe1; --line-strong:#aebec6; --line-focus:#0b7a82;
+  --ink-primary:#0d1f26; --ink-secondary:#223842; --ink-muted:#435a64; --ink-dim:#526a75;
+  --teal:#08656c; --teal-bright:#065056; --teal-dim:rgba(8,101,108,.10); --teal-border:rgba(8,101,108,.36); --teal-ink:#ffffff;
+  --emerald:#0a6e46; --emerald-dim:rgba(10,110,70,.11);
+  --amber:#8a4f00; --amber-dim:rgba(138,79,0,.10); --amber-border:rgba(138,79,0,.35);
+  --coral:#b42818; --coral-dim:rgba(180,40,24,.10); --coral-border:rgba(180,40,24,.35);
+  --violet:#4c35b8; --violet-dim:rgba(76,53,184,.10);
+  --track-bg:#eaf1f4;
+  --shadow-lg:0 20px 50px rgba(13,31,38,.18); --shadow-card:0 2px 8px rgba(13,31,38,.05);
+  --starve:repeating-linear-gradient(-45deg,rgba(200,55,39,.28),rgba(200,55,39,.28) 4px,rgba(200,55,39,.06) 4px,rgba(200,55,39,.06) 8px);
+}
+
+/* The review's type scale. Nothing a person must read is under 12px (the app today sets most of the Overview at 11px). */
+:root {
+  --fs-title:20px;   /* the page's name */
+  --fs-section:15px; /* a panel's heading */
+  --fs-body:13px;    /* rows, values, buttons */
+  --fs-small:12px;   /* labels, timestamps, table heads: the floor */
+  --fs-key:22px;     /* one key number per card */
+  --r-sm:4px; --r-ctl:6px; --r-card:10px; --r-dialog:12px;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg-outer); color: var(--ink-primary); font: 400 var(--fs-body)/1.4 Inter, "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.mono { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 12px; }
+h1, h2, h3, p { margin: 0; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; }
+
+/* The modelled window: exactly 1280 x 800, never a page scroll, so screenshots are the same every time. */
+.app { width: 1280px; height: 800px; overflow: hidden; background: var(--bg-canvas); display: grid; position: relative; }
+
+.muted { color: var(--ink-muted); } .dim { color: var(--ink-dim); } .small { font-size: var(--fs-small); }
+.ok { color: var(--teal); } .warn { color: var(--amber); } .bad { color: var(--coral); } .spare { color: var(--emerald); }
+.title { font-size: var(--fs-title); font-weight: 700; letter-spacing: -.01em; }
+.section { font-size: var(--fs-section); font-weight: 650; }
+.key { font-size: var(--fs-key); font-weight: 700; letter-spacing: -.01em; }
+.label { font-size: var(--fs-small); color: var(--ink-muted); }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+.grow { flex: 1; min-width: 0; }
+
+/* Buttons: one primary per fold. Every control is at least 28px tall. */
+.btn { height: 30px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--line-default); background: var(--bg-card); font-weight: 600; font-size: var(--fs-body); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.btn:hover { background: var(--bg-card-hover); border-color: var(--line-strong); }
+.btn.primary { background: var(--teal); border-color: var(--teal); color: var(--teal-ink); }
+.btn.quiet { background: transparent; border-color: transparent; color: var(--ink-secondary); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: var(--fs-small); }
+.btn.icon { width: 30px; padding: 0; justify-content: center; }
+.btn.danger { color: var(--coral); border-color: var(--coral-border); }
+
+.seg { display: inline-flex; border: 1px solid var(--line-default); border-radius: 7px; padding: 2px; background: var(--bg-input); }
+.seg > * { height: 24px; padding: 0 10px; border-radius: 5px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); display: inline-flex; align-items: center; gap: 6px; }
+.seg > .on { background: var(--bg-elevated); color: var(--ink-primary); box-shadow: 0 0 0 1px var(--line-default); }
+
+.pill { height: 20px; padding: 0 7px; border-radius: 99px; border: 1px solid var(--line-default); font-size: var(--fs-small); font-weight: 600; color: var(--ink-secondary); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pill.ok { color: var(--teal); border-color: var(--teal-border); background: var(--teal-dim); }
+.pill.warn { color: var(--amber); border-color: var(--amber-border); background: var(--amber-dim); }
+.pill.bad { color: var(--coral); border-color: var(--coral-border); background: var(--coral-dim); }
+.pill.violet { color: var(--violet); border-color: transparent; background: var(--violet-dim); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-dim); flex: none; }
+.dot.live { background: var(--teal); box-shadow: 0 0 0 3px var(--teal-dim); } .dot.warn { background: var(--amber); } .dot.bad { background: var(--coral); } .dot.pc2 { background: var(--amber); } .dot.pc3 { background: var(--violet); }
+.kbd { font: 600 11px "JetBrains Mono", monospace; padding: 2px 5px; border-radius: 4px; border: 1px solid var(--line-default); color: var(--ink-muted); background: var(--bg-input); }
+
+.card { background: var(--bg-panel); border: 1px solid var(--line-subtle); border-radius: var(--r-card); box-shadow: var(--shadow-card); }
+.card-head { display: flex; align-items: center; gap: var(--s2); padding: 10px 14px; border-bottom: 1px solid var(--line-subtle); }
+
+/* A limit bar: the fill is what is LEFT. tone by class on the bar. */
+.bar { height: 6px; border-radius: 3px; background: var(--track-bg); box-shadow: inset 0 0 0 1px var(--line-subtle); position: relative; overflow: hidden; min-width: 40px; }
+.bar > i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--teal); }
+.bar.warn > i { background: var(--amber); } .bar.bad > i { background: var(--coral); } .bar.spare > i { background: var(--emerald); }
+
+/* A limit ring from kit.js: <i data-ring="64" data-tone="ok" data-px="36"></i> */
+.ring { position: relative; display: inline-grid; place-items: center; flex: none; }
+.ring > b { position: absolute; font-size: 11px; font-weight: 700; }
+.ring-track { stroke: var(--line-default); } .ring-val { stroke: var(--teal); }
+.ring.tone-warn .ring-val { stroke: var(--amber); } .ring.tone-bad .ring-val { stroke: var(--coral); } .ring.tone-spare .ring-val { stroke: var(--emerald); }
+.ring.tone-none .ring-track { stroke: var(--coral-border); } .ring.tone-none > b { color: var(--ink-dim); }
+.ticon { display: inline-grid; place-items: center; flex: none; line-height: 0; }
+.ticon svg { border-radius: 3px; }
+
+table { border-collapse: collapse; width: 100%; }
+th { font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line-subtle); white-space: nowrap; }
+td { padding: 0 12px; border-bottom: 1px solid var(--line-subtle); height: 44px; vertical-align: middle; }
+tr:last-child > td { border-bottom: 0; }
+tr.sel > td { background: var(--teal-dim); } tr.sel > td:first-child { box-shadow: inset 2px 0 0 var(--teal); }
+.num { text-align: right; }

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>A · Accounts</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="a.css">
+</head>
+<body data-page="accounts">
+<div class="app">
+<script src="a.js"></script>
+<main class="page">
+
+  <div class="head">
+    <div class="grow">
+      <h1 class="title">Accounts</h1>
+      <p class="status trunc">8 accounts on 4 tools; 2 need attention.</p>
+    </div>
+    <div class="actions">
+      <a class="btn">Export CSV</a>
+      <a class="btn">Start in a folder…</a>
+      <a class="btn primary">Add account</a>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="seg" role="group" aria-label="Tool">
+      <a class="on">All <span class="muted">8</span></a>
+      <a><i data-tool="claude" data-size="14"></i>Claude Code <span class="dim">4</span></a>
+      <a><i data-tool="codex" data-size="14"></i>Codex <span class="dim">2</span></a>
+      <a><i data-tool="opencode" data-size="14"></i>OpenCode <span class="dim">1</span></a>
+      <a><i data-tool="agy" data-size="14"></i>Antigravity <span class="dim">1</span></a>
+    </div>
+    <div class="seg" role="group" aria-label="Range"><a class="on">7 d</a><a>14 d</a><a>30 d</a></div>
+  </div>
+
+  <div class="groups">
+    <section class="card">
+      <div class="group-line"><i data-tool="claude" data-size="18"></i><b>Claude Code</b><span class="muted">4</span><div class="sum"><span>Next reset in 2 h 10 m</span><span><b>285.5M</b> tokens · ≈ $367 in 7 days</span></div></div>
+      <div class="acct">
+        <i data-ring="41" data-tone="warn" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">work-max</b></div><div class="small muted trunc">alex@example.com</div></div>
+        <div><span class="pill plan">Max 20x</span></div>
+        <div class="lims"><div class="lim"><div class="t"><span>5h</span><b>64%</b></div><div class="bar"><i style="width:64%"></i></div></div><div class="lim"><div class="t"><span>Wk</span><b>41%</b></div><div class="bar warn"><i style="width:41%"></i></div></div><div class="lim"><div class="t"><span>Fable</span><b>35%</b></div><div class="bar warn"><i style="width:35%"></i></div></div></div>
+        <div class="spark"><i data-spark="18,22,30,26,24,28,20"></i><span>7 days</span></div>
+        <div class="use"><div><b>168M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $204</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+      <div class="acct">
+        <i data-ring="78" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">claude-main</b><span class="pill quiet">main</span></div><div class="small muted trunc">alex@example.com</div></div>
+        <div><span class="pill plan">Max 5x</span></div>
+        <div class="lims"><div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div><div class="lim"><div class="t"><span>Wk</span><b>78%</b></div><div class="bar"><i style="width:78%"></i></div></div><div class="lim"><div class="t"><span>Fable</span><b>80%</b></div><div class="bar"><i style="width:80%"></i></div></div></div>
+        <div class="spark"><i data-spark="10,14,12,18,15,13,14"></i><span>7 days</span></div>
+        <div class="use"><div><b>96M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $118</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+      <div class="acct">
+        <i data-ring="" data-tone="none" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">client-acme</b></div><div class="small muted trunc">alex@example.com</div></div>
+        <div><span class="unread">—</span></div>
+        <div class="unread trunc"><span class="bad">— Login expired</span></div>
+        <div class="spark"><i data-spark="5,4,3,0,0,0,0"></i><span>7 days</span></div>
+        <div class="use"><div><b>12M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $14</div></div>
+        <div class="acts"><a class="btn sm">Log in</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+      <div class="acct">
+        <i data-ring="" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">team-ci</b></div><div class="small muted trunc">Pay per use</div></div>
+        <div><span class="pill plan">API key</span></div>
+        <div class="unread trunc">— No plan limits</div>
+        <div class="spark"><i data-spark="1,1.5,1.2,1.6,1.3,1.4,1.5"></i><span>7 days</span></div>
+        <div class="use"><div><b>9.5M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $31</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="group-line"><i data-tool="codex" data-size="18"></i><b>Codex</b><span class="muted">2</span><div class="sum"><span>Next reset in 1 h 02 m</span><span><b>109M</b> tokens · ≈ $114 in 7 days</span></div></div>
+      <div class="acct">
+        <i data-ring="0" data-tone="bad" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">codex-main</b><span class="pill quiet">main</span></div><div class="small muted trunc">alex@example.org</div></div>
+        <div><span class="pill plan">ChatGPT Pro</span></div>
+        <div class="lims"><div class="lim"><div class="t"><span>5h</span><b>90%</b></div><div class="bar"><i style="width:90%"></i></div></div><div class="lim"><div class="t"><span>Wk</span><b class="bad">0%</b></div><div class="bar bad"><i style="width:0%"></i></div></div></div>
+        <div class="spark"><i data-spark="8,12,15,18,16,14,5"></i><span>7 days</span></div>
+        <div class="use"><div><b>88M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $92</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon open" aria-label="More actions" title="More actions" aria-expanded="true">⋯</a>
+          <div class="menu" role="menu"><a>Start in a folder…</a><a>Refresh limits</a><a>Rename</a><a>Edit</a><a>Open folder</a><a>Log in again</a><hr><a class="danger">Remove…</a></div></div>
+      </div>
+      <div class="acct">
+        <i data-ring="88" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">codex-personal</b></div><div class="small muted trunc">alex@example.org</div></div>
+        <div><span class="pill plan">Plus</span></div>
+        <div class="lims"><div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div><div class="lim"><div class="t"><span>Wk</span><b>88%</b></div><div class="bar"><i style="width:88%"></i></div></div></div>
+        <div class="spark"><i data-spark="2,3,3,4,3,3,3"></i><span>7 days</span></div>
+        <div class="use"><div><b>21M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $22</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="group-line"><i data-tool="opencode" data-size="18"></i><b>OpenCode</b><span class="muted">1</span><div class="sum"><span>No plan limits</span><span><b>11M</b> tokens · ≈ $12 in 7 days</span></div></div>
+      <div class="acct">
+        <i data-ring="" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">opencode-main</b><span class="pill quiet">main</span></div><div class="small muted trunc">Usage only</div></div>
+        <div><span class="unread">—</span></div>
+        <div class="unread trunc">— No plan limits</div>
+        <div class="spark"><i data-spark="1,2,1,2,2,1.5,1.5"></i><span>7 days</span></div>
+        <div class="use"><div><b>11M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $12</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="group-line"><i data-tool="agy" data-size="18"></i><b>Antigravity</b><span class="muted">1</span><div class="sum"><span>Next reset in 5 h</span><span><b>6.5M</b> tokens · ≈ $5 in 7 days</span></div></div>
+      <div class="acct">
+        <i data-ring="100" data-px="44"></i>
+        <div class="who"><div class="row"><b class="trunc">agy-main</b><span class="pill quiet">main</span></div><div class="small muted trunc">alex@example.net</div></div>
+        <div><span class="pill plan">Google AI Pro</span></div>
+        <div class="lims"><div class="lim"><div class="t"><span>5h</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div><div class="lim"><div class="t"><span>Wk</span><b>100%</b></div><div class="bar"><i style="width:100%"></i></div></div></div>
+        <div class="spark"><i data-spark="0.5,1,1.5,1,1,1,0.5"></i><span>7 days</span></div>
+        <div class="use"><div><b>6.5M</b> <span class="small muted">tokens</span></div><div class="small muted">≈ $5</div></div>
+        <div class="acts"><a class="btn sm">Start</a><a class="btn sm icon" aria-label="More actions" title="More actions">⋯</a></div>
+      </div>
+    </section>
+  </div>
+
+</main>
+</div>
+<script src="kit.js"></script>
+</body>
+</html>

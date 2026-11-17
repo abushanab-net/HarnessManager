@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>A · Computers</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="a.css">
+</head>
+<body data-page="computers">
+<div class="app">
+<script src="a.js"></script>
+<main class="page">
+
+  <div class="head">
+    <div class="grow">
+      <h1 class="title">Computers</h1>
+      <p class="status trunc">3 computers share their sessions through a folder; LAPTOP is connected directly.</p>
+    </div>
+    <div class="actions"><a class="btn primary">Pair a computer…</a></div>
+  </div>
+
+  <div class="pcs">
+    <section class="card">
+      <div class="pc-head"><span class="dot"></span><h2 class="section trunc">WORKSTATION</h2><span class="pill ok">This computer</span><span class="grow"></span><a class="btn sm icon" aria-label="More actions: Rename…" title="More actions: Rename…">⋯</a></div>
+      <div class="pc-body">
+        <dl class="kv"><dt>System</dt><dd>Windows</dd><dt>App version</dt><dd>1.9.14</dd><dt>Last seen</dt><dd>Now</dd><dt>Connection</dt><dd>Through the folder</dd></dl>
+        <div class="count"><b class="key">3</b><span>sessions<br>running</span></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="pc-head"><span class="dot pc2"></span><h2 class="section trunc">LAPTOP</h2><span class="grow"></span><a class="btn sm">Sync now</a><a class="btn sm icon" aria-label="More actions: Forget…" title="More actions: Forget… (danger)">⋯</a></div>
+      <div class="pc-body">
+        <dl class="kv"><dt>System</dt><dd>Windows</dd><dt>App version</dt><dd>1.9.14</dd><dt>Last seen</dt><dd>1 m ago</dd><dt>Connection</dt><dd class="ok">Direct connection</dd></dl>
+        <div class="count"><b class="key">1</b><span>session<br>running</span></div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="pc-head"><span class="dot pc3"></span><h2 class="section trunc">STUDIO-MAC</h2><span class="grow"></span><a class="btn sm icon" aria-label="More actions: Forget…" title="More actions: Forget… (danger)">⋯</a></div>
+      <div class="pc-body">
+        <dl class="kv"><dt>System</dt><dd>macOS</dd><dt>App version</dt><dd>1.9.12</dd><dt>Last seen</dt><dd>3 h ago</dd><dt>Connection</dt><dd>Through the folder</dd></dl>
+        <div class="count"><b class="key dim">0</b><span>sessions<br>running</span></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="pane-head"><h2 class="section">How your computers sync</h2><a class="btn sm quiet">First-run choices…</a></div>
+    <div class="ways">
+      <div class="way on">
+        <span class="radio"></span>
+        <div class="two"><div class="row"><b>A shared folder</b><span class="pill ok">In use</span></div><div class="mono trunc">D:\OneDrive\HarnessManager</div></div>
+        <a class="btn sm">Change…</a>
+      </div>
+      <div class="way">
+        <span class="radio"></span>
+        <div class="two"><b>A hub you host</b><div class="muted">Not joined</div></div>
+        <a class="btn sm">Join with a code…</a>
+      </div>
+    </div>
+    <div class="srow">
+      <div class="what"><b>Carry transcripts</b><p>Over 20 MB is skipped; the store holds 200 MB.</p></div>
+      <div class="ctl"><label class="sw"><i></i><b>On</b></label></div>
+    </div>
+    <div class="srow">
+      <div class="what"><b>Share what runs here</b><p>Your other computers see this one's sessions, every minute.</p></div>
+      <div class="ctl"><label class="sw"><i></i><b>On</b></label></div>
+    </div>
+    <div class="srow">
+      <div class="what"><b>Connect directly</b><p>Paired computers talk over TLS; the folder keeps working.</p></div>
+      <div class="ctl"><label class="sw"><i></i><b>On</b></label><a class="btn sm">Listen port 47110</a></div>
+    </div>
+  </section>
+
+</main>
+</div>
+<script src="kit.js"></script>
+</body>
+</html>

@@ -17,3 +17,8 @@ docs/design-committee-2026-11/round2/app/review.html
 .env
 /.claude/
 /app/.astryx-proto/
+# the review report and its screenshots stay local; the mockups (the spec for 1.10 and 1.11) are tracked
+/docs/project-review-2026-11/index.html
+/docs/project-review-2026-11/shots/
+/docs/project-review-2026-11/mockups/*.png
+/docs/project-review-2026-11/mockups/c-*

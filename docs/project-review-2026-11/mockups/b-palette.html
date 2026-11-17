@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>B · Workbench · Command palette</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="b.css">
+<script src="kit.js"></script>
+<script src="b.js"></script>
+<style>
+  /* The page behind is the real "Now" screen (b-now.html), so the two can never drift apart. */
+  .app.pal-host { display: block; }
+  .behind { position: absolute; inset: 0; width: 1280px; height: 800px; border: 0; pointer-events: none; }
+  .scrim { position: absolute; inset: 0; background: var(--bg-outer); opacity: .62; }
+  .pal { position: absolute; top: 8px; left: 320px; width: 640px; background: var(--bg-elevated); border: 1px solid var(--line-strong); border-radius: var(--r-dialog); box-shadow: var(--shadow-lg); overflow: hidden; }
+  .pal-in { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line-default); color: var(--ink-muted); }
+  .pal-in .q { font-size: var(--fs-section); color: var(--ink-primary); display: flex; align-items: center; }
+  .pal-in .q::after { content: ""; width: 2px; height: 18px; margin-left: 1px; background: var(--teal); }
+  .pal-g { padding: 10px 16px 4px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); }
+  .pal-r { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; height: 40px; margin: 0 6px; padding: 0 10px; border-radius: 7px; }
+  .pal-r.on { background: var(--teal-dim); box-shadow: inset 0 0 0 1px var(--teal-border); }
+  .pal-r .ic, .pal-r .ticon { justify-self: center; color: var(--ink-muted); }
+  .pal-r mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; text-decoration-color: var(--teal); text-underline-offset: 3px; }
+  .pal-r .sub { color: var(--ink-muted); }
+  .pal-f { display: flex; align-items: center; gap: 14px; height: 38px; margin-top: 6px; padding: 0 16px; border-top: 1px solid var(--line-default); background: var(--bg-panel); font-size: var(--fs-small); color: var(--ink-muted); }
+  .pal-f span { display: inline-flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="app pal-host">
+  <iframe class="behind" id="behind" title="Now, behind the palette" tabindex="-1" aria-hidden="true"></iframe>
+  <script>document.getElementById('behind').src = 'b-now.html' + location.search;</script>
+  <div class="scrim"></div>
+
+  <div class="pal" role="dialog" aria-label="Command palette">
+    <div class="pal-in"><i data-ic="search" data-size="18"></i><span class="q grow">start</span><span class="b-kbd">Esc</span></div>
+
+    <div class="pal-g">Actions</div>
+    <div class="pal-r on"><i data-tool="claude" data-size="18"></i>
+      <div class="trunc"><b><mark>Start</mark> claude-main</b><span class="sub"> · recommended for Claude Code</span></div><span class="b-kbd">↵</span></div>
+    <div class="pal-r"><i data-tool="codex" data-size="18"></i>
+      <div class="trunc"><b><mark>Start</mark> codex-personal</b><span class="sub"> · recommended for Codex</span></div><span class="b-kbd">Ctrl+2</span></div>
+    <div class="pal-r"><i data-ic="folder" data-size="18"></i>
+      <div class="trunc"><b><mark>Start</mark> in a folder…</b></div><span class="b-kbd">Ctrl+3</span></div>
+    <div class="pal-r"><i data-ic="plus" data-size="18"></i>
+      <div class="trunc"><b>New session in platform-gitops</b><span class="sub"> · starts in its folder</span></div><span class="b-kbd">Ctrl+4</span></div>
+
+    <div class="pal-g">Go to</div>
+    <div class="pal-r"><i data-ic="sessions" data-size="18"></i>
+      <div class="trunc"><b>Sessions</b><span class="sub"> · 4 running now</span></div><span class="b-kbd">Ctrl+5</span></div>
+    <div class="pal-r"><i data-ic="accounts" data-size="18"></i>
+      <div class="trunc"><b>Accounts › work-max</b><span class="sub"> · <mark style="font-weight:400">Start</mark>, limits, sessions</span></div><span class="b-kbd">Ctrl+6</span></div>
+    <div class="pal-r"><i data-ic="settings" data-size="18"></i>
+      <div class="trunc"><b>Settings › Launch at sign-in</b><span class="sub"> · <mark style="font-weight:400">start</mark> with the computer</span></div><span class="b-kbd">Ctrl+7</span></div>
+
+    <div class="pal-g">Sessions</div>
+    <div class="pal-r"><i data-tool="claude" data-size="18"></i>
+      <div class="trunc"><b>Re<mark>start</mark> the sync after the ArgoCD bump</b><span class="sub"> · platform-gitops · Yesterday 16:20</span></div><span class="b-kbd">Ctrl+8</span></div>
+    <div class="pal-r"><i data-tool="claude" data-size="18"></i>
+      <div class="trunc"><b><mark>Start</mark>up script for the billing worker</b><span class="sub"> · billing-api · Nov 14</span></div><span class="b-kbd">Ctrl+9</span></div>
+
+    <div class="pal-f"><span><span class="b-kbd">↑↓</span>move</span><span><span class="b-kbd">↵</span>run</span><span><span class="b-kbd">Esc</span>close</span><span class="grow"></span><span>9 results</span></div>
+  </div>
+</div>
+</body>
+</html>
