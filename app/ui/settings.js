@@ -1,4 +1,4 @@
-// Settings, as the reference draws it: the finding, a sticky row of section chips, and every section a folding card
+// Settings, as the reference draws it: the head, a sticky row of section chips, and every section a folding card
 // ("N settings") of rows: a title with its ⓘ (the explanation and the default), a one-line description, the control.
 // Switches and chips save at once; typed fields have a button beside them. Computers (the two sync cards, the rows, a
 // card per computer) and Backups and archive are sections of the same page. Harness Manager's own update lives here.
@@ -7,6 +7,7 @@ import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog
 import { esc, when, dur } from './lib.js';
 import { winTrack } from './accounts.js';
 import { computersStatus, syncOn, computers, colorIdx, heardOn, transportLine, nameOf, syncChoices } from './computers.js';
+import { pageHead } from './parts.js';
 
 // ---------- the parts ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
@@ -44,7 +45,7 @@ view('settings', async (sheet, params) => {
   // the sign-in entry and the choice of terminal are Windows things; macOS opens Terminal
   const win = !st.os || st.os === 'windows';
   patch(sheet, `<div class="page-body b-page" data-b-page="settings">
-    <header class="page-heading"><div><h1>Settings stay on this computer.</h1><div class="heading-facts">Saved as you change them · keys and logins never enter these files or backups</div></div></header>
+    ${pageHead('settings', 'Saved as you change them. Keys and logins never enter these files or backups.')}
     <nav class="b-section-nav chip-group" aria-label="Settings sections">${NAV.map(([id, label]) => `<button class="filter-chip" data-act="set-jump" data-v="${id}">${label}</button>`).join('')}</nav>
     ${section('appearance', 'Appearance',
       row('brand', 'Theme', info('brand', '<b>Harness (the default):</b> porcelain and night, Inter.<br><b>VektraGrid:</b> ivory and deep green, Garamond headings; deep teal leads, plum marks the router, sand gold is the warning.'), 'The look of this window; light and dark follow the choice below.', chips('brand', s.brand || 'hm', [['hm', 'Harness'], ['vg', 'VektraGrid']], 'st-brand'))

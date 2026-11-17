@@ -14,6 +14,7 @@ import zlib from 'node:zlib';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { designTests } from './design.e2e.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const target = path.join(root, 'target', 'debug');
@@ -154,6 +155,8 @@ const type = async (css, t) => {
 const text = async (css) => { await $(css); return page.innerText(css); };
 const hasText = (css, t) => waitFor(async () => (await text(css)).includes(t), `"${t}" in ${css}`);
 const nav = async (hash) => { await exec(`location.hash = arguments[0]`, [hash]); await sleep(400); };
+/** The page at the address is the one drawn (its data read, its markup in place). */
+const drawn = (what = 'the page') => waitFor(() => exec("return import('./core.js').then((c) => c.S.drawn === location.hash)"), what + ' drawn');
 const shot = async (name) => page.screenshot({ path: path.join(shots, name + '.png') });
 const select = async (css, value) => { await $(css); await page.selectOption(css, value); };
 
@@ -206,7 +209,9 @@ try {
     assert.equal(await exec("return document.querySelector('[data-testid=lane-codex-main] .ring-val').textContent"), '79%', 'the ring says what is left');
     await hasText('[data-testid=lane-codex-main]', 'Wk ↻');
     // a lane's Start has a ▾ beside it: choose a folder, or the full Start in a folder dialog
-    await page.hover('[data-testid=lane-codex-main]');
+    // (the buttons of a lane show while the pointer is over it: hovered again until they do, since a redraw of the page
+    // under a still pointer can leave the lane unhovered for a moment)
+    await waitFor(async () => { await page.hover('[data-testid=lane-codex-main]'); return (await exec("return getComputedStyle(document.querySelector('[data-testid=lane-start-menu-codex-main]')).pointerEvents")) !== 'none'; }, 'the lane hovered, its Start shown');
     await click('[data-testid=lane-start-menu-codex-main]');
     await $('[data-testid=sm-choose]');
     await click('[data-testid=sm-dialog]');
@@ -230,7 +235,6 @@ try {
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] .yc-cell:not(.lv-0)').length")) > 0, 'today shaded');
     await hasText('[data-testid=kpi-cost]', '$0.01');
     await hasText('[data-testid=kpi-tokens]', 'Tokens');
-    await hasText('#today-cost', '$');
     await shot('00-home');
     // a tool chip shows that tool's lanes and replies; Antigravity too (it keeps no usage logs, so its numbers are zero)
     await click('[data-testid=tool-codex]');
@@ -276,10 +280,8 @@ try {
     assert.ok(!(await exec("return !!document.querySelector('#tray-root')")), 'no limits popup in the window');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
-    await click('[data-testid=fold-pins]');
-    await waitFor(async () => exec("return document.getElementById('nav-pins').hidden"), 'pins folded');
-    await click('[data-testid=fold-pins]');
-    await waitFor(async () => !(await exec("return document.getElementById('nav-pins').hidden")), 'and shown');
+    // nothing is pinned yet, so there is no Pinned fold under Projects (the projects test folds it, with a pin)
+    assert.ok(await exec("return document.querySelector('[data-testid=fold-pins]').hidden"), 'no fold without a pin');
   });
 
   // (here, before any other test opens Accounts: the report is made once, at the first launch)
@@ -470,6 +472,12 @@ try {
     await exec("[...document.querySelectorAll('[data-testid^=pcard-]')].find((c) => c.innerText.includes('platform-gitops')).querySelector('[data-act=project-pin]').click()");
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned in the sidebar');
     assert.ok(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).pinned_projects.length === 1, 'saved in settings');
+    // with a pin, Projects has its Pinned fold in the sidebar; the pin carries no bare count
+    await click('[data-testid=fold-pins]');
+    await waitFor(async () => exec("return document.getElementById('nav-pins').hidden"), 'pins folded');
+    await click('[data-testid=fold-pins]');
+    await waitFor(async () => !(await exec("return document.getElementById('nav-pins').hidden")), 'and shown');
+    assert.equal((await exec("return document.querySelector('[data-testid=nav-pins] .nav-subitem .nav-label').parentElement.innerText")).replace(/[✕\s]+$/, ''), 'platform-gitops', 'a pinned project: its name, and a badge only when a session runs');
     assert.ok(await exec("return document.getElementById('pj-tiles') === window.__tiles"), 'pinning did not redraw the page');
     // the ✕ beside the pin in the sidebar takes it off; the card pins it again
     await exec("document.querySelector('[data-testid=nav-pins] .unpin').click()");
@@ -495,12 +503,13 @@ try {
     assert.ok(await exec("return [...document.querySelectorAll('.a-srow')].every((r) => r.innerText.includes('platform-gitops'))"), 'only the project\'s sessions');
     await shot('06e-project-sessions');
     // the header's pin icon pins and unpins too
-    await click('.page-heading [data-act=project-pin]');
+    await click('.page-head [data-act=project-pin]');
     await waitFor(async () => (await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'pinned from the header');
-    await click('.page-heading [data-act=project-pin]');
+    await click('.page-head [data-act=project-pin]');
     await waitFor(async () => !(await exec("return document.querySelector('[data-testid=nav-pins]').innerText")).includes('platform-gitops'), 'unpinned from the header');
     await nav('#sessions');
-    await hasText('[data-testid=sessions-finding]', 'sessions');
+    await hasText('[data-testid=page-title]', 'Sessions');
+    await hasText('[data-testid=sessions-count]', 'in the last 7 days');
     await $('[data-testid=rail-live]'); // the rail comes with the list
     assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
   });
@@ -606,7 +615,7 @@ try {
 
   await test('OpenCode and Antigravity sessions are listed and readable', async () => {
     await nav('#sessions');
-    await hasText('[data-testid=sessions-finding]', 'from Antigravity, OpenCode, Claude Code and Codex');
+    await waitFor(async () => (await exec("return [...new Set([...document.querySelectorAll('.a-srow .a-acct')].map((e) => e.title.split(' · ')[0]))].sort().join()")) === 'Antigravity,Claude Code,Codex,OpenCode', 'sessions of the four tools');
     const noFolder = await exec("return [...document.querySelectorAll('[data-testid=group]')].find((g) => g.textContent.includes('No folder')).textContent");
     assert.ok(!noFolder.includes('github.com'), 'a session without a folder has no repository');
     assert.ok(noFolder.includes('1 msg') || noFolder.includes('2 msgs'));
@@ -652,34 +661,14 @@ try {
     assert.ok(md.includes('What changed'));
   });
 
-  await test('the window follows the approved design in the Harness theme', async () => {
+  await test('accounts: a card and a chip per tool, a header that folds, Add account as a dialog; a session with its Conversation panel', async () => {
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
-    await page.mouse.move(2, 2); // no hover colour on the button being measured
-    const d = await exec(`
-      const cs = (sel) => getComputedStyle(document.querySelector(sel));
-      const on = document.querySelector('.nav a.active');
-      return {
-        frame: cs('.frame').backgroundColor, railBg: cs('aside.rail').backgroundColor, topBg: cs('.topbar').backgroundColor, sheetBg: cs('.sheet').backgroundColor,
-        rail: document.querySelector('aside.rail').getBoundingClientRect().width,
-        navActive: getComputedStyle(on).backgroundColor, navLabel: on.querySelector('.nav-item-left span').textContent.trim(),
-        font: getComputedStyle(document.body).fontFamily, inter: document.fonts.check('13px "Inter"'), mark: !!document.querySelector('#brand-mark svg linearGradient'),
+    const d = await exec(`return {
         groups: [...document.querySelectorAll('[data-testid=accounts-table] .tool-group-header .panel-title')].map((t) => t.textContent),
-        primary: cs('.btn-primary').backgroundColor, panel: [cs('.panel-card').borderTopLeftRadius, cs('.panel-card').backgroundColor],
         chips: [...document.querySelectorAll('.horizon-filterbar .filter-chip')].map((a) => a.textContent.trim().replace(/ \\(\\d+\\)$/, '')),
       };`);
-    assert.equal(d.frame, 'rgb(242, 246, 248)', 'the canvas');
-    assert.equal(d.railBg, 'rgb(233, 239, 242)', 'the rail');
-    assert.equal(d.topBg, 'rgb(255, 255, 255)', 'the top bar is a panel');
-    assert.equal(d.sheetBg, 'rgba(0, 0, 0, 0)', 'an open page: cards sit on the canvas');
-    assert.equal(d.rail, 192, 'rail 192 px');
-    assert.equal(d.navActive, 'rgba(8, 101, 108, 0.1)', 'the active item is shaded with the accent');
-    assert.equal(d.navLabel, 'Accounts');
-    assert.ok(d.font.includes('Inter') && d.inter, 'Inter loaded');
-    assert.ok(d.mark, 'the Interlocking H in the rail');
     assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'accounts grouped by tool, one card each');
-    assert.equal(d.primary, 'rgb(8, 101, 108)', 'the primary button in the accent');
-    assert.deepEqual(d.panel, ['10px', 'rgb(255, 255, 255)'], 'panel cards: radius 10, white');
     assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool');
     // a tool chip shows only that tool; a group header folds its accounts away
     await click('[data-testid=chip-codex]');
@@ -690,11 +679,7 @@ try {
     await click('[data-testid=group-claude] [data-act=acct-fold]');
     await $('[data-testid=row-claude-main]');
     await click('[data-testid=add-account]');
-    const dlg = await exec("const m = document.querySelector('.modal-card'), s = getComputedStyle(m); return { radius: s.borderTopLeftRadius, width: m.getBoundingClientRect().width, kind: getComputedStyle(document.querySelector('.kind-pick-card.active')).borderColor, tool: getComputedStyle(document.querySelector('.tool-pick-card.active')).borderColor };");
-    assert.equal(dlg.radius, '12px', 'Add account is a dialog over the list');
-    assert.equal(dlg.width, 640, 'the dialog is 640 wide');
-    assert.equal(dlg.kind, 'rgb(8, 101, 108)', 'the chosen kind in the accent');
-    assert.equal(dlg.tool, 'rgb(8, 101, 108)', 'the chosen tool in the accent');
+    await $('.modal-card .kind-pick-card.active');
     await exec("document.querySelector('[data-act=dialog-close]').click()");
     await nav('#session?profile=claude-main&id=s-main-1');
     await $('[data-testid=chat]');
@@ -704,66 +689,32 @@ try {
     assert.ok(r.resume.startsWith('Resume in'));
   });
 
-  // The approved reference (docs/design-committee-2026-11/round2/app, measured in Edge at 1280): the rail 192, the page
-  // padded 12 / 16 / 20 with its parts 12 apart, Inter 13 for text and 22 / 700 for the finding, cards of radius 10.
-  await test('measurements match the design pages', async () => {
-    await nav('#account?name=claude-main');
-    await $('.account-stat');
-    const d = await exec(`
-      const cs = (el) => getComputedStyle(el), q = (s) => document.querySelector(s), box = (s) => q(s).getBoundingClientRect();
-      const body = cs(q('.page-body')), h1 = cs(q('.page-heading h1')), panel = cs(q('.panel-card')), pt = cs(q('.panel-title')), stat = cs(q('.account-stat')), sb = cs(q('.account-stat > b'));
-      const nav = q('.nav-item'), btn = q('.btn-primary'), tab = q('.page-tabs .filter-chip.active');
-      return {
-        rail: box('aside.rail').width, top: box('.topbar').height, pad: [body.paddingTop, body.paddingRight, body.paddingBottom, body.paddingLeft], gap: body.rowGap,
-        h1: [h1.fontWeight, h1.fontFamily.split(',')[0].replace(/"/g, ''), h1.fontSize], body: [cs(document.body).fontSize, cs(document.body).fontFamily.split(',')[0].replace(/"/g, '')],
-        panel: [panel.borderTopLeftRadius, panel.paddingTop, panel.paddingLeft, panel.rowGap], title: [pt.fontSize, pt.fontWeight],
-        stat: [stat.borderTopLeftRadius, stat.paddingTop, stat.paddingLeft], statB: [sb.fontWeight, sb.fontSize], statGap: cs(q('.account-stats')).columnGap,
-        nav: [Math.round(nav.getBoundingClientRect().height * 2) / 2, cs(nav).borderTopLeftRadius, cs(nav).fontSize], btn: [Math.round(btn.getBoundingClientRect().height), cs(btn).borderTopLeftRadius, cs(btn).fontSize],
-        search: [Math.round(box('.search-box').height), cs(q('.search-box')).borderTopLeftRadius, box('.search-box').width], tab: cs(tab).color,
-        avatar: [box('.account-avatar').width, cs(q('.account-avatar')).borderTopLeftRadius], icon: box('.icon-btn').width,
-      };`);
-    assert.equal(d.rail, 192, 'rail 192 px');
-    assert.ok(d.top >= 47 && d.top <= 50, 'top bar about 48 px: ' + d.top);
-    assert.deepEqual([...d.pad, d.gap], ['12px', '16px', '20px', '16px', '12px'], 'page padding 12 / 16 / 20, parts 12 apart');
-    assert.deepEqual(d.h1, ['700', 'Inter', '22px'], 'the page finding: Inter 22 / 700');
-    assert.deepEqual(d.body, ['13px', 'Inter'], 'body 13 px Inter');
-    assert.deepEqual(d.panel, ['10px', '11px', '13px', '9px'], 'panel cards: radius 10, padding 11 / 13, parts 9 apart');
-    assert.deepEqual(d.title, ['12.5px', '700'], 'section titles 12.5 / 700');
-    assert.deepEqual(d.stat, ['10px', '12px', '12px'], 'readout tiles: radius 10, padding 12');
-    assert.deepEqual(d.statB, ['700', '18px'], 'readout values 18 / 700 at 1280');
-    assert.equal(d.statGap, '10px', '10 px between tiles');
-    assert.deepEqual(d.nav, [31.5, '7px', '12.5px'], 'nav items 31.5 px, radius 7, 12.5 px');
-    assert.deepEqual(d.btn, [29, '7px', '12px'], 'the primary button 29 px, radius 7, 12 px');
-    assert.deepEqual(d.search, [31, '7px', 310], 'search 31 px, radius 7, 310 wide');
-    assert.equal(d.tab, 'rgb(8, 101, 108)', 'the current tab in the accent');
-    assert.deepEqual(d.avatar, [44, '10px'], 'the avatar 44, radius 10');
-    assert.equal(d.icon, 28, 'icon buttons 28');
-  });
+  // The design's measurements (the 1.10 shell, the type scale, the page heads, the badges): tests of their own
+  await designTests({ test, exec, nav, $, click, waitFor, assert, page, shot });
 
   // Each page has the design page's sections, in its order: the titles of the design (rendered from the canvas)
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Period readouts', 'Needs attention', 'Activity, 53 weeks', 'Latest replies'],
-      '#accounts': ['Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
+      '#home': ['Overview', 'Period readouts', 'Needs attention', 'Activity, 53 weeks', 'Latest replies'],
+      '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Login and folder', 'Tokens per day · 30 days', 'By model · 30 days', 'Recent sessions'],
-      '#projects': ['Where the tokens and the cost went'],
-      '#sessions': ["Every tool's sessions", 'platform-gitops'],
+      '#projects': ['Projects', 'Where the tokens and the cost went'],
+      '#sessions': ['Sessions', 'platform-gitops'],
       '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
-      '#routing': ['Local router', 'Routes', 'Providers', 'Recent requests through the router'],
-      '#mcp': ['1 server shared', 'Write to each tool'], '#skills': ['No skills yet', 'Installed'], '#prompts': ['CLAUDE.md is the file Claude Code reads', 'The file now'],
-      '#apps': ['Installed', 'Harness Manager'],
+      '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
+      '#mcp': ['MCP servers', 'Write to each tool'], '#skills': ['Skills', 'Installed'], '#prompts': ['System prompts', 'The file now'],
+      '#apps': ['Apps', 'Installed', 'Harness Manager'],
       '#settings': ['Settings', 'Appearance', 'Window and terminal', 'Updates', 'Usage and limits', 'Connections', 'Diagnostic log', 'Maintenance', 'Backups'],
-      '#cli': ['Every desktop action has an hrm command', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
+      '#cli': ['CLI reference', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
     };
     // the replies panel as the design opens it (an earlier test left the full log open)
     await nav('#home');
     await $('[data-testid=activity]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
-      const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);
-      await waitFor(async () => (await exec("return document.querySelector('#sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
+      await drawn(h);
       await waitFor(async () => {
         const got = await exec("return [...document.querySelectorAll('#sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
         let i = 0;
@@ -1078,41 +1029,15 @@ description: Bulk skill ${i}
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('17e-dark-overview-panels');
     // every other page in dark, to compare with the dark design pages
-    for (const [h, n] of [['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'],
+    for (const [h, n] of [['#account?name=claude-main', 'account'], ['#projects', 'projects'], ['#sessions', 'sessions'], ['#session?profile=claude-main&id=s-main-1', 'session'],
       ['#routing', 'routing'], ['#mcp', 'mcp'], ['#skills', 'skills'], ['#prompts', 'prompts'], ['#apps', 'apps'], ['#cli', 'cli']]) {
-      const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);
-      await waitFor(async () => (await exec("return document.querySelector('#sheet h1')?.textContent || ''")) !== before, n + ' drawn');
+      await drawn(n);
       await sleep(500);
       await shot('18-dark-' + n);
-      // the design's measurements on every page: page padding, title, and every card's corners
-      const m = await exec(`const cs = (e) => getComputedStyle(e), sh = cs(document.querySelector('#sheet > .page-body')), h1 = cs(document.querySelector('#sheet h1'));
-        const cards = [...document.querySelectorAll('#sheet .panel-card, #sheet .a-grp')];
-        return { gap: sh.rowGap, pad: [sh.paddingTop, sh.paddingLeft], h1: h1.fontWeight, cards: cards.length, radius: [...new Set(cards.map((c) => cs(c).borderTopLeftRadius))] };`);
-      assert.deepEqual(m.pad, ['12px', '16px'], n + ': page padding 12 / 16, as the reference');
-      assert.equal(m.gap, '12px', n + ': the page parts sit 12 px apart, as drawn');
-      assert.equal(m.h1, '700', n + ': the finding, 700');
-      assert.ok(m.cards > 0, n + ': drawn in cards');
-      assert.deepEqual(m.radius, ['10px'], n + ': card corners 10 px');
-      // card padding, table rows and type as the design pages set them
-      const want = {
-        sessions: [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
-        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
-        routing: [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']], apps: [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
-        mcp: [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],
-        skills: [['.b-toolbar', 'display', 'flex'], ['.b-toolbar', 'flexWrap', 'wrap']],
-        prompts: [['.b-prompt-grid', 'display', 'grid']], cli: [['.b-cli-grid', 'display', 'grid'], ['.b-cli-row', 'display', 'grid']],
-      }[n] || [];
-      for (const [sel, prop, v] of want) {
-        const got = await exec(`const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return 'missing'; const c = getComputedStyle(e);
-          return ${JSON.stringify(prop)} === 'font' ? c.fontSize + '/' + c.fontWeight : c[${JSON.stringify(prop)}];`);
-        assert.equal(got, v, `${n}: ${sel} ${prop} as drawn`);
-      }
     }
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.b-section')).padding"), '11px 13px', 'settings sections: a panel card, as drawn');
-    assert.equal(await exec("return getComputedStyle(document.querySelector('.b-section-nav')).position"), 'sticky', 'settings: the section chips stay in view');
     await click('[data-testid=st-theme] button[data-v=light]');
     await waitFor(async () => (await exec(`return getComputedStyle(document.body).backgroundColor`)) === 'rgb(242, 246, 248)', 'light again');
     // the VektraGrid theme: ivory ground, EB Garamond headings from the app's own font file; Harness again after
@@ -1860,7 +1785,7 @@ description: Bulk skill ${i}
     ]));
     await waitFor(() => exec("return !!document.querySelector('[data-testid=session-s-watched-1]')"), 'the new session on the page without a reload', 2000);
     console.log(`     indexed and drawn in ${Date.now() - t0} ms`);
-    assert.ok((await exec("return document.querySelector('[data-testid=sessions-count]').textContent")).includes('sessions'), 'still the Sessions page');
+    assert.equal(await text('[data-testid=page-title]'), 'Sessions', 'still the Sessions page');
     const st = JSON.parse(hrm('index', 'status', '--json'));
     assert.ok(st.watcher === true && st.sessions >= 5 && st.tools.some((x) => x.harness === 'claude'), JSON.stringify(st));
     // the search: a word of the title, through the top bar and the CLI
@@ -1880,7 +1805,7 @@ description: Bulk skill ${i}
     await $('[data-testid=s-pager]');
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 50, '50 rows on the first page');
     const count = await text('[data-testid=sessions-count]');
-    assert.ok(+(count.match(/^(\d+) sessions/) || [])[1] >= 61, count); // the 60 seeded here and every earlier test's
+    assert.ok(+(count.replace(/,/g, '').match(/^(\d+) in all/) || [])[1] >= 61, count); // the 60 seeded here and every earlier test's
     await click('[data-testid=page-next]');
     await waitFor(async () => (await exec("return location.hash")).includes('page=1') && (await exec("return document.querySelectorAll('.a-srow').length")) < 50 && (await exec("return document.querySelectorAll('.a-srow').length")) > 0, 'the rest on the next page');
     await shot('60-sessions-paged');

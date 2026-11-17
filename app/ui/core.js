@@ -2,6 +2,7 @@
 // dialog controller, the popover menu, the one notice channel, theme, the sidebar's folds and pins.
 
 import { esc, dur } from './lib.js';
+import { PAGE, alertIcon, needsAttention } from './parts.js';
 
 export const S = { state: null, route: { view: 'accounts', params: {} }, cache: {} };
 
@@ -24,39 +25,36 @@ export function onShown(fn) {
   win().listen('tauri://focus', fn).catch(() => {});
 }
 
-/** The number of tools with a newer version, beside Setup and Apps in the rail. */
-export function setAppUpdates(n) {
-  for (const el of document.querySelectorAll('#apps-count, #n-apps')) {
-    el.textContent = n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '';
-    el.title = n ? `${n} ${n === 1 ? 'tool has' : 'tools have'} a newer version: Apps installs them` : '';
-  }
-}
-
-/** Live sessions as a 4×4 grid of dots with n of them lit (the number on hover); nothing when none. */
-// drawn as SVG squares snapped to device pixels, so a lit one is a flat colour, not a blurred glow at 125 % scaling
-const liveGrid = (n) => (n ? `<svg class="lgrid" width="11" height="11" viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 3}" y="${Math.floor(i / 4) * 3}" width="2" height="2" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
-
-/** The pinned projects under Projects in the rail (at most five), and the project count. */
-export function drawPins(list) {
-  const el = document.getElementById('nav-pins');
+/** A badge in the sidebar: there only for something to act on or watch, with its unit; nothing when there is nothing.
+ * `html` is our own markup ("4 live", "▲ 2", "1 update"), `title` says it in full. */
+function badge(id, html, title = '') {
+  const el = document.getElementById(id);
   if (!el) return;
-  const cur = S.route.view === 'sessions' ? S.route.params.project : '';
-  el.innerHTML = list.filter((p) => p.pinned).slice(0, 5).map((p) => `<a class="nav-subitem ${p.key === cur ? 'active' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><span>${esc(p.name)}</span><span class="nav-badge">${p.live ? `<span class="live-n">●${p.live}</span>` : p.sessions || ''}<span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">✕</span></span></a>`).join('');
-  setNavCounts({ 'n-projects': String(list.length || '') });
+  el.innerHTML = html || ''; el.hidden = !html; el.title = title;
 }
 
-/** The counts beside the pages in the rail; each one only when known. Our own markup: a number, or a number with a live grid. */
-export function setNavCounts(c) {
-  for (const [id, v] of Object.entries(c)) { const el = document.getElementById(id); if (el) el.innerHTML = v || ''; }
+/** The number of tools with a newer version, beside Setup in the sidebar. */
+export function setAppUpdates(n) {
+  badge('apps-count', n ? `${n} ${n === 1 ? 'update' : 'updates'}` : '', n ? `${n} ${n === 1 ? 'tool has' : 'tools have'} a newer version: Apps installs them` : '');
 }
 
-/** "Limits read 2 m ago · usage 1 m ago" in the top bar, on every page. */
+/** The pinned projects under Projects in the sidebar (at most five); one with a session running says "N live". */
+export function drawPins(list) {
+  const el = document.getElementById('nav-pins'), chip = document.querySelector('[data-fold=nav-pins]');
+  if (!el) return;
+  const cur = S.route.view === 'sessions' ? S.route.params.project : '', pins = list.filter((p) => p.pinned).slice(0, 5);
+  el.innerHTML = pins.map((p) => `<a class="nav-subitem ${p.key === cur ? 'active' : ''}" href="#sessions?project=${encodeURIComponent(p.key)}" data-nav-project="${esc(p.key)}" title="${esc(p.remote || p.root || p.name)}" data-testid="pin-${esc(p.key)}"><span class="nav-label">${esc(p.name)}</span>${p.live ? `<span class="pill ok badge">${p.live} live</span>` : ''}<span class="unpin" data-act="pin-off" data-key="${esc(p.key)}" role="button" tabindex="0" title="Unpin ${esc(p.name)}" aria-label="Unpin ${esc(p.name)}" data-testid="unpin-${esc(p.key)}">✕</span></a>`).join('');
+  if (chip) chip.hidden = !pins.length; // nothing pinned, nothing to fold
+}
+
+/** "limits read 2 m ago" in the top bar, on every page; when the usage was last read is on hover. */
 export function setFresh() {
   const st = S.state, el = document.getElementById('fresh');
   if (!st || !el) return;
   const now = Date.now(), ago = (t) => (now - t < 60000 ? 'just now' : dur(now - t) + ' ago');
   const read = st.profiles.map((p) => p.quota && p.quota.fetched_at).filter(Boolean);
-  el.textContent = [read.length ? 'Limits read ' + ago(Math.max(...read)) : 'Limits not read', S.usageAt ? 'usage ' + ago(S.usageAt) : ''].filter(Boolean).join(' · ');
+  el.textContent = read.length ? 'limits read ' + ago(Math.max(...read)) : 'limits not read';
+  el.title = S.usageAt ? 'Usage read ' + ago(S.usageAt) : '';
 }
 
 /** The name an account is shown by (its label), from its id; the id when unknown. */
@@ -109,10 +107,9 @@ export async function attempt(fn, okMsg) {
   }
 }
 
-/** Something changed on disk: forget the cached state, refresh the rail's counts, and draw the page again. */
+/** Something changed on disk: forget the cached state, refresh the sidebar's badges and pins, and draw the page again. */
 export async function changed() {
-  await Promise.all([loadState().catch(() => {}), call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {}),
-    call('projects', { days: 30 }).then(drawPins).catch(() => {})]);
+  await Promise.all([loadState().catch(() => {}), call('projects', { days: 30 }).then(drawPins).catch(() => {})]);
   return render();
 }
 
@@ -138,6 +135,9 @@ function parseHash() {
   return { view: v, params: Object.fromEntries(new URLSearchParams(q || '')) };
 }
 
+/** What the top bar's search does on a page that filters its own list; everywhere else it searches the sessions. */
+const FIND = { accounts: 'Filter accounts', projects: 'Filter projects', mcp: 'Filter MCP servers', skills: 'Filter skills' };
+
 // renders run one after another, so a slow earlier page never paints over the one you moved to
 let chain = Promise.resolve(), queued = null, quiet = true, keepEdits = false;
 /** Draw the page. `background` is a redraw nobody asked for (a refresh, a poll): it keeps what the reader typed. */
@@ -158,8 +158,17 @@ async function renderNow(background) {
   const sheet0 = document.getElementById('sheet'), sameHash = S.lastHash === location.hash;
   if (sheet0 && !S.sheetWatched) { S.sheetWatched = true; S.sheetTop = sheet0.scrollTop; sheet0.addEventListener('scroll', () => { S.sheetTop = sheet0.scrollTop; }, { passive: true }); }
   S.lastHash = location.hash;
+  const from = S.drawnView;
   S.route = parseHash();
   S.pageFind = null; // a page that lists things sets its own filter for the top bar's search
+  const page = routes[S.route.view] ? S.route.view : 'home';
+  // the window's title is the page's name; the search box says what it does on this page
+  document.title = `${PAGE[page] || 'Overview'} · Harness Manager`;
+  const find = document.getElementById('find');
+  if (find) { find.placeholder = FIND[page] || 'Search sessions'; find.setAttribute('aria-label', find.placeholder); }
+  // moving to another page moves the keyboard focus to it (not while the reader types in the search box, which stays theirs)
+  if (page !== from && !dialogOpen() && document.activeElement !== find) document.getElementById('sheet').focus({ preventScroll: true });
+  S.drawnView = page;
   document.querySelectorAll('.nav a[data-nav]').forEach((a) => {
     const on = a.dataset.nav === S.route.view || (a.dataset.nav === 'accounts' && S.route.view === 'account') || (a.dataset.nav === 'sessions' && S.route.view === 'session') || (a.dataset.nav === 'mcp' && S.route.view === 'mcp-edit');
     a.classList.toggle('active', on);
@@ -274,14 +283,21 @@ export function redrawLive() {
   if (!S.state) return;
   const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
   const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
-  const live = running.length + elsewhere;
-  setNavCounts({ 'n-live': live ? liveGrid(live) + `<span>${live}</span>` : '' });
+  const live = running.length + elsewhere, where = `${running.length} on this computer · ${elsewhere} elsewhere`;
+  badge('n-live', live ? `<i class="live-dot"></i>${live} live` : '', live ? `The sessions running now: ${where}` : '');
   const strip = document.getElementById('live-strip');
   if (strip) {
     strip.hidden = !live;
-    strip.querySelector('.live-n').textContent = `${running.length} live · ${elsewhere} elsewhere`;
-    strip.href = '#sessions?live=1';
+    strip.querySelector('.live-n').textContent = `${live} live`;
+    strip.title = where;
   }
+}
+
+/** Beside Accounts in the sidebar: how many accounts of the tools shown need attention (a login to renew, a limit used up). */
+export function redrawAttention() {
+  if (!S.state) return;
+  const tools = shownTools(S.state).map((h) => h.id), now = Date.now(), n = S.state.profiles.filter((p) => tools.includes(p.harness) && needsAttention(p, now)).length;
+  badge('n-attention', n ? `${alertIcon}${n}` : '', n ? `${n} ${n === 1 ? 'account needs' : 'accounts need'} attention` : '');
 }
 
 /** A page's last markup, shown at once while fresh data is read; the view calls keep() after it draws. */
@@ -302,9 +318,8 @@ export async function loadState() {
   st.first_run ||= S.state && S.state.first_run;
   S.state = st;
   applyTheme(S.state);
-  const n = S.state.profiles.length;
-  document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
-  setNavCounts({ 'n-accounts': String(n) });
+  document.getElementById('brand-sub').textContent = S.state.computer;
+  redrawAttention();
   redrawLive();
   setFresh();
   return S.state;

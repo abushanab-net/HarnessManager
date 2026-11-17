@@ -4,6 +4,7 @@
 
 import { call, view, go, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, confirmDialog, action, patch, loadState, keyStore } from './core.js';
 import { esc, fmt, hm, dur } from './lib.js';
+import { pageHead } from './parts.js';
 
 // Usage by account lives on Accounts now; the old address still works
 view('usage', async () => { go('accounts'); });
@@ -28,11 +29,10 @@ view('routing', async (sheet) => {
     const state = paused(id) ? `paused${b.retry_at && b.retry_at > now ? ' · retry ' + dur(b.retry_at - now) : ''}` : x2.mode === 'aggregate' ? (isDefault ? 'default' : 'hm-' + id + '--… models') : r.running && (k === 0 || paused(x2.providers[k - 1])) ? 'serving' : 'standby';
     return `${k ? '<span aria-hidden="true">→</span>' : ''}<div class="candidate-pill ${paused(id) ? 'b-warn' : ''}"><b>${esc(pname(id))}</b><span>${esc(state)}</span></div>`;
   }).join('');
-  const finding = r.running ? `${n(x.requests, 'request', 'requests')} in 24 h.${nPaused ? ` ${n(nPaused, 'provider', 'providers')} paused.` : x.errors ? ` ${n(x.errors, 'error', 'errors')}.` : ''}` : 'The local router is stopped.';
+  const status = r.running ? `The local router is running on 127.0.0.1:${r.port}; ${n(x.requests, 'request', 'requests')} in 24 h${nPaused ? `, ${n(nPaused, 'provider', 'providers')} paused` : x.errors ? `, ${n(x.errors, 'error', 'errors')}` : ''}.` : 'The local router is stopped.';
   const stat = (label, v, tone) => `<div data-key="stat-${label}"><span class="muted">${label}</span><b class="${v && tone ? 'b-' + tone : ''}">${v.toLocaleString()}${v && tone ? `<small> ${label === 'Paused providers' ? 'paused' : label.toLowerCase()}</small>` : ''}</b></div>`;
   patch(sheet, `<div class="page-body b-page" data-b-page="routing">
-    <header class="page-heading"><div><h1>${finding}</h1><div class="heading-facts">127.0.0.1:${r.port} · token required · keys stay in ${esc(keyStore())} · subscription logins stay outside the router</div></div>
-      <div class="page-actions"><button class="btn-secondary" data-act="provider-add" data-testid="provider-add">Add provider</button><button class="btn-primary" data-act="route-add" data-testid="route-add" ${r.providers.length ? '' : 'disabled'}>Add route</button></div></header>
+    ${pageHead('routing', status, `<button class="btn" data-act="provider-add" data-testid="provider-add">Add provider</button><button class="btn primary" data-act="route-add" data-testid="route-add" ${r.providers.length ? '' : 'disabled'}>Add route</button>`)}
     <section class="panel-card"><div class="panel-head"><h2 class="panel-title" data-testid="router-state">Local router · ${r.running ? 'running' : 'stopped'}</h2></div>
       <div class="b-router-stats">${stat('Requests · 24 h', x.requests)}${stat('Failovers', x.failovers, 'warn')}${stat('Errors', x.errors, 'danger')}${stat('Paused providers', nPaused, 'danger')}</div>
       <div class="b-toolbar"><span class="muted">${n(r.routes.length, 'route', 'routes')} · ${n(r.routed_profiles.length, 'account uses', 'accounts use')} it</span>${r.running ? '<button class="btn-secondary" data-act="router-stop">Stop router</button>' : '<button class="btn-secondary" data-act="router-start" data-testid="router-start">Start router</button>'}</div></section>

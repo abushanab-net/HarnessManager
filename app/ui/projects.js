@@ -7,6 +7,7 @@ import { S, call, view, go, attempt, mutate, changed, openDialog, closeDialog, d
 import { esc, fmt, when, ic } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
 import { tagsHtml, href, money } from './sessions.js';
+import { pageHead } from './parts.js';
 
 const SH = ['a-l1', 'a-l2', 'a-l3', 'a-l4', 'a-l5'];
 const pj = { list: null, fetched: '', days: '7', sort: 'active', metric: 'tokens', per: 10, page: 0, tiles: {}, q: '', distShut: false };
@@ -39,7 +40,7 @@ view('projects', async (sheet, params) => {
   pj.days = params.days || '7'; pj.sort = params.sort || 'active'; pj.metric = params.metric || 'tokens'; pj.per = +params.per || 10; pj.page = +params.page || 0;
   sheet.className = 'sheet';
   if (!pj.list || pj.fetched !== pj.days) {
-    if (!sheet.querySelector('#pj-tiles')) sheet.innerHTML = '<div class="page-body"><h1 class="muted">Reading projects…</h1></div>';
+    if (!sheet.querySelector('#pj-tiles')) sheet.innerHTML = `<div class="page-body">${pageHead('projects', 'Reading projects…')}</div>`;
     await fetchProjects();
   }
   // Ctrl K on this page narrows the cards to a name (the lazy user's fix)
@@ -55,8 +56,8 @@ function draw() {
   if (S.route.view !== 'projects' || !sheet) return;
   const list = pj.list, pcs = S.cache.computers, rangeTxt = pj.days === 'all' ? 'all time' : 'the last ' + esc(pj.days) + ' days';
   const liveN = list.filter((p) => p.live).length;
-  const head = `<header class="page-heading"><div><h1>${list.length ? `${plural(list.length, 'project')} ran in ${rangeTxt}${liveN ? `; ${liveN} ${liveN === 1 ? 'has' : 'have'} a session open now` : ''}.` : 'No sessions in this range yet.'}</h1><div class="heading-facts">${pj.days === 'all' ? 'All time' : esc(pj.days) + ' days'}${syncOn(pcs) ? ' · ' + plural(computers(pcs).length, 'computer') : ''} · cost ≈ at list prices</div></div>
-    <div class="page-actions">${chips('days', [['7', '7d'], ['30', '30d'], ['all', 'All']], pj.days, 'Range', 'pdays')}${chips('sort', [['active', 'Active'], ['cost', 'Cost'], ['tokens', 'Tokens'], ['name', 'Name']], pj.sort, 'Sort', 'psort')}</div></header>`;
+  const head = pageHead('projects', list.length ? `${plural(list.length, 'project')} ran in ${rangeTxt}${syncOn(pcs) ? ' on ' + plural(computers(pcs).length, 'computer') : ''}${liveN ? `; ${liveN} ${liveN === 1 ? 'has' : 'have'} a session open now` : ''}.` : `No project ran in ${rangeTxt}.`,
+    `${chips('days', [['7', '7d'], ['30', '30d'], ['all', 'All']], pj.days, 'Range', 'pdays')}${chips('sort', [['active', 'Active'], ['cost', 'Cost'], ['tokens', 'Tokens'], ['name', 'Name']], pj.sort, 'Sort', 'psort')}`);
   if (!list.length) { patch(sheet, `<div class="page-body" data-tour="projects">${head}<section class="panel-card empty-state"><span class="muted">A project is a folder your tools ran in.</span><div>${pj.days !== 'all' ? '<button class="btn-secondary" data-act="p-set" data-k="days" data-v="all">Show all time</button>' : '<button class="btn-primary" data-act="session-new">New session</button>'}</div></section></div>`); return; }
   // the five tiles; a number that changed since the last draw flashes once
   const tokens = list.reduce((a, p) => a + p.tokens, 0), sessions = list.reduce((a, p) => a + p.sessions, 0), live = list.reduce((a, p) => a + p.live, 0);

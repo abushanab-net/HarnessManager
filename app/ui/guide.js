@@ -8,7 +8,7 @@ import { esc } from './lib.js';
 const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode, Antigravity, Pi and Oh My Pi on this computer in one place. The ? at the top shows this tour of a page.'],
-    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, routing to other providers, and the MCP servers, skills and system prompts shared between accounts.'],
+    ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, and under Setup the MCP servers, skills and system prompts shared between accounts and the routing to other providers. A badge appears only for something to act on or watch.'],
     ['[data-testid=use-next]', 'Use next', 'The account to start on now: the most room, or the 5-hour window that resets soonest. Start opens a terminal on it; Folder picks where.'],
     ['[data-testid=finding]', 'Runs out first', 'The account on pace to run out before its reset, with the measured basis under it. Measured numbers are plain; estimates carry ≈.'],
     ['[data-testid=running-now]', 'Running now', 'Every console open, on which computer; Follow opens its session as it writes.'],
@@ -17,7 +17,6 @@ const TOURS = {
     ['[data-testid=attention]', 'Needs attention', 'A limit that runs out before its reset at today\'s pace, a login to renew, a provider the router paused.'],
     ['[data-testid=activity]', 'Activity, 53 weeks', 'A year clock of daily tokens: 53 weeks around, Monday inside, the busiest day in the centre.'],
     ['[data-testid=latest-replies]', 'Latest replies', 'Newest first, with the account, model, tokens and the time to the first reply; the request log has every call with its cost.'],
-    ['[data-nav=home] .nav-badge', 'Today', 'Today\'s usage at API prices, always in view.'],
   ],
   accounts: [
     ['[data-testid=add-account]', 'Add an account', 'Each account gets its own folder and login. Sign in once; Harness Manager keeps the accounts apart.'],
@@ -31,7 +30,7 @@ const TOURS = {
   account: [
     ['.page-tabs', 'Overview, Sessions, Projects, Settings', 'Plan, limits and usage; this account\'s sessions and projects; and its email, key or endpoint.'],
     ['[data-act=start-in-folder]', 'Start in a folder', 'Opens the account in the project folder you pick.'],
-    ['.page-actions [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
+    ['.page-head [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
   ],
   projects: [
     ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
@@ -95,7 +94,7 @@ function show() {
   pop.dataset.testid = 'tour';
   pop.innerHTML = `<div class="tour-step">${tour.i + 1} of ${tour.steps.length}</div><b>${esc(title)}</b><p>${esc(text.replace('{store}', keyStore()))}</p>
     <div class="tour-acts"><button class="btn sm" data-act="tour-skip" data-testid="tour-skip">Close</button><span>
-    ${tour.i ? '<button class="btn outline sm" data-act="tour-back">Back</button>' : ''}
+    ${tour.i ? '<button class="btn sm" data-act="tour-back">Back</button>' : ''}
     <button class="btn primary sm" data-act="tour-next" data-testid="tour-next">${last ? 'Done' : 'Next'}</button></span></div>`;
   document.body.appendChild(pop);
   const W = window.innerWidth, H = window.innerHeight, pw = pop.offsetWidth, ph = pop.offsetHeight;

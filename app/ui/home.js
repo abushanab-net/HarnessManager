@@ -7,6 +7,7 @@ import { S, call, view, render, attempt, loadState, action, acctName, shownTools
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
 import { accountViews, metricsOf, renderRingSvg, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, scope } from './computers.js';
+import { pageHead, plural } from './parts.js';
 
 const RANGES = [['today', 0], ['7d', 168], ['30d', 720], ['all', 24 * 400]], RANGE_LABEL = { today: 'Today', '7d': '7 d', '30d': '30 d', all: 'All' };
 // the page's own choices: the tool chips, which computer's sessions, the readout range, the year clock's computer,
@@ -17,11 +18,6 @@ const ago = (ms) => (ms < 60000 ? 'just now' : dur(ms) + ' ago');
 const TIMING = 'Approximate: worked out from the times each tool wrote the parts of the answer to its log';
 const firstReply = (r) => (r.ttft_ms != null ? `≈ ${(r.ttft_ms / 1000).toFixed(1)} s` : '<span class="dash">—</span>');
 const timeCell = (ts) => (new Date(ts).toDateString() === new Date().toDateString() ? hm(ts) : new Date(ts).toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + hm(ts));
-
-export function setTodayBadge(cost) {
-  const el = document.getElementById('today-cost');
-  if (el) { el.textContent = cost == null ? '' : money(cost); el.title = 'Today, at API list prices'; }
-}
 
 // ---------- the computers: this one first, each with the colour its dot has everywhere ----------
 function pcList(state, pcs) {
@@ -165,11 +161,12 @@ function openRequestLog() {
 // ---------- the first-run and empty states ----------
 function firstRun(state, accts, tools) {
   if (!accts.length) {
-    return `<div class="page-body"><section class="panel-card empty-state center"><div class="empty-logo" id="empty-mark"></div><h1>${tools.some((t) => t.installed) ? 'No account yet' : 'No AI coding tool found'} on ${esc(state.computer || 'this computer')}</h1>
+    const none = `${tools.some((t) => t.installed) ? 'No account yet' : 'No AI coding tool found'} on ${esc(state.computer || 'this computer')}`;
+    return `<div class="page-body">${pageHead('home', none + '.')}<section class="panel-card empty-state center"><div class="empty-logo" id="empty-mark"></div><h2>${none}</h2>
       <div class="tool-pick-grid full">${tools.map((t) => `<div class="tool-pick-card"><div class="tool-pick-head"><span class="tool-pick-name">${toolIcon(t.id, 14)} ${esc(t.label)}</span><span class="plan-pill">${t.installed ? 'Installed' : 'Not installed'}</span></div><div class="tool-pick-sup">Supports: ${['Subscription', t.caps.api_key ? 'API key' : '', t.caps.routable ? 'Routed' : ''].filter(Boolean).join(' · ')}</div><button class="btn-secondary" data-act="add-account-for" data-h="${t.id}">Prepare ${esc(t.label)} account</button></div>`).join('')}</div>
       <div class="row-actions"><button class="btn-primary" data-act="add-account" data-testid="add-account">+ Add first account</button></div></section></div>`;
   }
-  return `<div class="page-body"><section class="panel-card first-run-card"><div class="eyebrow-row"><span class="eyebrow ac">Profiles on ${esc(state.computer || 'this computer')} · ${accts.length} ${accts.length === 1 ? 'profile' : 'profiles'} ready</span><span class="eyebrow-note">Limits not read (—) until first sign-in or refresh</span></div>
+  return `<div class="page-body">${pageHead('home', `${plural(accts.length, 'account')} found on ${esc(state.computer || 'this computer')}; limits have not been read yet.`)}<section class="panel-card first-run-card"><div class="eyebrow-row"><span class="eyebrow ac">Profiles on ${esc(state.computer || 'this computer')} · ${accts.length} ${accts.length === 1 ? 'profile' : 'profiles'} ready</span><span class="eyebrow-note">Limits not read (—) until first sign-in or refresh</span></div>
     <div class="first-run-grid"><div class="first-run-col"><h2>Limits have not been read yet.</h2><div class="detected-profiles">${accts.map((a) => `<div class="live-mini-row" data-key="fr-${esc(a.id)}"><div class="live-mini-left">${toolIcon(a.tool, 14)}<b>${esc(a.name)}</b><span class="plan-pill">${a.isMain ? 'main profile' : esc(a.plan)}</span><span class="mono">${esc(a.folder)}</span><span class="note">· ${a.noPlan ? 'Usage only · no plan limits' : '— limits not read'}</span></div>${a.needsLogin ? `<button class="btn-lane-start" data-act="login" data-name="${esc(a.id)}">Log in</button>` : `<button class="btn-lane-start" data-act="start" data-name="${esc(a.id)}">▶ Start</button>`}</div>`).join('')}</div>
       <div class="row-actions"><button class="btn-primary" data-act="add-account" data-testid="add-account">+ Add another account</button><button class="btn-secondary" data-act="refresh-now">Read limits now</button></div></div>
       <div class="panel-card sub"><h2 class="panel-title">Sync limits and live sessions across your computers?</h2><div class="sync-choices">
@@ -189,7 +186,6 @@ view('home', async (sheet) => {
   const [state, d, pcs] = await Promise.all([loadState(), call('home', { days, hours, harness: st.harness, limit: 50, scope: scope() }), computersStatus().catch(() => null)]);
   st.rows = d.requests.rows; st.total = d.requests.total;
   const o = d.overview, k = d.dash, now = k.now, used = showUsed();
-  if (!st.harness) setTodayBadge(o.today_cost);
   if (!S.appVersions) { S.appVersions = {}; call('apps').then((a) => { S.appVersions = Object.fromEntries(a.apps.filter((x) => x.version).map((x) => [x.id, x.version])); }).catch(() => {}); }
   const tools = shownTools(state), accts = accountViews(state, k, now, pcs), pcl = pcList(state, pcs), me = pcl[0].id;
   const sessions = runningSessions(state, d, pcs, me);
@@ -207,7 +203,12 @@ view('home', async (sheet) => {
   const ttft = (id) => { const t = st.rows.filter((r) => r.profile === id && r.ttft_ms != null).map((r) => r.ttft_ms).sort((a, b) => a - b); return t.length ? `≈ ${(t[Math.floor(t.length / 2)] / 1000).toFixed(1)}s` : '—'; };
   const pick5 = pick && w5of(pick), best5 = best && w5of(best), bestWk = best && wkof(best), exp5 = exp && w5of(exp);
   const fmtAt = (at) => fmtAbsoluteReset(at, now);
-  patch(sheet, `<div class="page-body">
+  // the status: the accounts used up or on pace to run out before their reset (two at most), else what runs now
+  const seen = new Set(), risks = m.atRisk.filter((r) => !seen.has(r.acct.id) && seen.add(r.acct.id)).slice(0, 2);
+  const status = risks.length
+    ? risks.map((r) => `${esc(r.acct.name)} ${r.win.left === 0 ? 'is used up until ' + fmtAt(r.win.resetsAt).replace(/^Today /, '') : 'will run out ' + fmtAt(r.win.outAt).replace(/^Today /, 'today at ') + ', before its reset'}`).join('; ') + '.'
+    : `${sessions.length ? plural(sessions.length, 'session is', 'sessions are') + ' running now' : 'No session is running'}; ${accts.some((a) => a.measured) ? 'no account is on pace to run out before its reset' : 'limits have not been read yet'}.`;
+  patch(sheet, `<div class="page-body">${pageHead('home', status)}
     <section class="dispatch-deck" aria-label="Primary operational summary">
       <div class="deck-card hero-lead" data-key="hero" data-testid="use-next"><div class="eyebrow-row"><span class="eyebrow ac">Use next · Reset runway</span><button class="proposed-tag" data-act="home-prefer" aria-pressed="${st.preferExpiring}" title="Proposed: let Start pick an account whose 5-hour window resets within 2 hours and still has more than half its room">Proposed: ${st.preferExpiring ? 'Expiring 5h first ✓' : 'Prefer expiring 5h'}</button></div>
         <div class="lead-main"><div class="lead-text">${pick ? `<div class="lead-headline">Use <span class="lead-name">${esc(pick.name)}</span></div><div class="lead-sub">${toolIcon(pick.tool, 14)} <b>${esc(TOOL[pick.tool] || pick.tool)}</b> · <span class="fact">${esc(pick.plan)}</span>${pick5 && pick5.open ? ` · <span class="fact">5h ↻ ${fmtDuration(pick5.resetMs)} (${fmtAt(pick5.resetsAt)})</span>` : ''} · <span class="fact">read ${pick.readAt ? ago(now - pick.readAt) : 'never'}</span></div>` : `<div class="lead-headline">No measured room to recommend.</div><div class="lead-sub">${accts.length} ${accts.length === 1 ? 'account' : 'accounts'} · ${accts.some((a) => a.needsLogin) ? 'sign in, then ' : ''}refresh to read limits (—)</div>`}</div>

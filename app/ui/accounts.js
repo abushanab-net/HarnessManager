@@ -6,6 +6,7 @@ import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshTe
 import { esc, fmt, hm, when, dur, toolIcon } from './lib.js';
 import './sessions.js'; // nothing of it is used here: kept so the modules still load in the order they did, in the window and in the tray popup
 import { syncOn, nameOf } from './computers.js';
+import { pageHead, detailHead, needsAttention, plural } from './parts.js';
 
 export const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 /** The tools whose plans have windows to read; the others show usage only. */
@@ -153,19 +154,6 @@ function accountRow(a, best, now, used, pcs) {
       <button class="icon-btn" data-act="account-menu" data-name="${esc(a.id)}" data-home="${esc(a.folder)}" data-main="${a.isMain ? 1 : ''}" title="Account actions (folder, settings, sync, remove)" aria-label="More for ${esc(a.name)}" data-testid="menu-${esc(a.id)}">⋯</button></div></div>`;
 }
 
-/** The finding: the account with the most room, then what else needs saying. */
-function findings(accts, now) {
-  const { bestRoomAcct: best } = metricsOf(accts);
-  let text = '';
-  if (best) { const s = w5of(best), w = wkof(best); text = `<span class="lead-name">${esc(best.name)}</span> has the most room: ${s ? s.used + '% of its 5-hour limit and ' : ''}${w ? w.used + '% of its week used.' : 'ready to start.'}`; }
-  else text = accts.length ? 'Limits have not been read yet.' : 'No accounts configured yet.';
-  const extra = [];
-  for (const a of accts.filter(eligible)) for (const w of a.windows) if (w.open && w.used >= 75) extra.push(`<b>${esc(a.name)}</b> is at ${w.used}% of its ${esc(w.label.toLowerCase())} until ${esc(fmtAbsoluteReset(w.resetsAt, now))}.`);
-  const mm = accts.find((a) => a.mismatch); if (mm) extra.push(`<b>${esc(mm.name)}</b> is logged in as a different email than expected.`);
-  const notIn = accts.filter((a) => a.kind === 'subscription' && !a.p.identity.logged_in).length; if (notIn) extra.push(`${notIn} ${notIn === 1 ? 'account is' : 'accounts are'} not logged in yet.`);
-  return { best, text, extra: extra.slice(0, 3).join(' ') };
-}
-
 function stackedChart(days, series, short) {
   const totals = days.map((d, i) => series.reduce((s, x) => s + (x.vals[i] || 0), 0)), max = Math.max(1, ...totals), H = short ? 58 : 90;
   return `<div class="stacked-chart-box ${short ? 'short' : ''}">${days.map((d, i) => {
@@ -190,18 +178,18 @@ view('accounts', async (sheet) => {
   const accts = accountViews(st, x, now, pcs);
   // said once, then marked as told (not removed: the first-run dialog in computers.js reads the same report)
   if (st.first_run && !st.first_run.told && (st.first_run.main_profiles.length || st.first_run.accounts.length)) { st.first_run.told = true; toast(`Found ${st.first_run.main_profiles.length} installed tools and imported ${st.first_run.accounts.length} accounts from your PowerShell launcher.`); }
-  const { best, text, extra } = findings(accts, now);
+  const best = metricsOf(accts).bestRoomAcct;
   const q = (document.getElementById('find').value || '').toLowerCase();
   const shown = accts.filter((a) => !q || a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q));
   const read = accts.map((a) => a.readAt).filter(Boolean), readAgo = read.length ? 'limits read ' + agoText(Math.max(...read), now) : 'limits not read';
   const tools = shownTools(st), groups = tools.filter((h) => !acctTool || h.id === acctTool);
   const series = accts.filter((a) => au.series[a.id] && au.series[a.id].some((v) => v)).map((a) => ({ name: a.name, ci: au.color[a.id] || 0, vals: au.series[a.id] }));
   const chartOpen = !au.fold.has('chart'), modelsOpen = !au.fold.has('models'), topModel = au.models[0] ? au.models[0].tokens : 1;
-  const nTools = new Set(accts.map((a) => a.tool)).size;
+  const nTools = new Set(accts.map((a) => a.tool)).size, nAtt = accts.filter((a) => needsAttention(a.p, now)).length;
+  const status = accts.length ? `${plural(accts.length, 'account')} on ${plural(nTools, 'tool')}; ${nAtt ? `${nAtt} ${nAtt === 1 ? 'needs' : 'need'} attention` : 'none needs attention'}.` : 'No account yet.';
   patch(sheet, `<div class="page-body">
-    <section class="accounts-top-bar"><div class="accounts-finding"><h1 data-testid="finding">${text}</h1><p>${accts.length} ${accts.length === 1 ? 'account' : 'accounts'} across ${nTools} ${nTools === 1 ? 'tool' : 'tools'}, each in its own folder with its own login · sorted by room left · usage at API list prices (≈).${extra ? ' ' + extra : ''}</p></div>
-      <div class="accounts-actions"><div class="chip-group" role="group" aria-label="Accounts date range">${[7, 14, 30].map((d) => `<button class="filter-chip ${d === au.days ? 'active' : ''}" aria-pressed="${d === au.days}" data-act="acct-days" data-v="${d}" data-testid="u-days-${d}">${d}d</button>`).join('')}</div>
-        <button class="btn-secondary" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${best ? `<button class="btn-secondary" data-act="start-in-folder" data-name="${esc(best.id)}" data-testid="start-best">Start in a folder…</button>` : ''}<button class="btn-primary" data-act="add-account" data-testid="add-account">+ Add account</button></div></section>
+    ${pageHead('accounts', status, `<div class="chip-group" role="group" aria-label="Accounts date range">${[7, 14, 30].map((d) => `<button class="filter-chip ${d === au.days ? 'active' : ''}" aria-pressed="${d === au.days}" data-act="acct-days" data-v="${d}" data-testid="u-days-${d}">${d}d</button>`).join('')}</div>
+        <button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${best ? `<button class="btn" data-act="start-in-folder" data-name="${esc(best.id)}" data-testid="start-best">Start in a folder…</button>` : ''}<button class="btn primary" data-act="add-account" data-testid="add-account">Add account</button>`)}
     <div class="accounts-grid ${modelsOpen ? 'with-models' : ''}">
       <section class="panel-card" data-testid="usage-panel"><div class="panel-head"><div class="head-group"><button class="panel-title fold" data-act="acct-fold" data-h="chart" aria-expanded="${chartOpen}">Tokens per day, by account (${au.days}d)</button>
         ${chartOpen ? `<div class="chart-legend">${series.map((s) => `<span><i class="pc-dot c${s.ci}"></i>${esc(s.name)}</span>`).join('')}</div>` : ''}</div>
@@ -293,10 +281,11 @@ view('account', async (sheet, params) => {
       <section class="panel-card"><h2 class="panel-title">${p.main ? 'Hide main profile' : 'Remove account'}</h2><span class="muted">${p.main ? "Stops managing the tool's own profile. Its folder and login are never deleted." : 'Removes it from Harness Manager. Its folder stays unless you choose to delete it.'}</span><div><button class="btn-secondary negT" data-act="remove-account" data-name="${esc(name)}" data-main="${p.main ? 1 : ''}" data-testid="remove-account">${p.main ? 'Hide main profile…' : 'Remove account…'}</button></div></section></div>`;
   }
   const open = p.running.length ? `${p.running.length} ${p.running.length === 1 ? 'console' : 'consoles'} open${p.running[0].cwd ? ' in ' + esc(p.running[0].cwd.split(/[\\/]/).pop()) : ''}` : '';
-  patch(sheet, `<div class="page-body"><a class="filter-chip back-chip" href="#accounts">← Accounts</a>
-    <header class="page-heading"><div class="account-identity"><div class="account-avatar" aria-hidden="true">${esc(p.label.split(/[-_ ]/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join(''))}</div><div><h1 data-testid="detail-name">${toolIcon(p.harness, 20)}<span>${esc(p.label)}</span></h1>
-      <div class="heading-facts"><span>${esc(p.harness_label)}</span>${a.email ? `<span>${esc(a.email)}</span>` : ''}<span class="plan-pill ${a.planTone}">${esc(a.plan)}</span><span>${esc([p.identity.org, p.identity.role].filter(Boolean).join(' · '))}${p.main ? (p.identity.org ? ' · ' : '') + 'main profile' : ''}</span></div>${open ? `<div class="muted">${open}</div>` : ''}</div></div>
-      <div class="page-actions"><button class="btn-secondary" data-act="start-in-folder" data-name="${esc(name)}">Start in a folder…</button><button class="btn-primary" data-act="start" data-name="${esc(name)}" ${(!p.identity.logged_in && p.kind === 'subscription') || !tool.installed ? 'disabled' : ''}>Start ${esc(p.label)}</button><button class="icon-btn" data-act="account-menu" data-name="${esc(name)}" data-home="${esc(p.home)}" data-main="${p.main ? 1 : ''}" aria-label="More" title="Account actions">⋯</button></div></header>
+  // the account's own name with its tool's icon; under it, one line: the tool, the login, the plan, the organisation, what is open
+  const facts = [esc(p.harness_label), a.email ? esc(a.email) : '', `<span class="plan-pill ${a.planTone}">${esc(a.plan)}</span>`, esc([p.identity.org, p.identity.role].filter(Boolean).join(' · ')), p.main ? 'main profile' : '', open].filter(Boolean).join(' · ');
+  patch(sheet, `<div class="page-body">${detailHead({ back: ['#accounts', 'Accounts'], title: `${toolIcon(p.harness, 20)}<span>${esc(p.label)}</span>`, titleAttrs: 'data-testid="detail-name"', status: facts,
+      lead: `<div class="account-avatar" aria-hidden="true">${esc(p.label.split(/[-_ ]/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join(''))}</div>`,
+      actions: `<button class="btn" data-act="start-in-folder" data-name="${esc(name)}">Start in a folder…</button><button class="btn primary" data-act="start" data-name="${esc(name)}" ${(!p.identity.logged_in && p.kind === 'subscription') || !tool.installed ? 'disabled' : ''}>Start ${esc(p.label)}</button><button class="btn icon" data-act="account-menu" data-name="${esc(name)}" data-home="${esc(p.home)}" data-main="${p.main ? 1 : ''}" aria-label="More" title="Account actions">⋯</button>` })}
     <nav class="page-tabs" aria-label="Account tabs">${tabs.map(([k, l]) => `<a class="filter-chip ${k === tab ? 'active' : ''}" ${k === tab ? 'aria-current="page"' : ''} href="#account?name=${encodeURIComponent(name)}&tab=${k}" data-testid="tab-${k}">${l}</a>`).join('')}</nav>${body}</div>`);
 });
 

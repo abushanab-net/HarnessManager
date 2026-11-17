@@ -1,9 +1,9 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
+import { S, render, go, call, setAppUpdates, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
-import { setTodayBadge } from './home.js';
+import './home.js';
 import { setSelfUpdate } from './settings.js';
 import { refreshProjects } from './projects.js';
 import './sessions.js';
@@ -17,7 +17,7 @@ import './guide.js';
 import './computers.js';
 
 document.documentElement.dataset.theme = 'dark';
-document.getElementById('brand-mark').innerHTML = brandMark(28);
+document.getElementById('brand-mark').innerHTML = brandMark(26);
 
 // moving to another page draws it (core.js closes the dialog, the menu and the notice of the page left)
 window.addEventListener('hashchange', () => render());
@@ -40,7 +40,6 @@ const redrawSoon = () => {
     if (drawing) { again = true; return; }
     drawing = true;
     try {
-      call('today').then(setTodayBadge).catch(() => {});
       if (editing()) S.dirty = true; // a dialog, or a name being typed, stays as it is; the page catches up when it closes
       else if (S.route.view === 'projects') await refreshProjects(); // the tiles and rows take the new numbers where they are
       else await render(true);
@@ -62,8 +61,7 @@ if (ev) onShown(() => { if (stale) { stale = false; refreshed(); } });
 loadState().then((st) => { setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
 // a newer Harness Manager found by an earlier check: the dot on Settings
 call('self_latest').then((v) => v && setSelfUpdate(v)).catch(() => {});
-// how many MCP servers and skills there are, beside their pages; the pinned projects under Projects
-call('items').then((d) => setNavCounts({ 'n-mcp': d.mcp.length, 'n-skills': d.skills.length })).catch(() => {});
+// the pinned projects under Projects
 call('projects', { days: 30 }).then(drawPins).catch(() => {});
 restoreFolds();
 S.usageAt = Date.now();
@@ -85,5 +83,3 @@ setInterval(async () => { if (S.route.view === 'accounts' && !document.getElemen
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });
 
 render();
-// today's cost beside Overview, also when another page opens first
-call('today').then(setTodayBadge).catch(() => {});
