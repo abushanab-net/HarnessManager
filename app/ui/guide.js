@@ -3,7 +3,7 @@
 // page's tour off. Remembered on this computer; the ? button replays the current page's tour, and
 // Settings > Show the tours again turns them all back on.
 
-import { S, action } from './core.js';
+import { S, action, keyStore } from './core.js';
 import { esc } from './lib.js';
 
 // [selector of the part to highlight (null: the middle of the window), title, explanation]
@@ -52,7 +52,7 @@ const TOURS = {
     ['[data-testid=export-md]', 'Export', 'Save the session as a Markdown file.'],
   ],
   routing: [
-    ['[data-testid=provider-add]', 'Providers', 'Add OpenRouter, Ollama or another provider with its key. Keys stay in Windows Credential Manager, never in a file.'],
+    ['[data-testid=provider-add]', 'Providers', 'Add OpenRouter, Ollama or another provider with its key. Keys stay in {store}, never in the account list.'],
     ['[data-testid=route-add]', 'Routes', 'A route lists providers: failover tries them in order, aggregate offers all their models. Add an account of kind Routed to use one.'],
     ['[data-testid=router-state]', 'The router', 'Runs on this computer only (127.0.0.1) and starts by itself when a routed account starts.'],
   ],
@@ -102,7 +102,7 @@ function show() {
   pop.setAttribute('role', 'dialog');
   pop.setAttribute('aria-label', title);
   pop.dataset.testid = 'tour';
-  pop.innerHTML = `<div class="tour-step">${tour.i + 1} of ${tour.steps.length}</div><b>${esc(title)}</b><p>${esc(text)}</p>
+  pop.innerHTML = `<div class="tour-step">${tour.i + 1} of ${tour.steps.length}</div><b>${esc(title)}</b><p>${esc(text.replace('{store}', keyStore()))}</p>
     <div class="tour-acts"><button class="btn sm" data-act="tour-skip" data-testid="tour-skip" ${last ? '' : 'title="No more tours on any page; Settings can turn them back on"'}>${last ? 'Close' : 'Skip all tours'}</button><span>
     ${tour.i ? '<button class="btn outline sm" data-act="tour-back">Back</button>' : ''}
     <button class="btn primary sm" data-act="tour-next" data-testid="tour-next">${last ? 'Done' : 'Next'}</button></span></div>`;

@@ -1,12 +1,12 @@
 // CLI reference, as the reference draws it: the finding, a Start here card of examples, and the seven command groups
 // as cards in two columns. Static: no state, no empty state.
 
-import { view, patch } from './core.js';
+import { view, patch, keyStore } from './core.js';
 import { esc } from './lib.js';
 
 const CLI = [
   ['Accounts', [['list', 'Accounts with plan, limits, tokens and open consoles'], ['show', 'One account in detail'], ['add', 'Add an account (subscription login by default)'],
-    ['login', 'Log an account in'], ['remove', 'Remove an account; --delete-home also deletes its folder'], ['key', 'API keys, kept in Windows Credential Manager (the Keychain on macOS)']]],
+    ['login', 'Log an account in'], ['remove', 'Remove an account; --delete-home also deletes its folder'], ['key', 'API keys, kept in {store}']]],
   ['Run', [['run', 'Run the tool as an account in this console'], ['start', 'Open a new terminal running the account'], ['resume', 'Reopen a session in its own account'], ['open', 'Open the desktop app']]],
   ['Usage and limits', [['usage', 'Token usage per account and day'], ['overview', 'Cost at list prices, requests, tokens, cache hits'], ['requests', 'Every model reply, newest first'], ['quota', 'Limits of one account; --live asks Anthropic now']]],
   ['Sessions and projects', [['sessions', 'Sessions of every tool, grouped by project, date, account, tool or tag; --open, --project, --tag'], ['session', 'Print one session as a transcript'], ['projects', 'List projects with tokens and cost, rename or merge them'], ['tag', 'Tag a session or a project'], ['tags', 'Every tag with its counts']]],
@@ -28,6 +28,6 @@ view('cli', async (sheet) => {
   patch(sheet, `<div class="page-body b-page" data-b-page="cli">
     <header class="page-heading"><div><h1>Every desktop action has an hrm command.</h1><div class="heading-facts">Add <span class="mono">--json</span> for scripts · static reference</div></div></header>
     <section class="panel-card"><div class="panel-head"><h2 class="panel-title">Start here</h2></div><div class="b-cli-examples">${EX.map(([c, d]) => `<div><code>${esc(c)}</code><span class="muted">${esc(d)}</span></div>`).join('')}</div></section>
-    <div class="b-cli-grid">${CLI.map(([g, rows]) => `<section class="panel-card" id="cli-${slug(g)}"><div class="panel-head"><h2 class="panel-title">${esc(g)}</h2></div>${rows.map(([c, d]) => `<div class="b-cli-row"><code>hrm ${esc(c)}</code><span>${esc(d)}</span></div>`).join('')}</section>`).join('')}</div>
+    <div class="b-cli-grid">${CLI.map(([g, rows]) => `<section class="panel-card" id="cli-${slug(g)}"><div class="panel-head"><h2 class="panel-title">${esc(g)}</h2></div>${rows.map(([c, d]) => `<div class="b-cli-row"><code>hrm ${esc(c)}</code><span>${esc(d.replace('{store}', keyStore()))}</span></div>`).join('')}</section>`).join('')}</div>
   </div>`);
 });
