@@ -1,5 +1,10 @@
 /* MCP servers, Skills, System prompts, API keys & routing, Apps: what these pages need beyond app.css (1.10). */
 
+/* .b-page hands every control the page's font; on these pages a button and a choice keep the drawings' (12 or 13 px, 600),
+   as Settings and Computers do in pages-settings.css */
+:is([data-b-page="mcp"], [data-b-page="skills"], [data-b-page="prompts"], [data-b-page="routing"], [data-b-page="apps"]) .btn { font-size: var(--fs-body); font-weight: 600; }
+:is([data-b-page="mcp"], [data-b-page="skills"], [data-b-page="prompts"], [data-b-page="routing"], [data-b-page="apps"]) :is(.btn.sm, .seg > *) { font-size: var(--fs-small); font-weight: 600; }
+
 /* ---------- the matrix (MCP servers, Skills) ---------- */
 /* ONE line above the matrix: what the page says about its list, its filters, the pager and the rows a page. It stays at
    the top of the page while the rows scroll, and the tools' header stays under it, so a checkbox column always has
