@@ -27,10 +27,12 @@ These are the rules a report would show broken:
   login.
 - API keys, and the env and header values of MCP servers, live only in the operating system's credential store:
   Windows Credential Manager, the Keychain on macOS, the Secret Service on Linux (GNOME Keyring, KWallet). They
-  never go into the account list, command-line arguments, logs or backups. This computer's device key, ring key
-  and hub token are kept in the same store.
-- A computer where that store cannot be reached (a Linux server with no desktop session, a Mac whose keychain is
-  locked) keeps the same secrets in one file, `secrets.json` in the data folder, which only its owner can read
+  never go into command-line arguments, logs or backups. The account list holds an empty marker in their place,
+  with one exception: an MCP value the store refuses (too large for one credential, for example) stays in the
+  account list, and the log says so. This computer's device key, ring key and hub token are kept in the same
+  store.
+- On macOS and Linux, a computer where that store cannot be reached (a Linux server with no desktop session, a
+  Mac whose keychain is locked) keeps the same secrets in one file, `secrets.json` in the data folder, which only its owner can read
   (mode 0600). The values in it are encoded, not encrypted: the file's permissions are its whole protection. It
   is never in a backup, and `hrm secrets check` says which of the two a computer uses.
 - What another computer, the shared folder or the hub sends is checked before it is used: names must be plain

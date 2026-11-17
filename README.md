@@ -353,7 +353,6 @@ screen land in `e2e/.work/shots`. Switches for the UI tests:
 | `HRM_E2E_HUB=1` | also the hub tests, against `target/debug/hrm-hub.exe` |
 | `HRM_E2E_ONLY=<text>` | only the tests whose name contains the text; `HRM_E2E_REPEAT=<n>` runs them n times |
 | `HRM_E2E_APP_DIR=<folder>` | drive an installed app and its `hrm.exe` instead of the debug build |
-| `HRM_README_SHOT=1` | write the Accounts screenshot to `docs/screenshot.png` |
 
 `scripts/test.ps1` and CI set the first three. The test switches inside the app and `hrm` (a mock update
 server, a fake terminal, a private credential prefix) are honoured only in a debug build or when `HRM_HOME`

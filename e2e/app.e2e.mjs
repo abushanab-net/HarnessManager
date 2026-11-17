@@ -546,7 +546,7 @@ try {
       document.documentElement.dataset.theme = 'dark';`, [os.hostname()]); // the README shows the dark look, Harness
     await sleep(400);
     // HRM_README_SHOT=1 refreshes the tracked copy; otherwise it stays with the other screenshots
-    await page.screenshot({ path: process.env.HRM_README_SHOT ? path.join(root, 'docs', 'screenshot.png') : path.join(shots, 'readme.png') });
+    await page.screenshot({ path: path.join(shots, 'readme.png') });
     await exec("document.documentElement.dataset.theme = 'light'");
     await nav('#home');
     await nav('#accounts');
