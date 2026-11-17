@@ -1016,7 +1016,8 @@ fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T { f() }
 pub fn registry_snapshot(ctx: &Ctx) -> Result<Registry> { ctx.registry() }
 
 /// One setting changed and saved, for `hrm settings` and the window; the context comes back with it. The keys the
-/// sync's own checks guard are refused, and a value of the wrong type is reported, never saved.
+/// sync's own checks guard are refused, and a value of the wrong type is reported, never saved. A new place for
+/// the account list gets the list before the setting points at it.
 pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ctx> {
     // direct_connection too: like the mode it turns the journal on, which `computers set` follows with a fresh backfill
     if matches!(key, "device_id" | "incarnation" | "sync_mode" | "sync_folder" | "hub_url" | "direct_connection") {
@@ -1026,7 +1027,15 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
     let mut v = serde_json::to_value(&fresh.settings)?;
     if v.get(key).is_none() { bail!("no setting named {key}"); }
     v[key] = value;
+    let from = fresh.registry_path();
     fresh.settings = serde_json::from_value(v).with_context(|| format!("that value does not fit {key}"))?;
+    if key == "registry_path" {
+        let to = fresh.registry_path();
+        if !(fresh.settings.registry_path.is_empty() || to.is_absolute()) { bail!("give the account list's full path, ending in the file's name (profiles.json)"); }
+        if to.is_dir() { bail!("{} is a folder: give the file's path, for example {}", to.display(), to.join("profiles.json").display()); }
+        // a list already there is kept (a second computer joins a shared one that way); else this one goes along
+        if to.exists() { Registry::load(&to)?; } else { Registry::load(&from)?.save(&to).with_context(|| format!("could not put the account list at {}; it stays where it was", to.display()))?; }
+    }
     fresh.save_settings()?;
     Ok(fresh)
 }

@@ -722,6 +722,30 @@ fn settings_take_switches_and_lists_and_refuse_what_does_not_fit() {
 }
 
 #[test]
+fn moving_the_account_list_takes_the_accounts_along_and_keeps_a_list_already_there() {
+    let names = |e: &Env| e.json(&["list"]).as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let a = Env::new();
+    a.ok(&["add", "work", "--no-login"]);
+    // no file there yet (nor its folder): the list is copied before the setting points at it
+    let shared = a.home.join("OneDrive").join("hm").join("profiles.json");
+    a.ok(&["settings", "registry_path", shared.to_str().unwrap()]);
+    assert!(shared.is_file());
+    assert_eq!(names(&a), ["work"]);
+    // a second computer pointing at the list already there joins it: the file is kept, not replaced by its own
+    let b = Env::new();
+    b.ok(&["add", "other", "--no-login"]);
+    b.ok(&["settings", "registry_path", shared.to_str().unwrap()]);
+    assert_eq!(names(&b), ["work"]);
+    assert_eq!(names(&a), ["work"]);
+    // a place the list cannot go to is refused with the reason, and the setting stays
+    write(&a.home.join("blocker"), "a file, not a folder");
+    assert!(a.fail(&["settings", "registry_path", a.home.join("blocker").join("profiles.json").to_str().unwrap()]).contains("could not put the account list"));
+    assert!(a.fail(&["settings", "registry_path", a.home.join("OneDrive").to_str().unwrap()]).contains("is a folder"));
+    assert!(a.fail(&["settings", "registry_path", "profiles.json"]).contains("full path"));
+    assert_eq!(serde_json::from_str::<Value>(&a.ok(&["settings", "registry_path"])).unwrap(), json!(shared.to_str().unwrap()));
+}
+
+#[test]
 fn routed_profile_starts_the_router_and_gets_its_address_and_token() {
     let mut e = Env::new();
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
