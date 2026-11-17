@@ -121,7 +121,7 @@ function runwayTrack(a, now) {
   const row = (w, short) => {
     const scale = short ? 5 * H : HORIZON, gate = Math.min(100, (w.resetMs / scale) * 100), out = w.outMs != null ? Math.min(100, (w.outMs / scale) * 100) : null;
     const harvest = short && w.resetMs <= 2 * H && w.left >= 75;
-    return `<div class="runway-instrument ${short ? 'short-track' : ''}" data-key="rw-${w.id}" title="${esc(w.label)}: reset ${esc(fmtAbsoluteReset(w.resetsAt, now))}${out !== null ? '; ≈ out ' + esc(fmtAbsoluteReset(w.outAt, now)) : ''}"><div class="runway-caption"><span>${short ? '5h · 0–5h zoom' : 'Week · 0–7d'}${harvest ? ' · Proposed: harvest' : ''}</span><span>↻ ${fmtDuration(w.resetMs)}</span></div>
+    return `<div class="runway-instrument ${short ? 'short-track' : ''}" data-key="rw-${esc(w.id)}" title="${esc(w.label)}: reset ${esc(fmtAbsoluteReset(w.resetsAt, now))}${out !== null ? '; ≈ out ' + esc(fmtAbsoluteReset(w.outAt, now)) : ''}"><div class="runway-caption"><span>${short ? '5h · 0–5h zoom' : 'Week · 0–7d'}${harvest ? ' · Proposed: harvest' : ''}</span><span>↻ ${fmtDuration(w.resetMs)}</span></div>
       <svg class="runway-track-row" aria-hidden="true">${out !== null ? `<line class="runway-forecast-dash" x1="0" x2="${out.toFixed(1)}%" y1="3" y2="3"/><rect class="runway-starve-gap" x="${out.toFixed(1)}%" width="${Math.max(0, gate - out).toFixed(1)}%" height="6"/>` : `<rect class="runway-bar-fill ${harvest ? 'pos' : ''}" width="${gate.toFixed(1)}%" y="1.5" height="3" rx="1.5"/>`}<rect class="reset-gate ${harvest ? 'harvest' : ''}" x="${gate.toFixed(1)}%" y="-1" width="2" height="8" transform="translate(-1 0)"/></svg></div>`;
   };
   const w5 = w5of(a), wk = wkof(a);
@@ -144,7 +144,7 @@ function lane(a, selected, used, pcs, now) {
   return `<div class="t-lane ${selected ? 'selected' : ''} ${a.windows.some((w) => w.outAt) ? 'warn-lane' : ''}" tabindex="0" data-act="home-select" data-name="${esc(a.id)}" data-key="lane-${esc(a.id)}" data-testid="lane-${esc(a.id)}">
     <div class="lane-id">${renderRingSvg(a, used)}<div class="lane-name-box"><div class="lane-name-top">${toolIcon(a.tool, 14)}<span class="lane-acct-name">${esc(a.name)}</span><span class="pc-dots">${a.computers.map((id) => pcDot(pcs, id, 'Active on ' + ((pcs.find((c) => c.id === id) || {}).name || id))).join('')}</span></div><div class="lane-sub-meta"><span class="plan-pill">${esc(a.plan)}</span>${a.openSessions ? `<span class="lane-open"><i class="live-pulse-dot"></i>${a.openSessions} open</span>` : '<span>idle</span>'}</div></div></div>
     ${capacityColumn(a, used)}${runwayTrack(a, now)}
-    <div class="lane-readout"><span class="lane-readout-primary">${top}</span><span class="lane-readout-sub ${cls}">${sub}</span></div>
+    <div class="lane-readout"><span class="lane-readout-primary">${top}</span><span class="lane-readout-sub ${cls}">${esc(sub)}</span></div>
     <div class="lane-action">${a.needsLogin ? `<button class="btn-lane-start neg" data-act="login" data-name="${esc(a.id)}">Sign in</button>` : `<span class="split-start"><button class="btn-lane-start" data-act="start" data-name="${esc(a.id)}" data-testid="lane-start-${esc(a.id)}">▶ Start</button><button class="btn-lane-start caret" data-act="start-menu" data-name="${esc(a.id)}" aria-haspopup="menu" aria-label="Start ${esc(a.name)} in a folder" title="Start in a folder" data-testid="lane-start-menu-${esc(a.id)}">▾</button></span>`}</div></div>`;
 }
 

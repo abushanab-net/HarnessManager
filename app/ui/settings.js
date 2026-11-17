@@ -11,7 +11,7 @@ import { computersStatus, syncOn, computers, colorIdx, heardOn, transportLine, n
 
 // ---------- the parts ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
-const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${id}" data-testid="tip-${id}">i</button><span role="tooltip" id="tip-${id}">${html}</span></span>`;
+const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${esc(id)}" data-testid="tip-${esc(id)}">i</button><span role="tooltip" id="tip-${esc(id)}">${html}</span></span>`;
 /** A row: the title with its ⓘ, the description, the control. */
 const row = (key, title, tip, text, ctl) => `<div class="b-setting" data-key="setting-${key}"><div><div class="b-name"><b>${title}</b>${tip || ''}</div><div class="muted">${text}</div></div><div class="b-setting-control">${ctl}</div></div>`;
 // a switch that saves as soon as it is flipped, and a chip group that does the same
