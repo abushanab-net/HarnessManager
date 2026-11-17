@@ -195,29 +195,30 @@ try {
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
   await exec(`localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`);
 
-  await test('overview: the deck, the horizon lanes, the readouts, the year clock, attention, reply timing and the request log', async () => {
+  await test('overview: the head with its readouts, the deck, the accounts runway, the year clock, reply timing and the request log', async () => {
     await $('[data-testid=heatmap]');
     assert.equal(await exec("return document.querySelectorAll('[data-testid=heatmap] .yc-cell').length"), 371, '53 weeks of days on the year clock');
-    // the deck: the account to use next with Start, the account that runs out first with its measured basis, what runs now
+    // the head: beside the range, three readouts for it (tokens, cost at list prices, the share read from cache); no readouts panel
+    await hasText('[data-testid=kpi-cost]', '$0.01');
+    await hasText('[data-testid=kpi-tokens]', 'tokens');
+    await hasText('[data-testid=kpi-hit]', 'cached');
+    assert.ok(await exec("return !!document.querySelector('.page-head .actions [data-testid=kpi-tokens]') && !!document.querySelector('.page-head .actions [data-testid=range-today]') && !document.querySelector('[aria-label=\"Period readouts\"]')"), 'the range and its readouts sit in the head');
+    // the deck, in the drawing's order: the account to use next with Start and Start in folder…, what needs attention, what runs now
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.ov-deck > section h2')].map((h) => h.textContent)"), ['Use next', 'Needs attention', 'Running now'], 'three cards, in this order');
     await hasText('[data-testid=use-next]', 'codex-main');
-    await $('[data-testid=finding]');
-    await hasText('[data-testid=basis]', 'easured');
     await $('[data-testid=use-next] [data-testid=start-best]');
-    await $('[data-testid=running-now]');
-    // the lanes: one per account; the ring says what is left of the week; the ruler is linear over seven days
-    await $('[data-testid=lane-codex-main]');
-    assert.equal(await exec("return document.querySelector('[data-testid=lane-codex-main] .ring-val').textContent"), '79%', 'the ring says what is left');
-    await hasText('[data-testid=lane-codex-main]', 'Wk ↻');
-    // a lane's Start has a ▾ beside it: choose a folder, or the full Start in a folder dialog
-    // (the buttons of a lane show while the pointer is over it: hovered again until they do, since a redraw of the page
-    // under a still pointer can leave the lane unhovered for a moment)
-    await waitFor(async () => { await page.hover('[data-testid=lane-codex-main]'); return (await exec("return getComputedStyle(document.querySelector('[data-testid=lane-start-menu-codex-main]')).pointerEvents")) !== 'none'; }, 'the lane hovered, its Start shown');
-    await click('[data-testid=lane-start-menu-codex-main]');
-    await $('[data-testid=sm-choose]');
-    await click('[data-testid=sm-dialog]');
+    await click('[data-testid=start-folder]');
     await $('[data-testid=sd-dir]');
     await click('.dlg .dh [data-act=dialog-close]');
-    assert.deepEqual(await exec("return [...document.querySelectorAll('.axis-tick')].map((t) => t.textContent)"), ['NOW', '+2d', '+4d', '+6d', '+7d'], 'a linear 7-day ruler');
+    await $('[data-testid=running-now]');
+    await $('[data-testid=attention]');
+    // the runway: one row per account; its limits as bars of what is left, one lane on a linear seven days, one verdict
+    await $('[data-testid=lane-codex-main]');
+    assert.equal(await exec("return document.querySelector('[data-testid=lane-codex-main] .ov-lim b').textContent"), '79%', 'the bar says what is left');
+    await hasText('[data-testid=lane-codex-main] .ov-lim', 'Wk');
+    await hasText('[data-testid=verdict-codex-main]', 'Lasts until');
+    assert.ok(await exec("const l = document.querySelector('[data-testid=lane-codex-main] .ov-lane'); return !!l.querySelector('.fill') && !!l.querySelector('.tick') && !l.querySelector('.starve')"), 'its lane is filled up to the reset\'s tick');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.ov-axis span')].map((t) => t.textContent)"), ['Now', '+7 d'], 'a linear 7-day lane');
     // the latest replies carry no tokens-per-second; Request log opens the whole log in a dialog, every number column right-aligned
     await hasText('[data-testid=latest-replies]', 'claude-opus-5-5');
     assert.ok(!(await exec("return document.querySelector('[data-testid=latest-replies] thead').textContent.includes('Speed')")), 'no speed column on the Overview');
@@ -231,14 +232,12 @@ try {
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
     await exec("document.querySelector('[data-act=dialog-close]').click()");
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=request-log]')")), 'the log closed');
-    // the year clock shades today; the readouts: tokens, cost at list prices, the share read from cache
+    // the year clock shades today
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=heatmap] .yc-cell:not(.lv-0)').length")) > 0, 'today shaded');
-    await hasText('[data-testid=kpi-cost]', '$0.01');
-    await hasText('[data-testid=kpi-tokens]', 'Tokens');
     await shot('00-home');
-    // a tool chip shows that tool's lanes and replies; Antigravity too (it keeps no usage logs, so its numbers are zero)
+    // a tool in the table's head shows that tool's rows and replies; Antigravity too (it keeps no usage logs, so its numbers are zero)
     await click('[data-testid=tool-codex]');
-    await waitFor(async () => (await exec("const l = [...document.querySelectorAll('.t-lane')]; return l.length > 0 && l.every((x) => x.dataset.name.startsWith('codex'))")), 'only codex lanes');
+    await waitFor(async () => (await exec("const l = [...document.querySelectorAll('.ov-table tbody tr')]; return l.length > 0 && l.every((x) => (x.dataset.name || '').startsWith('codex'))")), 'only codex rows');
     await click('[data-testid=tool-agy]');
     await hasText('[data-testid=latest-replies]', 'No replies in this range.');
     await click('[data-testid=tool-all]');
@@ -246,23 +245,228 @@ try {
     // no Limits panel and no rings in the rail: the rings are the tray popup's
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=limits], aside.rail [data-testid=nav-limits]')")), 'no Limits panel, no rings in the rail');
     await hasText('[data-testid=activity]', 'Activity, 53 weeks');
-    await $('[data-testid=attention]');
     // a range picks the period; the readouts follow
     await click('[data-testid=range-7d]');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').classList.contains('active')")), '7 days picked');
-    await hasText('[data-testid=kpi-tokens]', 'Tokens');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=range-7d]').getAttribute('aria-pressed')")) === 'true', '7 days picked');
+    await hasText('[data-testid=kpi-tokens]', 'tokens');
     await exec("document.querySelector('[data-testid=activity]').scrollIntoView()");
     await shot('00c-overview-panels');
     await click('[data-testid=range-today]');
-    // a selected lane names its route under the lanes; Escape returns to the finding's account
-    await click('[data-testid=lane-codex-main]');
-    await hasText('.route-inspector-bar', 'codex-main');
-    // a double-click on an account renames nothing: the rename box is for a project's name only
-    await page.dblclick('[data-testid=lane-codex-main] .lane-acct-name');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=rename-input]')")), 'no rename box on an account lane');
-    await hasText('[data-testid=lane-codex-main] .lane-acct-name', 'codex-main');
+    // the legend sits behind one small "i", drawn with the marks it explains
+    await click('[data-testid=legend]');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.menu .ov-legend').length")) === 4, 'the legend');
     await page.keyboard.press('Escape');
-    await waitFor(async () => exec("const l = document.querySelector('.t-lane'); return l && l.classList.contains('selected')"), 'the first lane selected again');
+    // limits as what is left or what is used: one compact choice in the table's head, saved as the setting
+    await click('[data-testid=used-pick]');
+    await click('[data-testid=used-used]');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=lane-codex-main] .ov-lim b').textContent")) === '21%', 'the bars say what is used');
+    await click('[data-testid=used-pick]');
+    await click('[data-testid=used-left]');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=lane-codex-main] .ov-lim b').textContent")) === '79%', 'and what is left again');
+    // a selected row is marked and names its route under the table; Escape lets it go
+    await click('[data-testid=lane-codex-main] .ov-name');
+    await hasText('.route-inspector-bar', 'codex-main');
+    await waitFor(() => exec("return document.querySelector('[data-testid=lane-codex-main]').classList.contains('sel')"), 'the row marked');
+    // a double-click on an account renames nothing: the rename box is for a project's name only
+    await page.dblclick('[data-testid=lane-codex-main] .ov-name');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=rename-input]')")), 'no rename box on an account row');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return !!document.querySelector('.ov-table tr.sel')")), 'no row marked any more');
+  });
+
+  // The drawing's sample data (docs/project-review-2026-11/mockups/BRIEF.md), answered in place of the backend's, so
+  // the Overview is measured, and photographed, in the state the drawing shows: eight accounts on four tools, four
+  // sessions on two computers, one tool with an update. `long` adds an account whose name, plan and limits are long.
+  const sampleOn = (opts = {}) => exec(`
+    const t = window.__TAURI__, real = window.__ovReal || t.core, opts = arguments[0], H = 3600e3, now = Date.now();
+    window.__ovReal = real;
+    const tier = (id, label, left, hours) => ({ id, label, used: 100 - left, resets_at: hours ? now + hours * H : null });
+    const acct = (p, name, harness, o = {}) => ({ ...p, name, label: name, harness, kind: 'subscription', main: false, home: 'C:/Users/alex/.' + name, expected_email: null, email_mismatch: false, route: null, running: [],
+      ...o, identity: { ...p.identity, logged_in: true, needs_login: false, plan: null, email: 'alex@example.com', ...(o.identity || {}) }, quota: o.tiers ? { tiers: o.tiers, fetched_at: now - 60000 } : null });
+    const run = (id, dir, min) => ({ pid: 1000 + min, session_id: id, cwd: 'C:/Projects/' + dir, started_at: now - min * 60000 });
+    const profiles = (p) => [
+      acct(p, 'work-max', 'claude', { identity: { plan: 'Max 20x' }, tiers: [tier('session', '5-hour', 64, 2.17), tier('week', 'Week', 41, 66.9), tier('week_fable', 'Week · Fable', 35, 66.9)], running: [run('s1', 'platform-gitops', 72), run('s2', 'platform-gitops', 24)] }),
+      acct(p, 'claude-main', 'claude', { main: true, identity: { plan: 'Max 5x' }, tiers: [tier('session', '5-hour', 100, 0), tier('week', 'Week', 78, 122), tier('week_fable', 'Week · Fable', 80, 122)] }),
+      acct(p, 'client-acme', 'claude', { identity: { needs_login: true } }),
+      acct(p, 'team-ci', 'claude', { kind: 'api_key' }),
+      acct(p, 'codex-main', 'codex', { main: true, identity: { plan: 'ChatGPT Pro' }, tiers: [tier('session', '5-hour', 90, 4), tier('week', 'Week', 0, 1.03)] }),
+      acct(p, 'codex-personal', 'codex', { identity: { plan: 'Plus' }, tiers: [tier('session', '5-hour', 100, 0), tier('week', 'Week', 88, 144)], running: [run('s4', 'web-console', 6)] }),
+      acct(p, 'opencode-main', 'opencode', { main: true }),
+      acct(p, 'agy-main', 'agy', { main: true, identity: { plan: 'Google AI Pro' }, tiers: [tier('session', '5-hour', 100, 5), tier('week', 'Week', 100, 167.99)] }),
+      ...(opts.long ? [acct(p, 'agy-with-a-very-long-account-name', 'agy', { identity: { plan: 'Google AI Ultra for Business, annual' }, tiers: [tier('session', '5-hour', 70, 3), tier('week', 'Week', 60, 100),
+        tier('g1', 'Week · Gemini 3 Pro High and Low thinking', 55, 100), tier('g2', 'Week · Gemini 3 Flash and Flash Lite', 90, 100), tier('g3', 'Week · Claude models through Antigravity', 20, 100)] })] : []),
+    ];
+    const titles = { s1: ['work-max', 'Longhorn backup target for staging', 'platform-gitops'], s2: ['work-max', 'Bump ArgoCD and fix the sync waves', 'platform-gitops'], s3: ['claude-main', 'Invoice export: totals off by one cent', 'billing-api'], s4: ['codex-personal', 'Fix the flaky build', 'web-console'] };
+    const fake = {
+      state: (r) => ({ ...r, computer: 'WORKSTATION', app_updates: 1, settings: { ...r.settings, hidden_tools: ['pi', 'omp'], quota_display: 'left', theme: opts.theme || r.settings.theme, brand: opts.brand || r.settings.brand, text_size: opts.size || r.settings.text_size }, profiles: profiles(r.profiles[0]) }),
+      home: (r) => ({ ...r, dash: { ...r.dash, cur: { ...r.dash.cur, tokens: 48200000, requests: 10472, cost: 61.4, hit: 0.94 },
+        forecast: { 'work-max|week': { runs_out: r.dash.now + 45.25 * H, at_reset: 130 }, 'work-max|week_fable': { runs_out: r.dash.now + 50 * H, at_reset: 120 } } } }),
+      usage: (r) => ({ ...r, accounts: [{ key: 'team-ci', cost: 4.2, tokens: 1 }] }),
+      sessions: () => ({ total: 4, groups: [{ key: 'g', sessions: Object.entries(titles).map(([id, [profile, title, project_name]]) => ({ id, profile, title, project_name, open: true })) }] }),
+      computers_status: (r) => ({ ...r, mode: 'folder', this: { id: 'pc-here', name: 'WORKSTATION' }, peers: [{ id: 'pc-laptop', name: 'LAPTOP', last_seen: now - 60000, running: [{ session_id: 's3', cwd: 'C:/Projects/billing-api', profile: 'claude-main', started_at: now - 41 * 60000 }] }] }),
+      apps: (r) => ({ ...r, apps: r.apps.map((a) => (a.id === 'codex' ? { ...a, path: a.path || 'codex.exe', version: '0.169.0' } : a)), latest: { at: now, versions: { codex: '0.170.0' }, errors: {} } }),
+    };
+    t.core = { ...real, invoke: (cmd, a, o) => real.invoke(cmd, a, o).then((r) => (a && fake[a.op] ? fake[a.op](r) : r)) };`, [opts]);
+  const sampleOff = () => exec("if (window.__ovReal) { window.__TAURI__.core = window.__ovReal; window.__ovReal = null; } localStorage.removeItem('hm.usenext');");
+  /** The Overview drawn from the answers in force now: the sample's, or the backend's again. (Without a visit to
+   * another page: the first-run report is said on the first visit to Accounts, which a later test makes.) */
+  const overview = async () => { await exec("if (location.hash !== '#home') location.hash = '#home'; return import('./core.js').then((c) => c.render())"); await drawn('the Overview'); };
+  /** A click and what the page shows right after it, in one turn of the page: a choice that only changes what is
+   * shown is drawn at once from what was last read, where one that reads the backend again would not be drawn yet. */
+  const clickNow = (css, read) => exec(`document.querySelector(arguments[0]).click(); ${read}`, [css]);
+
+  await test('overview: the tool switch of Use next changes the recommendation, and the choice is remembered', async () => {
+    await sampleOn();
+    try {
+      await overview();
+      // across every tool: the account with the most room; the switch offers Any and each tool that has an account, by its icon
+      await hasText('[data-testid=use-name]', 'agy-main');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('[data-act=home-use-tool]')].map((b) => b.dataset.v + ':' + (b.querySelector('img.ticon')?.getAttribute('src') || b.textContent))"),
+        [':Any', 'claude:icons/claude.svg', 'codex:icons/codex.svg', 'opencode:icons/opencode.svg', 'agy:icons/agy.svg'], 'Any, then each tool that has an account, with its official icon');
+      // one tool: its own best account, with its plan, one reason, Start and one runner-up, drawn without a new read
+      const c = await clickNow('[data-testid=use-claude]', `const q = (s) => document.querySelector('[data-testid=use-next] ' + s);
+        return { name: q('[data-testid=use-name]').textContent, why: q('[data-testid=use-why]').textContent, runner: q('[data-testid=use-runner]').textContent, pills: [...q('.ov-who').querySelectorAll('.pill')].map((p) => p.textContent),
+          start: q('[data-testid=start-best]').dataset.name, folder: q('[data-testid=start-folder]').textContent, pressed: q('[data-testid=use-claude]').getAttribute('aria-pressed'), icon: q('.ov-who img').getAttribute('src'), primary: document.querySelectorAll('#sheet .btn.primary').length };`);
+      assert.equal(c.name, 'claude-main', 'the Claude Code account with the most room');
+      assert.equal(c.why, '78% of the week left · lasts until its reset', 'one reason line');
+      assert.ok(/^Runner-up\s*work-max\s*41% left · ≈ out \w+$/.test(c.runner), 'one runner-up line: ' + c.runner);
+      assert.deepEqual(c.pills, ['Max 5x', 'main'], 'its plan, and that it is the main profile');
+      assert.deepEqual([c.start, c.folder, c.pressed, c.icon, c.primary], ['claude-main', 'Start in folder…', 'true', 'icons/claude.svg', 1], 'Start is the one primary button, Start in folder… beside it');
+      // the page in the drawing's state, for review beside docs/project-review-2026-11/mockups/a-overview-{light,dark}.png
+      await page.mouse.move(700, 22);
+      await sleep(300);
+      await shot('00a-overview-sample-light');
+      await sampleOn({ theme: 'dark' });
+      await overview();
+      await waitFor(async () => (await exec('return getComputedStyle(document.body).backgroundColor')) === 'rgb(9, 17, 21)', 'the dark theme');
+      await sleep(300);
+      await shot('00b-overview-sample-dark');
+      // and in VektraGrid, light and dark, and at the Large text size
+      for (const [name, o] of [['00d-overview-sample-vg-light', { brand: 'vg' }], ['00e-overview-sample-vg-dark', { brand: 'vg', theme: 'dark' }], ['00f-overview-sample-large', { size: 'large' }]]) {
+        await sampleOn(o);
+        await overview();
+        await sleep(300);
+        await shot(name);
+      }
+      await sampleOn();
+      await overview();
+      // another tool, and the choice is kept for the next visit
+      assert.equal(await clickNow('[data-testid=use-codex]', "return document.querySelector('[data-testid=use-name]').textContent"), 'codex-personal', 'the Codex account with the most room');
+      assert.equal(await exec("return localStorage.getItem('hm.usenext')"), 'codex', 'remembered');
+      await overview();
+      await hasText('[data-testid=use-name]', 'codex-personal');
+      // a tool whose plans have no limits to read: its account, with that reason
+      assert.deepEqual(await clickNow('[data-testid=use-opencode]', "return [document.querySelector('[data-testid=use-name]').textContent, document.querySelector('[data-testid=use-why]').textContent]"), ['opencode-main', 'No plan limits to run out']);
+      // "5h first" is the rule it always was (the 5-hour window that resets soonest with half its room left), among the chosen tool's accounts
+      await click('[data-testid=use-claude]');
+      assert.deepEqual(await clickNow('[data-testid=use-prefer]', "return [document.querySelector('[data-testid=use-name]').textContent, document.querySelector('[data-testid=use-prefer]').getAttribute('aria-pressed')]"), ['work-max', 'true']);
+      await hasText('[data-testid=use-why]', '64% of the 5-hour window left · resets in 2 h');
+      assert.equal(await clickNow('[data-testid=use-prefer]', "return document.querySelector('[data-testid=use-name]').textContent"), 'claude-main', 'and off again');
+      await click('[data-testid=use-any]');
+    } finally { await sampleOff(); await overview(); }
+  });
+
+  await test('overview: Needs attention has one entry per account, the most severe first, each with its one action', async () => {
+    await sampleOn();
+    try {
+      await overview();
+      await $('[data-testid=att-update-codex]');
+      const d = await exec(`const q = (s) => document.querySelector(s);
+        return { n: q('[data-testid=attention-count]').textContent, status: q('[data-testid=page-status]').textContent, title: q('[data-testid=att-work-max]').title, href: q('[data-testid=att-codex-main] a').getAttribute('href'),
+          items: [...document.querySelectorAll('[data-testid=attention] .ov-item')].map((i) => [i.querySelector('.two b').textContent, i.querySelector('.two span').textContent, [...i.querySelectorAll('button, a')].map((b) => b.textContent).join('|'), !!i.querySelector('img.ticon')]) };`);
+      assert.equal(d.n, '4', 'the header counts the entries');
+      assert.deepEqual(d.items.map((i) => i[0]), ['codex-main', 'work-max', 'client-acme', 'Codex'], 'one entry per account: used up, then running out, then a login, then a tool update');
+      assert.ok(/^Week used up · back \d\d:\d\d$/.test(d.items[0][1]), d.items[0][1]);
+      assert.ok(/^≈ Out 2[12] h before reset$/.test(d.items[1][1]), d.items[1][1]);
+      assert.ok(d.title.includes('Week ≈ runs out') && d.title.includes('Week · Fable ≈ runs out'), 'work-max is listed once, though two of its windows run out; both are on hover: ' + d.title);
+      assert.deepEqual(d.items.slice(2).map((i) => i[1]), ['Login expired', 'Update 0.169.0 → 0.170.0']);
+      assert.deepEqual(d.items.map((i) => i[2]), ['Open', 'Open', 'Log in', 'Update'], 'one action each, the one that works');
+      assert.ok(d.items.every((i) => i[3]), 'each with its tool\'s icon');
+      assert.equal(d.href, '#account?name=codex-main', 'Open goes to the account');
+      assert.ok(/^codex-main is used up until \d\d:\d\d; work-max will run out \w+ \d\d:\d\d, before its reset\.$/.test(d.status), 'the status names the most urgent first: ' + d.status);
+    } finally { await sampleOff(); await overview(); }
+  });
+
+  await test('overview: every account row is 48 px with nothing wrapped; a long name is cut, and limits past the third sit behind +N', async () => {
+    await sampleOn({ long: true });
+    try {
+      await overview();
+      const long = '[data-testid="lane-agy-with-a-very-long-account-name"]';
+      await $(long);
+      const d = await exec(`const rows = [...document.querySelectorAll('.ov-table tbody tr')], long = document.querySelector(arguments[0]), h = (e) => e.getBoundingClientRect().height, sheet = document.getElementById('sheet');
+        return { rows: rows.map((r) => Math.round(h(r) * 2) / 2), names: rows.map((r) => r.dataset.name),
+          // every word of a row sits on one line: a name, a pill, a limit's label and number, a verdict
+          tall: [...document.querySelectorAll('.ov-table tbody :is(.ov-name, .pill, .ov-lim .t span, .ov-lim .t b, .ov-verdict, .ov-unread, .ov-more)')].filter((e) => h(e) > 22).map((e) => e.className + ' ' + e.textContent),
+          // and nothing reaches into the next column
+          over: rows.flatMap((r) => [...r.cells].filter((td) => [...td.querySelectorAll('*')].some((e) => e.getBoundingClientRect().right > td.getBoundingClientRect().right + 0.5)).map((td) => r.dataset.name + ' col ' + td.cellIndex)),
+          lims: [...long.querySelectorAll('.ov-lim')].map((l) => l.querySelector('.t span').textContent), cut: (() => { const s = long.querySelectorAll('.ov-lim .t span')[2]; return [s.scrollWidth > s.clientWidth, s.closest('.ov-lim').title]; })(),
+          more: [long.querySelector('.ov-more').textContent, long.querySelector('.ov-more').title], name: (() => { const n = long.querySelector('.ov-name'); return n.scrollWidth > n.clientWidth; })(),
+          plan: (() => { const p = long.querySelector('.ov-plan'); return [p.getBoundingClientRect().width <= 104, p.title]; })(), wide: sheet.scrollWidth > sheet.clientWidth };`, [long]);
+      assert.equal(d.names.length, 9, 'one row per account');
+      assert.equal(new Set(d.names).size, 9, 'no account twice');
+      assert.deepEqual([...new Set(d.rows)], [48], 'every row is 48 px: ' + d.rows);
+      assert.deepEqual(d.tall, [], 'nothing wraps to a second line');
+      assert.deepEqual(d.over, [], 'nothing reaches into the next column');
+      assert.deepEqual(d.lims, ['5h', 'Wk', 'Gemini 3 Pro High and Low thinking'], 'three limits in the line');
+      assert.ok(d.cut[0] && d.cut[1].startsWith('Week · Gemini 3 Pro High and Low thinking: 55% left'), 'a long label is cut with an ellipsis, whole on hover: ' + d.cut);
+      assert.equal(d.more[0], '+2', 'the fourth and fifth behind +N');
+      assert.ok(d.more[1].includes('Gemini 3 Flash and Flash Lite: 90% left') && d.more[1].includes('Claude models through Antigravity: 20% left'), 'listed on hover: ' + d.more[1]);
+      assert.ok(d.name, 'a long account name is cut');
+      assert.ok(d.plan[0] && d.plan[1] === 'Google AI Ultra for Business, annual', 'a long plan name is cut, whole on hover: ' + d.plan);
+      assert.ok(!d.wide, 'nothing is wider than the page');
+    } finally { await sampleOff(); await overview(); }
+  });
+
+  await test('overview: each account row says its state once and has the one action that works in it', async () => {
+    await sampleOn();
+    try {
+      await overview();
+      await $('[data-testid=lane-agy-main]');
+      const read = `const row = (r) => ({ limits: [...r.querySelectorAll('.ov-lim')].map((l) => l.textContent.trim()).join(' ') || r.cells[1].textContent.trim(), verdict: r.querySelector('.ov-verdict').textContent, tone: r.querySelector('.ov-verdict').className.replace(/ov-verdict|trunc/g, '').trim(),
+          lane: ['fill', 'warn', 'starve', 'tick'].filter((c) => r.querySelector('.ov-lane .' + c)).join(' ') || r.querySelector('.ov-lane').getAttribute('class'),
+          acts: [...r.querySelectorAll('button, a')].map((b) => [b.textContent, b.dataset.act, b.disabled, b.title].join('|')) });
+        return Object.fromEntries([...document.querySelectorAll('.ov-table tbody tr')].map((r) => [r.dataset.name, row(r)]));`;
+      const d = await exec(read);
+      const want = {
+        'work-max': ['5h64% Wk41% Fable35%', /^≈ Out \w{3} \d\d:\d\d$/, 'warnT', 'fill warn starve tick', /^Start\|start\|false\|/],
+        'claude-main': ['5h100% Wk78% Fable80%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
+        'client-acme': ['—', /^Login expired$/, 'negT', 'ov-lane none', /^Log in\|login\|false\|/],
+        'team-ci': ['—', /^Pay per use · ≈ \$4\.20 today$/, 'plain', 'ov-lane none', /^Start\|start\|false\|/],
+        'codex-main': ['5h90% Wk0%', /^Used up · back \d\d:\d\d$/, 'negT', 'fill warn starve tick', /^Start\|start\|true\|Used up · back \d\d:\d\d$/],
+        'codex-personal': ['5h100% Wk88%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
+        'opencode-main': ['—', /^No plan limits$/, 'plain', 'ov-lane none', /^Start\|start\|false\|/],
+        'agy-main': ['5h100% Wk100%', /^Lasts until next \w{3}$/, '', 'fill tick', /^Start\|start\|false\|/],
+      };
+      assert.deepEqual(Object.keys(d), Object.keys(want), 'one row per account, in the accounts\' order');
+      for (const [name, [limits, verdict, tone, lane, act]] of Object.entries(want)) {
+        const r = d[name];
+        assert.equal(r.limits.replace(/\s+/g, ' '), limits, `${name}: its limits in one line`);
+        assert.ok(verdict.test(r.verdict), `${name}: its verdict, one phrase: ${r.verdict}`);
+        assert.equal(r.tone, tone, `${name}: the verdict's tone`);
+        assert.equal(r.lane, lane, `${name}: its lane`);
+        assert.equal(r.acts.length, 1, `${name}: one action: ${r.acts}`);
+        assert.ok(act.test(r.acts[0]), `${name}: the action that works: ${r.acts[0]}`);
+      }
+      // eight accounts fit above the fold at 1280 × 800
+      assert.ok(await exec("return document.querySelector('[data-testid=lane-agy-main]').getBoundingClientRect().bottom <= window.innerHeight"), 'the eighth row is on screen without scrolling');
+      // the head line: the tools by icon, name and count; the running sessions counted per computer
+      assert.deepEqual(await exec("return [...document.querySelectorAll('[data-act=home-tool]')].map((b) => b.textContent.replace(/\\s+/g, ' ').trim())"), ['All 8', 'Claude Code 4', 'Codex 2', 'OpenCode 1', 'Antigravity 1']);
+      assert.equal((await text('[data-testid=running-count]')).trim(), '3 here · 1 on LAPTOP');
+      const rows = await exec("return [...document.querySelectorAll('[data-testid=running-now] .ov-item')].map((i) => i.textContent.replace(/\\s+/g, ' ').trim())");
+      assert.equal(rows.length, 4, 'a row per running session');
+      assert.ok(rows.some((r) => /^Longhorn backup target for staging ?1 h 1[23] m ?platform-gitops ?work-max ?WORKSTATION ?Follow$/.test(r)), 'title, elapsed, project, account, computer, Follow: ' + rows.join(' / '));
+      // a count shows that computer's sessions alone, and all of them again
+      assert.equal(await clickNow('[data-testid=running-count] [data-v=pc-laptop]', "return [...document.querySelectorAll('[data-testid=running-now] .ov-item b')].map((b) => b.textContent).join()"), 'Invoice export: totals off by one cent');
+      assert.equal(await clickNow('[data-testid=running-count] [data-v=pc-laptop]', "return document.querySelectorAll('[data-testid=running-now] .ov-item').length"), 4);
+      // the window the lanes draw: the 5-hour window alone goes on a five-hour lane, with its own verdict; drawn at once
+      await click('[data-testid=window-pick]');
+      const five = await clickNow('[data-testid=window-5h]', "return [[...document.querySelectorAll('.ov-axis span')].map((t) => t.textContent).join(), document.querySelector('[data-testid=verdict-work-max]').textContent, document.querySelector('[data-testid=window-pick]').textContent]");
+      assert.deepEqual(five.slice(0, 1), ['Now,+5 h']);
+      assert.ok(/^Lasts until \d\d:\d\d$/.test(five[1]) && five[2].startsWith('5-hour only'), 'the 5-hour window\'s own verdict: ' + five);
+      await click('[data-testid=window-pick]');
+      await click('[data-testid=window-both]');
+      await hasText('[data-testid=verdict-work-max]', '≈ Out');
+    } finally { await sampleOff(); await overview(); }
   });
 
   await test('sidebar: Setup folds and stays as left, a page inside opens it, the pinned projects fold, the tray popup', async () => {
@@ -696,7 +900,7 @@ try {
   // must appear among the page's headings in that order; headings named by data (accounts, routes) may sit between.
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
-      '#home': ['Overview', 'Period readouts', 'Needs attention', 'Activity, 53 weeks', 'Latest replies'],
+      '#home': ['Overview', 'Use next', 'Needs attention', 'Running now', 'Accounts runway', 'Activity, 53 weeks', 'Latest replies'],
       '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Login and folder', 'Tokens per day · 30 days', 'By model · 30 days', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
@@ -1384,25 +1588,30 @@ description: Bulk skill ${i}
     assert.equal(chip.on, 2, 'both heard within three minutes');
     assert.equal(chip.text, '2 computers', chip.text);
     assert.ok(chip.names.some((n) => n.includes('LAPTOP')), 'the full name on hover: ' + chip.names);
-    // the Overview: the switch, the other computer's session under Running now with a chip per computer, the account's
-    // lane with a dot for the computer it runs on, the Activity switch and each computer's 53-week total
+    // the Overview: the computers' choice, the other computer's session under Running now with a count per computer, the
+    // account's row naming the computer it runs on, the Activity switch and each computer's 53-week total
     await nav('#home');
     await $('[data-testid=scope]');
-    await hasText('[data-testid=running-now]', '0 here · 1 elsewhere');
-    await hasText('[data-testid=running-now] .live-mini-list', 'LAPTOP');
-    assert.equal(await exec("return document.querySelectorAll('[data-testid=running-now] [data-act=home-live-pc]').length"), 3, 'All, and a chip per computer');
-    assert.ok((await exec("return [...document.querySelectorAll('[data-testid=lane-claude-main] .pc-dots .pc-dot')].map((d) => d.title).join()")).includes('LAPTOP'), 'the account running there carries that computer\'s dot, named on hover');
+    await hasText('[data-testid=running-count]', '0 here · 1 on ');
+    await hasText('[data-testid=running-count]', 'LAPTOP');
+    await hasText('[data-testid=running-now] .ov-list', 'LAPTOP');
+    assert.equal(await exec("return document.querySelectorAll('[data-testid=running-now] [data-act=home-live-pc]').length"), 1, 'the count of a computer with sessions shows that computer\'s alone');
+    assert.ok((await exec("return document.querySelector('[data-testid=lane-claude-main]').title")).includes('LAPTOP'), 'the account running there names that computer on hover');
+    assert.ok((await text('[data-testid=route]')).length > 0, 'and the selected route names its computers');
     assert.ok((await exec("return [...document.querySelectorAll('[data-testid=activity-pc] button')].map((a) => a.title).join(' ')")).includes('LAPTOP'), 'the year clock has a switch per computer, with the name on hover');
     await hasText('[data-testid=activity] .year-clock-pcs', 'LAPTOP');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await shot('19c-overview-all-computers');
     await click('[data-testid=activity-pc-' + dev + ']');
     await hasText('[data-testid=activity] .year-clock-center', 'LAPTOP');
+    await click('[data-testid=scope]');
     await click('[data-testid=scope-here]');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=scope] button.active')?.dataset.v")) === 'here', 'This computer picked');
+    await waitFor(async () => (await text('[data-testid=scope]')).includes('This computer'), 'This computer picked');
     assert.equal(await exec("return localStorage.getItem('hm.scope')"), 'here', 'remembered');
     await shot('19d-overview-this-computer');
+    await click('[data-testid=scope]');
     await click('[data-testid=scope-all]');
+    await waitFor(async () => (await text('[data-testid=scope]')).includes('All computers'), 'every computer again');
     // Sessions: the Computer column, the filter, and the session open on the other computer
     await nav('#sessions?days=all');
     await $('[data-testid=session-laptop-s1] .a-pc');
@@ -1980,13 +2189,14 @@ description: Bulk skill ${i}
   });
 
   await test('Enter opens a Needs attention item, and a chosen filter chip says it is pressed', async () => {
-    // two tools with an update, as a check for updates leaves it: the Overview lists that under Needs attention
+    // two tools with an update, as a check for updates leaves it, their versions not read yet: the Overview lists
+    // that under Needs attention as one entry, whose button opens Apps
     await exec(`const t = window.__TAURI__; window.__core = t.core;
-      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => (a && a.op === 'state' ? { ...r, app_updates: 2 } : r)) };`);
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => (a && a.op === 'state' ? { ...r, app_updates: 2 } : a && a.op === 'apps' ? { ...r, latest: null } : r)) };`);
     try {
       await nav('#accounts');
       await nav('#home');
-      const item = '[data-testid=attention] .att-item[data-href="#apps"]';
+      const item = '[data-testid=attention] [data-testid=att-updates] a[href="#apps"]';
       await $(item);
       await page.focus(item);
       await page.keyboard.press('Enter');

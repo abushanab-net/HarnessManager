@@ -25,6 +25,7 @@ const SMALL_TEXT_ALLOWED = [
 ];
 /** Each page's own parts, as its page worker drew them: [selector, computed property, value]. */
 const PARTS = {
+  '#home': [['.ov-deck', 'columnGap', '10px'], ['.ov-deck .card-head', 'height', '40px'], ['.ov-readouts b', 'fontSize', '15px'], ['.ov-table', 'tableLayout', 'fixed'], ['.ov-table td', 'height', '48px'], ['.ov-table th', 'fontSize', '12px']],
   '#sessions': [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
   '#session?profile=claude-main&id=s-main-1': [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
   '#routing': [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']],
