@@ -25,8 +25,11 @@ const SMALL_TEXT_ALLOWED = [
 ];
 /** Each page's own parts, as its page worker drew them: [selector, computed property, value]. */
 const PARTS = {
-  '#sessions': [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
-  '#session?profile=claude-main&id=s-main-1': [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
+  // Sessions: one filter line; the groups in one card, a 36 px band a group, rows 44 px (b-sessions.html's middle zone)
+  '#sessions': [['.a-fbar', 'display', 'flex'], ['.a-fbar .seg', 'height', '30px'], ['.a-lh', 'minHeight', '36px'], ['.a-gh', 'height', '36px'], ['.a-srow', 'minHeight', '44px'], ['.a-srow', 'padding', '0px 12px'], ['.a-gname', 'fontSize', '13px'], ['.a-title b', 'fontWeight', '600']],
+  // Projects: one list in one card, a project a 52 px row
+  '#projects': [['.a-plist', 'padding', '0px'], ['.a-prow.head', 'minHeight', '34px'], ['.a-pcard', 'minHeight', '52px'], ['.a-pcard', 'display', 'grid'], ['.a-pname', 'fontWeight', '650']],
+  '#session?profile=claude-main&id=s-main-1': [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px'], ['.page-head .actions', 'flexWrap', 'nowrap'], ['.a-split .btn', 'height', '30px']],
   '#routing': [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']],
   '#apps': [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
   '#mcp': [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],

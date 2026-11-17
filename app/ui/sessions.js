@@ -1,18 +1,18 @@
-// Sessions (the list) and Session (the reading view) as the reference draws them (round2/app/pages-a.js), fed by the
-// index: `sessions`, `projects`, `tag_list`, `computers_status`, `transcript`, `session_stats`, `file_stamp`.
-// The tags shared with Projects and Accounts live here too. Every redraw goes through patch(), so a live arrival
-// keeps the reader's scroll, focus and open folds.
+// Sessions (the list) and Session (the reading view), fed by the index: `sessions`, `projects`, `tag_list`,
+// `computers_status`, `transcript`, `session_stats`, `file_stamp`. The list is the 1.10 drawing's (Option A, with the
+// middle zone of docs/project-review-2026-11/mockups/b-sessions.html): one filter line, Running now, then the groups
+// in one card with 44 px rows. The tags shared with Projects and Accounts live here too. Every redraw goes through
+// patch(), so a live arrival keeps the reader's scroll, focus and open folds.
 
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown } from './core.js';
 import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
-import { nameEl, pinBtn, area, refreshProjects } from './projects.js';
+import { nameEl, pinBtn, area, refreshProjects, tellApart } from './projects.js';
 import './restore.js';
-import { pageHead, detailHead } from './parts.js';
+import { pageHead, detailHead, seg, plural } from './parts.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many || one + 's'}`;
 
 // ---------- tags ----------
 // a tag's colour follows its place in the list (oldest first), so it never changes; the six hues are none of the state colours
@@ -61,27 +61,31 @@ const sq = (patchParams) => go('sessions', clean({ ...S.route.params, ...patchPa
 export const href = (view, p) => '#' + view + (Object.keys(clean(p)).length ? '?' + new URLSearchParams(clean(p)) : '');
 export const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
 const sMore = new Set(), sFold = new Set();
-let railMore = false;
+// what the Project and Tag pickers list: the data of the last draw, and whether every project was asked for
+let pick = null, pickMore = false;
 // the page reads the index in pages of 50 rows; the search, the computer and every filter are the backend's
 const PER = 50;
-const seg = (k, opts, cur, label, tid) => `${label ? `<span class="a-lbl">${label}</span>` : ''}<div class="chip-group" role="group" aria-label="${label || k}">${opts.map(([v, l]) => `<button class="filter-chip ${cur === v ? 'active' : ''}" data-act="s-set" data-k="${k}" data-v="${esc(v)}" aria-pressed="${cur === v}" data-testid="${esc(tid(v))}">${esc(l)}</button>`).join('')}</div>`;
+/** A segmented choice that sets one parameter of the hash. */
+const sseg = (k, opts, cur, label, tid) => seg(label, opts, cur, (v) => `data-act="s-set" data-k="${k}" data-v="${esc(v)}" data-testid="${esc(tid(v))}"`);
 
-/** One row: status dot, title and where, tags, account (its tool's icon first), computer (sync on), tokens, when, one action. */
-function sessionRow(s, pcs) {
+/** One row, 44 px: status dot, title (a failed one says so in words) with its tags, account (its tool's icon first),
+ * computer (sync on), tokens, when, one action. `running`: a row of Running now, which says when it started. */
+function sessionRow(s, pcs, running) {
   const sync = syncOn(pcs), remote = !!(pcs && pcs.this && s.device && s.device !== pcs.this.id);
   const device = s.device_name || nameOf(pcs, s.device), far = s.open_elsewhere ? device : '';
   // the login is this computer's: on another computer the same account name is often another login
   const mail = remote ? '' : acctEmail(s.profile);
   const path = s.cwd ? s.cwd.split(/[\\/]/).slice(-2).join('\\') : '';
-  const where = `${s.continued_from ? `<span data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span> · ` : ''}${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}`;
+  // where it ran (its messages and the last two folders): shown when the title leaves it room, whole on hover
   // archived: read only; open: follow; from another computer: resume here when its repository and account are here, else why not
-  const act = s.archived ? '' : s.open ? `<button class="btn-follow" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote ? `data-device="${esc(s.device)}"` : ''}>Follow</button>`
-    : remote ? (canResume(s.resumable) ? `<button class="btn-lane-start" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>` : `<span class="a-reason" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
-    : `<button class="btn-lane-start" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
-  return `<div class="a-srow" data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" ${s.failed ? `title="${plural(s.failed, 'failed command')}"` : 'aria-hidden="true"'}></i>
-    <div class="a-tcell"><button class="a-title" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}</b></button><div class="a-tline"><span class="a-where" title="${esc(s.cwd)}">${where}</span>${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}</div></div>
-    <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 14)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : '<span></span>'}
-    <span class="num">${fmt(s.tokens)}</span><span class="a-when ${s.open || far ? 'live' : ''}">${far ? 'running on ' + esc(far) : s.open ? 'live' : esc(when(s.last_active_at))}</span><span class="a-act">${act}</span></div>`;
+  const act = s.archived ? '' : s.open ? `<button class="btn sm" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote ? `data-device="${esc(s.device)}"` : ''}>Follow</button>`
+    : remote ? (canResume(s.resumable) ? `<button class="btn sm" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>` : `<span class="a-reason" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
+    : `<button class="btn sm" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
+  const at = running ? when(s.started_at) : far ? 'running on ' + far : s.open ? 'live' : when(s.last_active_at);
+  return `<div class="a-srow" data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" aria-hidden="true"></i>
+    <div class="a-tcell"><button class="a-title" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}</b></button>${s.failed ? `<span class="a-fail" title="${plural(s.failed, 'failed command')}">${s.failed} failed</span>` : ''}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}${s.continued_from ? `<span class="a-pill arch" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span>` : ''}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}<span class="a-where" title="${esc(plural(s.messages, 'message') + (s.cwd ? ' · ' + s.cwd : ''))}"><span class="a-wtx">${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}</span></span></div>
+    <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 16)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : ''}
+    <span class="num">${fmt(s.tokens)}</span><span class="a-when ${!running && (s.open || far) ? 'live' : ''}" title="${esc(at)}">${esc(at)}</span><span class="a-act">${act}</span></div>`;
 }
 
 view('sessions', async (sheet, params) => {
@@ -116,25 +120,22 @@ view('sessions', async (sheet, params) => {
     patch(sheet, `<div class="page-body" data-tour="sessions">${pageHead('sessions', 'No session yet.', '<button class="btn primary" data-act="session-new" data-testid="session-new">New session</button>')}<section class="panel-card empty-state"><span class="muted">Sessions appear here as your tools write their logs.</span></section></div>`);
     return;
   }
-  const grp = (g, k, cls) => {
-    const open = cls || !sFold.has(k), list = g.sessions, n = g.total || g.sessions.length;
-    const p = group === 'project' && g.key ? plist.find((x) => x.key === g.key) : null;
-    return `<section class="a-grp ${cls || ''} ${open ? '' : 'shut'}" data-key="grp:${esc(k)}" data-testid="group"><div class="a-gh"><h2 class="a-gname">${group === 'tag' && g.key && !cls ? `<span class="a-tag ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${g.root ? `<span class="a-path mono" title="${esc(g.root)}">${esc(g.root)}</span>` : g.remote ? `<span class="a-path">${esc(g.remote)}</span>` : ''}
-      ${group === 'project' && g.key && !cls ? `<button class="a-ib" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${p && p.pinned ? 1 : ''}" aria-label="Open, pin, rename or merge ${esc(g.name)}" aria-haspopup="menu">${ic.dots}</button>` : ''}
-      <span class="a-tot">${plural(n, 'session')} · ${fmt(g.tokens)} tokens${p && p.cost != null ? ' · ' + money(p.cost) : ''}</span>${group === 'project' && g.root && !cls ? `<button class="btn-lane-start" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">New session</button>` : ''}${cls ? '' : `<button class="a-fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}">${open ? '▾' : '▸'}</button>`}</div>${open ? list.map((s) => sessionRow(s, pcs)).join('') + (list.length < n ? `<div class="a-more-row"><button class="filter-chip" data-act="s-more" data-k="${esc(k)}" data-testid="s-more-${esc(g.key)}">Show all ${plural(n, 'session')}</button></div>` : '') : ''}</section>`;
-  };
-  // the rail: what runs now, every project, the pinned ones, the recent ones, and the tags
   const keep = clean({ group: params.group, days: params.days });
-  const tagItem = (t) => `<a class="a-rail-item ${tag === t.tag ? 'on' : ''}" href="${href('sessions', { ...keep, tag: t.tag })}" data-testid="rail-tag-${esc(t.tag)}"><i class="a-dot ghost"></i><span><span class="a-tag ${tagColor(t.tag)}">${esc(t.tag)}</span></span><span class="a-cnt">${t.sessions + t.projects}</span></a>`;
-  const item = (p) => `<div class="a-rail-row" data-key="rail:${esc(p.key)}"><a class="a-rail-item ${project === p.key ? 'on' : ''}" href="${href('sessions', { ...keep, project: p.key })}" data-testid="rail-${esc(p.key)}"><i class="a-dot ${p.live ? 'live' : ''}"></i><span>${esc(p.name)}</span><span class="a-cnt ${p.live ? 'live' : ''}">${p.live ? p.live + ' live' : p.sessions}</span></a>${pinBtn(p)}</div>`;
-  const pinned = plist.filter((p) => p.pinned), rest = plist.filter((p) => !p.pinned);
-  const rail = `<aside class="a-rail" aria-label="Projects, pinned and recent" data-testid="rail" data-tour="rail">
-      <a class="a-rail-item ${live ? 'on' : ''}" href="${href('sessions', { ...keep, live: '1' })}" data-testid="rail-live"><i class="a-dot live"></i><span>Live now</span><span class="a-cnt live">${running.length || ''}</span></a>
-      <a class="a-rail-item ${!live && !project ? 'on' : ''}" href="${href('sessions', keep)}" data-testid="rail-all"><i class="a-dot"></i><span>All projects</span><span class="a-cnt">${plist.reduce((a, p) => a + p.sessions, 0)}</span></a>
-      ${pinned.length ? `<div class="a-rail-sec">Pinned</div>${pinned.map(item).join('')}` : ''}
-      <div class="a-rail-sec">${pinned.length ? 'Recent' : 'Projects'}</div>${(railMore ? rest : rest.slice(0, 8)).map(item).join('')}${rest.length > 8 && !railMore ? `<button class="a-rail-link muted" data-act="rail-more">${rest.length - 8} more…</button>` : ''}
-      <a class="a-rail-link" href="#projects">Every project, with costs →</a>
-      ${tlist.length ? `<div class="a-rail-sec" data-tour="tags">Tags</div><div class="a-rail-tags">${tlist.map(tagItem).join('')}</div>` : ''}</aside>`;
+  pick = { plist, tlist, keep, live, tag, liveN: running.length };
+  // a project is named with what tells it from another of the same name: its remote, or the last folders of its path
+  const byProject = group === 'project', apart = byProject ? tellApart([...new Map([...plist, ...groups].map((p) => [p.key, p])).values()]) : null;
+  // the head of a card of rows: its name and a note, then the names of the columns, on the rows' own grid
+  const listHead = (title, note, whenLabel) => `<div class="a-lh"><div><h2 class="section">${title}</h2><span class="small muted trunc">${note}</span></div><span class="label">Account</span>${sync ? '<span class="label">Computer</span>' : ''}<span class="label num">Tokens</span><span class="label num">${whenLabel}</span><span></span></div>`;
+  // one group: a 36 px band (fold, name, what tells it apart, its numbers, its actions), then its rows
+  const grp = (g) => {
+    const k = group + ':' + g.key, open = !sFold.has(k), n = g.total || g.sessions.length;
+    const p = byProject && g.key ? plist.find((x) => x.key === g.key) : null, hint = byProject ? apart.get(g.key).hint : '';
+    return `<div class="a-sec ${open ? '' : 'shut'}" data-key="grp:${esc(k)}" data-testid="group"><div class="a-gh"><button class="a-fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}">${open ? '▾' : '▸'}</button>
+      <h2 class="a-gname">${group === 'tag' && g.key ? `<span class="a-tag ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${hint ? `<span class="a-path mono" title="${esc(g.root || g.remote)}" data-testid="group-hint">${esc(hint)}</span>` : ''}
+      <span class="a-tot">${plural(n, 'session')} · ${fmt(g.tokens)} tokens${p && p.cost != null ? ' · ' + money(p.cost) + ' ≈' : ''}</span><span class="grow"></span>
+      ${byProject && g.root ? `<button class="btn sm quiet" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">New session</button>` : ''}${byProject && g.key ? `<button class="a-ib" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${p && p.pinned ? 1 : ''}" aria-label="Open, pin, rename or merge ${esc(g.name)}" aria-haspopup="menu">${ic.dots}</button>` : ''}</div>
+      ${open ? g.sessions.map((s) => sessionRow(s, pcs)).join('') + (g.sessions.length < n ? `<div class="a-more-row"><button class="btn sm quiet" data-act="s-more" data-k="${esc(k)}" data-testid="s-more-${esc(g.key)}">Show all ${plural(n, 'session')}</button></div>` : '') : ''}</div>`;
+  };
   const head = cur
     // a project: the back line, its own name (renamed in place) with its pin and tags, where it lives, and its numbers under the head
     ? `${detailHead({ back: ['#projects', 'Projects'], titleAttrs: 'data-testid="project-title"',
@@ -145,25 +146,31 @@ view('sessions', async (sheet, params) => {
     // the list: what runs now, then how many sessions the range (or the search) holds
     : pageHead('sessions', `${running.length ? `${running.length} running now` : 'No session is running'}; <span data-testid="sessions-count">${total.toLocaleString()} ${filtered ? (total === 1 ? 'matches ' : 'match ') : ''}${days === 'all' || live ? 'in all' : 'in the last ' + esc(days) + ' days'}</span>.`,
       '<button class="btn primary" data-act="session-new" data-testid="session-new">New session</button>');
-  // a project's view has no rail of other projects: its own accounts and tags are chips in the bar, and a panel
-  // about the project appears only when it spans several folders or accounts
+  // a project's view lists no other project: its own accounts and tags are choices in the line, and a panel about the
+  // project appears only when it spans several folders or accounts
   const folders = cur ? [...new Set(all.map((s) => s.cwd).filter(Boolean))] : [];
   const accts = cur ? (cur.accounts && cur.accounts.length ? cur.accounts : [...new Set(all.map((s) => s.profile))]) : [];
   const ptags = cur ? [...new Set([...(cur.tags || []), ...all.flatMap((s) => s.tags || [])])] : [];
-  const about = cur && (folders.length > 1 || accts.length > 1) ? `<aside class="a-rail a-about" aria-label="This project" data-testid="project-about">
+  const about = cur && (folders.length > 1 || accts.length > 1) ? `<aside class="a-about" aria-label="This project" data-testid="project-about">
       <div class="a-rail-sec">This project</div><div class="a-kv"><b>${money(cur.cost)}</b><span>≈ list prices</span><b>${fmt(cur.tokens)}</b><span>tokens</span><b>${cur.sessions}</b><span>${cur.sessions === 1 ? 'session' : 'sessions'}</span></div>
       ${cur.series && cur.series.some((v) => v) ? `<div class="a-rail-sec">${days === 'all' ? 'Activity' : esc(days) + ' days'}</div>${area(cur.series)}` : ''}
       ${running.length ? `<div class="a-rail-sec">Running</div>${running.map((s) => `<a class="a-rail-item" href="#session?profile=${encodeURIComponent(s.profile)}&id=${encodeURIComponent(s.id)}"><i class="a-dot live"></i><span>${esc(s.title || 'Untitled session')}</span><span></span></a>`).join('')}` : ''}
       ${accts.length > 1 ? `<div class="a-rail-sec">Accounts</div>${accts.map((a) => { const n = all.filter((s) => s.profile === a).length; return `<div class="a-arow"><span>${esc(acctName(a))}</span><span>${n}${all.length ? ' · ' + Math.round((n / all.length) * 100) + '%' : ''}</span></div>`; }).join('')}` : ''}
       ${folders.length > 1 ? `<div class="a-rail-sec">Folders</div>${folders.slice(0, 6).map((f) => `<div class="a-afold mono" title="${esc(f)}">${esc(f)}</div>`).join('')}${folders.length > 6 ? `<div class="a-afold">${folders.length - 6} more</div>` : ''}` : ''}</aside>` : '';
-  const fbar = `<div class="horizon-filterbar a-fbar" data-tour="filters">${live ? `<button class="a-chipx" data-act="s-set" data-k="live" data-v="" data-testid="chip-live">Running now ✕</button>` : ''}${tag && !cur ? `<button class="a-chipx" data-act="s-set" data-k="tag" data-v="" data-testid="chip-tag"><span class="a-tag ${tagColor(tag)}">${esc(tag)}</span> ✕</button>` : ''}${q ? `<button class="a-chipx" data-act="s-set" data-k="q" data-v="">“${esc(q)}” ✕</button>` : ''}
-      ${seg('group', [['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')), group, 'Group by', (v) => 'group-' + v)}${seg('days', [['7', '7d'], ['30', '30d'], ['all', 'All']], days, '', (v) => 'days-' + v)}
-      ${sync ? `<span data-testid="pc-seg">${seg('pc', [['', 'All computers'], ['here', 'This computer'], ...(pcs.peers.length <= 3 ? pcs.peers.map((x) => [x.id, x.name]) : [])], pc, '', (v) => 'pc-' + (v || 'all'))}${pcs.peers.length > 3 ? `<button class="filter-chip ${pc && pc !== 'here' ? 'active' : ''}" data-act="s-pc-menu" aria-haspopup="menu" data-testid="pc-other">${esc(pc && pc !== 'here' ? nameOf(pcs, pc) : 'Elsewhere')} ▾</button>` : ''}</span>` : ''}
-      ${cur && accts.length > 1 ? seg('profile', [['', 'All'], ...accts.map((a) => [a, acctName(a)])], params.profile || '', 'Accounts', (v) => 'pacct-' + (v || 'all')) : ''}${cur && ptags.length ? seg('tag', [['', 'All'], ...ptags.map((t) => [t, t])], tag, 'Tags', (v) => 'ptag-' + (v || 'all')) : ''}<span class="a-hint">Search above searches every session</span></div>`;
-  const body = `${running.length && !live ? grp({ key: '', name: 'Running now', sessions: running, total: running.length, tokens: running.reduce((a, s) => a + s.tokens, 0) }, 'live', 'livegrp') : ''}
-    ${groups.length ? groups.map((g) => grp(g, group + ':' + g.key)).join('') : running.length && !live ? '' : `<section class="a-grp"><div class="a-empty">No sessions match.<button class="filter-chip" data-act="s-clear">Clear filters</button></div></section>`}
-    ${total > PER ? `<div class="a-pager" data-testid="s-pager"><button class="filter-chip" data-act="s-set" data-k="page" data-v="${page - 1}" ${page === 0 ? 'disabled' : ''} aria-label="Previous page" data-testid="page-prev">‹</button><span>${page * PER + 1}–${Math.min(total, (page + 1) * PER)} of ${total}</span><button class="filter-chip" data-act="s-set" data-k="page" data-v="${page + 1}" ${(page + 1) * PER >= total ? 'disabled' : ''} aria-label="Next page" data-testid="page-next">›</button></div>` : ''}`;
-  patch(sheet, `<div class="page-body" data-tour="sessions">${head}<div class="a-wrap ${cur && !about ? 'one' : ''}">${cur ? about : rail}<div class="a-smain" data-tour="groups">${fbar}${body}</div></div></div>`);
+  // the one filter line: the grouping, the range, the Project and Tag pickers (in a project: its accounts and tags),
+  // the filters in force as chips with ✕, and at the right the computer when sync is on
+  const pcBtn = (v, label, title, dot = '') => `<button type="button" class="${pc === v ? 'on' : ''}" aria-pressed="${pc === v}" data-act="s-set" data-k="pc" data-v="${esc(v)}" title="${esc(title)}" data-testid="pc-${esc(v || 'all')}">${dot}${esc(label)}</button>`;
+  const fbar = `<div class="a-fbar" data-tour="filters" data-testid="filters"><span class="label">Group by</span>${sseg('group', [['project', 'Project'], ['date', 'Date'], ['account', 'Account'], ['tool', 'Tool'], ['tag', 'Tag']].filter(([k]) => !(cur && k === 'project')), group, 'Group by', (v) => 'group-' + v)}${sseg('days', [['7', '7 d'], ['30', '30 d'], ['all', 'All']], days, 'Range', (v) => 'days-' + v)}
+      ${cur ? `${accts.length > 1 ? `<span class="label">Accounts</span>${sseg('profile', [['', 'All'], ...accts.map((a) => [a, acctName(a)])], params.profile || '', 'Accounts', (v) => 'pacct-' + (v || 'all'))}` : ''}${ptags.length ? `<span class="label">Tags</span>${sseg('tag', [['', 'All'], ...ptags.map((t) => [t, t])], tag, 'Tags', (v) => 'ptag-' + (v || 'all'))}` : ''}`
+    : `<button class="btn sm" data-act="s-pick-project" aria-haspopup="menu" data-testid="pick-project">Project ▾</button>${tlist.length ? '<button class="btn sm" data-act="s-pick-tag" aria-haspopup="menu" data-tour="tags" data-testid="pick-tag">Tag ▾</button>' : ''}`}
+      ${live ? `<button class="a-chipx" data-act="s-set" data-k="live" data-v="" data-testid="chip-live">Running now ✕</button>` : ''}${tag && !cur ? `<button class="a-chipx" data-act="s-set" data-k="tag" data-v="" data-testid="chip-tag"><span class="a-tag ${tagColor(tag)}">${esc(tag)}</span> ✕</button>` : ''}${q ? `<button class="a-chipx" data-act="s-set" data-k="q" data-v="" title="The search above searches every session" data-testid="chip-q">“${esc(q)}” ✕</button>` : ''}
+      ${sync ? `<span class="grow"></span><div class="seg" role="group" aria-label="Computer" data-testid="pc-seg">${pcBtn('', 'All', 'All computers')}${pcBtn('here', 'This', 'This computer: ' + pcs.this.name, cdot(pcs, pcs.this.id, pcs.this.name, 'on'))}${pcs.peers.length <= 3 ? pcs.peers.map((x) => pcBtn(x.id, x.name, x.name, cdot(pcs, x.id, x.name, 'on'))).join('') : ''}</div>${pcs.peers.length > 3 ? `<button class="btn sm" data-act="s-pc-menu" aria-haspopup="menu" data-testid="pc-other">${esc(pc && pc !== 'here' ? nameOf(pcs, pc) : 'Elsewhere')} ▾</button>` : ''}` : ''}</div>`;
+  const here = running.filter((s) => !s.open_elsewhere).length;
+  const body = `${running.length && !live ? `<section class="a-grp livegrp" data-key="grp:live" data-testid="group">${listHead('Running now', `${running.length}${sync ? ` · ${here} here, ${running.length - here} elsewhere` : ''}`, 'Started')}${running.map((s) => sessionRow(s, pcs, true)).join('')}</section>` : ''}
+    ${groups.length ? `<section class="a-grp" data-key="grp:list">${listHead('By ' + esc(group), plural(groups.length, { project: 'project', date: 'day', account: 'account', tool: 'tool', tag: 'tag' }[group] || 'group'), 'Last active')}${groups.map(grp).join('')}</section>`
+    : running.length && !live ? '' : `<section class="a-grp"><div class="a-empty">No sessions match.<button class="btn sm" data-act="s-clear">Clear filters</button></div></section>`}
+    ${total > PER ? `<div class="a-pager" data-testid="s-pager"><button class="btn sm icon" data-act="s-set" data-k="page" data-v="${page - 1}" ${page === 0 ? 'disabled' : ''} aria-label="Previous page" data-testid="page-prev">‹</button><span>${page * PER + 1}–${Math.min(total, (page + 1) * PER)} of ${total}</span><button class="btn sm icon" data-act="s-set" data-k="page" data-v="${page + 1}" ${(page + 1) * PER >= total ? 'disabled' : ''} aria-label="Next page" data-testid="page-next">›</button></div>` : ''}`;
+  patch(sheet, `<div class="page-body" data-tour="sessions">${head}${fbar}<div class="a-wrap ${about ? '' : 'one'}">${about}<div class="a-smain ${sync ? '' : 'nopc'}" data-tour="groups">${body}</div></div></div>`);
   // the top bar's search is the index's: a pause in typing asks for the matching sessions
   const find = document.getElementById('find');
   if (q && !find.value.trim()) find.value = q; // searched from another page
@@ -175,12 +182,30 @@ action('s-set', (el) => {
   if (el.dataset.k === 'q') document.getElementById('find').value = el.dataset.v;
   sq({ [el.dataset.k]: el.dataset.v, ...(el.dataset.k === 'page' ? {} : { page: '' }) });
 });
-// from four other computers on, they are one chip that opens a menu with every one of them (the same pc parameter)
+// from four other computers on, they are one button that opens a menu with every one of them (the same pc parameter)
 action('s-pc-menu', (el) => { const pcs = S.cache.computers, pc = S.route.params.pc || ''; openMenu(el, pcs.peers.map((x) => ({ html: cdot(pcs, x.id, x.name, 'on') + esc(x.name), on: x.id === pc, testid: 'pc-' + x.id, run: () => sq({ pc: x.id, page: '' }) }))); });
+// The Project and Tag pickers: what the page's own project rail listed, as two menus. An item is a dot, a name and a
+// count; `sep` draws a line above it, where a new part of the menu starts.
+const pk = (dot, name, count, cls = '') => `<span class="a-pk ${cls}">${dot || '<i></i>'}<span class="a-pkn">${name}</span>${count}</span>`;
+const cnt = (v, live = false) => `<span class="a-cnt ${live ? 'live' : ''}">${v}</span>`;
+action('s-pick-project', (el) => {
+  const { plist, keep, live, liveN } = pick, apart = tellApart(plist);
+  const pinned = plist.filter((p) => p.pinned), rest = plist.filter((p) => !p.pinned), some = pickMore ? rest : rest.slice(0, 8);
+  // a pinned project carries the pin; two projects of one name carry what tells them apart
+  const item = (p, i) => ({ html: pk(`<i class="a-dot ${p.live ? 'live' : ''}"></i>`, `${p.pinned ? ic.pin : ''}<span class="trunc">${esc(p.name)}</span>${apart.get(p.key).dup ? `<small class="trunc">${esc(apart.get(p.key).hint)}</small>` : ''}`, cnt(p.live ? p.live + ' live' : p.sessions, p.live), i ? '' : 'sep'),
+    testid: 'pick-' + p.key, run: () => go('sessions', { ...keep, project: p.key }) });
+  openMenu(el, [
+    { html: pk('<i class="a-dot live"></i>', 'Live now', cnt(liveN || '', true)), on: live, testid: 'pick-live', run: () => go('sessions', { ...keep, live: '1' }) },
+    { html: pk('<i class="a-dot"></i>', 'All projects', cnt(plist.reduce((a, p) => a + p.sessions, 0))), on: !live, testid: 'pick-all', run: () => go('sessions', keep) },
+    ...pinned.map(item), ...some.map(item),
+    ...(some.length < rest.length ? [{ html: pk('', `<span class="muted">${rest.length - some.length} more…</span>`, ''), testid: 'pick-more', run: () => { pickMore = true; el.click(); } }] : []),
+    { html: pk('', 'Every project, with costs →', '', 'sep'), testid: 'pick-projects', run: () => go('projects') },
+  ]);
+});
+action('s-pick-tag', (el) => openMenu(el, pick.tlist.map((t) => ({ html: pk('', `<span class="a-tag ${tagColor(t.tag)}">${esc(t.tag)}</span>`, cnt(t.sessions + t.projects)), on: pick.tag === t.tag, testid: 'pick-tag-' + t.tag, run: () => go('sessions', { ...pick.keep, tag: t.tag }) }))));
 action('s-clear', () => { document.getElementById('find').value = ''; sq({ live: '', tag: '', pc: '', profile: '', harness: '', q: '', page: '' }); });
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
 action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); render(); });
-action('rail-more', () => { railMore = true; render(); });
 action('go-live', () => go('sessions', { live: '1' }));
 action('go-apps', () => go('apps'));
 

@@ -539,8 +539,9 @@ try {
     await nav('#sessions');
     await hasText('[data-testid=page-title]', 'Sessions');
     await hasText('[data-testid=sessions-count]', 'in the last 7 days');
-    await $('[data-testid=rail-live]'); // the rail comes with the list
-    assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
+    // the list has no project rail of its own (the sidebar has the pinned projects): the Project picker comes with it
+    await $('[data-testid=pick-project]');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=rail], .a-rail')")), 'no project rail on the page');
   });
 
   await test('reading a session: steps, failed command, answer and changes', async () => {
@@ -626,8 +627,11 @@ try {
     await exec("document.querySelector('[data-testid=session-s-main-1] .a-tags a.a-tag').click()");
     await $('[data-testid=chip-tag]');
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 1, 'only the tagged session');
-    assert.ok(await exec("return !!document.querySelector('[data-testid=rail-tag-release]')"), 'the rail lists the tag');
+    // the Tag picker lists the tag, marked as the one in force
+    await click('[data-testid=pick-tag]');
+    await $('.menu [data-testid=pick-tag-release].on');
     await shot('06f-sessions-tags');
+    await page.keyboard.press('Escape');
     // a project's tag reaches its sessions: tag platform-gitops from the Projects page, then filter by it
     await nav('#projects');
     await $('[data-testid=project-cards]');
@@ -639,7 +643,59 @@ try {
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) >= 2, 'every session of the project carries the project tag');
     assert.ok(hrm('sessions', '--tag', 'client-x').includes('platform-gitops'), 'the CLI filters by tag too');
     await click('[data-testid=chip-tag]');
-    await click('[data-testid=rail-all]');
+    await waitFor(async () => !(await exec("return location.hash")).includes('tag='), 'the ✕ of the chip takes the tag off');
+  });
+
+  await test('sessions: one filter line, and the Project and Tag pickers filter as the page\'s own rail did', async () => {
+    const hash = () => exec('return location.hash');
+    const items = () => exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.innerText.replace(/\\s+/g, ' ').trim())");
+    await nav('#sessions?group=date&days=30');
+    await $('[data-testid=pick-project]');
+    // at 1280 the filters are one line: the grouping, the range, the two pickers
+    const line = await exec(`const f = document.querySelector('[data-testid=filters]'), kids = [...f.children].filter((e) => e.getBoundingClientRect().width);
+      return { w: window.innerWidth, mids: kids.map((e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); }), low: [...f.querySelectorAll('button')].filter((b) => b.closest('.seg') ? b.closest('.seg').getBoundingClientRect().height < 28 : b.getBoundingClientRect().height < 28).length,
+        text: f.innerText.replace(/\\s+/g, ' ') };`);
+    assert.equal(line.w, 1280);
+    assert.ok(Math.max(...line.mids) - Math.min(...line.mids) <= 1, 'one line: ' + line.mids);
+    assert.equal(line.low, 0, 'every control at least 28 px tall');
+    assert.ok(/Group by ?Project ?Date ?Account ?Tool ?Tag ?7 d ?30 d ?All ?Project ▾ ?Tag ▾/.test(line.text), line.text);
+    // the Project picker lists what the rail listed: Live now and All projects first, the projects with their counts, every project last
+    await click('[data-testid=pick-project]');
+    await $('.menu [data-testid=pick-live]');
+    const list = await items();
+    assert.equal(list[0], 'Live now');
+    assert.ok(/^All projects \d+$/.test(list[1]), list[1]);
+    assert.ok(list.some((t) => /^platform-gitops \d+$/.test(t)), 'a project with its count: ' + list);
+    assert.equal(list[list.length - 1], 'Every project, with costs →');
+    assert.ok(await exec("return document.querySelector('.menu [data-testid=pick-all]').classList.contains('on')"), 'All projects is the choice in force');
+    // a project: its sessions, with the grouping and the range kept in the address
+    await page.click('.menu [role=menuitem]:has-text("platform-gitops")');
+    await hasText('[data-testid=project-title]', 'platform-gitops');
+    assert.equal(await hash(), '#sessions?group=date&days=30&project=' + encodeURIComponent('github.com/example/platform-gitops'));
+    // Live now: the filter, said by its chip; the ✕ takes it off
+    await nav('#sessions?group=date&days=30');
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-live]');
+    await $('[data-testid=chip-live]');
+    assert.equal(await hash(), '#sessions?group=date&days=30&live=1');
+    await click('[data-testid=chip-live]');
+    await waitFor(async () => (await hash()) === '#sessions?group=date&days=30', 'the live filter off');
+    // the Tag picker: every tag with its chip and its count; one filters to what carries it
+    await click('[data-testid=pick-tag]');
+    await $('.menu [data-testid=pick-tag-release]');
+    assert.ok((await items()).some((t) => /^release \d+$/.test(t)) && (await exec("return !!document.querySelector('.menu [data-testid=pick-tag-release] .a-tag')")), 'a tag as its chip, with its count');
+    await click('.menu [data-testid=pick-tag-release]');
+    await $('[data-testid=chip-tag]');
+    assert.equal(await hash(), '#sessions?group=date&days=30&tag=release');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 1, 'only the tagged session');
+    // All projects takes every filter off
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-all]');
+    await waitFor(async () => (await hash()) === '#sessions?group=date&days=30', 'every project again');
+    // Every project, with costs → opens Projects
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-projects]');
+    await waitFor(async () => (await hash()) === '#projects', 'the Projects page');
   });
 
   await test('OpenCode and Antigravity sessions are listed and readable', async () => {
@@ -2121,6 +2177,50 @@ description: Bulk skill ${i}
     await page.mouse.move(400, 300);
     await page.mouse.move(420, 320);
     await waitFor(async () => (await renders()) > n, 'the redraw that waited, once the window shows', 15000);
+  });
+
+  // (last: its two folders are projects of every later list)
+  await test('two projects of one name are told apart: in the Sessions groups, the Project picker and the Projects rows', async () => {
+    // two folders named api, neither a repository: nothing but their paths tells them apart
+    const dirs = ['acme', 'beta'].map((d) => path.join(home, 'Work', d, 'api'));
+    const files = dirs.map((dir, i) => {
+      fs.mkdirSync(dir, { recursive: true });
+      const f = path.join(home, '.claude', 'projects', 'p', `s-twin-${i}.jsonl`);
+      write(f, jl([{ type: 'user', sessionId: `s-twin-${i}`, cwd: dir, timestamp: new Date().toISOString(), message: { role: 'user', content: `Twinned session ${i}` } }]));
+      return f;
+    });
+    try {
+      hrm('index', 'refresh');
+      const want = ['acme\\api', 'beta\\api'];
+      // Sessions, grouped by project: two groups named api, each with the last two folders of its path beside the name
+      await nav('#sessions?days=all&q=twinned');
+      const heads = () => exec("return [...document.querySelectorAll('[data-testid=group]')].map((g) => [g.querySelector('.a-gname').textContent.trim(), (g.querySelector('[data-testid=group-hint]') || {}).textContent || ''])");
+      await waitFor(async () => (await heads()).filter(([n]) => n === 'api').length === 2, 'two groups named api');
+      assert.deepEqual((await heads()).filter(([n]) => n === 'api').map(([, h]) => h).sort(), want, 'a different second label on each');
+      await shot('61-sessions-same-name');
+      // the Project picker: the two carry it too; a project whose name is its own carries nothing
+      await click('[data-testid=pick-project]');
+      if (await exec("return !!document.querySelector('.menu [data-testid=pick-more]')")) await click('.menu [data-testid=pick-more]');
+      await $('.menu [data-testid=pick-all]');
+      const picks = await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => [(b.querySelector('.a-pkn > .trunc') || {}).textContent || '', (b.querySelector('.a-pkn small') || {}).textContent || ''])");
+      assert.deepEqual(picks.filter(([n]) => n === 'api').map(([, h]) => h).sort(), want, 'in the picker: ' + JSON.stringify(picks));
+      // every project of the menu: a name that is its own carries nothing; a name two share never reads the same twice
+      const projects = picks.filter(([n]) => n), count = (n) => projects.filter(([m]) => m === n).length;
+      assert.ok(projects.some(([n]) => count(n) === 1) && projects.every(([n, h]) => count(n) > 1 || h === ''), 'no second label where the name is enough: ' + JSON.stringify(projects));
+      assert.equal(new Set(projects.map((p) => p.join(' '))).size, projects.length, 'no two items read the same: ' + JSON.stringify(projects));
+      await shot('61b-picker-same-name');
+      await page.keyboard.press('Escape');
+      // Projects: each on its own row, the folders beside the name and its own path under it
+      await nav('#projects?days=all&per=50');
+      const rows = () => exec("return [...document.querySelectorAll('.a-pcard')].filter((r) => r.querySelector('.a-pname').textContent === 'api').map((r) => [(r.querySelector('[data-testid=dup-hint]') || {}).textContent || '', r.querySelector('.a-path').textContent])");
+      await waitFor(async () => (await rows()).length === 2, 'two rows named api');
+      const r = await rows();
+      assert.deepEqual(r.map(([h]) => h).sort(), want, 'beside the name: ' + JSON.stringify(r));
+      assert.ok(r[0][1] !== r[1][1] && r.every(([, p]) => p.endsWith('api')), 'and each its own path under it: ' + JSON.stringify(r));
+      const all = await exec("return [...document.querySelectorAll('.a-pcard')].map((r) => [r.querySelector('.a-pname').textContent, (r.querySelector('[data-testid=dup-hint]') || {}).textContent || '', r.querySelector('.a-path').textContent].join(' | '))");
+      assert.equal(new Set(all).size, all.length, 'no two rows read the same: ' + JSON.stringify(all));
+      await shot('61c-projects-same-name');
+    } finally { for (const f of files) fs.rmSync(f, { force: true }); hrm('index', 'refresh'); }
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
