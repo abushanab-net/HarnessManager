@@ -23,9 +23,11 @@ button.a-ib:hover, button.a-ib:focus-visible { color: var(--ink-primary); backgr
 .a-ib.on svg { fill: var(--ac); }
 .a-chipx { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--fs-small); font-weight: 600; background: var(--ac-soft); border: 1px solid var(--ac-border); color: var(--ink-primary); white-space: nowrap; flex: none; }
 .a-hint { font-size: var(--fs-small); color: var(--ink-muted); }
-.a-split { display: inline-flex; }
+/* a button and the ▾ that changes what it does, joined */
+.a-split { display: inline-flex; flex: none; }
 .a-split .btn:first-child { border-radius: 7px 0 0 7px; }
-.a-split .btn + .btn { border-radius: 0 7px 7px 0; border-left: 0; padding: 0 8px; }
+.a-split .btn + .btn { border-radius: 0 7px 7px 0; border-left: 0; padding: 0 9px; }
+.a-split .btn.primary + .btn.primary { border-left: 1px solid color-mix(in srgb, var(--on-ac) 35%, transparent); }
 
 /* tags: colour = position in the tag list, six hues that are none of teal, amber, coral, emerald or violet */
 .a-tags { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
@@ -151,10 +153,10 @@ a.a-tag:hover { filter: brightness(1.12); }
 
 /* ---------- Session (one, live): the head and tiles stay put, the conversation scrolls inside its panel ---------- */
 .a-sbody { height: 100%; min-height: 0; }
-.a-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--ink-secondary); }
+.a-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: var(--fs-small); color: var(--ink-secondary); }
 .a-meta .a-tags { vertical-align: middle; }
 .a-conv { flex: 1; min-height: 0; padding: 0; gap: 0; }
-.a-conv .panel-head { padding: 9px 13px; border-bottom: 1px solid var(--line-subtle); flex-wrap: wrap; }
+.a-conv .panel-head { padding: 7px 13px; border-bottom: 1px solid var(--line-subtle); flex-wrap: wrap; }
 .a-conv .panel-title .muted { font-weight: 500; margin-left: 6px; font-size: var(--fs-small); }
 .a-chat { flex: 1; min-height: 240px; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; position: relative; }
 /* a measure cap: at 1920 a duration never sits 1,400 px from its tool name */
@@ -176,7 +178,7 @@ a.a-tag:hover { filter: brightness(1.12); }
 .a-step { border-radius: 6px; }
 .a-step.open { background: var(--bg-card); border: 1px solid var(--line-subtle); }
 /* glyph · tool · what · duration · diff: two quantities, two columns */
-.a-sb { display: grid; grid-template-columns: 16px 84px minmax(0, 1fr) 100px 64px; align-items: center; gap: 8px; width: 100%; padding: 3px 8px; border-radius: 6px; font-size: var(--fs-small); text-align: left; color: var(--ink-secondary); }
+.a-sb { display: grid; grid-template-columns: 16px 84px minmax(0, 1fr) 100px 64px; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 3px 8px; border-radius: 6px; font-size: var(--fs-small); text-align: left; color: var(--ink-secondary); }
 .a-sb:hover { background: var(--bg-card-hover); color: var(--ink-primary); }
 .a-sb .a-k { font-weight: 600; color: var(--ink-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-sb .a-what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-small); }
@@ -192,9 +194,10 @@ a.a-tag:hover { filter: brightness(1.12); }
 .a-diff .a-del { background: var(--neg-soft); color: var(--neg); }
 .a-diff .a-hunk { color: var(--ink-muted); }
 .a-more { padding: 4px 8px 4px 32px; }
+/* "↓ Latest": over the end of the conversation whenever the reader is not there */
 .a-toend { position: sticky; bottom: 4px; display: flex; justify-content: center; margin-top: auto; pointer-events: none; }
 .a-toend[hidden] { display: none; }
-.a-toend .btn-primary { pointer-events: auto; box-shadow: var(--shadow-lg); }
+.a-toend .btn { pointer-events: auto; background: var(--bg-elevated); border-color: var(--line-strong); box-shadow: var(--shadow-lg); }
 .a-sbody .account-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .a-sbody .account-stat { padding: 8px 12px; }
 .a-sbody .account-stat > b { font-size: 18px; }

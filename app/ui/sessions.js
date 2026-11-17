@@ -216,6 +216,8 @@ action('go-apps', () => go('apps'));
 const rv = { mode: 'all', open: new Set(), more: new Set(), sessionKey: '', follow: false };
 const secsOf = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms');
 const diffHtml = (d) => `<div class="a-diff mono">${String(d || '').split('\n').map((l) => `<span class="${l[0] === '+' ? 'a-add' : l[0] === '-' ? 'a-del' : l.startsWith('@@') ? 'a-hunk' : ''}">${esc(l) || ' '}</span>`).join('')}</div>`;
+/** The terminal a session resumes in, as its button says it. */
+const termName = () => { const win = !S.state || !S.state.os || S.state.os === 'windows'; return !win ? 'Terminal' : S.state.settings.terminal === 'console' ? 'a console window' : 'Windows Terminal'; };
 
 view('session', async (sheet, params) => {
   sheet.className = 'sheet';
@@ -232,7 +234,6 @@ view('session', async (sheet, params) => {
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
   const changes = steps.filter((st) => st.change), failed = steps.filter((st) => st.status === 'error'), files = new Set(changes.map((st) => st.change.path)).size;
   const win = !S.state || !S.state.os || S.state.os === 'windows';
-  const term = !win ? 'Terminal' : S.state.settings.terminal === 'console' ? 'a console window' : 'Windows Terminal';
   const tool = TOOL[m.harness] || m.harness;
   const project = m.project_name || (m.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder';
   // one step: ✓ / ✗ / …, the tool, what it worked on, its time, its change; it unfolds to its output or diff
@@ -243,7 +244,7 @@ view('session', async (sheet, params) => {
   };
   // a run of steps; a long one (thousands in a Codex run) shows its first and last until asked for all
   const run = (list, id, head, tail) => !list.length ? '' : `<div class="a-steps" data-key="run:${id}">${rv.more.has(id) || list.length <= head + tail + 2 ? list.map(([st, k]) => row(st, k)).join('')
-    : list.slice(0, head).map(([st, k]) => row(st, k)).join('') + `<div class="a-more" data-key="more:${id}"><button class="filter-chip active" data-act="more-steps" data-run="${id}" data-testid="more-steps">Show ${(list.length - head - tail).toLocaleString()} more steps</button></div>` + list.slice(-tail).map(([st, k]) => row(st, k)).join('')}</div>`;
+    : list.slice(0, head).map(([st, k]) => row(st, k)).join('') + `<div class="a-more" data-key="more:${id}"><button class="btn sm" data-act="more-steps" data-run="${id}" data-testid="more-steps">Show ${(list.length - head - tail).toLocaleString()} more steps</button></div>` + list.slice(-tail).map(([st, k]) => row(st, k)).join('')}</div>`;
   const who = (x) => `<span class="a-who">${esc(tool.toUpperCase())}${x.answer_at ? ' · ' + hm(x.answer_at) : ''}${x.model ? ' · ' + esc(x.model) : ''}</span>`;
   // All: each turn in order, the prompt, then the replies with the steps between them where they happened
   let k = 0;
@@ -263,20 +264,24 @@ view('session', async (sheet, params) => {
   // Changes and Failed: only those steps, as one list
   const picked = steps.map((st, j) => [st, j]).filter(([st]) => (rv.mode === 'changes' ? st.change : st.status === 'error'));
   const body = rv.mode === 'all' ? chatAll : run(picked, 'flat', 30, 10) || `<div class="a-empty">${rv.mode === 'changes' ? 'This session changed no files.' : 'Nothing failed.'}</div>`;
-  // archived: read only; from another computer: resume here, or why not; here: resume in the terminal of the setting
-  const actions = m.archived ? '<span class="muted" data-testid="resume-reason">archived: it can be read, not resumed</span>'
+  // The head's actions, on one row: ONE primary (the action that works in the state shown), Export as a secondary,
+  // the rest behind ⋯. Archived: read only. From another computer: Resume here, or why not. Running here: Follow live
+  // (Resume moves into ⋯). Else: Resume in the terminal of the setting, with its ▾ to change the terminal.
+  const local = !m.archived && !params.device;
+  const primary = m.archived ? '<span class="muted" data-testid="resume-reason">archived: it can be read, not resumed</span>'
     : params.device ? (canResume(m.resumable) ? `<button class="btn primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
-    : `<span class="a-split"><button class="btn" data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${term}</button>${win ? `<button class="btn" data-act="terminal-menu" aria-label="Choose terminal" aria-haspopup="menu">▾</button>` : ''}</span>`;
+    : m.open ? '<button class="btn primary" data-act="follow-end" data-testid="follow-live">Follow live</button>'
+    : `<span class="a-split"><button class="btn primary" data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${termName()}</button>${win ? `<button class="btn primary" data-act="terminal-menu" aria-label="Choose terminal" aria-haspopup="menu">▾</button>` : ''}</span>`;
   const stat = (title, value, cls = '') => `<div class="account-stat"><span>${title}</span><b class="${cls}">${value}</b><span></span></div>`;
   patch(sheet, `<div class="page-body a-sbody" data-tour="session">${detailHead({ back: ['#sessions', 'Sessions · ' + project], title: esc(m.title || 'Untitled session'), titleAttrs: 'data-testid="session-title"',
-      status: `<div class="a-meta">${m.open ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
+      status: `<div class="a-meta">${m.open ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${toolIcon(m.harness, 14)} ${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
         ${params.device ? `<span data-testid="session-from">${cdot(pcs, params.device, m.device_name, 'on')} ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
         <span>started ${esc(when(m.started_at))} · ${plural(t.turns.length, 'turn')}</span><span>${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · ' + money(ss.cost) + ' ≈' : ''}</span></div>`,
-      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${actions}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-cwd="${esc(m.cwd)}" aria-label="More" aria-haspopup="menu">⋯</button>` })}
+      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${primary}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-resume="${local && m.open ? 1 : ''}" aria-label="More" aria-haspopup="menu" data-testid="session-menu">⋯</button>` })}
     <section class="account-stats" aria-label="Session readouts">${stat('Tokens', fmt(m.tokens))}${stat('Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—')}${stat('First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—')}${stat('Failed commands', String(failed.length), failed.length ? 'a-neg' : '')}${stat('Files changed', String(files))}</section>
     <section class="panel-card a-conv" data-testid="conv-panel" data-tour="conversation"><div class="panel-head"><h2 class="panel-title">Conversation<span class="muted">${plural(t.turns.length, 'turn')} · ${steps.length.toLocaleString()} steps · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed</span></h2>
-        <div class="chip-group" role="group" aria-label="Show" data-tour="modes">${[['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']].map(([v, l]) => `<button class="filter-chip ${rv.mode === v ? 'active' : ''}" data-act="rv-mode" data-v="${v}" aria-pressed="${rv.mode === v}" data-testid="mode-${v}">${l}</button>`).join('')}</div></div>
-      <div class="a-chat" id="chat" data-testid="chat" tabindex="0" aria-label="Conversation; scroll to read">${body || '<div class="a-empty">This session has no messages yet.</div>'}<div class="a-toend" id="toend" hidden><button class="btn-primary" data-act="follow-end" data-testid="follow-end">↓ Latest${m.open ? ' · follow live' : ''}</button></div></div></section></div>`);
+        <span data-tour="modes">${seg('Show', [['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']], rv.mode, (v) => `data-act="rv-mode" data-v="${v}" data-testid="mode-${v}"`)}</span></div>
+      <div class="a-chat" id="chat" data-testid="chat" tabindex="0" aria-label="Conversation; scroll to read">${body || '<div class="a-empty">This session has no messages yet.</div>'}<div class="a-toend" id="toend" hidden><button class="btn" data-act="follow-end" data-testid="follow-end">↓ Latest${m.open ? ' · follow live' : ''}</button></div></div></section></div>`);
   S.cache.transcript = t;
   // a live session opens at its end, following; a redraw keeps the reader's place (patch), or the end while following
   const chat = document.getElementById('chat');
@@ -315,12 +320,17 @@ action('follow-end', () => {
 action('more-steps', (el) => { rv.more.add(el.dataset.run); render(); });
 action('step-open', (el) => { const k = +el.dataset.k; if (rv.open.has(k)) rv.open.delete(k); else rv.open.add(k); render(); });
 action('rv-mode', (el) => { rv.mode = el.dataset.v; render(); });
-action('terminal-menu', (el) => openMenu(el, [
+const terminals = () => [
   { label: 'Open sessions in Windows Terminal', run: () => setTerminal('wt') },
   { label: 'Open sessions in a console window', run: () => setTerminal('console') },
-]));
+];
+action('terminal-menu', (el) => openMenu(el, terminals()));
 const setTerminal = (v) => mutate(() => call('settings_set', { key: 'terminal', value: v }), 'Saved');
-action('session-menu', (el) => openMenu(el, [{ label: 'Open the log file folder', run: () => call('open_folder', { path: el.dataset.path.replace(/[\\/][^\\/]*$/, '') }) }]));
+// ⋯: the log file's folder; for a session running here also Resume (the head's primary is Follow live) and the terminal
+action('session-menu', (el) => { const d = el.dataset, win = !S.state || !S.state.os || S.state.os === 'windows'; openMenu(el, [
+  ...(d.resume ? [{ label: 'Resume in ' + termName(), run: () => attempt(() => call('resume', { profile: d.profile, id: d.id, cwd: d.cwd }), 'Resumed in a new terminal') }, ...(win ? terminals() : [])] : []),
+  { label: 'Open the log file folder', run: () => call('open_folder', { path: d.path.replace(/[\\/][^\\/]*$/, '') }) },
+]); });
 action('export-md', async (el) => {
   const path = await saveFile(`${(S.cache.transcript.meta.title || 'session').replace(/[^\w -]+/g, '').slice(0, 60)}.md`);
   if (path) attempt(() => call('export_markdown', { profile: el.dataset.profile, id: el.dataset.id, path }), 'Exported');

@@ -746,6 +746,53 @@ try {
     assert.ok(md.includes('What changed'));
   });
 
+  await test('session: the head\'s actions sit on one row at 1280: one primary, Export as Markdown beside it, the rest behind ⋯', async () => {
+    await nav('#session?profile=claude-main&id=s-main-1');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+    const head = () => exec(`const a = document.querySelector('.page-head .actions'), bs = [...a.querySelectorAll('button')], sheet = document.getElementById('sheet');
+      return { w: window.innerWidth, tops: [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().top)))], heights: [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().height)))],
+        inside: a.getBoundingClientRect().right <= sheet.getBoundingClientRect().right && sheet.scrollWidth <= sheet.clientWidth, labels: bs.map((b) => b.textContent.trim()),
+        primary: [...document.querySelectorAll('#sheet .btn.primary, #sheet .btn-primary')].filter((b) => b.getBoundingClientRect().width).map((b) => b.dataset.act) };`);
+    const d = await head();
+    assert.equal(d.w, 1280);
+    assert.ok(d.tops.length === 1 && d.inside, 'the actions on one row, inside the page: ' + JSON.stringify(d));
+    assert.deepEqual(d.heights, [30], 'each 30 px tall');
+    assert.ok(d.labels.length === 4 && d.labels[0] === 'Export as Markdown' && d.labels[1].startsWith('Resume in') && d.labels[2] === '▾' && d.labels[3] === '⋯', 'Export, Resume with its ▾, ⋯: ' + d.labels);
+    assert.deepEqual(d.primary, ['resume', 'terminal-menu'], 'one primary on the page: Resume, with the ▾ that is part of it');
+    // a title of three lines moves nothing: the name wraps, the actions stay one row
+    await exec("document.querySelector('[data-testid=session-title]').textContent = 'Longhorn backup target for staging, and every other cluster too '.repeat(4)");
+    const long = await head();
+    assert.ok(long.tops.length === 1 && long.inside, 'still one row beside a long title: ' + JSON.stringify(long));
+    // the rest is behind ⋯; the ▾ chooses the terminal
+    await click('[data-testid=session-menu]');
+    await hasText('.menu', 'Open the log file folder');
+    await page.keyboard.press('Escape');
+    await click('.page-head [data-act=terminal-menu]');
+    await hasText('.menu', 'Open sessions in a console window');
+    await page.keyboard.press('Escape');
+    // the tiles, the conversation and its three views are where they were
+    assert.equal(await exec("return document.querySelectorAll('#sheet .account-stat').length"), 5, 'five tiles');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=conv-panel] [data-testid=chat]') && !!document.querySelector('[data-testid=follow-end]')"), 'the conversation, with its ↓ Latest');
+    // a session running here (the sandbox has no console, so the transcript is answered as open): the primary is
+    // Follow live, and Resume is behind ⋯ with the terminal choice
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => (a && a.op === 'transcript' ? { ...r, meta: { ...r.meta, open: true, source_path: '' } } : r)) };`);
+    try {
+      await nav('#sessions');
+      await nav('#session?profile=claude-main&id=s-main-1');
+      await $('[data-testid=follow-live]');
+      const live = await head();
+      assert.deepEqual(live.labels, ['Export as Markdown', 'Follow live', '⋯'], 'a running session: Export, Follow live, ⋯');
+      assert.ok(live.tops.length === 1 && live.inside, 'on one row');
+      assert.deepEqual(live.primary, ['follow-end'], 'Follow live is the one primary');
+      await hasText('#sheet .a-pill.live', 'LIVE');
+      await click('[data-testid=session-menu]');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …'))"),
+        ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯');
+      await page.keyboard.press('Escape');
+    } finally { await exec('window.__TAURI__.core = window.__core'); await nav('#sessions'); }
+  });
+
   await test('accounts: a card and a chip per tool, a header that folds, Add account as a dialog; a session with its Conversation panel', async () => {
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
