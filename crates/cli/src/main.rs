@@ -639,7 +639,8 @@ fn real_main(cli: Cli) -> Result<i32> {
             }
         }
         Cmd::Open => {
-            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "harnessmanager" });
+            // the bundle's binary beside hrm, named by mainBinaryName in tauri.conf.json on every system
+            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "HarnessManager" });
             std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
         }
         Cmd::Computers { cmd } => {

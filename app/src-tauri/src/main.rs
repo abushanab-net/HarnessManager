@@ -152,6 +152,23 @@ fn s(args: &Value, k: &str) -> Result<String> {
 }
 fn opt(args: &Value, k: &str) -> Option<String> { args[k].as_str().map(String::from).filter(|s| !s.is_empty()) }
 
+/// The system's file manager on `p`: a folder opened; a file shown in its folder, selected where the file manager
+/// can (xdg-open would open the file itself); a file not there yet, its folder.
+fn open_cmd(p: &std::path::Path) -> std::process::Command {
+    let mut c = std::process::Command::new(if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+    if p.is_dir() { c.arg(p); }
+    else if cfg!(windows) && p.exists() { c.arg(format!("/select,{}", p.display())); }
+    else if cfg!(target_os = "macos") && p.exists() { c.arg("-R").arg(p); }
+    else { c.arg(p.parent().unwrap_or(p)); }
+    c
+}
+
+fn open_path(p: &std::path::Path) -> Result<()> {
+    let mut c = open_cmd(p);
+    c.spawn().with_context(|| format!("could not start {} to open {}", c.get_program().to_string_lossy(), p.display()))?;
+    Ok(())
+}
+
 fn sync_items(ctx: &Ctx) -> Result<Value> {
     let reg = ctx.registry()?;
     Ok(serde_json::to_value(items::sync(ctx, &reg)?)?)
@@ -204,7 +221,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                 "router": {"running": service::router_running(ctx), "port": ctx.settings.router_port},
                 "routes": reg.routes,
                 "registry_path": ctx.registry_path(),
-                "computer": std::env::var("COMPUTERNAME").unwrap_or_default(),
+                "computer": hrm_core::util::hostname(),
                 "version": env!("CARGO_PKG_VERSION"),
                 "first_run": state.first_run.lock().unwrap_or_else(|e| e.into_inner()).take(),
                 "now": hrm_core::util::now_ms(),
@@ -253,7 +270,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "open_folder" => {
             let p = s(a, "path")?;
             if !std::path::Path::new(&p).is_dir() { bail!("{p} is not a folder"); }
-            std::process::Command::new("explorer").arg(&p).spawn()?;
+            open_path(std::path::Path::new(&p))?;
             json!(true)
         }
         "open_url" => {
@@ -284,6 +301,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         }
         "show_window" => {
             // best effort: activate the console window that runs this process
+            if !cfg!(windows) { bail!("showing a console window is not available on this system; switch to its terminal"); }
             let pid = a["pid"].as_u64().context("pid")?;
             let ok = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("(New-Object -ComObject WScript.Shell).AppActivate({pid})")])
                 .output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "True").unwrap_or(false);
@@ -722,8 +740,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         }
         "log_open" => {
             let f = hrm_core::log::file(&ctx.data);
-            if f.exists() { std::process::Command::new("explorer").arg(format!("/select,{}", f.display())).spawn()?; }
-            else { std::fs::create_dir_all(f.parent().unwrap())?; std::process::Command::new("explorer").arg(f.parent().unwrap()).spawn()?; }
+            if !f.exists() { std::fs::create_dir_all(f.parent().unwrap())?; }
+            open_path(&f)?;
             json!(true)
         }
         "settings_set" => {
@@ -1059,4 +1077,19 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("run Harness Manager");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_file_manager_opens_a_folder_and_shows_a_file_in_its_folder() {
+        let args = |p: &std::path::Path| super::open_cmd(p).get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let file = std::env::current_exe().unwrap();
+        let dir = file.parent().unwrap();
+        assert_eq!(super::open_cmd(&dir).get_program(), if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" });
+        assert_eq!(args(&dir), [dir.display().to_string()]);
+        assert_eq!(args(&dir.join("hrm-no-such.log")), [dir.display().to_string()], "a file not there yet: its folder");
+        let shown = if cfg!(windows) { vec![format!("/select,{}", file.display())] } else if cfg!(target_os = "macos") { vec!["-R".into(), file.display().to_string()] } else { vec![file.parent().unwrap().display().to_string()] };
+        assert_eq!(args(&file), shown);
+    }
 }
