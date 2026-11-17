@@ -12,6 +12,9 @@ if (-not (Test-Path e2e/node_modules)) {
   Push-Location e2e; npm install; $npm = $LASTEXITCODE; Pop-Location
   if ($npm) { Remove-Item -Recurse -Force e2e/node_modules -ErrorAction SilentlyContinue; exit $npm }
 }
+# the tests of several computers run here too: a seeded sync folder, a second computer paired through hrm, and a hub
+# started from target/debug/hrm-hub.exe
+$env:HRM_E2E_SYNC = '1'; $env:HRM_E2E_PEERS = '1'; $env:HRM_E2E_HUB = '1'
 node e2e/app.e2e.mjs
 if ($LASTEXITCODE -or -not $Installed) { exit $LASTEXITCODE }
 
@@ -22,6 +25,7 @@ $dir = Join-Path $env:TEMP "hrm-installed-$PID"
 Start-Process $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
 try {
   $env:HRM_E2E_APP_DIR = $dir
+  Remove-Item Env:HRM_E2E_HUB # the installer carries no hrm-hub.exe: the hub runs on a server
   node e2e/app.e2e.mjs
   $code = $LASTEXITCODE
 } finally {
