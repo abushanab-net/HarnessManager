@@ -3,7 +3,7 @@
 // Switches and chips save at once; typed fields have a button beside them. Computers (the two sync cards, the rows, a
 // card per computer) and Backups and archive are sections of the same page. Harness Manager's own update lives here.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, applyTheme, patch, dialogOpen } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, dialogOpen } from './core.js';
 import { resetGuides } from './guide.js';
 import { esc, when, dur } from './lib.js';
 import { winTrack } from './accounts.js';
@@ -38,9 +38,7 @@ const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + 
 
 view('settings', async (sheet, params) => {
   sheet.className = 'sheet';
-  const st = await call('state');
-  S.state = st;
-  applyTheme(st);
+  const st = await loadState();
   const s = st.settings;
   const c = await computersStatus().catch(() => null);
   const [ts, b, ar] = await Promise.all([c && syncOn(c) ? call('transcripts_status').catch(() => null) : null, call('backups').catch(() => null), call('archive_status').catch(() => null)]);

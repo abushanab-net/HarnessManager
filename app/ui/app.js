@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
+import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
@@ -58,7 +58,8 @@ if (ev) ev.listen('refreshed', () => { S.usageAt = Date.now(); refreshed(); });
 if (ev) onShown(() => { if (stale) { stale = false; refreshed(); } });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
-call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
+// (through the shared loader: this answer may be the one that carries the first-run report)
+loadState().then((st) => { setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
 // a newer Harness Manager found by an earlier check: the dot on Settings
 call('self_latest').then((v) => v && setSelfUpdate(v)).catch(() => {});
 // how many MCP servers and skills there are, beside their pages; the pinned projects under Projects

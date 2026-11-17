@@ -2,7 +2,7 @@
 // errors and paused providers red, with the word beside the number), the routes as provider chains, the providers
 // table and the recent requests; Add provider / Add route as dialogs. The old usage address still redirects.
 
-import { S, call, view, go, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, confirmDialog, action, patch } from './core.js';
+import { call, view, go, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, confirmDialog, action, patch, loadState } from './core.js';
 import { esc, fmt, hm, dur } from './lib.js';
 
 // Usage by account lives on Accounts now; the old address still works
@@ -16,8 +16,7 @@ const n = (c, one, many) => `${c.toLocaleString()} ${c === 1 ? one : many}`;
 
 view('routing', async (sheet) => {
   sheet.className = 'sheet';
-  const [r, st] = await Promise.all([call('routing'), call('state')]);
-  S.state = st;
+  const [r] = await Promise.all([call('routing'), loadState()]);
   const now = r.now, x = r.stats;
   const paused = (id) => !!(r.breakers[id] && r.breakers[id].state === 'open');
   const nPaused = r.providers.filter((p) => paused(p.id)).length;

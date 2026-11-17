@@ -307,7 +307,10 @@ export function keepPage(sheet, key) {
 try { S.cache.html = JSON.parse(localStorage.getItem('hm.pages') || '{}') || {}; } catch { S.cache.html = {}; }
 
 export async function loadState() {
-  S.state = await call('state');
+  const st = await call('state');
+  // the backend hands the first-run report to one answer only: it stays on the state for the pages that show it
+  st.first_run ||= S.state && S.state.first_run;
+  S.state = st;
   applyTheme(S.state);
   const n = S.state.profiles.length;
   document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;

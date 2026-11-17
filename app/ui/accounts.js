@@ -191,7 +191,8 @@ view('accounts', async (sheet) => {
   }
   const now = st.now, pcs = S.cache.computers, used = showUsed();
   const accts = accountViews(st, x, now, pcs);
-  if (st.first_run && (st.first_run.main_profiles.length || st.first_run.accounts.length)) toast(`Found ${st.first_run.main_profiles.length} installed tools and imported ${st.first_run.accounts.length} accounts from your PowerShell launcher.`);
+  // said once, then marked as told (not removed: the first-run dialog in computers.js reads the same report)
+  if (st.first_run && !st.first_run.told && (st.first_run.main_profiles.length || st.first_run.accounts.length)) { st.first_run.told = true; toast(`Found ${st.first_run.main_profiles.length} installed tools and imported ${st.first_run.accounts.length} accounts from your PowerShell launcher.`); }
   const { best, text, extra } = findings(accts, now);
   const q = (document.getElementById('find').value || '').toLowerCase();
   const shown = accts.filter((a) => !q || a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q));
@@ -488,6 +489,7 @@ async function startLogin(name) {
       const now = st && st.profiles.find((x) => x.name === name);
       if (!now || JSON.stringify(now.identity) === before || !now.identity.logged_in) return;
       clearInterval(timer);
+      st.first_run ||= S.state.first_run; // this read is not the loader's: the first-run report stays
       S.state = st;
       const dlg = document.querySelector('.modal-card');
       if (dlg) dlg.innerHTML = body(`Signed in${now.identity.email ? ' as ' + esc(now.identity.email) : ''}.`, true);
