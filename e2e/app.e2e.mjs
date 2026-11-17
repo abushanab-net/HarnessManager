@@ -1055,6 +1055,28 @@ try {
     } finally { await exec('window.__TAURI__.core = window.__core'); }
   });
 
+  await test('add account: nothing in the dialog is under 12 px, and every control is at least 28 px tall', async () => {
+    await nav('#accounts');
+    await click('[data-testid=add-account]');
+    for (const kind of ['subscription', 'api_key', 'routed']) {
+      await click(`[data-testid=kind-${kind}]`);
+      await $(`[data-testid=kind-${kind}].active`);
+      const d = await exec(`const card = document.querySelector('.modal-card'), small = [], low = []; let read = 0;
+        for (const el of card.querySelectorAll('*')) {
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || el.matches('input, select')) { read++; const fs = parseFloat(getComputedStyle(el).fontSize); if (fs < 12) small.push(fs + 'px ' + el.className + ' ' + el.textContent.trim().slice(0, 24)); }
+          if (el.matches('button, input, select') && r.height < 28) low.push(Math.round(r.height) + 'px ' + (el.dataset.testid || el.className || el.id));
+        }
+        return { small, low, read, title: getComputedStyle(card.querySelector('.modal-head h2')).fontSize, field: getComputedStyle(card.querySelector('#ad-name')).fontSize };`);
+      assert.ok(d.read > 20, kind + ': the dialog was measured');
+      assert.deepEqual(d.small, [], kind + ': text under 12 px');
+      assert.deepEqual(d.low, [], kind + ': controls under 28 px');
+      assert.deepEqual([d.title, d.field], ['15px', '13px'], kind + ': on the type scale (its title 15, what is typed 13)');
+    }
+    await click('.dlg .dh [data-act=dialog-close]');
+  });
+
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
     const claudeMcp = () => JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
     await nav('#mcp');

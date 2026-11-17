@@ -90,3 +90,7 @@ html[data-theme="dark"] :is(.a-filters, .tool-group-header, .page-head .title, .
 .a-unread .panel-title { flex: none; }
 .account-columns.solo .facts-grid { grid-template-columns: 110px minmax(0, 1fr) 110px minmax(0, 1fr); }
 .account-chart .stack-lbl { white-space: nowrap; }
+
+/* ---- Add account: the dialog as it is, on the type scale (13 px for what is read and typed, 12 px for labels and notes) ---- */
+.modal-card[aria-label="Add account"] .modal-head h2 { font-size: var(--fs-section); }
+.modal-card[aria-label="Add account"] :is(.tool-pick-name, .kind-pick-card b, .form-field input, .form-field select, .btn-primary, .btn-secondary) { font-size: var(--fs-body); }
