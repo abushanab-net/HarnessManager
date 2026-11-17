@@ -93,7 +93,7 @@ Press `Ctrl K` to find an account, session or setting. The **?** button replays 
 - **Apps:** every copy of each tool on this computer and how it was installed (the vendor's installer, npm,
   winget, Homebrew, Scoop or Chocolatey), its version and the newest one from its vendor, and install, update
   or remove a duplicate copy in a terminal you can watch.
-- **API keys and a local router:** API-key accounts keep their key in Windows Credential Manager, and only
+- **API keys and a local router:** API-key accounts keep their key in the operating system's credential store, and only
   the launched process receives it. A local router on 127.0.0.1 sends routed accounts to providers, moves to
   the next one when a provider fails, and converts between the Anthropic Messages and OpenAI Chat Completions
   formats. Subscription logins never pass through it. DeepSeek is a built-in preset (`hrm provider` shows
@@ -225,10 +225,15 @@ hrm help <command>
 **Where are my logins and keys?** Logins stay where each tool saved them, in that account's folder.
 Harness Manager never refreshes a subscription login or sends it anywhere. Antigravity is the one exception to
 "never copies": it has a single login for the whole computer, so a copy per account is kept in the credential
-store and put in place when that account starts. API keys, and the env and header values of your MCP servers,
-are in Windows Credential Manager, never in the account list, command-line arguments, logs or backups. On macOS
-and Linux there is no credential store yet: API-key accounts cannot be saved there, and MCP values stay in the
-account list file.
+store and put in place when that account starts. That swap works on Windows only; on macOS and Linux
+Antigravity runs as its one account. API keys, and the env and header values of your MCP servers, are in the
+operating system's credential store: Windows Credential Manager, the Keychain on macOS, the Secret Service on
+Linux (GNOME Keyring, KWallet). They are never in the account list, command-line arguments, logs or backups.
+
+What happens on a computer with no such store, for example a Linux server without a desktop session? There
+the same secrets go into one file, `secrets.json` in the data folder, which only your user can read. The file
+is not encrypted, so it is as safe as your account on that computer. `hrm secrets check` tells you which of
+the two a computer uses.
 
 **What does it store?** `%APPDATA%\HarnessManager` holds `profiles.json` (the account list),
 `settings.json`, `hm.db` (usage and sessions), `backups\` and `logs\`. In Settings you can point the account
