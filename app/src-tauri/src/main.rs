@@ -727,14 +727,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "settings_set" => {
-            let key = s(a, "key")?;
-            let mut v = serde_json::to_value(&ctx.settings)?;
-            if v.get(&key).is_none() { bail!("no setting named {key}"); }
-            v[&key] = a["value"].clone();
-            let settings = serde_json::from_value(v).context("that value does not fit the setting")?;
-            let mut fresh = Ctx::open_at(&ctx.data, &ctx.home)?;
-            fresh.settings = settings;
-            fresh.save_settings()?;
+            let fresh = service::settings_set(ctx, &s(a, "key")?, a["value"].clone())?;
             *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(fresh);
             *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
             json!(true)

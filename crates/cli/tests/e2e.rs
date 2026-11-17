@@ -700,6 +700,28 @@ fn settings_can_be_read_and_changed() {
 }
 
 #[test]
+fn settings_take_switches_and_lists_and_refuse_what_does_not_fit() {
+    let e = Env::new();
+    e.ok(&["settings", "close_to_tray", "false"]);
+    assert_eq!(e.ok(&["settings", "close_to_tray"]).trim(), "false");
+    e.ok(&["settings", "hidden_tools", r#"["codex", "agy"]"#]);
+    assert_eq!(serde_json::from_str::<Value>(&e.ok(&["settings", "hidden_tools"])).unwrap(), json!(["codex", "agy"]));
+    // a text setting keeps the words as typed, digits too
+    e.ok(&["settings", "device_name", "42"]);
+    assert_eq!(e.ok(&["settings", "device_name"]).trim(), "\"42\"");
+    // what the sync's own checks guard is changed through them only
+    for k in ["device_id", "incarnation", "sync_mode", "sync_folder", "hub_url", "direct_connection"] {
+        assert!(e.fail(&["settings", k, "hub"]).contains("hrm computers set"), "{k}");
+    }
+    // the wrong type is reported, and nothing of the above was saved
+    assert!(e.fail(&["settings", "close_to_tray", "maybe"]).contains("does not fit close_to_tray"));
+    assert!(e.fail(&["settings", "router_port", "70000"]).contains("does not fit router_port"));
+    assert!(e.fail(&["settings", "no_such", "1"]).contains("no setting named no_such"));
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(e.data.join("settings.json")).unwrap()).unwrap();
+    assert_eq!((&saved["close_to_tray"], &saved["router_port"], &saved["sync_mode"], &saved["hub_url"]), (&json!(false), &json!(15731), &json!("off"), &json!("")));
+}
+
+#[test]
 fn routed_profile_starts_the_router_and_gets_its_address_and_token() {
     let mut e = Env::new();
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();

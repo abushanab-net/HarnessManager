@@ -1015,6 +1015,22 @@ fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T { f() }
 
 pub fn registry_snapshot(ctx: &Ctx) -> Result<Registry> { ctx.registry() }
 
+/// One setting changed and saved, for `hrm settings` and the window; the context comes back with it. The keys the
+/// sync's own checks guard are refused, and a value of the wrong type is reported, never saved.
+pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ctx> {
+    // direct_connection too: like the mode it turns the journal on, which `computers set` follows with a fresh backfill
+    if matches!(key, "device_id" | "incarnation" | "sync_mode" | "sync_folder" | "hub_url" | "direct_connection") {
+        bail!("{key} is not changed here: the mode, the folder and the direct connection go through `hrm computers set`, a hub through `hrm hub join`, and this computer's ids are made once");
+    }
+    let mut fresh = Ctx::open_at(&ctx.data, &ctx.home)?;
+    let mut v = serde_json::to_value(&fresh.settings)?;
+    if v.get(key).is_none() { bail!("no setting named {key}"); }
+    v[key] = value;
+    fresh.settings = serde_json::from_value(v).with_context(|| format!("that value does not fit {key}"))?;
+    fresh.save_settings()?;
+    Ok(fresh)
+}
+
 // ---------- home: totals, heatmap, request log ----------
 
 #[derive(Debug, Clone, Serialize)]
