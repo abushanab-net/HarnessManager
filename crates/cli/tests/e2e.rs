@@ -458,7 +458,12 @@ fn mcp_servers_are_written_per_tool_and_only_ours_are_removed() {
 
     let claude: Value = serde_json::from_str(&std::fs::read_to_string(e.home.join(".claude.json")).unwrap()).unwrap();
     assert_eq!(claude["mcpServers"]["docs"]["type"], "http");
+    assert_eq!(claude["mcpServers"]["docs"]["headers"]["Authorization"], "Bearer t");
     assert_eq!(claude["mcpServers"]["fs"]["command"], "different");
+    // a header's value is in the credential store: the account list keeps its key only, and `mcp list` shows it as before
+    let list = std::fs::read_to_string(e.data.join("profiles.json")).unwrap();
+    assert!(!list.contains("Bearer t") && list.contains("Authorization"), "{list}");
+    assert_eq!(e.json(&["mcp", "list"])["servers"][1]["headers"]["Authorization"], "Bearer t");
     let codex = std::fs::read_to_string(e.home.join(".codex").join("config.toml")).unwrap();
     assert!(codex.contains("[mcp_servers.fs]") && codex.contains("command = \"npx\"") && codex.contains("http_headers"));
     assert!(codex.contains("model = \"gpt-6\"") && codex.contains("[mcp_servers.handmade]"), "the rest of config.toml is kept");
@@ -479,6 +484,22 @@ fn mcp_servers_are_written_per_tool_and_only_ours_are_removed() {
     e.ok(&["mcp", "import", "codex"]);
     let l = e.json(&["mcp", "list"]);
     assert!(l["servers"].as_array().unwrap().iter().any(|s| s["name"] == "handmade"));
+}
+
+#[test]
+fn mcp_values_an_older_version_left_in_the_list_move_to_the_credential_store_at_the_next_command() {
+    let e = Env::new();
+    std::fs::create_dir_all(e.home.join(".claude")).unwrap();
+    e.ok(&["list"]);
+    // as 1.9.14 saved it: the values in the file
+    let path = e.data.join("profiles.json");
+    let mut reg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    reg["mcp"] = json!([{"name": "github", "transport": "stdio", "command": "npx", "env": {"GITHUB_TOKEN": "ghp_old"}}]);
+    write(&path, &reg.to_string());
+    e.ok(&["list"]);
+    let list = std::fs::read_to_string(&path).unwrap();
+    assert!(!list.contains("ghp_old") && list.contains("GITHUB_TOKEN"), "{list}");
+    assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "ghp_old");
 }
 
 #[test]

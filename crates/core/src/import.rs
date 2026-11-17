@@ -74,6 +74,8 @@ pub fn import_powershell(_ctx: &Ctx, reg: &mut Registry, path: &Path, rep: &mut 
 
 /// Run once when the registry is empty: main profiles plus the PowerShell launcher's accounts if found.
 pub fn first_run(ctx: &Ctx) -> Result<Option<ImportReport>> {
+    // the app and the command line first open the list here, under its lock: env and header values an older version left in it move to the credential store
+    if let Err(e) = Registry::move_mcp_values(&ctx.registry_path()) { crate::log::warn(&format!("moving the MCP servers' values to the credential store: {e:#}")); }
     let mut reg = ctx.registry()?;
     if !reg.profiles.is_empty() { return Ok(None); }
     let mut rep = ImportReport::default();

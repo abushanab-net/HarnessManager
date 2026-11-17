@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::secrets;
 use crate::util::{now_ms, valid_name, write_atomic};
 
 /// How a profile pays for its harness.
@@ -120,6 +121,23 @@ pub struct McpServer {
     pub homepage: Option<String>,
 }
 
+impl McpServer {
+    /// Each env and header value with the credential it is kept in.
+    fn values(&mut self) -> impl Iterator<Item = (String, &mut String)> {
+        let McpServer { name, env, headers, .. } = self;
+        let name: &str = name;
+        env.iter_mut().map(move |(k, v)| (secrets::mcp_target(name, "env", k), v))
+            .chain(headers.iter_mut().map(move |(k, v)| (secrets::mcp_target(name, "header", k), v)))
+    }
+
+    /// An empty value is one not set on this computer (the list may be shared with another): it takes the one `from` has.
+    pub fn fill_unset(&mut self, from: &McpServer) {
+        for (map, src) in [(&mut self.env, &from.env), (&mut self.headers, &from.headers)] {
+            for (k, v) in map.iter_mut().filter(|(_, v)| v.is_empty()) { if let Some(x) = src.get(k) { v.clone_from(x); } }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub name: String,
@@ -198,7 +216,18 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// The list with each MCP env and header value: an empty one in the file is filled from the credential store. One
+    /// still in the file (an older version wrote it, or the store refused it) is used as it is.
     pub fn load(path: &Path) -> Result<Registry> {
+        let mut reg = Self::read(path)?;
+        for (t, v) in reg.mcp.iter_mut().flat_map(McpServer::values).filter(|(_, v)| v.is_empty()) {
+            if let Some(x) = secrets::get_key(&t) { *v = x; }
+        }
+        Ok(reg)
+    }
+
+    /// The file as it is.
+    fn read(path: &Path) -> Result<Registry> {
         // a file that exists but cannot be read is an error: treating it as empty would save an empty list over it
         let s = crate::util::read_or_empty(path)?;
         if s.trim().is_empty() { return Ok(Registry { version: 1, ..Default::default() }); }
@@ -212,8 +241,53 @@ impl Registry {
         Ok(reg)
     }
 
-    pub fn save(&self, path: &Path) -> Result<()> {
-        write_atomic(path, serde_json::to_string_pretty(self)?.as_bytes())
+    /// Each MCP env and header value goes to the credential store, and the file keeps its key with an empty value.
+    pub fn save(&self, path: &Path) -> Result<()> { self.write(path, true) }
+
+    /// `save` for a list put back from a backup: no credential is deleted, so putting the newer list back finds its values.
+    pub fn save_restored(&self, path: &Path) -> Result<()> { self.write(path, false) }
+
+    fn write(&self, path: &Path, forget: bool) -> Result<()> {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        let mut file = self.clone();
+        let mut live = std::collections::BTreeSet::new();
+        for (t, v) in file.mcp.iter_mut().flat_map(McpServer::values) {
+            // of two values whose names give one credential (Windows ignores letter case there), the first takes it
+            if !live.insert(t.to_lowercase()) || v.is_empty() || secrets::get_key(&t).as_deref() == Some(v.as_str()) { continue; }
+            // replaced, not written over: under a name spelled with other letter case Windows keeps a second entry, which the old one hides
+            let _ = secrets::delete(&t);
+            // too large for a credential, or no store on this platform: the value is kept, in the file
+            if let Err(e) = secrets::write(&t, "hrm", v.as_bytes()) {
+                WARNED.call_once(|| crate::log::warn(&format!("an MCP server's value stays in {}: {e:#}", path.display())));
+            }
+        }
+        // only a value that reads back leaves the file, so none is lost: not one the store refused, not the second of two that share a credential
+        for (t, v) in file.mcp.iter_mut().flat_map(McpServer::values) {
+            if !v.is_empty() && secrets::get_key(&t).as_deref() == Some(v.as_str()) { v.clear(); }
+        }
+        let text = serde_json::to_string_pretty(&file)?;
+        let old = crate::util::read_or_empty(path).unwrap_or_default();
+        if old != text { write_atomic(path, text.as_bytes())?; }
+        // a server or key this save removed: its credentials go (a renamed server's are under its new name by now)
+        // shortcut: another computer that shares the list keeps its own credentials of a server removed here; list and delete them there if that matters
+        if let (true, Ok(mut was)) = (forget, serde_json::from_str::<Registry>(&old)) {
+            for (t, _) in was.mcp.iter_mut().flat_map(McpServer::values).filter(|(t, _)| !live.contains(&t.to_lowercase())) { let _ = secrets::delete(&t); }
+        }
+        Ok(())
+    }
+
+    /// Values an older version left in the file move to the credential store: a load and a save, only when the file holds one.
+    // shortcut: only Windows has a store so far (see secrets), so elsewhere a start moves nothing and warns of nothing; drop the test with the Keychain build
+    pub fn move_mcp_values(path: &Path) -> Result<()> {
+        if cfg!(windows) && Self::read(path)?.mcp.iter().any(|s| s.env.values().chain(s.headers.values()).any(|v| !v.is_empty())) { Self::load(path)?.save(path)?; }
+        Ok(())
+    }
+
+    /// The list as a backup carries it: no env or header value, on any platform.
+    pub fn without_mcp_values(&self) -> Registry {
+        let mut r = self.clone();
+        for (_, v) in r.mcp.iter_mut().flat_map(McpServer::values) { v.clear(); }
+        r
     }
 
     pub fn profile(&self, name: &str) -> Option<&Profile> { self.profiles.iter().find(|p| p.name == name) }
