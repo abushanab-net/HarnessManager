@@ -252,7 +252,7 @@ pub fn list() -> Vec<AppInfo> {
         let id = h.id();
         let runs = crate::launch::resolve_program(id, h.binary()).ok();
         // tests pin the tool with HRM_BIN_<ID>: then the real folders of this computer are left alone
-        let pinned = std::env::var_os(format!("HRM_BIN_{}", id.to_ascii_uppercase())).is_some();
+        let pinned = crate::testenv::var(&format!("HRM_BIN_{}", id.to_ascii_uppercase())).is_some();
         let mut paths: Vec<PathBuf> = runs.iter().cloned().collect();
         if let (Some(ins), false) = (installer(id), pinned) {
             for d in known_dirs(ins) {
@@ -436,7 +436,7 @@ fn remove_cmd(ins: Option<&Installer>, c: &Copy) -> Result<String> {
 fn open_shell(line: &str) -> Result<()> {
     use std::os::windows::process::CommandExt;
     // tests record the command instead of running npm or an updater
-    if let Ok(log) = std::env::var("HRM_TERMINAL_LOG") {
+    if let Some(log) = crate::testenv::var("HRM_TERMINAL_LOG") {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
         writeln!(f, "{}", serde_json::json!({"shell": line}))?;
@@ -450,7 +450,7 @@ fn open_shell(line: &str) -> Result<()> {
 }
 #[cfg(not(windows))]
 fn open_shell(line: &str) -> Result<()> {
-    if let Ok(log) = std::env::var("HRM_TERMINAL_LOG") {
+    if let Some(log) = crate::testenv::var("HRM_TERMINAL_LOG") {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
         writeln!(f, "{}", serde_json::json!({"shell": line}))?;

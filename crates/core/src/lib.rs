@@ -18,6 +18,7 @@ pub mod secrets;
 pub mod service;
 pub mod shared;
 pub mod sync;
+pub mod testenv;
 pub mod transcripts;
 pub mod util;
 pub mod watch;

@@ -800,7 +800,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
 async fn self_update(app: &tauri::AppHandle, install: bool) -> Result<Value> {
     use tauri_plugin_updater::UpdaterExt;
     let mut b = app.updater_builder();
-    if let Ok(u) = std::env::var("HRM_UPDATE_URL") { b = b.endpoints(vec![u.parse()?])?; }
+    if let Some(u) = hrm_core::testenv::var("HRM_UPDATE_URL") { b = b.endpoints(vec![u.parse()?])?; }
     let current = app.package_info().version.to_string();
     let found = b.build()?.check().await?;
     let seen = json!({"at": hrm_core::util::now_ms(), "current": current, "version": found.as_ref().map(|u| u.version.clone()), "notes": found.as_ref().and_then(|u| u.body.clone())});
@@ -813,10 +813,14 @@ async fn self_update(app: &tauri::AppHandle, install: bool) -> Result<Value> {
     Ok(json!({"current": current, "version": up.version, "notes": up.body}))
 }
 
+/// The port the tests drive the window through (HRM_DEVTOOLS_PORT): a number only, so the value can never carry
+/// browser flags of its own.
+fn devtools_port() -> Option<u16> { hrm_core::testenv::var("HRM_DEVTOOLS_PORT")?.parse().ok() }
+
 /// Look for a new Harness Manager at launch and then every hour; the window offers it, or drops an old offer.
 /// The tests' copy looks only when they give it a release to find.
 fn watch_self_update(app: tauri::AppHandle) {
-    if std::env::var("HRM_DEVTOOLS_PORT").is_ok() && std::env::var("HRM_UPDATE_URL").is_err() { return; }
+    if devtools_port().is_some() && hrm_core::testenv::var("HRM_UPDATE_URL").is_none() { return; }
     std::thread::spawn(move || loop {
         match tauri::async_runtime::block_on(self_update(&app, false)) {
             Ok(v) => { let _ = app.emit("self-update", v); }
@@ -941,7 +945,7 @@ fn main() {
     let mut builder = tauri::Builder::default();
     // one copy runs: opening it again (Start menu, a shortcut) shows the window the tray keeps. The tests' copy
     // skips this, so they can run while the installed app sits in the tray.
-    if std::env::var("HRM_DEVTOOLS_PORT").is_err() {
+    if devtools_port().is_none() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)));
     }
     builder
@@ -1040,7 +1044,7 @@ fn main() {
                 // started at sign-in (--tray): the window waits in the tray
                 .visible(!std::env::args().any(|a| a == "--tray"));
             // end-to-end tests drive the window over the DevTools protocol; only when they ask for it
-            if let Ok(port) = std::env::var("HRM_DEVTOOLS_PORT") {
+            if let Some(port) = devtools_port() {
                 win = win.additional_browser_args(&format!("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"))
                     // its own browser profile: WebView2 cannot start a second, differently configured browser in the
                     // profile an open Harness Manager window is using, and the test would never get its window

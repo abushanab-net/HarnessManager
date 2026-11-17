@@ -50,7 +50,7 @@ impl Claude {
         if i64_at(&creds, &["claudeAiOauth", "expiresAt"]) < now_ms() + 60_000 {
             bail!("Claude Code's login on this computer has expired; it refreshes the next time this account runs");
         }
-        let url = std::env::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|_| "https://api.anthropic.com/api/oauth/usage".into());
+        let url = crate::testenv::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|| "https://api.anthropic.com/api/oauth/usage".into());
         let r = reqwest::blocking::Client::new()
             .get(url)
             .bearer_auth(token)
