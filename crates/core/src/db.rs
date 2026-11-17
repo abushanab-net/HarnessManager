@@ -543,23 +543,6 @@ impl Db {
         })
     }
 
-    /// Rename a tag everywhere; an empty new name deletes it.
-    pub fn tag_rename(&self, from: &str, to: &str) -> Result<()> {
-        self.with(|c| {
-            let tx = c.transaction()?;
-            // the journal carries whole tag lists per key: note which keys change before the old tag is gone
-            let keys: Vec<(String, String)> = if self.journal { tx.prepare("select distinct kind, key from tags where tag=?")?.query_map([from], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()? } else { vec![] };
-            if to.is_empty() { tx.execute("delete from tags where tag=?", [from])?; }
-            else { tx.execute("insert or ignore into tags select kind, key, ?2 from tags where tag=?1", [from, to])?; tx.execute("delete from tags where tag=?", [from])?; }
-            for (kind, key) in keys {
-                let tags: Vec<String> = tx.prepare("select tag from tags where kind=? and key=? order by rowid")?.query_map([&kind, &key], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-                crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?;
-            }
-            tx.commit()?;
-            Ok(())
-        })
-    }
-
     pub fn kv_get(&self, k: &str) -> Result<Option<String>> {
         self.read(|c| Ok(c.query_row("select v from kv where k=?", [k], |r| r.get(0)).optional()?))
     }
