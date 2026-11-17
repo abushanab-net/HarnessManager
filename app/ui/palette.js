@@ -43,7 +43,8 @@ function build() {
   const can = accts.filter((a) => !a.needsLogin && (tools.find((h) => h.id === a.tool) || {}).installed);
   const recs = new Map(tools.map((h) => [recommendedFor(accts, h.id), h]).filter(([a]) => can.includes(a)));
   const withRoot = projects.filter((p) => p.root), recent = [...withRoot].sort((a, b) => (b.last_active_at || 0) - (a.last_active_at || 0))[0];
-  const inProject = (p, top) => act(SIGN.plus, 'New session in ' + p.name, 'starts in its folder', 'project-new', { dir: p.root, name: p.name, profile: '' }, top);
+  const apart = tellApart(projects); // two projects of one name are told apart, as on Sessions and Projects
+  const inProject = (p, top) => act(SIGN.plus, 'New session in ' + p.name, apart.get(p.key).dup ? apart.get(p.key).hint : 'starts in its folder', 'project-new', { dir: p.root, name: p.name, profile: '' }, top);
 
   // ---- Actions: the useful ones first (they are the list with nothing typed)
   for (const [a, h] of recs) act(toolIcon(a.tool, 18), 'Start ' + a.name, 'recommended for ' + h.label, 'start', { name: a.id }, true);
@@ -71,7 +72,6 @@ function build() {
   const live = st.profiles.reduce((n, p) => n + p.running.length, 0) + ((pcs || {}).peers || []).reduce((n, p) => n + (p.running || []).length, 0);
   for (const [id, desc] of PAGES) to(navIcon(document.querySelector(`.nav-item[data-nav=${id}]`) ? id : 'setup'), PAGE[id], id === 'sessions' && live ? `${live} running now` : desc, id, {}, { top: true });
   for (const a of accts) to(toolIcon(a.tool, 18), 'Accounts › ' + a.name, `${label(a.tool)} · Start, limits, sessions`, 'account', { name: a.id }, { name: a.name });
-  const apart = tellApart(projects);
   for (const p of projects) to(navIcon('projects'), 'Projects › ' + p.name, [apart.get(p.key).hint, 'its sessions'].filter(Boolean).join(' · '), 'sessions', { project: p.key }, { name: p.name });
   for (const s of settings) to(navIcon('settings'), 'Settings › ' + s.title, '', 'settings', { tab: s.id }, { name: s.title });
   for (const s of settings) for (const r of s.rows) to(navIcon('settings'), 'Settings › ' + r.label, r.help, 'settings', { tab: s.id }, { name: r.label });
