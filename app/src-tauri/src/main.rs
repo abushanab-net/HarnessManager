@@ -254,13 +254,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         }
         "remove" => { service::remove_profile(ctx, &s(a, "name")?, a["delete_home"] == true)?; json!(true) }
         "update" => { service::update_profile(ctx, &s(a, "name")?, opt(a, "email"), a["base_url"].as_str().map(String::from), a["model"].as_str().map(String::from))?; json!(true) }
-        // the refresh button of one account: its limits from Anthropic now, with the login Claude Code saved
-        "quota_live" => {
-            let reg = ctx.registry()?;
-            let p = reg.get(&s(a, "name")?)?;
-            if p.harness != "claude" || p.kind != hrm_core::registry::Kind::Subscription { bail!("only Claude subscriptions have limits to read live"); }
-            json!(harness::claude::Claude.live_quota(ctx, p)?)
-        }
+        // the refresh button of one account: its limits read now
+        "quota_live" => json!(service::quota_live(ctx, &s(a, "name")?)?),
         "set_cap" => { service::set_daily_cap(ctx, &s(a, "name")?, a["cap"].as_f64())?; json!(true) }
         "set_label" => { service::set_label(ctx, &s(a, "name")?, a["label"].as_str().unwrap_or(""))?; json!(true) }
         "set_key" => { service::set_api_key(ctx, &s(a, "name")?, &s(a, "key")?)?; json!(true) }
@@ -397,8 +392,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
         "computers_set_peer" => hrm_core::sync::peer::set_peer(ctx, &s(a, "id")?, a["address"].as_str(), a["name"].as_str())?,
         // tags: free text on sessions ("session", key profile/id) and projects ("project", the project key)
         "tag_set" => {
-            let tags: Vec<String> = a["tags"].as_array().into_iter().flatten().filter_map(|v| v.as_str()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
-            ctx.db.tag_set(&s(a, "kind")?, &s(a, "key")?, &tags)?;
+            let tags: Vec<String> = a["tags"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+            service::tag_set(ctx, &s(a, "kind")?, &s(a, "key")?, &tags)?;
             json!(true)
         }
         "tag_list" => json!(ctx.db.tag_list()?.into_iter().map(|(t, s, p)| json!({"tag": t, "sessions": s, "projects": p})).collect::<Vec<_>>()),
@@ -429,15 +424,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"mcp": reg.mcp, "skills": reg.skills, "skill_info": info, "unmanaged": unmanaged, "skill_repos": items::skill_repos(&reg), "prompts": reg.prompts, "targets": reg.targets, "skill_store": store,
                    "profiles": reg.profiles.iter().map(|p| json!({"name": p.name, "harness": p.harness})).collect::<Vec<_>>()})
         }
-        "item_remove" => {
-            let mut reg = ctx.registry()?;
-            let (kind, name) = (s(a, "kind")?, s(a, "name")?);
-            items::remove_item(&mut reg, &kind, &name)?;
-            ctx.save_registry(&reg)?;
-            let rep = sync_items(ctx)?;
-            if kind == "skill" { items::delete_skill_files(ctx, &name)?; }
-            rep
-        }
+        "item_remove" => json!(service::item_remove(ctx, &s(a, "kind")?, &s(a, "name")?)?),
         "target" => {
             let mut reg = ctx.registry()?;
             items::set_target(&mut reg, &s(a, "kind")?, &s(a, "item")?, &s(a, "harness")?, opt(a, "profile").as_deref(), a["on"] == true)?;
@@ -631,15 +618,7 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!({"path": f, "body": std::fs::read_to_string(&f).unwrap_or_default()})
         }
         "sync" => {
-            let mut relinked = vec![];
-            if a["relink"] == true {
-                let reg = ctx.registry()?;
-                let c = harness::claude::Claude;
-                for p in reg.profiles.iter().filter(|p| p.harness == "claude" && !p.main) {
-                    let done = hrm_core::shared::relink_copies(&harness::Harness::default_home(&c, ctx), &harness::Harness::home(&c, ctx, p))?;
-                    if !done.is_empty() { relinked.push(format!("{}: {}", p.name, done.join(", "))); }
-                }
-            }
+            let relinked = if a["relink"] == true { service::relink(ctx)? } else { vec![] };
             json!({"items": sync_items(ctx)?, "relinked": relinked})
         }
 
@@ -654,49 +633,19 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
                    "routed_profiles": reg.profiles.iter().filter(|p| p.kind == Kind::Routed).map(|p| json!({"name": p.name, "route": p.route})).collect::<Vec<_>>()})
         }
         "provider_add" => {
-            let id = s(a, "id")?;
-            if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id: use letters, digits, - and _"); }
-            let format = s(a, "format")?;
-            if !matches!(format.as_str(), "anthropic" | "openai") { bail!("format must be anthropic or openai"); }
-            let base_url = s(a, "base_url")?;
-            if !base_url.starts_with("http") { bail!("the base URL must start with http:// or https://"); }
-            let mut reg = ctx.registry()?;
-            let models: Vec<String> = a["models"].as_str().unwrap_or("").split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
-            if let Some(k) = opt(a, "key") { hrm_core::secrets::set_key(&hrm_core::secrets::provider_target(&id), k.trim())?; }
-            else if hrm_core::secrets::get_key(&hrm_core::secrets::provider_target(&id)).is_none() { bail!("enter the provider's key"); }
-            reg.providers.retain(|p| p.id != id);
-            reg.providers.push(Provider { name: opt(a, "name").unwrap_or_else(|| id.clone()), id, base_url, format, models });
-            ctx.save_registry(&reg)?;
+            let (id, format, base_url) = (s(a, "id")?, s(a, "format")?, s(a, "base_url")?);
+            let models: Vec<String> = a["models"].as_str().unwrap_or("").split(',').map(String::from).collect();
+            service::provider_add(ctx, Provider { name: opt(a, "name").unwrap_or_else(|| id.clone()), id, base_url, format, models }, a["key"].as_str())?;
             json!(true)
         }
-        "provider_remove" => {
-            let id = s(a, "id")?;
-            let mut reg = ctx.registry()?;
-            reg.remove_provider(&id)?;
-            hrm_core::secrets::delete(&hrm_core::secrets::provider_target(&id))?;
-            ctx.save_registry(&reg)?;
-            json!(true)
-        }
+        "provider_remove" => { service::provider_remove(ctx, &s(a, "id")?)?; json!(true) }
         "route_add" => {
-            let id = s(a, "id")?;
-            if !hrm_core::util::valid_name(&id) { bail!("'{id}' is not a valid id"); }
-            let mode = s(a, "mode")?;
+            let (id, mode) = (s(a, "id")?, s(a, "mode")?);
             let providers: Vec<String> = a["providers"].as_array().map(|x| x.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
-            let mut reg = ctx.registry()?;
-            if providers.is_empty() { bail!("choose at least one provider"); }
-            for p in &providers { if !reg.providers.iter().any(|x| &x.id == p) { bail!("no provider named '{p}'"); } }
-            reg.routes.retain(|r| r.id != id);
-            reg.routes.push(Route { id, mode, providers, default_provider: opt(a, "default") });
-            ctx.save_registry(&reg)?;
+            service::route_add(ctx, Route { id, mode, providers, default_provider: opt(a, "default") })?;
             json!(true)
         }
-        "route_remove" => {
-            let id = s(a, "id")?;
-            let mut reg = ctx.registry()?;
-            reg.remove_route(&id)?;
-            ctx.save_registry(&reg)?;
-            json!(true)
-        }
+        "route_remove" => { service::route_remove(ctx, &s(a, "id")?)?; json!(true) }
         "router_start" => { service::router_token(ctx)?; service::ensure_router(ctx)?; json!(true) }
         "router_stop" => { service::router_stop(ctx)?; json!(true) }
 
@@ -735,22 +684,8 @@ fn dispatch(state: &AppState, op: &str, a: &Value) -> Result<Value> {
             json!(true)
         }
         "live_quota_set" => { ctx.db.kv_set("live_quota", if a["on"] == true { "1" } else { "0" })?; json!(true) }
-        "import_ps" => {
-            let mut reg = ctx.registry()?;
-            let mut rep = hrm_core::import::ImportReport::default();
-            let path = opt(a, "path").map(PathBuf::from).unwrap_or_else(|| hrm_core::import::default_ps_registry(ctx));
-            hrm_core::import::import_powershell(&mut reg, &path, &mut rep)?;
-            ctx.save_registry(&reg)?;
-            for p in &reg.profiles { let _ = harness::of(p).prepare(ctx, p); }
-            json!(rep)
-        }
-        "detect" => {
-            let mut reg = ctx.registry()?;
-            let mut rep = hrm_core::import::ImportReport::default();
-            hrm_core::import::detect_main_profiles(ctx, &mut reg, &mut rep);
-            ctx.save_registry(&reg)?;
-            json!(rep)
-        }
+        "import_ps" => json!(service::import_powershell(ctx, opt(a, "path").map(PathBuf::from))?),
+        "detect" => json!(service::detect(ctx)?),
         // resume here (phase 3): a session from another computer as a fork in this computer's clone
         "session_resume_here" => hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?, opt(a, "cwd").map(PathBuf::from).as_deref())?,
         "transcripts_status" => hrm_core::transcripts::status(ctx)?,
