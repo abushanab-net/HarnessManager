@@ -508,7 +508,10 @@ try {
     // every account with plan limits has a ring in the tray popup, read or not: what the tray's window draws
     const tray = await exec("return Promise.all([import('./accounts.js'), import('./core.js')]).then(([a, c]) => a.trayHtml(a.accountViews(c.S.state, {}, Date.now(), null)));");
     assert.ok(tray.includes('nav-limit-claude-main') && tray.includes('nav-limit-codex-main'), 'a ring for each account');
-    await hasText('[data-testid=row-codex-main]', '79% left');
+    // the week: its number in the ring and over its bar; the bar's title says the whole of it
+    await hasText('[data-testid=row-codex-main] .a-ring', '79%');
+    await hasText('[data-testid=row-codex-main] .lims', 'Wk');
+    assert.ok((await exec("return document.querySelector('[data-testid=row-codex-main] .lim').title")).startsWith('Week: 79% left (21% used), resets '), 'the week bar says what is left, what is used and when it resets');
     await shot('01-accounts');
   });
 
@@ -527,10 +530,11 @@ try {
     await shot('03-signed-in');
     await click('[data-testid=login-done]');
     await hasText('[data-testid=row-work-max]', 'Max 20x');
-    await hasText('[data-testid=row-work-max]', '36% left');
+    await waitFor(async () => (await exec("return [...document.querySelectorAll('[data-testid=row-work-max] .lim')].map((l) => l.title).join(' | ')")).includes('36% left'), 'the limits read after the sign-in');
     assert.ok(fs.existsSync(path.join(home, '.claude-work-max', '.credentials.json')));
     assert.ok(fs.existsSync(path.join(home, '.claude-work-max', 'skills', 'pdf', 'SKILL.md')), 'skills linked from the main profile');
-    await hasText('[data-testid=best-note]', 'Most room of any account');
+    // the account with the most room says so on its limits
+    assert.ok((await exec("return document.querySelector('[data-testid=best-note]').title")).includes('Most room of any account'), 'the advice is on the limits of the account to start next');
     await shot('04-accounts-with-limits');
     // the README's screenshot: the same page with a made-up computer name and the fixture's year-2099 resets as real ones
     await exec(`const swap = [[new RegExp(arguments[0], 'gi'), 'DEVBOX']];
@@ -869,11 +873,14 @@ try {
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
     const d = await exec(`return {
-        groups: [...document.querySelectorAll('[data-testid=accounts-table] .tool-group-header .panel-title')].map((t) => t.textContent),
-        chips: [...document.querySelectorAll('.horizon-filterbar .filter-chip')].map((a) => a.textContent.trim().replace(/ \\(\\d+\\)$/, '')),
+        groups: [...document.querySelectorAll('[data-testid=accounts-table] .tool-group-header h2')].map((t) => t.textContent),
+        chips: [...document.querySelectorAll('.a-filters [data-act=acct-tool]')].map((a) => a.textContent.trim().replace(/ \\d+$/, '')),
+        icons: [...document.querySelectorAll('.a-filters [data-act=acct-tool] img.ticon, .tool-group-header img.ticon')].map((i) => i.getAttribute('src')),
       };`);
     assert.deepEqual(d.groups, ['Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'accounts grouped by tool, one card each');
-    assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool');
+    assert.deepEqual(d.chips, ['All', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Pi', 'Oh My Pi'], 'a chip for each tool, with its count');
+    const svgs = ['claude', 'codex', 'opencode', 'agy', 'pi', 'omp'].map((t) => `icons/${t}.svg`);
+    assert.deepEqual(d.icons, [...svgs, ...svgs], 'the official icon of each tool, on its chip and on its group');
     // a tool chip shows only that tool; a group header folds its accounts away
     await click('[data-testid=chip-codex]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .tool-group-card').length")) === 1, 'only Codex');
@@ -901,7 +908,7 @@ try {
   await test('every page has the sections of its design page, in order', async () => {
     const want = {
       '#home': ['Overview', 'Use next', 'Needs attention', 'Running now', 'Accounts runway', 'Activity, 53 weeks', 'Latest replies'],
-      '#accounts': ['Accounts', 'Tokens per day, by account', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity'],
+      '#accounts': ['Accounts', 'Claude Code', 'Codex', 'OpenCode', 'Antigravity', 'Tokens per day, by account'],
       '#account?name=claude-main': ['claude-main', 'Limits', 'Login and folder', 'Tokens per day · 30 days', 'By model · 30 days', 'Recent sessions'],
       '#projects': ['Projects', 'Where the tokens and the cost went'],
       '#sessions': ['Sessions', 'platform-gitops'],
@@ -944,16 +951,37 @@ try {
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
     await nav('#accounts');
-    await click('[data-testid=usage-panel] [data-act=acct-fold]');
+    // the two charts are one panel under the groups, folded until asked for
+    const fold = '[data-testid=usage-panel] [data-act=acct-fold]';
+    const open = async () => (await exec('return document.querySelector(arguments[0]).getAttribute("aria-expanded")', [fold])) === 'true';
+    await $(fold);
+    if (await open()) await click(fold); // (left open by an earlier run of this window)
+    await waitFor(async () => !(await open()) && !(await exec("return !!document.querySelector('[data-testid=usage-ledger], [data-testid=models-panel]')")), 'the charts folded');
+    assert.ok(await exec("const p = document.querySelector('[data-testid=usage-panel]').getBoundingClientRect(), g = document.querySelector('[data-testid=accounts-table]').getBoundingClientRect(); return p.top >= g.bottom"), 'under the groups');
+    await click(fold);
     await $('[data-testid=usage-panel] [data-testid=usage-ledger]');
-    // the Claude session priced from the catalogue; Codex's gpt-6 too
-    await waitFor(async () => /\$\d+\.\d\d/.test(await text('[data-testid=cost-claude-main]')), 'a cost on the Claude row');
+    await hasText('[data-testid=usage-panel] [data-testid=models-panel]', 'claude-opus-5-5');
+    // open is remembered: on another page and back, the charts are still there
+    await nav('#home');
+    await nav('#accounts');
+    await $('[data-testid=usage-panel] [data-testid=usage-ledger]');
+    // the Claude session priced from the catalogue (an estimate, so it carries ≈); Codex's gpt-6 too
+    await waitFor(async () => /≈ \$\d+\.\d\d/.test(await text('[data-testid=cost-claude-main]')), 'a cost on the Claude row');
     await hasText('[data-testid=group-codex] .tool-group-header', 'tokens');
     await click('[data-testid=u-days-30]');
-    await hasText('[data-testid=row-claude-main]', '30-day pace');
+    await hasText('[data-testid=row-claude-main] .spark', '30 days');
+    await hasText('[data-testid=group-codex] .tool-group-header', 'in 30 days');
     await click('[data-testid=u-days-7]');
-    await hasText('[data-testid=row-claude-main]', '7-day pace');
+    await hasText('[data-testid=row-claude-main] .spark', '7 days');
+    await exec("document.querySelector('[data-testid=usage-panel]').scrollIntoView({ block: 'end' })");
     await shot('09-usage');
+    // folded again, and that is remembered too
+    await click(fold);
+    await waitFor(async () => !(await open()), 'folded again');
+    await nav('#home');
+    await nav('#accounts');
+    await $(fold);
+    assert.ok(!(await open()), 'the fold is remembered');
     // the old page's address opens Accounts
     await nav('#usage');
     await waitFor(() => exec("return location.hash === '#accounts'"), 'redirected to Accounts');
@@ -991,6 +1019,274 @@ try {
     await hasText('[data-testid=row-capped]', '$5.00 daily cap');
     await shot('10b-accounts-cap');
     hrm('remove', 'capped');
+  });
+
+  // ---------- Accounts and the page of one account, as the 1.10 drawing (docs/project-review-2026-11/mockups/a-accounts.html) ----------
+  /** While fn runs, the state the window reads is changed first by `change` (a function body over `st`, run in the window). */
+  const withState = async (change, fn) => {
+    await exec(`const t = window.__TAURI__, change = new Function('st', arguments[0]); window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => { if (a && a.op === 'state') change(r); return r; }) };`, [change]);
+    try { await fn(); } finally { await exec('window.__TAURI__.core = window.__core'); }
+  };
+  /** Open Accounts again from another page, so it is drawn from a fresh read. */
+  const reopenAccounts = async () => { await nav('#home'); await nav('#accounts'); await drawn('accounts'); await $('[data-testid=accounts-table] .acct-row'); };
+  /** What the rows measure: each one's height, the lines of every piece of text in it, and whether a column runs into the next. */
+  const rowFacts = () => exec(`const z = document.documentElement.currentCSSZoom || 1, out = { heights: [], wrapped: [], overlap: [] };
+    for (const row of document.querySelectorAll('.acct-row')) {
+      const box = row.getBoundingClientRect(), kids = [...row.children];
+      out.heights.push(Math.round(box.height / z));
+      for (const el of row.querySelectorAll('*')) {
+        if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+        const r = document.createRange(); r.selectNodeContents(el);
+        if (new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size > 1) out.wrapped.push(row.dataset.name + ': ' + el.textContent.trim());
+      }
+      kids.forEach((k, i) => { const r = k.getBoundingClientRect(), next = kids[i + 1] ? kids[i + 1].getBoundingClientRect().left : box.right; if (r.right > next + 0.5 || k.scrollHeight > box.height) out.overlap.push(row.dataset.name + ': column ' + (i + 1)); });
+    }
+    return out;`);
+
+  await test('accounts: every row is 56 px with nothing wrapped; at most three limits in one line, a long name cut with its whole name in the title, the rest behind +N', async () => {
+    await reopenAccounts();
+    const d = await rowFacts();
+    assert.ok(d.heights.length >= 6, 'the rows were measured: ' + d.heights.length);
+    assert.deepEqual([...new Set(d.heights)], [56], 'every row is 56 px');
+    assert.deepEqual(d.wrapped, [], 'no text in a row wraps');
+    assert.deepEqual(d.overlap, [], 'no column runs into the next');
+    // an account with five windows, one of them with a long name, and one logged in whose login has expired
+    const soon = Date.now() + 3 * 3600e3;
+    await withState(`const p = st.profiles.find((x) => x.name === 'work-max'), t = (id, label, used) => ({ id, label, used, resets_at: ${soon} });
+      p.quota = { fetched_at: Date.now(), tiers: [t('session', '5-hour session', 36), t('week', 'Week', 59), t('week:claude and gpt models', 'Week · Claude and GPT models', 65), t('week:sonnet', 'Week · Sonnet', 100), t('week:opus', 'Week · Opus', 12)] };
+      p.identity.plan = 'Enterprise premium seat with a very long plan name';`, async () => {
+      await reopenAccounts();
+      const row = '[data-testid=row-work-max]';
+      const w = await exec(`const row = document.querySelector(arguments[0]), lims = [...row.querySelectorAll('.lim')], cut = (e) => e.scrollWidth > e.clientWidth, plan = row.querySelector('.pill.plan');
+        return { labels: lims.map((l) => l.querySelector('.t span').textContent), cut: lims.map((l) => cut(l.querySelector('.t span'))), titles: lims.map((l) => l.title.split(',')[0]),
+          more: row.querySelector('.lim-more').textContent, moreTitle: row.querySelector('.lim-more').title, plan: [cut(plan), plan.title],
+          fits: row.querySelector('.lims').getBoundingClientRect().right <= row.querySelector('.spark').getBoundingClientRect().left };`, [row]);
+      assert.deepEqual(w.labels, ['5h', 'Wk', 'Claude and GPT models'], 'three limits, by their short names');
+      assert.deepEqual(w.cut, [false, false, true], 'the long name is cut with an ellipsis');
+      assert.deepEqual(w.titles, ['5-hour session: 64% left (36% used)', 'Week: 41% left (59% used)', 'Week · Claude and GPT models: 35% left (65% used)'], 'each bar says the whole of it in its title');
+      assert.equal(w.more, '+2', 'the other two go behind +2');
+      assert.ok(w.moreTitle.includes('Week · Sonnet: 0% left (100% used)') && w.moreTitle.includes('Week · Opus: 88% left'), 'and are named in its title: ' + w.moreTitle);
+      assert.deepEqual(w.plan, [true, 'Enterprise premium seat with a very long plan name'], 'a long plan name is cut too, whole in its title');
+      assert.ok(w.fits, 'the limits stay inside their column');
+      const e = await rowFacts();
+      assert.deepEqual([[...new Set(e.heights)], e.wrapped, e.overlap], [[56], [], []], 'the rows keep their height, and nothing wraps or overlaps');
+      await shot('04b-accounts-long-labels');
+    });
+    await reopenAccounts();
+    // every control of the page is at least 28 px tall (a choice of a segmented control is 24 px inside its 30 px frame, as drawn)
+    const low = await exec(`return [...document.querySelectorAll('#sheet button, #sheet a[href], #sheet input, #sheet select')].filter((e) => !e.closest('.seg') && e.getBoundingClientRect().height < 28).map((e) => (e.dataset.testid || e.className) + ' ' + e.getBoundingClientRect().height)
+      .concat([...document.querySelectorAll('#sheet .seg')].filter((e) => e.getBoundingClientRect().height < 28).map((e) => 'seg ' + e.getBoundingClientRect().height))`);
+    assert.deepEqual(low, [], 'controls under 28 px');
+    // the VektraGrid look, light and dark: the rows hold there too (shots for review; the Harness light look is put back)
+    try {
+      for (const theme of ['light', 'dark']) {
+        await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = arguments[0]", [theme]);
+        await sleep(300);
+        const v = await rowFacts();
+        assert.deepEqual([[...new Set(v.heights)], v.wrapped, v.overlap], [[56], [], []], 'VektraGrid ' + theme + ': 56 px rows, nothing wrapped');
+        await shot('04d-accounts-vektragrid-' + theme);
+      }
+    } finally { await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'"); }
+  });
+
+  await test('accounts: one button per row for its state (Start, or Log in in the warning outline), and the ⋯ menu holds every other action, each of which works', async () => {
+    hrm('add', 'side-route', '--route', 'cheap');
+    await reopenAccounts();
+    // the one button: Start for an account that can start, Log in for one that is logged out (the sandbox's claude-main has no login)
+    const acts = await exec(`return Object.fromEntries([...document.querySelectorAll('.acct-row')].map((r) => [r.dataset.name, [...r.querySelectorAll('.acts button')].map((b) => b.textContent.trim()).join(' ')]))`);
+    assert.equal(acts['claude-main'], 'Log in ⋯', 'a logged-out account: Log in');
+    for (const n of ['work-max', 'team-ci', 'codex-main', 'codex-personal', 'side-route']) assert.equal(acts[n], 'Start ⋯', n + ': Start');
+    await page.mouse.move(640, 5); // no hover colour on what is measured
+    const look = await exec(`const cs = (s) => getComputedStyle(document.querySelector(s)), l = cs('[data-testid=login-claude-main]'), s = cs('[data-testid=start-work-max]');
+      return { login: [l.borderTopColor, l.color], start: [s.borderTopColor, s.color], size: [l.height, l.width, s.height, s.width], title: document.querySelector('[data-testid=login-claude-main]').title };`);
+    assert.deepEqual(look.login, ['rgba(138, 79, 0, 0.35)', 'rgb(138, 79, 0)'], 'Log in wears the warning outline');
+    assert.notDeepEqual(look.login, look.start, 'so it does not read as Start');
+    assert.deepEqual(look.size, ['28px', '64px', '28px', '64px'], 'both 28 px tall and 64 wide');
+    assert.ok(look.title.startsWith('Not logged in yet'), 'and its title says why: ' + look.title);
+    // an account whose login has expired gets Log in too
+    await withState("st.profiles.find((x) => x.name === 'codex-personal').identity.needs_login = true;", async () => {
+      await reopenAccounts();
+      await hasText('[data-testid=login-codex-personal]', 'Log in');
+      assert.ok((await exec("return document.querySelector('[data-testid=login-codex-personal]').title")).startsWith('Its login has expired'), 'an expired login says so');
+      await hasText('[data-testid=row-codex-personal] .unread.trunc', '— Login expired');
+      assert.ok(!(await exec("return !!document.querySelector('[data-testid=start-codex-personal]')")), 'and no Start beside it');
+    });
+    await reopenAccounts();
+    // Log in opens the sign-in
+    await click('[data-testid=login-claude-main]');
+    await $('[data-testid=login-code]');
+    await click('.dlg .dh [data-act=dialog-close]');
+
+    // the ⋯ menu, per kind of account: every other action, Remove… last and in the danger colour
+    const menu = async (name) => { await click(`[data-testid="menu-${name}"]`); await $('.menu.acct-menu'); return exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent.trim())"); };
+    const pick = async (name, label) => { await menu(name); await page.click(`.menu button:text-is("${label}")`); };
+    assert.deepEqual(await menu('work-max'), ['Start in a folder…', 'Refresh limits', 'Rename', 'Edit', 'Open folder', 'Log in again', 'Sync from the main profile', 'Remove…'], 'a Claude subscription');
+    const m = await exec(`const m = document.querySelector('.menu'), b = document.querySelector('[data-testid=menu-work-max]'), mr = m.getBoundingClientRect(), br = b.getBoundingClientRect(), last = m.querySelector('button:last-child');
+      return { right: Math.round(mr.right - br.right), below: Math.round(mr.top - br.bottom), items: [...new Set([...m.querySelectorAll('button')].map((x) => Math.round(x.getBoundingClientRect().height)))], font: getComputedStyle(last).fontSize,
+        danger: [last.classList.contains('danger'), getComputedStyle(last).color], line: getComputedStyle(last, '::before').borderTopWidth, open: b.getAttribute('aria-expanded') };`);
+    assert.deepEqual([m.right, m.below, m.items, m.font], [0, 4, [30], '13px'], 'under its button, right edges together; 30 px items in 13 px');
+    assert.deepEqual([m.danger, m.line, m.open], [[true, 'rgb(180, 40, 24)'], '1px', 'true'], 'Remove… in the danger colour after a line; the button says the menu is open');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await menu('codex-main'), ['Start in a folder…', 'Refresh limits', 'Rename', 'Edit', 'Open folder', 'Log in again', 'Hide main profile…'], 'a main profile is hidden, not removed');
+    await shot('04c-accounts-menu');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await menu('claude-main'), ['Start in a folder…', 'Rename', 'Edit', 'Open folder', 'Hide main profile…'], 'logged out: no limits to refresh, and Log in is the row\'s button');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await menu('team-ci'), ['Start in a folder…', 'Rename', 'Edit', 'Open folder', 'Sync from the main profile', 'Remove…'], 'an API key: no limits to refresh, no login');
+    await page.keyboard.press('Escape');
+    assert.deepEqual(await menu('side-route'), ['Start in a folder…', 'Rename', 'Edit', 'Open folder', 'Daily spend cap…', 'Sync from the main profile', 'Remove…'], 'a routed account: its spending cap');
+    await page.keyboard.press('Escape');
+
+    // each one works
+    await pick('codex-personal', 'Start in a folder…');
+    await hasText('.modal-head', 'Start codex-personal in a folder');
+    await click('.dlg .dh [data-act=dialog-close]');
+    await pick('codex-main', 'Refresh limits');
+    await waitFor(async () => /new record|up to date/.test(await exec("return document.getElementById('toast')?.textContent || ''")), 'Refresh limits reported');
+    await pick('side-route', 'Rename');
+    await type('[data-testid=fd-in]', 'Side route');
+    await click('[data-testid=fd-ok]');
+    await hasText('[data-testid=row-side-route] .who', 'Side route');
+    assert.equal(JSON.parse(hrm('list', '--json')).find((x) => x.name === 'side-route').label, 'Side route', 'renamed, the id stays');
+    await pick('side-route', 'Daily spend cap…');
+    await type('[data-testid=fd-in]', '3');
+    await page.press('[data-testid=fd-in]', 'Enter');
+    await hasText('[data-testid=row-side-route] .lims', '$3.00 daily cap');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'profiles.json'), 'utf8')).profiles.find((x) => x.name === 'side-route').daily_cap_usd, 3, 'the cap saved');
+    await pick('side-route', 'Edit');
+    await waitFor(async () => (await exec('return location.hash')) === '#account?name=side-route&tab=settings', 'Edit opens its settings');
+    await $('[data-testid=rename-input]');
+    await reopenAccounts();
+    // (Open folder would open a file manager window: the call is caught here instead)
+    await exec(`const t = window.__TAURI__; window.__core = t.core; window.__opened = [];
+      t.core = { ...t.core, invoke: (cmd, a, o) => (a && a.op === 'open_folder' ? (window.__opened.push(a.args.path), Promise.resolve(true)) : window.__core.invoke(cmd, a, o)) };`);
+    try {
+      await pick('team-ci', 'Open folder');
+      await waitFor(async () => (await exec('return window.__opened.length')) === 1, 'Open folder asked for the folder');
+      assert.equal(await exec('return window.__opened[0]'), JSON.parse(hrm('show', 'team-ci', '--json')).home, 'the account\'s own folder');
+    } finally { await exec('window.__TAURI__.core = window.__core'); }
+    const logins = () => readLines(termLog).filter((t) => JSON.stringify(t.args) === JSON.stringify(['login', 'codex-personal'])).length, before = logins();
+    await pick('codex-personal', 'Log in again');
+    await $('[data-testid=login-status]');
+    await waitFor(() => logins() === before + 1, 'Log in again opened the sign-in terminal');
+    await click('[data-testid=login-done]');
+    await reopenAccounts();
+    await pick('work-max', 'Sync from the main profile');
+    await hasText('#toast', 'Accounts are in step');
+    await pick('side-route', 'Remove…');
+    await hasText('.modal-head', 'Remove Side route');
+    await click('[data-testid=remove-confirm]');
+    await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-side-route]')")), 'removed');
+    assert.ok(!JSON.parse(hrm('list', '--json')).some((x) => x.name === 'side-route'), 'gone from the list of accounts');
+    // a click on the row itself (not on a button) still opens the account's page
+    await click('[data-testid=row-team-ci] .who');
+    await waitFor(async () => (await exec('return location.hash')) === '#account?name=team-ci', 'the row opens its account');
+  });
+
+  await test('account page: a logged-out account has Log in as its primary and Start disabled with the reason; a Limits card with nothing read holds the reason and the fix; the head\'s actions stay on one line', async () => {
+    const head = () => exec(`const q = (s) => document.querySelector(s), acts = [...document.querySelectorAll('.page-head .actions > *')], start = q('[data-testid=detail-start]'), body = q('.page-body').getBoundingClientRect();
+      return { primary: [...document.querySelectorAll('.page-head .btn.primary')].map((b) => b.textContent.trim()), buttons: acts.map((b) => b.textContent.trim()), start: [start.disabled, start.title],
+        tops: [...new Set(acts.map((b) => Math.round(b.getBoundingClientRect().top)))].length, inside: acts.at(-1).getBoundingClientRect().right <= body.right - 13, name: Math.round(q('.page-head h1').getBoundingClientRect().height) };`);
+    const limits = () => exec(`const c = document.querySelector('[data-testid=limits-card]'), cols = c.parentElement, fix = c.querySelector('[data-testid=limits-fix]'), w = cols.getBoundingClientRect().width;
+      return { text: c.innerText.replace(/\\s+/g, ' ').trim(), fix: fix ? fix.textContent.trim() : null, bars: c.querySelectorAll('.account-limit').length, solo: cols.classList.contains('solo'),
+        widths: [...cols.children].map((k) => Math.round((k.getBoundingClientRect().width / w) * 100)), height: Math.round(c.getBoundingClientRect().height) };`);
+    // logged out (the sandbox's claude-main has no login)
+    await nav('#account?name=claude-main');
+    await drawn('the account');
+    await $('[data-testid=detail-login]');
+    let h = await head();
+    assert.deepEqual(h.primary, ['Log in'], 'the one primary is the action that works: Log in');
+    assert.deepEqual(h.buttons, ['Start in a folder…', 'Start', 'Log in', '⋯'], 'Start stays, as a secondary');
+    assert.deepEqual(h.start, [true, 'Not logged in: log in first'], 'disabled, with the reason in its title');
+    assert.deepEqual([h.tops, h.inside, h.name], [1, true, 24], 'the actions on one line, inside the page; the name on one line');
+    let l = await limits();
+    assert.ok(l.text.startsWith('Limits — Not read: this account is not logged in.'), 'the Limits card says why nothing is read: ' + l.text);
+    assert.equal(l.fix, 'Log in', 'and holds the action that fixes it');
+    assert.deepEqual([l.solo, l.widths, l.bars], [true, [100, 100], 0], 'one line across the page, the login card under it: no half of the row is empty');
+    assert.ok(l.height <= 60, 'the card is as tall as its one line: ' + l.height);
+    await shot('05c-account-logged-out');
+    try {
+      await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = 'dark'");
+      await sleep(300);
+      await shot('05d-account-vektragrid-dark');
+    } finally { await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'"); }
+    // every tab of the page: no text under 12 px, and every control at least 28 px tall (the back line is the shared head's)
+    for (const tab of ['overview', 'sessions', 'projects', 'settings']) {
+      await click(`[data-testid=tab-${tab}]`);
+      await drawn('the ' + tab + ' tab');
+      const t = await exec(`const small = [], low = [];
+        for (const el of document.querySelectorAll('#sheet *')) {
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(getComputedStyle(el).fontSize) < 12) small.push(getComputedStyle(el).fontSize + ' ' + el.className + ' ' + el.textContent.trim().slice(0, 24));
+          if (el.matches('button, a[href], input, select') && !el.matches('.back-chip') && r.height < 28) low.push(Math.round(r.height) + 'px ' + (el.dataset.testid || el.className) + ' ' + el.textContent.trim().slice(0, 24));
+        }
+        return { small, low };`);
+      assert.deepEqual(t, { small: [], low: [] }, tab + ': text under 12 px, controls under 28 px');
+    }
+    await click('[data-testid=tab-overview]');
+    await drawn('the overview tab');
+    assert.equal(await exec("return document.querySelector('[data-testid=limits-fix]').dataset.act"), 'login', 'the card\'s Log in is the same action');
+    await click('[data-testid=detail-login]');
+    await $('[data-testid=login-code]');
+    await click('.dlg .dh [data-act=dialog-close]');
+    // logged in, limits read: Start is the primary, the limits beside the login card
+    await nav('#account?name=work-max');
+    await drawn('the account');
+    await $('[data-testid=limits-card] .account-limit');
+    h = await head();
+    assert.deepEqual([h.primary, h.buttons, h.start[0]], [['Start work-max'], ['Start in a folder…', 'Start work-max', '⋯'], false], 'Start <name> is the primary of an account that can start');
+    assert.deepEqual([h.tops, h.inside], [1, true], 'on one line');
+    l = await limits();
+    assert.ok(!l.solo && l.bars >= 2 && l.fix === null, 'its limits as bars, beside the login card');
+    // logged in, nothing read yet: Refresh limits fixes it
+    await nav('#account?name=codex-personal');
+    await drawn('the account');
+    await $('[data-testid=limits-fix]');
+    l = await limits();
+    assert.ok(l.text.startsWith('Limits — Not read yet') && l.fix === 'Refresh limits' && l.solo, 'not read yet: Refresh limits: ' + l.text);
+    await click('[data-testid=limits-fix]');
+    await waitFor(async () => /new record|up to date/.test(await exec("return document.getElementById('toast')?.textContent || ''")), 'Refresh limits reported');
+    // an API key has no limits, and nothing to fix
+    await nav('#account?name=team-ci');
+    await drawn('the account');
+    await $('[data-testid=limits-card]');
+    l = await limits();
+    assert.ok(l.text.includes('billed per token') && l.fix === null && l.solo, 'an API key: the plain fact: ' + l.text);
+    // a long account name does not push the actions onto a second line
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => { if (a && a.op === 'detail') r.view.label = 'An account with a very long name that would not fit beside its buttons'; return r; }) };`);
+    try {
+      await nav('#account?name=work-max&tab=sessions');
+      await drawn('the account');
+      await hasText('[data-testid=detail-name]', 'An account with a very long name');
+      h = await head();
+      assert.deepEqual([h.tops, h.inside, h.name], [1, true, 24], 'a long name is cut, the actions stay on one line');
+      assert.ok(await exec("const b = document.querySelector('[data-testid=detail-start]').getBoundingClientRect(); return b.width <= 260"), 'and so is the name on Start');
+    } finally { await exec('window.__TAURI__.core = window.__core'); }
+  });
+
+  await test('add account: nothing in the dialog is under 12 px, and every control is at least 28 px tall', async () => {
+    await nav('#accounts');
+    await click('[data-testid=add-account]');
+    for (const kind of ['subscription', 'api_key', 'routed']) {
+      await click(`[data-testid=kind-${kind}]`);
+      await $(`[data-testid=kind-${kind}].active`);
+      const d = await exec(`const card = document.querySelector('.modal-card'), small = [], low = []; let read = 0;
+        for (const el of card.querySelectorAll('*')) {
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || el.matches('input, select')) { read++; const fs = parseFloat(getComputedStyle(el).fontSize); if (fs < 12) small.push(fs + 'px ' + el.className + ' ' + el.textContent.trim().slice(0, 24)); }
+          if (el.matches('button, input, select') && r.height < 28) low.push(Math.round(r.height) + 'px ' + (el.dataset.testid || el.className || el.id));
+        }
+        return { small, low, read, title: getComputedStyle(card.querySelector('.modal-head h2')).fontSize, field: getComputedStyle(card.querySelector('#ad-name')).fontSize };`);
+      assert.ok(d.read > 20, kind + ': the dialog was measured');
+      assert.deepEqual(d.small, [], kind + ': text under 12 px');
+      assert.deepEqual(d.low, [], kind + ': controls under 28 px');
+      assert.deepEqual([d.title, d.field], ['15px', '13px'], kind + ': on the type scale (its title 15, what is typed 13)');
+    }
+    await click('.dlg .dh [data-act=dialog-close]');
   });
 
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
@@ -1263,7 +1559,10 @@ description: Bulk skill ${i}
     await click('[data-testid=st-quota] button[data-v=used]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).quota_display === 'used', 'saved');
     await nav('#accounts');
-    await hasText('[data-testid=row-codex-main]', '% used');
+    // the rings and bars turn to what is used, and the page says so in words
+    await hasText('[data-testid=used-note]', '% used');
+    await hasText('[data-testid=row-codex-main] .a-ring', '21%');
+    await hasText('[data-testid=row-codex-main] .lim', '21%');
     await nav('#settings');
     await click('[data-testid=st-quota] button[data-v=left]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).quota_display === 'left', 'back to left');
