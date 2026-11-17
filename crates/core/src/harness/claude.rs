@@ -159,6 +159,11 @@ impl Harness for Claude {
         if !p.main {
             crate::shared::sync_claude(ctx, &self.default_home(ctx), &ctx.home.join(".claude.json"), &home)?;
         }
+        if p.kind == Kind::ApiKey {
+            if let Some(key) = crate::secrets::get_key(&crate::secrets::key_target(&p.name)) {
+                crate::shared::approve_claude_key(&self.claude_json(ctx, p), &key)?;
+            }
+        }
         Ok(())
     }
 

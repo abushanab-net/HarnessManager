@@ -18,8 +18,8 @@ struct Env {
 }
 
 fn target_dir() -> PathBuf {
-    // tests run from target/debug/deps
-    std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf()
+    // where cargo put hrm.exe: the test's own folder moved in cargo 1.100, so it is not derived from that
+    Path::new(env!("CARGO_BIN_EXE_hrm")).parent().unwrap().to_path_buf()
 }
 
 impl Env {
@@ -221,7 +221,15 @@ fn api_key_profile_keeps_the_key_out_of_argv_and_files() {
     let p = e.profile("team-ci");
     assert_eq!(p["identity"]["plan"], "API key");
     assert_eq!(p["identity"]["logged_in"], true);
+    // Claude Code asks before it uses an environment key, and "No" is its default: the key is approved for it,
+    // also after it was declined once (it would show its login screen at every start)
+    let pj = e.home.join(".claude-team-ci").join(".claude.json");
+    let responses = |pj: &Path| serde_json::from_str::<Value>(&std::fs::read_to_string(pj).unwrap()).unwrap()["customApiKeyResponses"].clone();
+    assert_eq!(responses(&pj), json!({"approved": ["sk-ant-test-123"], "rejected": []}));
+    write(&pj, &json!({"hasCompletedOnboarding": true, "numStartups": 3, "customApiKeyResponses": {"approved": [], "rejected": ["sk-ant-test-123", "other"]}}).to_string());
     e.ok(&["run", "team-ci", "--", "-p", "hi"]);
+    assert_eq!(responses(&pj), json!({"approved": ["sk-ant-test-123"], "rejected": ["other"]}));
+    assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&pj).unwrap()).unwrap()["numStartups"], 3, "the rest of the file is kept");
     let run = e.runs().pop().unwrap();
     assert_eq!(run["env"]["ANTHROPIC_API_KEY"], "sk-ant-test-123");
     assert_eq!(run["env"]["ANTHROPIC_MODEL"], "claude-sonnet-5-5");
@@ -237,6 +245,7 @@ fn api_key_profile_keeps_the_key_out_of_argv_and_files() {
     e.ok(&["key", "set", "team-ci"]);
     e.ok(&["run", "team-ci"]);
     assert_eq!(e.runs().pop().unwrap()["env"]["ANTHROPIC_API_KEY"], "sk-ant-new");
+    assert!(responses(&pj)["approved"].as_array().unwrap().contains(&json!("sk-ant-new")), "a replaced key is approved too");
     e.ok(&["key", "delete", "team-ci"]);
     assert!(e.fail(&["run", "team-ci"]).contains("no API key saved"));
 }
