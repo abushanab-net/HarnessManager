@@ -18,6 +18,8 @@ fn copy_tree(from: &Path, to: &Path) {
 
 /// A sandbox whose home holds the fixtures as the two tools would keep them, with a main profile for each.
 fn ctx() -> (tempfile::TempDir, Ctx, Profile, Profile) {
+    // the tests' credential names: none reads this computer's own keys
+    std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     copy_tree(&fixtures().join("pi"), &home.join(".pi").join("agent").join("sessions"));

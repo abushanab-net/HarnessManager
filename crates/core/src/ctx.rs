@@ -56,7 +56,7 @@ pub struct Settings {
     pub sync_mode: String,
     /// The shared folder, absolute, when `sync_mode` is "folder".
     pub sync_folder: String,
-    /// The hub's address when `sync_mode` is "hub"; its token lives in Credential Manager.
+    /// The hub's address when `sync_mode` is "hub"; its token lives in the credential store.
     pub hub_url: String,
     pub sync_transcripts: bool,
     /// Tell the other computers what runs here, once a minute.
@@ -89,6 +89,12 @@ impl Default for Settings {
     }
 }
 
+/// The data folder: `HRM_HOME`, else `HarnessManager` in the platform's data folder. `secrets` asks too, without a
+/// `Ctx`: a computer with no system credential store keeps its credential file here.
+pub fn data_dir() -> PathBuf {
+    std::env::var_os("HRM_HOME").map(PathBuf::from).unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("HarnessManager"))
+}
+
 /// Everything a command needs: where data lives, the user's home, settings, registry and database.
 pub struct Ctx {
     pub data: PathBuf,
@@ -101,9 +107,7 @@ impl Ctx {
     /// `HRM_HOME` overrides the data folder and `HRM_PROFILES_HOME` the folder profile homes are created in;
     /// tests set both to temp folders.
     pub fn open() -> Result<Ctx> {
-        let data = std::env::var_os("HRM_HOME").map(PathBuf::from).unwrap_or_else(|| {
-            dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("HarnessManager")
-        });
+        let data = data_dir();
         let home = std::env::var_os("HRM_PROFILES_HOME").map(PathBuf::from).unwrap_or_else(|| dirs::home_dir().expect("home dir"));
         Ctx::open_at(&data, &home)
     }

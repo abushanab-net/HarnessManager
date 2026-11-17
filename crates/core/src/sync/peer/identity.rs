@@ -50,19 +50,15 @@ fn make_cert(key_der: &[u8], device_id: &str) -> Result<(String, Vec<u8>)> {
 /// This computer's identity, made at first use.
 pub fn load(ctx: &Ctx) -> Result<Identity> {
     let t = target(&ctx.settings.device_id);
-    let key_file = ctx.data.join("device.key");
-    let stored = secrets::read(&t).map(|(_, b)| b).or_else(|| { crate::util::make_private(&key_file); std::fs::read(&key_file).ok() });
+    // `device.key`: where a version before the credential store on macOS and Linux kept the seed
+    let stored = secrets::read_moving(&t, &ctx.data.join("device.key"));
     let seed: [u8; 32] = match stored.and_then(|b| hex::decode(String::from_utf8_lossy(&b).trim()).ok()).and_then(|v| v.try_into().ok()) {
         Some(s) => s,
         None => {
             let mut s = [0u8; 32];
             getrandom::fill(&mut s).map_err(|e| anyhow::anyhow!("random bytes: {e}"))?;
-            // shortcut: a platform without a credential store keeps the seed in the data folder (not in settings.json, so
-            // not in backups); upgrade to the Keychain / Secret Service with those builds
-            if let Err(e) = secrets::write(&t, "hrm", hex::encode(s).as_bytes()) {
-                crate::log::warn(&format!("computers: the device key could not go to the credential store ({e:#}); kept in {}", key_file.display()));
-                crate::util::write_atomic_private(&key_file, hex::encode(s).as_bytes())?;
-            }
+            // a key that cannot be kept would be another one at the next start, and every pairing with it would break
+            secrets::write(&t, "hrm", hex::encode(s).as_bytes()).context("the device key could not be saved")?;
             crate::log::info("computers: a device key was made for the direct connection");
             s
         }

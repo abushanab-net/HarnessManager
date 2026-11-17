@@ -263,6 +263,10 @@ export function patch(root, html) {
 }
 
 /** The tools the user shows (Apps > Show); hidden ones are left out of every page. */
+/** Where this computer keeps keys, as a sentence takes it ("Windows Credential Manager", "the Keychain"): the backend
+ * names it in the state. Texts written before the state is read carry `{store}` in its place. */
+export const keyStore = () => (S.state && S.state.secret_store) || "this computer's credential store";
+
 export const shownTools = (st) => st.harnesses.filter((h) => !((st.settings && st.settings.hidden_tools) || []).includes(h.id));
 
 /** The brand (Harness or VektraGrid) and light or dark; "system" follows Windows or macOS, and changes with it.

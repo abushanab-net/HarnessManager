@@ -54,7 +54,7 @@ enum Cmd {
     Run { name: String, #[arg(last = true)] args: Vec<String> },
     /// Open a new terminal running the account
     Start { name: String, #[arg(long)] cwd: Option<PathBuf>, #[arg(last = true)] args: Vec<String> },
-    /// API keys for API-key accounts (kept in Windows Credential Manager)
+    /// API keys for API-key accounts (kept in this computer's credential store: see `hrm secrets check`)
     Key { #[command(subcommand)] cmd: KeyCmd },
     /// Token usage per account and day
     Usage { #[arg(long, default_value_t = 7)] days: i64, #[arg(long)] profile: Option<String>, #[command(flatten)] j: Json },
@@ -124,6 +124,8 @@ enum Cmd {
     Hub { #[command(subcommand)] cmd: HubCmd },
     /// The ring key the hub's data is sealed with: show the recovery key, or enter it
     Ring { #[command(subcommand)] cmd: RingCmd },
+    /// Where this computer keeps API keys and saved logins, and whether that store works
+    Secrets { #[command(subcommand)] cmd: SecretsCmd },
     /// Make a backup now (the account list, settings, the history; never keys or logins)
     Backup {
         /// Also this computer's session transcripts, compressed
@@ -172,6 +174,12 @@ enum RingCmd {
     Show,
     /// Enter the recovery key shown on another computer (asked for when not given)
     Enter { key: Option<String> },
+}
+
+#[derive(Subcommand)]
+enum SecretsCmd {
+    /// Write, read back and delete a probe credential, and say which store this computer uses
+    Check { #[command(flatten)] j: Json },
 }
 
 #[derive(Subcommand)]
@@ -772,6 +780,12 @@ fn real_main(cli: Cli) -> Result<i32> {
                 println!("the ring key is set{}", if ctx.settings.sync_mode == "hub" { "; the next round reads the hub" } else { "" });
             }
         },
+        Cmd::Secrets { cmd: SecretsCmd::Check { j } } => {
+            let s = hrm_core::secrets::check()?;
+            if j.json { return print_json(&s).map(|_| 0); }
+            println!("Credentials on this computer are kept in {}.{}", s.name, s.reason.map(|r| format!(" No system credential store was reachable: {r}.")).unwrap_or_default());
+            println!("A probe credential was written, read back and deleted.");
+        }
         Cmd::Backup { with_transcripts, j } => {
             let b = hrm_core::backup::create_with(&ctx, "Manual", with_transcripts)?;
             if j.json { return print_json(&b).map(|_| 0); }

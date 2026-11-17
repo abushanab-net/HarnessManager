@@ -2,7 +2,7 @@
 // errors and paused providers red, with the word beside the number), the routes as provider chains, the providers
 // table and the recent requests; Add provider / Add route as dialogs. The old usage address still redirects.
 
-import { call, view, go, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, confirmDialog, action, patch, loadState } from './core.js';
+import { call, view, go, attempt, mutate, changed, acctName, openDialog, closeDialog, dlgHead, confirmDialog, action, patch, loadState, keyStore } from './core.js';
 import { esc, fmt, hm, dur } from './lib.js';
 
 // Usage by account lives on Accounts now; the old address still works
@@ -31,7 +31,7 @@ view('routing', async (sheet) => {
   const finding = r.running ? `${n(x.requests, 'request', 'requests')} in 24 h.${nPaused ? ` ${n(nPaused, 'provider', 'providers')} paused.` : x.errors ? ` ${n(x.errors, 'error', 'errors')}.` : ''}` : 'The local router is stopped.';
   const stat = (label, v, tone) => `<div data-key="stat-${label}"><span class="muted">${label}</span><b class="${v && tone ? 'b-' + tone : ''}">${v.toLocaleString()}${v && tone ? `<small> ${label === 'Paused providers' ? 'paused' : label.toLowerCase()}</small>` : ''}</b></div>`;
   patch(sheet, `<div class="page-body b-page" data-b-page="routing">
-    <header class="page-heading"><div><h1>${finding}</h1><div class="heading-facts">127.0.0.1:${r.port} · token required · keys stay in Windows Credential Manager · subscription logins stay outside the router</div></div>
+    <header class="page-heading"><div><h1>${finding}</h1><div class="heading-facts">127.0.0.1:${r.port} · token required · keys stay in ${esc(keyStore())} · subscription logins stay outside the router</div></div>
       <div class="page-actions"><button class="btn-secondary" data-act="provider-add" data-testid="provider-add">Add provider</button><button class="btn-primary" data-act="route-add" data-testid="route-add" ${r.providers.length ? '' : 'disabled'}>Add route</button></div></header>
     <section class="panel-card"><div class="panel-head"><h2 class="panel-title" data-testid="router-state">Local router · ${r.running ? 'running' : 'stopped'}</h2></div>
       <div class="b-router-stats">${stat('Requests · 24 h', x.requests)}${stat('Failovers', x.failovers, 'warn')}${stat('Errors', x.errors, 'danger')}${stat('Paused providers', nPaused, 'danger')}</div>
@@ -58,7 +58,7 @@ action('provider-add', () => {
     <div class="form-field"><label for="pv-format">Format</label><select id="pv-format" data-testid="pv-format"><option value="anthropic">Anthropic Messages</option><option value="openai">OpenAI Chat Completions</option></select></div>
     ${field('pv-url', 'Base URL', 'type="url" placeholder="https://openrouter.ai/api/v1" data-testid="pv-url"', 'Anthropic: the root (…/v1/messages is added). OpenAI: up to /v1 (…/chat/completions is added).')}
     ${field('pv-models', 'Models (comma separated)', 'placeholder="deepseek/deepseek-v4, z-ai/glm-5" data-testid="pv-models"', 'The first is used when a request names a model this provider lacks.')}
-    ${field('pv-key', 'Key', 'type="password" autocomplete="off" data-testid="pv-key"', 'Kept in Windows Credential Manager, never in a file.')}
+    ${field('pv-key', 'Key', 'type="password" autocomplete="off" data-testid="pv-key"', `Kept in ${esc(keyStore())}, never in the account list.`)}
     ${foot('pv-save', 'Add provider')}`, { label: 'Add provider' });
   document.getElementById('pv-save').onclick = async () => {
     const g = (id) => document.getElementById(id).value.trim();

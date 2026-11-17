@@ -245,6 +245,11 @@ pub fn add_profile(ctx: &Ctx, req: AddRequest) -> Result<ProfileView> {
     if let Some(r) = &req.route {
         if !reg.routes.iter().any(|x| &x.id == r) { bail!("no route named '{r}'"); }
     }
+    // the main account (found at the first start, where Antigravity is installed) is the only one that can run
+    if req.harness == "agy" && !req.main && !harness::agy::can_swap() {
+        bail!("Antigravity keeps one sign-in for the whole computer, and Harness Manager switches it between accounts on Windows only. On this computer Antigravity has one account: its own, {}.",
+            reg.profiles.iter().find(|p| p.harness == "agy" && p.main).map(|p| p.name.as_str()).unwrap_or("agy-main"));
+    }
     let p = Profile {
         name: req.name.trim().into(), label: None, harness: req.harness.clone(), kind: req.kind,
         email: req.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
@@ -278,7 +283,7 @@ pub fn remove_profile(ctx: &Ctx, name: &str, delete_home: bool) -> Result<()> {
         }
     }
     ctx.save_registry(&reg)?;
-    if let Err(e) = crate::secrets::delete(&crate::secrets::key_target(name)) { crate::log::warn(&format!("removed {name}, but its API key stays in Credential Manager: {e:#}")); }
+    if let Err(e) = crate::secrets::delete(&crate::secrets::key_target(name)) { crate::log::warn(&format!("removed {name}, but its API key stays in {}: {e:#}", crate::secrets::store().name)); }
     // the main profile's saved login is the user's own Antigravity login: never deleted from here
     if p.harness == "agy" && !p.main {
         if let Err(e) = harness::agy::Agy.forget(ctx, name) { crate::log::warn(&format!("removed {name}, but its saved Antigravity login stays: {e:#}")); }
@@ -934,8 +939,9 @@ fn health(answer: &str) -> Option<String> {
 
 /// The router this app would start: the same program file (an older install or a dev build is another).
 fn router_is_ours(exe: &str) -> bool {
-    let canon = |p: &std::path::Path| std::fs::canonicalize(p).map(|c| c.display().to_string().to_lowercase()).unwrap_or_default();
-    !exe.is_empty() && canon(std::path::Path::new(exe)) == canon(&crate::launch::hrm_exe())
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).ok().map(|c| c.display().to_string().to_lowercase());
+    // a file that is not there is nobody's: two missing paths are not the same program
+    canon(std::path::Path::new(exe)).is_some_and(|c| Some(c) == canon(&crate::launch::hrm_exe()))
 }
 
 /// What answers `GET /health` on the router port, if anything listens there at all.

@@ -21,6 +21,17 @@ pub fn live_target() -> String { crate::testenv::var("HRM_AGY_CRED").unwrap_or_e
 
 fn snapshot_target(profile: &str) -> String { format!("{}:agy:{profile}", crate::secrets::prefix()) }
 
+/// Harness Manager can swap Antigravity's login between accounts: where it knows the credential Antigravity keeps it in.
+// shortcut: Windows only. Where Antigravity keeps its login on macOS and Linux is not known, so there one account runs on Antigravity's own login; answer true here once `live_target` names that place
+pub fn can_swap() -> bool { cfg!(windows) }
+
+/// Without the swap nothing is saved or put in place: the main account is Antigravity's own login, as it is, and
+/// another account (one that came with a shared account list) has no login on this computer.
+fn unswapped(p: &Profile) -> Result<()> {
+    if p.main { return Ok(()); }
+    bail!("'{}' cannot start here: Harness Manager switches Antigravity's login between accounts on Windows only. On this computer Antigravity runs as its main account.", p.name)
+}
+
 const ACTIVE_KEY: &str = "agy:active";
 /// Stored while a sign-in runs: the slot holds a login nobody owns yet. If the sign-in never finishes
 /// (cancelled, app closed), that login must not be filed under the main profile.
@@ -36,6 +47,7 @@ impl Agy {
     /// Antigravity has one login slot. Swapping it while Antigravity runs would hand the running console the
     /// other account's login, and its token refreshes would be saved under the wrong account.
     pub fn check_switch(&self, ctx: &Ctx, p: &Profile) -> Result<()> {
+        if !can_swap() { return unswapped(p); }
         let owner = self.owner(ctx);
         if owner.as_deref() == Some(p.name.as_str()) || self.consoles().is_empty() { return Ok(()); }
         bail!("Antigravity is open for '{}'. Close it before starting '{}': both use the same sign-in, so switching while it runs mixes the two accounts.",
@@ -89,6 +101,7 @@ impl Agy {
 
     /// Before a fresh login: park the current login with its owner and empty the slot.
     pub fn prepare_login(&self, ctx: &Ctx) -> Result<()> {
+        if !can_swap() { return Ok(()); }
         if !self.consoles().is_empty() { bail!("Close Antigravity before signing in: the sign-in replaces the login it is using."); }
         self.save_current(ctx)?;
         crate::secrets::delete(&live_target())?;
@@ -97,6 +110,7 @@ impl Agy {
 
     /// After a login finished: the slot now belongs to `p`.
     pub fn finish_login(&self, ctx: &Ctx, p: &Profile) -> Result<bool> {
+        if !can_swap() { return Ok(true); }
         match crate::secrets::read(&live_target()) {
             Some((user, blob)) => {
                 crate::secrets::write(&snapshot_target(&p.name), &user, &blob)?;
@@ -159,6 +173,7 @@ impl Harness for Agy {
     }
 
     fn activate(&self, ctx: &Ctx, p: &Profile) -> Result<()> {
+        if !can_swap() { return unswapped(p); }
         if self.active(ctx).as_deref() == Some(p.name.as_str()) { return Ok(()); }
         self.check_switch(ctx, p)?;
         let Some((user, blob)) = crate::secrets::read(&snapshot_target(&p.name)) else {
@@ -343,6 +358,27 @@ mod tests {
         assert_eq!(q.tier("week:claude and gpt models").unwrap().label, "Week · Claude and GPT models");
         assert!(q.tier("week").unwrap().resets_at.unwrap() > 0);
         assert!(super::parse_usage(&serde_json::Value::Null, 1).tiers.is_empty());
+    }
+
+    /// Off Windows there is no swap: the main account starts on Antigravity's own login, and a second one is refused.
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_antigravity_runs_as_its_main_account_alone() {
+        use crate::harness::Harness;
+        use crate::registry::{Kind, Profile};
+        let d = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&d.path().join("data"), &d.path().join("home")).unwrap();
+        let acct = |name: &str, main| Profile { name: name.into(), label: None, harness: "agy".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        // no login was ever saved here, and the start is not held up by a swap
+        super::Agy.activate(&ctx, &acct("agy-main", true)).unwrap();
+        assert!(super::Agy.activate(&ctx, &acct("second", false)).unwrap_err().to_string().contains("on Windows only"));
+        // a sign-in parks nothing and leaves no login without an owner behind
+        super::Agy.prepare_login(&ctx).unwrap();
+        assert!(super::Agy.finish_login(&ctx, &acct("agy-main", true)).unwrap() && !super::Agy.unowned(&ctx));
+        super::Agy.check_switch(&ctx, &acct("agy-main", true)).unwrap();
+        let add = crate::service::add_profile(&ctx, crate::service::AddRequest { name: "second".into(), harness: "agy".into(), kind: Kind::Subscription, email: None, api_key: None, base_url: None, model: None, route: None, main: false });
+        assert!(add.err().unwrap().to_string().contains("on Windows only"));
+        assert!(ctx.registry().unwrap().profiles.is_empty());
     }
 
     #[test]

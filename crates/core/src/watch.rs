@@ -43,7 +43,8 @@ fn run(ctx_of: CtxOf, on_refresh: OnRefresh) {
         if dirs != watched || (watcher.is_none() && !dirs.is_empty()) {
             // accounts came or went: a fresh watcher over the folders of today
             let tx = tx.clone();
-            match notify::recommended_watcher(move |r: notify::Result<notify::Event>| { if let Ok(e) = r { for p in e.paths { let _ = tx.send(p); } } }) {
+            // a file being opened or closed is no change: Linux reports those too, also the refresh's own reads, which would start the next refresh
+            match notify::recommended_watcher(move |r: notify::Result<notify::Event>| { if let Ok(e) = r { if !e.kind.is_access() { for p in e.paths { let _ = tx.send(p); } } } }) {
                 Ok(mut w) => {
                     for d in &dirs {
                         if let Err(e) = w.watch(d, RecursiveMode::Recursive) {
@@ -103,11 +104,9 @@ mod tests {
         claude_file(&ctx, "s1", "written while watched", "2026-11-05T10:00:00.000Z");
         let t0 = Instant::now();
         while t0.elapsed() < Duration::from_secs(2) {
-            // the callback runs once the refresh has written the row, so it is the thing to wait for
-            if seen.load(std::sync::atomic::Ordering::SeqCst) >= 1 {
-                assert_eq!(sessions(&ctx, &SessionFilter { id: Some("s1".into()), ..Default::default() }).unwrap().len(), 1, "the new file is in the index");
-                return;
-            }
+            // the callback runs once the refresh has written the row, so it is the thing to wait for; macOS also
+            // reports the file written just before the watch began, so a first callback can come without this one
+            if seen.load(std::sync::atomic::Ordering::SeqCst) >= 1 && sessions(&ctx, &SessionFilter { id: Some("s1".into()), ..Default::default() }).unwrap().len() == 1 { return; }
             std::thread::sleep(Duration::from_millis(100));
         }
         // a CI runner's file notifications can lag or be dropped; the periodic walk covers that in use

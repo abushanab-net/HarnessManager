@@ -16,8 +16,9 @@ pub fn alive(pid: u32) -> bool {
     }
 }
 
+// asked of the system's process table: macOS has no /proc to look in
 #[cfg(not(windows))]
-pub fn alive(pid: u32) -> bool { std::path::Path::new(&format!("/proc/{pid}")).exists() }
+pub fn alive(pid: u32) -> bool { start_ms(pid).is_some() }
 
 /// Processes with one of these names (and, when given, this program file): (pid, start ms, working folder).
 pub fn by_name(names: &[&str], exe: Option<&std::path::Path>) -> Vec<(u32, i64, Option<String>)> {
@@ -115,4 +116,13 @@ pub fn kill(pid: u32) -> anyhow::Result<()> {
     #[cfg(not(windows))]
     { std::process::Command::new("kill").arg(pid.to_string()).status()?; }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn this_process_is_alive_and_a_pid_nobody_has_is_not() {
+        assert!(super::alive(std::process::id()));
+        assert!(!super::alive(i32::MAX as u32));
+    }
 }

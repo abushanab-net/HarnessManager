@@ -1,6 +1,6 @@
 name: ci
-# Windows: build once, then the Rust tests and the desktop UI tests run at the same time. macOS: the code only it
-# builds. The release workflow calls this one and waits for it, so a tag never publishes untested code.
+# Windows: build once, then the Rust tests and the desktop UI tests run at the same time. macOS and Linux: the tests
+# of hrm-core and the hub. The release workflow calls this one and waits for it, so a tag never publishes untested code.
 on:
   pull_request:
     paths-ignore: ['**.md', 'docs/**']
@@ -57,15 +57,35 @@ jobs:
         with: { name: ui-tests, path: e2e/.work, retention-days: 3, if-no-files-found: ignore }
 
   macos:
-    # the code only macOS builds (the shell's PATH, Terminal.app windows) compiles, and its tests pass. The
-    # self-hosted Mac (variable RUNNER_MAC_RELEASE), or a failed job when the variable is missing; a fork's pull
-    # request runs on GitHub's Mac for the same reason as the Windows job
+    # the app compiles on macOS, and hrm-core and the hub pass their tests there. The self-hosted Mac (variable
+    # RUNNER_MAC_RELEASE), or a failed job when the variable is missing; a fork's pull request runs on GitHub's Mac
+    # for the same reason as the Windows job
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'macos-latest') || vars.RUNNER_MAC_RELEASE }}
     timeout-minutes: 30
+    # the tests' credential names: under them a test keeps its credentials in a private file, never in this Mac's
+    # Keychain (the tests set their own; this covers one that forgets)
+    env: { HRM_CRED_PREFIX: HRMTEST-ci }
     steps:
       - uses: actions/checkout@v5
         with: { clean: false }
       - uses: dtolnay/rust-toolchain@stable
-      # the app and the library; the integration tests in tests/ drive Windows (file locks, consoles)
       - run: cargo check --workspace --lib --bins
-      - run: cargo test -p hrm-core --lib unix_ -- --nocapture
+      # the tests of the desktop app and of hrm (crates/cli) drive Windows consoles, so they stay in the Windows job
+      - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast
+
+  linux:
+    # hrm-core and the hub pass their tests on Linux. The self-hosted Linux runners (variable RUNNER_LINUX), or a
+    # failed job when the variable is missing; a fork's pull request runs on GitHub's runner for the same reason as
+    # the Windows job. The runner is a container without a desktop, so it has no Secret Service: the credential store
+    # that runs here is the private file
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.RUNNER_LINUX }}
+    timeout-minutes: 30
+    env: { HRM_CRED_PREFIX: HRMTEST-ci }
+    steps:
+      - uses: actions/checkout@v5
+        with: { clean: false }
+      # the C compiler that SQLite and the TLS library are built with, as release.yml installs it. It belongs in the
+      # runner image: this step does nothing once it is there
+      - run: command -v cc || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config; }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast
