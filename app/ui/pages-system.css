@@ -3,7 +3,7 @@
    primary, the CLI's command column, content-sized controls that start after the description). */
 
 /* routing: a stat's word beside its number; a paused provider's chip; a disabled Add route reads as disabled */
-.b-router-stats b small { font-size: 11px; font-weight: 500; margin-left: 4px; }
+.b-router-stats b small { font-size: var(--fs-small); font-weight: 500; margin-left: 4px; }
 .b-chain .candidate-pill.b-warn { border-color: var(--warn-border); }
 .b-chain .candidate-pill.b-warn b, .b-chain .candidate-pill.b-warn span { color: var(--warn); }
 .b-page .btn-primary:disabled { background: var(--bg-card); color: var(--ink-muted); border: 1px solid var(--line-default); box-shadow: none; }
