@@ -189,7 +189,7 @@ function hubJoinDialog() {
   };
 }
 /** Invite a computer…: a one-time six-digit code, good for ten minutes, with the address to enter it at. */
-async function inviteDialog() {
+export async function inviteDialog() {
   openDialog(`${dlgHead('Invite a computer')}<div class="b-dialog-content" id="invite-body" data-testid="invite-body"><p class="muted">Asking the hub for a code…</p></div>${foot('<button class="btn-secondary" data-act="dialog-close">Close</button>')}`, { size: 'sm', label: 'Invite a computer' });
   const el = document.getElementById('invite-body');
   try {
@@ -211,9 +211,9 @@ async function ringShowDialog(first = false) {
   } catch (e) { if (el.isConnected) el.innerHTML = `<p class="b-danger" data-testid="hub-error">${esc(errText(e))}</p>`; }
 }
 /** Enter recovery key: the 8 groups of 4, typed or pasted; spaces, dashes and case do not matter. */
-function ringEnterDialog() {
+export function ringEnterDialog() {
   openDialog(`${dlgHead('Enter the recovery key')}
-    ${field('ring-in', 'Recovery key', 'class="mono" autocomplete="off" placeholder="8 groups of 4" aria-label="The recovery key" data-testid="ring-in"', 'Case, spaces and dashes are ignored. It was shown on the computer that first turned the hub on (Computers › Recovery key › Show again…).')}
+    ${field('ring-in', 'Recovery key', 'class="mono" autocomplete="off" placeholder="8 groups of 4" aria-label="The recovery key" data-testid="ring-in"', 'Case, spaces and dashes are ignored. It was shown on the computer that first turned the hub on (Computers › A hub you host › ⋯ › Show the recovery key…).')}
     ${errLine('ring-error')}${foot(`${cancel}<button class="btn-primary" id="ring-ok" data-testid="ring-ok">Save</button>`)}`, { size: 'sm', label: 'Enter the recovery key' });
   const inp = document.getElementById('ring-in');
   inp.addEventListener('input', () => { inp.value = fmtRing(inp.value); });
@@ -227,29 +227,34 @@ function ringEnterDialog() {
 action('hub-join', hubJoinDialog);
 action('hub-invite', inviteDialog);
 action('ring-enter', ringEnterDialog);
-action('ring-show', async () => { if (await confirmDialog('Show the recovery key', 'Anyone who reads it can read your hub. Show it on screen?', 'Show', false)) ringShowDialog(); });
-action('hub-leave', async () => {
+/** Show the recovery key again, and leave the hub: each behind a confirm. (The ⋯ of the hub on the Computers page runs these.) */
+export async function ringShowAgain() { if (await confirmDialog('Show the recovery key', 'Anyone who reads it can read your hub. Show it on screen?', 'Show', false)) ringShowDialog(); }
+export async function hubLeave() {
   if (await confirmDialog('Stop syncing', 'Leave the hub? Merged history and the recovery key stay on this computer; this computer\'s record and token go from the hub.', 'Leave')) mutate(() => call('hub_leave'), 'Left the hub');
-});
+}
 
-// ---------- the two ways to sync, as cards: on the Computers page, and in the first-run dialog ----------
-/** The folder card and the hub card; `first` draws them for the first-run dialog, whose buttons pick a folder or open Join. */
-export function syncChoices(c, first = false) {
-  const hub = c.hub || {}, folderOn = c.mode === 'folder', hubOn = c.mode === 'hub' && !!hub.joined, pill = (t) => `<span class="plan-pill b-good" data-testid="hub-state">${t}</span>`;
+// ---------- the two ways to sync, as cards that say what each one is: the first-run dialog (the Computers page draws
+// them in one line each, with the actions of the one in use) ----------
+/** What each way is, in a sentence or two: on the first-run cards, and behind the ⓘ of each way on the Computers page. */
+export const WAYS = {
+  folder: 'OneDrive, Google Drive, an SMB share or a NAS. Nothing to run; the service carries the files.',
+  hub: 'Your VPS with Docker, behind Caddy. Works from any network, no VPN needed, and gives live presence everywhere. Only your computers can read it: everything but their names is sealed with your ring key.',
+};
+function syncChoices(c) {
+  const hub = c.hub || {}, folderOn = c.mode === 'folder', hubOn = c.mode === 'hub' && !!hub.joined, inUse = '<span class="plan-pill b-good">In use</span>';
   return `<div class="b-sync-grid">
-    <div class="b-sync-choice ${folderOn ? 'active' : ''}" data-testid="sync-folder"><b>A shared folder ${folderOn ? '<span class="plan-pill b-good">Selected</span>' : ''}</b><span class="muted">OneDrive, Google Drive, an SMB share or a NAS. Nothing to run; the service carries the files.</span>
-      <span class="mono b-command" title="${esc(c.folder || '')}" data-testid="sync-folder-path">${esc(c.folder || 'No folder chosen yet')}</span>
-      <div class="page-actions">${first ? '<button class="btn-secondary" data-act="firstrun-folder" data-testid="firstrun-folder">Choose folder…</button>' : `<button class="btn-secondary" data-act="sync-folder-pick" data-testid="sync-folder-pick">${c.folder ? 'Change…' : 'Choose…'}</button>${folderOn ? '<button class="btn-secondary" data-act="sync-off" data-testid="sync-off">Stop syncing…</button>' : ''}`}</div></div>
-    <div class="b-sync-choice ${hubOn ? 'active' : ''}" data-testid="sync-hub"><b>A hub you host ${hubOn ? pill(hub.ws ? 'Live' : 'Joined') : ''}</b><span class="muted">Your VPS with Docker, behind Caddy. Works from any network, no VPN needed, and gives live presence everywhere. Only your computers can read it: everything but their names is sealed with your ring key.</span>
-      <span class="mono b-command" title="${esc(hub.url || '')}" data-testid="hub-url">${esc(hub.url || 'Not joined yet')}</span>
-      <div class="page-actions">${first ? '<button class="btn-secondary" data-act="firstrun-hub" data-testid="firstrun-hub">Join with a code…</button>' : hubOn ? '<button class="btn-secondary" data-act="hub-invite" data-testid="hub-invite">Invite a computer…</button><button class="btn-secondary" data-act="hub-leave" data-testid="hub-leave">Stop syncing…</button>' : '<button class="btn-secondary" data-act="hub-join" data-testid="hub-join">Join with a code…</button>'}</div>
-      ${hubOn ? `<span class="muted" data-testid="hub-line">Joined · ${hub.devices || 0} ${hub.devices === 1 ? 'computer' : 'computers'} · ${hub.ws ? 'live' : 'polling'}</span>${hub.ring ? '' : '<b class="b-danger">No ring key: enter the recovery key below.</b>'}` : ''}</div></div>`;
+    <div class="b-sync-choice ${folderOn ? 'active' : ''}"><b>A shared folder ${folderOn ? inUse : ''}</b><span class="muted">${WAYS.folder}</span>
+      <span class="mono b-command" title="${esc(c.folder || '')}">${esc(c.folder || 'No folder chosen yet')}</span>
+      <div class="page-actions"><button class="btn-secondary" data-act="firstrun-folder" data-testid="firstrun-folder">Choose folder…</button></div></div>
+    <div class="b-sync-choice ${hubOn ? 'active' : ''}"><b>A hub you host ${hubOn ? inUse : ''}</b><span class="muted">${WAYS.hub}</span>
+      <span class="mono b-command" title="${esc(hub.url || '')}">${esc(hub.url || 'Not joined yet')}</span>
+      <div class="page-actions"><button class="btn-secondary" data-act="firstrun-hub" data-testid="firstrun-hub">Join with a code…</button></div></div></div>`;
 }
 
 // ---------- first run: "Add this computer to your others", with both cards ----------
 const FIRSTRUN_KEY = 'hm.firstrun';
 export function firstRunDialog() {
-  openDialog(`${dlgHead('Add this computer to your others')}<span>How should your computers sync? You can change this later on the Computers page.</span>${syncChoices(S.cache.computers || OFF, true)}
+  openDialog(`${dlgHead('Add this computer to your others')}<span>How should your computers sync? You can change this later on the Computers page.</span>${syncChoices(S.cache.computers || OFF)}
     ${foot('<button class="btn-secondary" data-act="dialog-close" data-testid="firstrun-later">Not now</button>')}`, { label: 'Add this computer to your others' });
 }
 action('firstrun-open', firstRunDialog);

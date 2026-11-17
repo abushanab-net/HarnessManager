@@ -9,12 +9,11 @@ const TOURS = {
   home: [
     [null, 'Welcome to Harness Manager', 'It keeps every account of Claude Code, Codex, OpenCode, Antigravity, Pi and Oh My Pi on this computer in one place. The ? at the top shows this tour of a page.'],
     ['aside.rail nav', 'Every page', 'Accounts to add and start accounts (with their usage), Projects and Sessions to read past work, Computers to sync your other computers, and under Setup the MCP servers, skills and system prompts shared between accounts and the routing to other providers. A badge appears only for something to act on or watch.'],
-    ['[data-testid=use-next]', 'Use next', 'The account to start on now: the most room, or the 5-hour window that resets soonest. Start opens a terminal on it; Folder picks where.'],
-    ['[data-testid=finding]', 'Runs out first', 'The account on pace to run out before its reset, with the measured basis under it. Measured numbers are plain; estimates carry ≈.'],
-    ['[data-testid=running-now]', 'Running now', 'Every console open, on which computer; Follow opens its session as it writes.'],
-    ['[data-testid=horizon]', 'Reset Horizon', 'Each account as a lane: its week ring, the capacity left in each window, and the time to each reset on a 7-day scale (the 5-hour window on its own zoom). Start appears on hover.'],
-    ['[data-testid=kpi-tokens]', 'Key numbers', 'Tokens, cost and the share read from cache, each with its trend and its change against the period before: today, 7 days, 30 days or all time. Cost is what the tokens would cost at API list prices.'],
-    ['[data-testid=attention]', 'Needs attention', 'A limit that runs out before its reset at today\'s pace, a login to renew, a provider the router paused.'],
+    ['.page-head .actions', 'Key numbers', 'Tokens, cost and the share read from cache for the range beside them: today, 7 days, 30 days or all time; the change against the period before is on hover. Cost is what the tokens would cost at API list prices.'],
+    ['[data-testid=use-next]', 'Use next', 'The account to start on now, of any tool or of the one you pick: the most room, or with "5h first" the 5-hour window that resets soonest. Start opens a terminal on it; Start in folder… picks where.'],
+    ['[data-testid=attention]', 'Needs attention', 'One entry per account: a limit used up or on pace to run out before its reset, a login to renew; then a provider the router paused and a tool with an update. Each has the one button that deals with it.'],
+    ['[data-testid=running-now]', 'Running now', 'Every session open, on which computer; Follow opens it as it writes.'],
+    ['[data-testid=horizon]', 'Accounts runway', 'One row per account: what is left of each limit, a lane from now to +7 d with a tick at the reset (striped where it is on pace to run out first), one verdict, and Start or Log in. Measured numbers are plain; estimates carry ≈; — means not read.'],
     ['[data-testid=activity]', 'Activity, 53 weeks', 'A year clock of daily tokens: 53 weeks around, Monday inside, the busiest day in the centre.'],
     ['[data-testid=latest-replies]', 'Latest replies', 'Newest first, with the account, model, tokens and the time to the first reply; the request log has every call with its cost.'],
   ],
@@ -63,13 +62,16 @@ const TOURS = {
     ['[data-testid=prompt-new]', 'Versions', 'Keep several prompts and switch with Use this prompt. The file\'s current text is saved in the list before it is replaced.'],
   ],
   settings: [
-    ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
+    // (steps that are on the page whichever section is chosen; Text size shows on Appearance)
+    ['[data-testid=set-nav]', 'One section at a time', 'Pick a section, or type in Search settings to find a row in any of them.'],
+    ['#set-panes .b-tip', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
     ['[data-testid=st-textsize]', 'Text size', 'Compact, Comfortable or Large: the whole window follows, on every page.'],
   ],
   computers: [
-    ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
-    ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
-    ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
+    ['[data-testid=computer-cards]', 'Your computers', 'A card per computer: how it is reached, when it was last seen and what runs there. Its ⋯ renames this computer, and syncs with or forgets another.'],
+    ['[data-testid=computers]', 'How your computers sync', 'Pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
+    ['[data-key=setting-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
+    ['[data-testid=pair-head]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget in its ⋯ drops it again.'],
   ],
 };
 

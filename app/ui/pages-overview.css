@@ -1,0 +1,117 @@
+/* The Overview (1.10, Option A · Tighten), as docs/project-review-2026-11/mockups/a-overview.html and a.css draw it,
+   in this app's role tokens. Every class is the page's own (ov-); the shared parts (.card, .btn, .seg, .pill, .dot,
+   .row, .trunc) come from app.css. Bars and lanes are SVG, so their widths are attributes. */
+
+/* ---- the head: the range, then three readouts for it ---- */
+.ov-readouts { display: flex; margin-left: 4px; }
+.ov-readouts > div { padding: 0 14px; border-left: 1px solid var(--line-subtle); line-height: 18px; }
+.ov-readouts > div:last-child { padding-right: 0; }
+.ov-readouts b { display: block; font-size: var(--fs-section); font-weight: 700; white-space: nowrap; }
+.ov-readouts span { display: block; font-size: var(--fs-small); color: var(--ink-muted); white-space: nowrap; }
+
+/* ---- the deck: use next | needs attention | running now, each 40 px of head over four 40 px rows ---- */
+.ov-deck { display: grid; grid-template-columns: 316px 280px minmax(0, 1fr); gap: 10px; flex: none; }
+.ov-deck > .card { min-width: 0; min-height: 202px; display: flex; flex-direction: column; }
+.ov-deck .card-head { height: 40px; padding: 0 14px; flex: none; }
+.ov-deck .card-head > :last-child { margin-left: auto; }
+.ov .seg.tight > * { padding: 0 6px; gap: 4px; }
+.ov .seg button { cursor: pointer; }
+.ov .seg .dim { font-weight: 500; }
+.ov-plan { display: inline-block; line-height: 18px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; }
+/* OpenCode's mark is drawn in black: on a dark theme it is shown in white */
+html[data-theme="dark"] .ov img.ticon[src$="opencode.svg"] { filter: invert(1); }
+
+.ov-use { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; }
+.ov-who { gap: 10px; min-height: 28px; }
+.ov-who b { font-size: var(--fs-section); font-weight: 650; }
+.ov-why { margin-top: -4px; color: var(--ink-secondary); line-height: 18px; }
+.ov-prefer { margin-left: auto; padding: 0 8px; color: var(--ink-muted); }
+.ov-prefer.on { color: var(--ac); background: var(--ac-soft); border-color: var(--ac-border); }
+.ov-runner { white-space: nowrap; margin-top: auto; padding-top: 9px; border-top: 1px solid var(--line-subtle); line-height: 16px; }
+.ov-runner b { font-weight: 600; }
+
+/* a list of entries: four show, more scroll inside the card so the table under the deck keeps its place */
+.ov-list { max-height: 160px; overflow-y: auto; flex: 1; }
+.ov-item { height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line-subtle); min-width: 0; }
+.ov-item:last-child { border-bottom: 0; }
+.ov-item b { font-weight: 600; }
+.ov-item .two { flex: 1; min-width: 0; line-height: 16px; }
+.ov-item .two > b, .ov-item .two > span { display: block; }
+.ov-item .two > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ov-item .g { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+.ov-item .btn { width: 62px; justify-content: center; flex: none; }
+.ov-item .meta { font-size: var(--fs-small); color: var(--ink-muted); white-space: nowrap; }
+.ov-item .pc-dot { width: 7px; height: 7px; flex: none; }
+.ov-empty { padding: 12px 14px; font-size: var(--fs-small); color: var(--ink-muted); line-height: 18px; }
+/* the counts in the Running now head: with sessions on another computer, a count shows that computer's alone */
+.ov-counts { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ov-count { height: 28px; padding: 0 6px; margin: 0 -6px; border-radius: 6px; font-size: var(--fs-small); color: var(--ink-muted); }
+.ov-count:hover { color: var(--ink-primary); background: var(--bg-card); }
+.ov-count.on { color: var(--ac); background: var(--ac-soft); font-weight: 600; }
+
+/* ---- the accounts runway: one table, one 48 px row per account ---- */
+.ov-runway { overflow: hidden; flex: none; }
+/* the head line is 40 px; with more in it than the window has room for, it takes a second line instead of cutting a control off */
+.ov-tbl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 40px; padding: 4px 14px; border-bottom: 1px solid var(--line-subtle); min-width: 0; }
+.ov-picks { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
+.ov-picks .btn > span { color: var(--ink-muted); }
+.ov-table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.ov-table .c-acct { width: 288px; } .ov-table .c-lims { width: 264px; } .ov-table .c-verdict { width: 200px; } .ov-table .c-act { width: 90px; }
+.ov-table th { font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line-subtle); white-space: nowrap; }
+.ov-table td { height: 48px; padding: 0 12px; border-bottom: 1px solid var(--line-subtle); vertical-align: middle; }
+.ov-table tr:last-child > td { border-bottom: 0; }
+.ov-table th:first-child, .ov-table td:first-child { padding-left: 14px; }
+.ov-table th:last-child, .ov-table td:last-child { padding-right: 14px; text-align: right; }
+.ov-table tbody tr:not(.none) { cursor: pointer; }
+.ov-table tbody tr:not(.none):hover > td { background: var(--bg-card); }
+.ov-table tr.sel > td, .ov-table tr.sel:hover > td { background: var(--ac-soft); }
+.ov-table tr.sel > td:first-child { box-shadow: inset 2px 0 0 var(--ac); }
+.ov-table tr:focus-visible { outline: 2px solid var(--line-focus); outline-offset: -2px; }
+.ov-table .btn { width: 64px; justify-content: center; }
+.ov-table b { font-weight: 600; }
+.ov-table .none > td { text-align: left; }
+.ov-axis { display: flex; justify-content: space-between; }
+
+/* limits in one line: label + % over a bar, three at most; a long label is cut, never wrapped */
+.ov-lims { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.ov-lim { width: 72px; flex: none; }
+.ov-lims.more { gap: 8px; } .ov-lims.more .ov-lim { width: 64px; }
+.ov-lim .t { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; font-size: var(--fs-small); line-height: 16px; }
+.ov-lim .t span { color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ov-lim .t b { font-weight: 650; }
+.ov-more { font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); white-space: nowrap; cursor: help; }
+.ov-unread { font-size: var(--fs-small); color: var(--ink-muted); }
+svg.ov-bar { display: block; width: 100%; height: 6px; margin-top: 3px; border-radius: 3px; background: var(--track-bg); box-shadow: inset 0 0 0 1px var(--line-subtle); }
+.ov-bar rect { fill: var(--ac); } .ov-bar rect.warn { fill: var(--warn); } .ov-bar rect.bad { fill: var(--neg); } .ov-bar rect.spare { fill: var(--pos); } .ov-bar rect.r2 { fill: var(--r2); }
+
+/* one lane per account: now → +7 d, a faint line per day, the fill ends at the reset's tick */
+svg.ov-lane { display: block; width: 100%; height: 8px; border-radius: 2px; background: var(--track-bg); box-shadow: inset 0 0 0 1px var(--line-subtle); overflow: visible; }
+.ov-lane .g { stroke: var(--line-default); stroke-width: 1; }
+.ov-lane .fill { fill: var(--ac); } .ov-lane .fill.warn { fill: var(--warn); }
+.ov-lane .starve { fill: url(#starve-stripe); stroke: var(--neg-border); stroke-width: 1; }
+#starve-stripe line { stroke: var(--neg); stroke-width: 10; opacity: .42; } /* the pattern is in index.html: 5 px stripes, 5 px apart */
+.ov-lane .tick { fill: var(--ink-primary); }
+svg.ov-lane.none { background: none; box-shadow: none; }
+.ov-lane.none line { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+
+.ov-verdict { display: block; font-weight: 600; }
+.ov-verdict.plain { font-weight: 400; color: var(--ink-secondary); }
+
+/* the legend's rows, in the popover menu: the mark, then what it means */
+.ov-legend { display: flex; align-items: center; gap: 10px; }
+.ov-legend > svg { width: 56px; flex: none; margin: 0; }
+
+/* ---- below the table: the year clock beside the latest replies ---- */
+.ov-lower { display: grid; grid-template-columns: minmax(300px, 340px) minmax(0, 1fr); gap: 12px; align-items: stretch; }
+.ov-lower > * { min-width: 0; }
+
+/* less room (a narrower window, the Large text size): the fixed columns give some of theirs to the lane */
+@container sheet (max-width: 1000px) {
+  .ov-table .c-acct { width: 232px; } .ov-table .c-verdict { width: 184px; } .ov-table .c-act { width: 86px; }
+}
+/* a narrow window: the deck's third card and the replies go under */
+@container sheet (max-width: 900px) {
+  .ov-deck { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .ov-deck > :last-child { grid-column: 1 / -1; }
+  .ov-lower { grid-template-columns: minmax(0, 1fr); }
+}
