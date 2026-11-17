@@ -68,8 +68,9 @@ signed by the release key.
    every account's limits on one lane from now to seven days ahead.
 5. **MCP servers**, **Skills** and **System prompts:** add something once and tick the tools it should reach.
 
-`Ctrl K` puts the cursor in the search box: it searches sessions, or filters the list on Accounts, Projects,
-MCP servers and Skills. The **?** button replays the page's tour.
+`Ctrl K` opens the command palette: start an account, run an action, or go to a page, an account, a
+session or a setting. `/` puts the cursor in the search box, which searches sessions or filters the page
+you are on. The **?** button replays the page's tour.
 
 ## Features
 

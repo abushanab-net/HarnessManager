@@ -100,7 +100,7 @@ export async function designTests({ test, exec, nav, $, click, waitFor, assert, 
     assert.deepEqual(d.search.slice(0, 3), [340, 30, '7px'], 'the search box: 340 × 30, radius 7');
     assert.equal(d.search[3], 'Filter accounts', 'it says what it does on this page');
     assert.ok(d.search[4], 'and its words are never cut off');
-    assert.equal(d.search[5], '12px', 'Ctrl K in 12 px');
+    assert.equal(d.search[5], '12px', 'its key hint (/) in 12 px');
     assert.deepEqual(d.chip, ['28px', '99px', '12px', '600'], 'a chip: 28 px, round, 12 / 600');
     assert.equal(d.fresh, '12px', 'limits read … ago, in 12 px');
     assert.deepEqual(d.iconBtn, ['30,30,7px', '30,30,7px'], 'the tour and refresh buttons: 30 × 30, radius 7');
