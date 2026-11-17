@@ -359,9 +359,12 @@ async function refreshNow() {
   const r = await attempt(() => call('refresh', { live: S.state && S.state.live_quota }));
   if (r) { toast(refreshText(r)); changed(); }
 }
-/** One account's limits, now: a Claude subscription's from Anthropic, with the login Claude Code saved; another
- * tool's from what the tool wrote, which is what the top bar's refresh reads (for every account). */
-const refreshLimits = (p) => (p.harness === 'claude' ? mutate(() => call('quota_live', { name: p.name }), 'Limits read') : refreshNow());
+/** The tools whose subscription limits the core reads on request (hrm_core::service::quota_live): Claude from
+ * Anthropic with the login Claude Code saved, Antigravity from its own program. */
+const LIVE_TOOLS = ['claude', 'agy'];
+/** One account's limits, now: read live where the core can ask for them; another tool's from what the tool wrote,
+ * which is what the top bar's refresh reads (for every account). */
+const refreshLimits = (p) => (LIVE_TOOLS.includes(p.harness) && p.kind === 'subscription' ? mutate(() => call('quota_live', { name: p.name }), 'Limits read') : refreshNow());
 /** The ⋯ of an account, on its row and on its page: every action besides the row's one button, Remove… last. */
 action('account-menu', (el) => {
   const name = el.dataset.name, p = (S.state.profiles || []).find((x) => x.name === name) || { identity: {} };

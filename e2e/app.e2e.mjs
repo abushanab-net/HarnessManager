@@ -1482,6 +1482,26 @@ try {
     });
   });
 
+  await test('Refresh limits reads live for every tool the core can ask (Claude Code and Antigravity) and falls back to the general refresh for the others', async () => {
+    await nav('#accounts');
+    await drawn('accounts');
+    const kinds = await exec("return import('./core.js').then((c) => Object.fromEntries(c.S.state.profiles.map((p) => [p.name, p.harness + ' ' + p.kind])))");
+    assert.deepEqual([kinds['claude-main'], kinds['agy-main'], kinds['codex-main']], ['claude subscription', 'agy subscription', 'codex subscription']);
+    // (the reads themselves are answered here: the sandbox's tools have no live limits to give)
+    await withOps(async () => {
+      const refresh = async (name) => {
+        await sleep(300);
+        await ops();
+        await exec("const b = document.createElement('button'); b.dataset.act = 'limits-refresh'; b.dataset.name = arguments[0]; b.hidden = true; document.body.append(b); b.click(); b.remove();", [name]);
+        return waitFor(async () => { const o = (await ops()).filter((x) => x.startsWith('quota_live') || x === 'refresh'); return o.length ? o : null; }, 'a read of the limits of ' + name);
+      };
+      assert.deepEqual(await refresh('claude-main'), ['quota_live:claude-main'], 'Claude Code: read live');
+      assert.deepEqual(await refresh('agy-main'), ['quota_live:agy-main'], 'Antigravity: read live too');
+      assert.deepEqual(await refresh('codex-main'), ['refresh'], 'Codex: the general refresh');
+    }, '', "if (op === 'quota_live') return { tiers: [], fetched_at: Date.now() }; if (op === 'refresh') return { new_rows: 0, quota_errors: [] };");
+    await nav('#home');
+  });
+
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
     const claudeMcp = () => JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
     await nav('#mcp');
