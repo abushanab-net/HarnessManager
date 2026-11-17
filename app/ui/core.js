@@ -225,8 +225,9 @@ function patchNode(cur, next, keep) {
 }
 const focusKey = (el) => (el && el !== document.body ? (el.id ? '#' + CSS.escape(el.id) : el.dataset.testid ? `[data-testid="${CSS.escape(el.dataset.testid)}"]` : el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : null) : null);
 export function patch(root, html) {
-  // a background redraw of the page shown keeps what the reader typed
+  // a background redraw of the page shown keeps what the reader typed, and waits for a name being typed in place
   const keep = keepEdits && root.id === 'sheet';
+  if (keep && root.querySelector('input.a-rename')) { S.dirty = true; return; }
   const scrolls = [...root.querySelectorAll('*')].filter((el) => el.scrollTop || el.scrollLeft).map((el) => [el, el.scrollTop, el.scrollLeft]);
   const active = document.activeElement, sel = root.contains(active) ? focusKey(active) : null;
   const range = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
@@ -331,6 +332,8 @@ export function closeDialog() {
   if (S.dirty) { S.dirty = false; render(true); }
 }
 export const dialogOpen = () => !!document.getElementById('dialog-root').innerHTML;
+/** A dialog is open, or a name is being typed in place: a background redraw waits until it closes. */
+export const editing = () => dialogOpen() || !!document.querySelector('#sheet input.a-rename');
 
 export const dlgHead = (title) => `<div class="modal-head dh"><h2>${esc(title)}</h2><button class="icon-btn" data-act="dialog-close" aria-label="Close">✕</button></div>`;
 

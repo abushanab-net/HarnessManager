@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
+import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds, editing } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
@@ -41,7 +41,7 @@ const redrawSoon = () => {
     drawing = true;
     try {
       call('today').then(setTodayBadge).catch(() => {});
-      if (document.getElementById('dialog-root').innerHTML) S.dirty = true; // a dialog stays as it is; the page catches up when it closes
+      if (editing()) S.dirty = true; // a dialog, or a name being typed, stays as it is; the page catches up when it closes
       else if (S.route.view === 'projects') await refreshProjects(); // the tiles and rows take the new numbers where they are
       else await render(true);
     } finally { drawing = false; lastDraw = Date.now(); if (again) { again = false; redrawSoon(); } }

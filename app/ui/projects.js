@@ -3,7 +3,7 @@
 // `project_alias`. The page's state is in the hash (#projects?days=30&sort=cost&metric=cost&per=25&page=2) through
 // replaceState; every choice redraws through patch(), so the tiles stay the same nodes.
 
-import { S, call, view, go, attempt, mutate, changed, openDialog, closeDialog, dlgHead, openMenu, action, drawPins, patch } from './core.js';
+import { S, call, view, go, attempt, mutate, changed, openDialog, closeDialog, dlgHead, openMenu, action, drawPins, patch, render, editing } from './core.js';
 import { esc, fmt, when, ic } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
 import { tagsHtml, href, money } from './sessions.js';
@@ -98,6 +98,7 @@ function draw() {
 export async function refreshProjects() {
   if (S.route.view !== 'projects' || !pj.list) return;
   await fetchProjects().catch(() => {});
+  if (editing()) { S.dirty = true; return; } // a name being typed (or a dialog) stays as it is; the page catches up when it closes
   draw();
 }
 // an unpin from the sidebar: the Projects page fetches again; a project's header icon flips
@@ -146,10 +147,12 @@ export function renameProject(key) {
     if (done) return; done = true;
     const name = inp.value.trim();
     el.textContent = save && name ? name : old;
-    if (!save || !name || name === old) return;
-    if (!(await attempt(() => call('project_alias', { key, name }), `Renamed to ${name}`))) { el.textContent = old; return; }
-    for (const p of pj.list || []) if (p.key === key) p.name = name;
-    if (pj.list) drawPins(pj.list);
+    if (save && name && name !== old) {
+      if (await attempt(() => call('project_alias', { key, name }), `Renamed to ${name}`)) { for (const p of pj.list || []) if (p.key === key) p.name = name; if (pj.list) drawPins(pj.list); }
+      else el.textContent = old;
+    }
+    // a background refresh that arrived while the name was being typed catches up now
+    if (S.dirty && !editing()) { S.dirty = false; if (S.route.view === 'projects') refreshProjects(); else render(true); }
   };
   inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
   inp.addEventListener('blur', () => finish(true));
