@@ -225,9 +225,16 @@ fn env_and_header_values_are_in_the_credential_store_not_in_the_list_file_or_a_b
     ctx.save_registry(&reg).unwrap();
     let file = std::fs::read_to_string(ctx.registry_path()).unwrap();
     assert!(!file.contains("ghp_secret_1") && !file.contains("secret_2"), "a value is in the list file: {file}");
-    assert!(file.contains("GITHUB_TOKEN") && file.contains("Authorization"), "the keys stay in the file: {file}");
+    assert!(file.contains("\"GITHUB_TOKEN\": null") && file.contains("\"DEBUG\": null") && file.contains("\"Authorization\": null") && file.contains("\"version\": 2"), "the keys stay in the file, each marked as not held there: {file}");
+    // a version before this one refuses such a list: read as empty, the values would be written over the ones its tools have
+    #[derive(Debug, serde::Deserialize)]
+    struct OldServer { #[serde(default)] env: std::collections::BTreeMap<String, String>, #[serde(default)] headers: std::collections::BTreeMap<String, String> }
+    #[derive(Debug, serde::Deserialize)]
+    struct OldList { mcp: Vec<OldServer> }
+    let refused = serde_json::from_str::<OldList>(&file).map(|l| l.mcp.iter().map(|s| s.env.len() + s.headers.len()).sum::<usize>()).unwrap_err();
+    assert!(refused.to_string().contains("invalid type: null, expected a string"), "{refused}");
     let zip = list_in_zip(&ctx, &hrm_core::backup::create(&ctx, "Manual").unwrap().name);
-    assert!(!zip.contains("ghp_secret_1") && !zip.contains("secret_2"), "a value is in the backup: {zip}");
+    assert!(!zip.contains("ghp_secret_1") && !zip.contains("secret_2") && zip.contains("\"GITHUB_TOKEN\": null"), "a value is in the backup: {zip}");
     // in memory nothing changed: every caller reads the values as before
     let reg = ctx.registry().unwrap();
     assert_eq!(reg.mcp[0].env["GITHUB_TOKEN"], "ghp_secret_1");
@@ -292,10 +299,12 @@ fn a_list_written_by_an_older_version_moves_its_values_at_the_first_start() {
     let path = ctx.registry_path();
     // as 1.9.14 saved it: the values in the file
     let mut old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    old["mcp"] = json!([{"name": "github", "transport": "stdio", "command": "npx", "env": {"GITHUB_TOKEN": "ghp_old"}},
+    old["mcp"] = json!([{"name": "github", "transport": "stdio", "command": "npx", "env": {"GITHUB_TOKEN": "ghp_old", "DEBUG": ""}},
         {"name": "docs", "transport": "http", "url": "https://d.example/mcp", "headers": {"Authorization": "Bearer old"}}]);
     std::fs::write(&path, serde_json::to_string_pretty(&old).unwrap()).unwrap();
-    assert_eq!(ctx.registry().unwrap().mcp[0].env["GITHUB_TOKEN"], "ghp_old", "a value still in the file is used as it is");
+    secrets::write(&format!("{}:mcp:github:env:DEBUG", s.prefix), "hrm", b"1").unwrap();
+    let reg = ctx.registry().unwrap();
+    assert_eq!((reg.mcp[0].env["GITHUB_TOKEN"].as_str(), reg.mcp[0].env["DEBUG"].as_str()), ("ghp_old", ""), "a value written in the file, an empty one too, is used as it is");
     // what the app and the command line run at every start
     hrm_core::import::first_run(&ctx).unwrap();
     let file = std::fs::read_to_string(&path).unwrap();
@@ -325,7 +334,7 @@ fn a_value_the_store_refuses_stays_in_the_list_file_and_out_of_backups() {
     assert_eq!(ctx.registry().unwrap().mcp[0].env["BIG"], big);
     let b = hrm_core::backup::create(&ctx, "Manual").unwrap();
     let zip = list_in_zip(&ctx, &b.name);
-    assert!(!zip.contains(&big) && zip.contains("\"BIG\": \"\""), "its key is in the backup, its value is not: {zip}");
+    assert!(!zip.contains(&big) && zip.contains("\"BIG\": null"), "its key is in the backup, its value is not: {zip}");
     // putting that backup back: its empty values do not replace the ones this computer has
     hrm_core::backup::restore(&ctx, &b.name).unwrap();
     let reg = ctx.registry().unwrap();

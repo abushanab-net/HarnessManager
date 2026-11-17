@@ -190,6 +190,9 @@ pub struct ProjectAlias {
     pub merge_into: Option<String>,
 }
 
+/// The file's format. 2: an MCP env or header value may be `null` (see `Registry::file_text`).
+const VERSION: u32 = 2;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Registry {
     #[serde(default)]
@@ -216,22 +219,47 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// The list with each MCP env and header value: an empty one in the file is filled from the credential store. One
-    /// still in the file (an older version wrote it, or the store refused it) is used as it is.
-    pub fn load(path: &Path) -> Result<Registry> {
-        let mut reg = Self::read(path)?;
-        for (t, v) in reg.mcp.iter_mut().flat_map(McpServer::values).filter(|(_, v)| v.is_empty()) {
-            if let Some(x) = secrets::get_key(&t) { *v = x; }
+    /// The list with each MCP env and header value: one the file does not hold (`null`) comes from the credential
+    /// store, or is empty when this computer has none. One in the file (an older version wrote it, or the store
+    /// refused it) is used as it is.
+    pub fn load(path: &Path) -> Result<Registry> { Self::read(path, |t| secrets::get_key(t).unwrap_or_default()) }
+
+    /// The list from its file's text, as a backup carries it: a value the file does not hold is empty.
+    pub fn from_text(text: &str) -> serde_json::Result<Registry> { Self::parse(text, |_| String::new()) }
+
+    /// `fill` gives each `null` env or header value, by the name of its credential.
+    fn parse(text: &str, fill: impl Fn(&str) -> String) -> serde_json::Result<Registry> {
+        let mut v: serde_json::Value = serde_json::from_str(text)?;
+        for s in v.get_mut("mcp").and_then(|m| m.as_array_mut()).into_iter().flatten() {
+            let name = s["name"].as_str().unwrap_or_default().to_string();
+            for (kind, field) in [("env", "env"), ("header", "headers")] {
+                for (k, x) in s.get_mut(field).and_then(|m| m.as_object_mut()).into_iter().flatten().filter(|(_, x)| x.is_null()) {
+                    *x = fill(&secrets::mcp_target(&name, kind, k)).into();
+                }
+            }
         }
-        Ok(reg)
+        serde_json::from_value(v)
     }
 
-    /// The file as it is.
-    fn read(path: &Path) -> Result<Registry> {
+    /// The list as its file's text. An empty env or header value is written as `null`: not in this file (it is in the
+    /// credential store, or not set on this computer). A version before 1.9.15 refuses such a file, where it would
+    /// read "" as the value and write that over the one its tools have.
+    pub fn file_text(&self) -> Result<String> {
+        let mut v = serde_json::to_value(self)?;
+        v["version"] = VERSION.into();
+        for s in v.get_mut("mcp").and_then(|m| m.as_array_mut()).into_iter().flatten() {
+            for field in ["env", "headers"] {
+                for x in s.get_mut(field).and_then(|m| m.as_object_mut()).into_iter().flat_map(|m| m.values_mut()).filter(|x| *x == "") { *x = serde_json::Value::Null; }
+            }
+        }
+        Ok(serde_json::to_string_pretty(&v)?)
+    }
+
+    fn read(path: &Path, fill: impl Fn(&str) -> String) -> Result<Registry> {
         // a file that exists but cannot be read is an error: treating it as empty would save an empty list over it
         let s = crate::util::read_or_empty(path)?;
-        if s.trim().is_empty() { return Ok(Registry { version: 1, ..Default::default() }); }
-        let reg: Registry = serde_json::from_str(&s).with_context(|| format!("{} is not valid JSON; fix or restore it", path.display()))?;
+        if s.trim().is_empty() { return Ok(Registry { version: VERSION, ..Default::default() }); }
+        let reg = Self::parse(&s, fill).with_context(|| format!("{} is not valid JSON; fix or restore it", path.display()))?;
         if let Some(p) = reg.profiles.iter().find(|p| !valid_name(&p.name)) {
             bail!("{}: '{}' is not a valid account name (it becomes a folder name); fix the file", path.display(), p.name);
         }
@@ -241,7 +269,7 @@ impl Registry {
         Ok(reg)
     }
 
-    /// Each MCP env and header value goes to the credential store, and the file keeps its key with an empty value.
+    /// Each MCP env and header value goes to the credential store, and the file keeps its key with `null`.
     pub fn save(&self, path: &Path) -> Result<()> { self.write(path, true) }
 
     /// `save` for a list put back from a backup: no credential is deleted, so putting the newer list back finds its values.
@@ -265,12 +293,12 @@ impl Registry {
         for (t, v) in file.mcp.iter_mut().flat_map(McpServer::values) {
             if !v.is_empty() && secrets::get_key(&t).as_deref() == Some(v.as_str()) { v.clear(); }
         }
-        let text = serde_json::to_string_pretty(&file)?;
+        let text = file.file_text()?;
         let old = crate::util::read_or_empty(path).unwrap_or_default();
         if old != text { write_atomic(path, text.as_bytes())?; }
         // a server or key this save removed: its credentials go (a renamed server's are under its new name by now)
         // shortcut: another computer that shares the list keeps its own credentials of a server removed here; list and delete them there if that matters
-        if let (true, Ok(mut was)) = (forget, serde_json::from_str::<Registry>(&old)) {
+        if let (true, Ok(mut was)) = (forget, Self::from_text(&old)) {
             for (t, _) in was.mcp.iter_mut().flat_map(McpServer::values).filter(|(t, _)| !live.contains(&t.to_lowercase())) { let _ = secrets::delete(&t); }
         }
         Ok(())
@@ -279,7 +307,7 @@ impl Registry {
     /// Values an older version left in the file move to the credential store: a load and a save, only when the file holds one.
     // shortcut: only Windows has a store so far (see secrets), so elsewhere a start moves nothing and warns of nothing; drop the test with the Keychain build
     pub fn move_mcp_values(path: &Path) -> Result<()> {
-        if cfg!(windows) && Self::read(path)?.mcp.iter().any(|s| s.env.values().chain(s.headers.values()).any(|v| !v.is_empty())) { Self::load(path)?.save(path)?; }
+        if cfg!(windows) && Self::read(path, |_| String::new())?.mcp.iter().any(|s| s.env.values().chain(s.headers.values()).any(|v| !v.is_empty())) { Self::load(path)?.save(path)?; }
         Ok(())
     }
 

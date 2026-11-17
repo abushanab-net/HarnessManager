@@ -201,8 +201,8 @@ fn transcripts(ctx: &Ctx) -> Result<Vec<(String, Vec<u8>)>> {
 fn write_zip(ctx: &Ctx, out: &Path, with_transcripts: bool) -> Result<()> {
     let reg_text = crate::util::read_or_empty(&ctx.registry_path())?;
     let reg = ctx.registry()?;
-    // keys only: no env or header value is in a backup, also where the list file still holds one
-    let reg_text = if reg_text.trim().is_empty() { reg_text } else { serde_json::to_string_pretty(&reg.without_mcp_values())? };
+    // keys only (each `null`): no env or header value is in a backup, also where the list file still holds one
+    let reg_text = if reg_text.trim().is_empty() { reg_text } else { reg.without_mcp_values().file_text()? };
     let state = ctx.db.with(|c| {
         let ledger: Vec<Value> = c.prepare("select target, kind, item from ledger")?
             .query_map([], |r| Ok(json!([r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?])))?.collect::<rusqlite::Result<_>>()?;
@@ -352,11 +352,11 @@ pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
     };
     let reg_text = text("profiles.json")?.context("not a Harness Manager backup: it has no profiles.json")?;
     // a list that does not parse is not written over the one in use
-    let mut reg: crate::registry::Registry = serde_json::from_str(&reg_text).context("the backup's account list is not valid")?;
+    let mut reg = crate::registry::Registry::from_text(&reg_text).context("the backup's account list is not valid")?;
     let settings = text("settings.json")?;
     let state: Value = text("state.json")?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
     create(ctx, "Before restore")?;
-    // a backup holds no env or header value: an empty one never replaces the value this computer has
+    // a backup holds no env or header value (`null`, read as empty): this computer's value stays
     let here = ctx.registry()?;
     for s in &mut reg.mcp { if let Some(h) = here.mcp.iter().find(|h| h.name == s.name) { s.fill_unset(h); } }
     reg.save_restored(&ctx.registry_path())?;

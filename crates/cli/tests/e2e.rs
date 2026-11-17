@@ -498,7 +498,7 @@ fn mcp_values_an_older_version_left_in_the_list_move_to_the_credential_store_at_
     write(&path, &reg.to_string());
     e.ok(&["list"]);
     let list = std::fs::read_to_string(&path).unwrap();
-    assert!(!list.contains("ghp_old") && list.contains("GITHUB_TOKEN"), "{list}");
+    assert!(!list.contains("ghp_old") && list.contains("\"GITHUB_TOKEN\": null"), "{list}");
     assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "ghp_old");
 }
 
