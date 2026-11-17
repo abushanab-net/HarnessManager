@@ -30,7 +30,7 @@ pub(crate) fn ring_target(device_id: &str) -> String { format!("{}:ring-key:{dev
 pub(crate) fn token_target(device_id: &str) -> String { format!("{}:hub-token:{device_id}", secrets::prefix()) }
 
 fn read_secret(ctx: &Ctx, target: &str, file: &str) -> Option<String> {
-    secrets::read(target).map(|(_, b)| b).or_else(|| std::fs::read(ctx.data.join(file)).ok())
+    secrets::read(target).map(|(_, b)| b).or_else(|| { crate::util::make_private(&ctx.data.join(file)); std::fs::read(ctx.data.join(file)).ok() })
         .map(|b| String::from_utf8_lossy(&b).trim().to_string()).filter(|s| !s.is_empty())
 }
 
@@ -39,7 +39,7 @@ fn read_secret(ctx: &Ctx, target: &str, file: &str) -> Option<String> {
 fn write_secret(ctx: &Ctx, target: &str, file: &str, value: &str) -> Result<()> {
     if let Err(e) = secrets::write(target, "hrm", value.as_bytes()) {
         crate::log::warn(&format!("hub: {target} could not go to the credential store ({e:#}); kept in {file}"));
-        crate::util::write_atomic(&ctx.data.join(file), value.as_bytes())?;
+        crate::util::write_atomic_private(&ctx.data.join(file), value.as_bytes())?;
     }
     Ok(())
 }

@@ -3,7 +3,21 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 /// Write via a temp file in the same folder and rename, so readers never see half a file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, false) }
+
+/// `write_atomic` for a key or a token kept as a file: on unix the file is its owner's alone (mode 0600) from the
+/// moment it exists. On Windows it is a plain file, under the user's own profile.
+pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, true) }
+
+/// A key file an earlier version wrote for every user to read, made its owner's alone; nothing to do on Windows.
+pub fn make_private(path: &Path) {
+    #[cfg(unix)]
+    { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)); }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+fn write_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -13,7 +27,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension(format!("hrm-tmp-{}-{n}", std::process::id()));
     let written = (|| -> std::io::Result<()> {
         use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        { if private { std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600); } }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut f = o.open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()
     })();
@@ -261,6 +281,27 @@ mod unix_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unix_a_key_kept_as_a_file_is_its_owners_alone() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("keys").join("device.key");
+        write_atomic_private(&f, b"seed").unwrap();
+        write_atomic_private(&f, b"seed again").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"seed again");
+        assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "no temp file is left");
+        make_private(&f);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = || std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(), 0o600);
+            // one an earlier version wrote for every user to read
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+            make_private(&f);
+            assert_eq!(mode(), 0o600);
+        }
+    }
 
     #[test]
     fn a_capped_read_stops_at_the_cap() {
