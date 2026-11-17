@@ -1,16 +1,18 @@
 // Sessions (the list) and Session (the reading view), fed by the index: `sessions`, `projects`, `tag_list`,
 // `computers_status`, `transcript`, `session_stats`, `file_stamp`. The list is the 1.10 drawing's (Option A, with the
 // middle zone of docs/project-review-2026-11/mockups/b-sessions.html): one filter line, Running now, then the groups
-// in one card with 44 px rows. The tags shared with Projects and Accounts live here too. Every redraw goes through
-// patch(), so a live arrival keeps the reader's scroll, focus and open folds.
+// in one card with 44 px rows. A click on a row selects the session and shows it in the pane at the right (pane.js;
+// the drawing's zone 3); its page stays one step away. The tags shared with Projects and Accounts live here too.
+// Every redraw goes through patch(), so a live arrival keeps the reader's scroll, focus and open folds.
 
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown } from './core.js';
-import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
+import { esc, fmt, hm, when, dur, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
 import { nameEl, pinBtn, area, refreshProjects, tellApart } from './projects.js';
 import './restore.js';
 import { pageHead, detailHead, seg, plural } from './parts.js';
+import { paneOf, selected, paneOpen, rowAttrs, paneHtml, patchPane, drawWithPane } from './pane.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
@@ -68,10 +70,16 @@ const PER = 50;
 /** A segmented choice that sets one parameter of the hash. */
 const sseg = (k, opts, cur, label, tid) => seg(label, opts, cur, (v) => `data-act="s-set" data-k="${k}" data-v="${esc(v)}" data-testid="${esc(tid(v))}"`);
 
+/** A session from another computer: its account, its login and its log file are that computer's. */
+const isRemote = (s, pcs) => !!(pcs && pcs.this && s.device && s.device !== pcs.this.id);
+/** The address of a session's full page. */
+const sessionHash = (s, pcs) => href('session', { profile: s.profile, id: s.id, device: isRemote(s, pcs) && !s.archived ? s.device : '' });
 /** One row, 44 px: status dot, title (a failed one says so in words) with its tags, account (its tool's icon first),
- * computer (sync on), tokens, when, one action. `running`: a row of Running now, which says when it started. */
-function sessionRow(s, pcs, running) {
-  const sync = syncOn(pcs), remote = !!(pcs && pcs.this && s.device && s.device !== pcs.this.id);
+ * computer (sync on), tokens, when, one action. `running`: a row of Running now, which says when it started.
+ * A click selects the row (pane.js); `sel` is the selected session's key. `paned`: the pane is open beside the list,
+ * so the row is the drawn columns only and its action is the pane's. */
+function sessionRow(s, pcs, running, sel = '', paned = false) {
+  const sync = syncOn(pcs), remote = isRemote(s, pcs), key = s.profile + '/' + s.id;
   const device = s.device_name || nameOf(pcs, s.device), far = s.open_elsewhere ? device : '';
   // the login is this computer's: on another computer the same account name is often another login
   const mail = remote ? '' : acctEmail(s.profile);
@@ -82,10 +90,10 @@ function sessionRow(s, pcs, running) {
     : remote ? (canResume(s.resumable) ? `<button class="btn sm" data-act="resume-here" data-s="${resumeData(s)}" data-testid="resume-here-${esc(s.id)}">Resume here</button>` : `<span class="a-reason" title="${esc(s.resumable || '')}" data-testid="reason-${esc(s.id)}">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
     : `<button class="btn sm" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
   const at = running ? when(s.started_at) : far ? 'running on ' + far : s.open ? 'live' : when(s.last_active_at);
-  return `<div class="a-srow" data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" aria-hidden="true"></i>
-    <div class="a-tcell"><button class="a-title" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" ${remote && !s.archived ? `data-device="${esc(s.device)}"` : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}</b></button>${s.failed ? `<span class="a-fail" title="${plural(s.failed, 'failed command')}">${s.failed} failed</span>` : ''}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}${s.continued_from ? `<span class="a-pill arch" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span>` : ''}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}<span class="a-where" title="${esc(plural(s.messages, 'message') + (s.cwd ? ' · ' + s.cwd : ''))}"><span class="a-wtx">${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}</span></span></div>
-    <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 16)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : ''}
-    <span class="num">${fmt(s.tokens)}</span><span class="a-when ${!running && (s.open || far) ? 'live' : ''}" title="${esc(at)}">${esc(at)}</span><span class="a-act">${act}</span></div>`;
+  return `<div class="a-srow" ${rowAttrs(key, sessionHash(s, pcs), key === sel)} data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" aria-hidden="true"></i>
+    <div class="a-tcell"><button class="a-title" data-sel-title ${key === sel ? 'aria-current="true"' : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}</b></button>${s.failed ? `<span class="a-fail" title="${plural(s.failed, 'failed command')}">${s.failed} failed</span>` : ''}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}${s.continued_from ? `<span class="a-pill arch" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span>` : ''}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}${paned ? '' : `<span class="a-where" title="${esc(plural(s.messages, 'message') + (s.cwd ? ' · ' + s.cwd : ''))}"><span class="a-wtx">${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}</span></span>`}</div>
+    <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 16)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail && !paned ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : ''}
+    <span class="num">${fmt(s.tokens)}</span><span class="a-when ${!running && (s.open || far) ? 'live' : ''}" title="${esc(at)}">${esc(at)}</span>${paned ? '' : `<span class="a-act">${act}</span>`}</div>`;
 }
 
 // what the list last read: a choice that only changes what is shown (a group folded) draws from it again, without
@@ -98,6 +106,15 @@ const listKey = (params) => JSON.stringify(Object.entries(params).filter(([k]) =
 const filtersOf = (params) => ({ group: params.group || 'project', days: params.days || '7', live: params.live === '1', project: params.project || '', q: params.q || '', tag: params.tag || '', pc: params.pc || '', page: +params.page || 0 });
 view('sessions', async (sheet, params) => {
   const { group, days, live, project, q, tag, pc, page } = filtersOf(params);
+  // the same list as the one last read: drawn from that at once. When the list is on screen and only the selection
+  // moved, that is all; when the reader comes back to it (from a session's page), the fresh read follows
+  if (last && last.key === listKey(params)) {
+    const only = !!sheet.querySelector('[data-tour=sessions]') && (last.params.sel || '') !== (params.sel || '');
+    last.params = params;
+    sheet.className = 'sheet';
+    draw(sheet);
+    if (only) return;
+  }
   if (!S.state) await loadState();
   const scope = pc === 'here' ? 'here' : 'all';
   const filter = { harness: params.harness || null, profile: params.profile || null, days: days === 'all' || live ? null : +days, query: q || null, open: live || null, project: project || null, tag: tag || null, device: pc && pc !== 'here' ? pc : null, per: PER, page };
@@ -128,6 +145,13 @@ function draw(sheet) {
   let groups = ans.groups;
   const total = ans.total, sync = syncOn(pcs);
   const all = groups.flatMap((g) => g.sessions);
+  // the selected session, and whether the pane shows it: a session the list does not hold (a link, another page of
+  // the list) is shown from its transcript once that is read
+  const sel = params.sel || '', paned = !!sel && paneOpen('sessions');
+  const picked = sel ? all.find((s) => s.profile + '/' + s.id === sel) || (pn.key === sel && pn.t ? pn.t.meta : null) : null;
+  last.picked = picked;
+  // one primary on the screen: with the pane open it is the pane's, and the head's New session is a secondary
+  const pri = paned ? '' : 'primary';
   // a running session sits at the top, whatever the grouping, never inside a fold
   const isLive = (s) => s.open || s.open_elsewhere;
   const running = all.filter(isLive);
@@ -135,7 +159,7 @@ function draw(sheet) {
   const filtered = !!(q || tag || live || pc || params.profile || params.harness);
   const cur = project ? plist.find((p) => p.key === project) || { key: project, name: (all[0] && all[0].project_name) || project, sessions: total, tokens: all.reduce((a, s) => a + s.tokens, 0), accounts: [...new Set(all.map((s) => s.profile))], live: running.length } : null;
   if (!total && !filtered && !cur && days === 'all') {
-    patch(sheet, `<div class="page-body" data-tour="sessions">${pageHead('sessions', 'No session yet.', '<button class="btn primary" data-act="session-new" data-testid="session-new">New session</button>')}<section class="panel-card empty-state"><span class="muted">Sessions appear here as your tools write their logs.</span></section></div>`);
+    drawWithPane(sheet, `<div class="page-body" data-tour="sessions">${pageHead('sessions', 'No session yet.', '<button class="btn primary" data-act="session-new" data-testid="session-new">New session</button>')}<section class="panel-card empty-state"><span class="muted">Sessions appear here as your tools write their logs.</span></section></div>`, 'sessions:' + last.key);
     return;
   }
   const keep = clean({ group: params.group, days: params.days });
@@ -143,7 +167,7 @@ function draw(sheet) {
   // a project is named with what tells it from another of the same name: its remote, or the last folders of its path
   const byProject = group === 'project', apart = byProject ? tellApart([...new Map([...plist, ...groups].map((p) => [p.key, p])).values()]) : null;
   // the head of a card of rows: its name and a note, then the names of the columns, on the rows' own grid
-  const listHead = (title, note, whenLabel) => `<div class="a-lh"><div><h2 class="section">${title}</h2><span class="small muted trunc">${note}</span></div><span class="label">Account</span>${sync ? '<span class="label">Computer</span>' : ''}<span class="label num">Tokens</span><span class="label num">${whenLabel}</span><span></span></div>`;
+  const listHead = (title, note, whenLabel) => `<div class="a-lh"><div><h2 class="section">${title}</h2><span class="small muted trunc">${note}</span></div><span class="label">Account</span>${sync ? '<span class="label">Computer</span>' : ''}<span class="label num">Tokens</span><span class="label num">${whenLabel}</span>${paned ? '' : '<span></span>'}</div>`;
   // one group: a 36 px band (fold, name, what tells it apart, its numbers, its actions), then its rows
   const grp = (g) => {
     const k = group + ':' + g.key, open = !sFold.has(k), n = g.total || g.sessions.length;
@@ -152,18 +176,18 @@ function draw(sheet) {
       <h2 class="a-gname">${group === 'tag' && g.key ? `<span class="a-tag ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${hint ? `<span class="a-path mono" title="${esc(g.root || g.remote)}" data-testid="group-hint">${esc(hint)}</span>` : ''}
       <span class="a-tot">${plural(n, 'session')} · ${fmt(g.tokens)} tokens${p && p.cost != null ? ' · ' + money(p.cost) + ' ≈' : ''}</span><span class="grow"></span>
       ${byProject && g.root ? `<button class="btn sm quiet" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">New session</button>` : ''}${byProject && g.key ? `<button class="a-ib" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${p && p.pinned ? 1 : ''}" aria-label="Open, pin, rename or merge ${esc(g.name)}" aria-haspopup="menu">${ic.dots}</button>` : ''}</div>
-      ${open ? g.sessions.map((s) => sessionRow(s, pcs)).join('') + (g.sessions.length < n ? `<div class="a-more-row"><button class="btn sm quiet" data-act="s-more" data-k="${esc(k)}" data-testid="s-more-${esc(g.key)}">Show all ${plural(n, 'session')}</button></div>` : '') : ''}</div>`;
+      ${open ? g.sessions.map((s) => sessionRow(s, pcs, false, sel, paned)).join('') + (g.sessions.length < n ? `<div class="a-more-row"><button class="btn sm quiet" data-act="s-more" data-k="${esc(k)}" data-testid="s-more-${esc(g.key)}">Show all ${plural(n, 'session')}</button></div>` : '') : ''}</div>`;
   };
   const head = cur
     // a project: the back line, its own name (renamed in place) with its pin and tags, where it lives, and its numbers under the head
     ? `${detailHead({ back: ['#projects', 'Projects'], titleAttrs: 'data-testid="project-title"',
       title: `${nameEl(cur)}<button class="a-ib" data-act="project-rename" data-key="${esc(cur.key)}" title="Rename (or double-click the name)" aria-label="Rename ${esc(cur.name)}">${ic.edit}</button>${pinBtn(cur)}${tagsHtml(cur.tags, 'project', cur.key, cur.name)}`,
       status: `<span class="mono a-path">${esc(cur.remote || cur.root || '')}</span>`,
-      actions: `<button class="btn icon" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge" aria-haspopup="menu">⋯</button>${cur.root ? `<button class="btn primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">New session</button>` : ''}` })}
+      actions: `<button class="btn icon" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge" aria-haspopup="menu">⋯</button>${cur.root ? `<button class="btn ${pri}" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">New session</button>` : ''}` })}
         <div class="a-pstats" data-testid="project-stats"><span><b>${money(cur.cost)}</b> ≈ list prices</span><span><b>${fmt(cur.tokens)}</b> tokens</span><span><b>${cur.sessions}</b> ${cur.sessions === 1 ? 'session' : 'sessions'}</span><span><b>${(cur.accounts || []).length}</b> ${(cur.accounts || []).length === 1 ? 'account' : 'accounts'}</span>${cur.live ? `<span class="a-live"><b>${cur.live}</b> running</span>` : ''}</div>`
     // the list: what runs now, then how many sessions the range (or the search) holds
     : pageHead('sessions', `${running.length ? `${running.length} running now` : 'No session is running'}; <span data-testid="sessions-count">${total.toLocaleString()} ${filtered ? (total === 1 ? 'matches ' : 'match ') : ''}${days === 'all' || live ? 'in all' : 'in the last ' + esc(days) + ' days'}</span>.`,
-      '<button class="btn primary" data-act="session-new" data-testid="session-new">New session</button>');
+      `<button class="btn ${pri}" data-act="session-new" data-testid="session-new">New session</button>`);
   // a project's view lists no other project: its own accounts and tags are choices in the line, and a panel about the
   // project appears only when it spans several folders or accounts
   const folders = cur ? [...new Set(all.map((s) => s.cwd).filter(Boolean))] : [];
@@ -184,11 +208,13 @@ function draw(sheet) {
       ${live ? `<button class="a-chipx" data-act="s-set" data-k="live" data-v="" data-testid="chip-live">Running now ✕</button>` : ''}${tag && !cur ? `<button class="a-chipx" data-act="s-set" data-k="tag" data-v="" data-testid="chip-tag"><span class="a-tag ${tagColor(tag)}">${esc(tag)}</span> ✕</button>` : ''}${q ? `<button class="a-chipx" data-act="s-set" data-k="q" data-v="" title="The search above searches every session" data-testid="chip-q">“${esc(q)}” ✕</button>` : ''}
       ${sync ? `<span class="grow"></span><div class="seg" role="group" aria-label="Computer" data-testid="pc-seg">${pcBtn('', 'All', 'All computers')}${pcBtn('here', 'This', 'This computer: ' + pcs.this.name, cdot(pcs, pcs.this.id, pcs.this.name, 'on'))}${pcs.peers.length <= 3 ? pcs.peers.map((x) => pcBtn(x.id, x.name, x.name, cdot(pcs, x.id, x.name, 'on'))).join('') : ''}</div>${pcs.peers.length > 3 ? `<button class="btn sm" data-act="s-pc-menu" aria-haspopup="menu" data-testid="pc-other">${esc(pc && pc !== 'here' ? nameOf(pcs, pc) : 'Elsewhere')} ▾</button>` : ''}` : ''}</div>`;
   const here = running.filter((s) => !s.open_elsewhere).length;
-  const body = `${running.length && !live ? `<section class="a-grp livegrp" data-key="grp:live" data-testid="group">${listHead('Running now', `${running.length}${sync ? ` · ${here} here, ${running.length - here} elsewhere` : ''}`, 'Started')}${running.map((s) => sessionRow(s, pcs, true)).join('')}</section>` : ''}
+  const body = `${running.length && !live ? `<section class="a-grp livegrp" data-key="grp:live" data-testid="group">${listHead('Running now', `${running.length}${sync ? ` · ${here} here, ${running.length - here} elsewhere` : ''}`, 'Started')}${running.map((s) => sessionRow(s, pcs, true, sel, paned)).join('')}</section>` : ''}
     ${groups.length ? `<section class="a-grp" data-key="grp:list">${listHead('By ' + esc(group), plural(groups.length, { project: 'project', date: 'day', account: 'account', tool: 'tool', tag: 'tag' }[group] || 'group'), 'Last active')}${groups.map(grp).join('')}</section>`
     : running.length && !live ? '' : `<section class="a-grp"><div class="a-empty">No sessions match.<button class="btn sm" data-act="s-clear">Clear filters</button></div></section>`}
     ${total > PER ? `<div class="a-pager" data-testid="s-pager"><button class="btn sm icon" data-act="s-set" data-k="page" data-v="${page - 1}" ${page === 0 ? 'disabled' : ''} aria-label="Previous page" data-testid="page-prev">‹</button><span>${page * PER + 1}–${Math.min(total, (page + 1) * PER)} of ${total}</span><button class="btn sm icon" data-act="s-set" data-k="page" data-v="${page + 1}" ${(page + 1) * PER >= total ? 'disabled' : ''} aria-label="Next page" data-testid="page-next">›</button></div>` : ''}`;
-  patch(sheet, `<div class="page-body" data-tour="sessions">${head}${fbar}<div class="a-wrap ${about ? '' : 'one'}">${about}<div class="a-smain ${sync ? '' : 'nopc'}" data-tour="groups">${body}</div></div></div>`);
+  drawWithPane(sheet, `<div class="page-body" data-tour="sessions">${head}${fbar}<div class="a-wrap ${about ? '' : 'one'}">${about}<div class="a-smain ${sync ? '' : 'nopc'} ${paned ? 'paned' : ''}" data-tour="groups">${body}</div></div></div>${
+    paned ? paneHtml(...(picked ? paneParts(picked, pcs) : ['Session', '<div class="grow name">Session</div>', `<div class="pane-sec"><p class="pane-note" data-testid="pane-rest">${pn.key === sel && pn.gone ? 'This session is not in the list, and its transcript could not be read.' : 'Reading the session…'}</p></div>`])) : ''}`, 'sessions:' + last.key);
+  if (paned) followPane(sel, picked, pcs);
   // the top bar's search is the index's: a pause in typing asks for the matching sessions
   const find = document.getElementById('find');
   if (q && !find.value.trim()) find.value = q; // searched from another page
@@ -224,8 +250,92 @@ action('s-pick-tag', (el) => openMenu(el, pick.tlist.map((t) => ({ html: pk('', 
 action('s-clear', () => { document.getElementById('find').value = ''; sq({ live: '', tag: '', pc: '', profile: '', harness: '', q: '', page: '' }); });
 action('s-more', (el) => { sMore.add(el.dataset.k); render(); });
 action('s-fold', (el) => { const k = el.dataset.k; if (sFold.has(k)) sFold.delete(k); else sFold.add(k); show(); });
+paneOf('sessions', show);
 action('go-live', () => go('sessions', { live: '1' }));
 action('go-apps', () => go('apps'));
+
+// ---------- the pane: the selected session beside the list (docs/project-review-2026-11/mockups/b-sessions.html) ----------
+// what the pane last read of the selected session, by the reads its own page uses (`transcript`, `session_stats`):
+// `key` is the session's, `gone` a transcript that could not be read
+const pn = { key: '', t: null, ss: null, gone: false, busy: false };
+const mark = { ok: ['done', '<path d="m5 12 5 5 9-10"/>'], bad: ['failed', '<path d="M6 6l12 12M18 6 6 18"/>'], busy: ['running', '<path d="M12 3a9 9 0 1 0 9 9"/>'] };
+/** The mark of a step: a tick, a cross or an open ring, each a shape of its own and named to a screen reader. */
+const stepMark = (k) => `<svg class="pn-mark ${k}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="${mark[k][0]}">${mark[k][1]}</svg>`;
+
+/** The pane of a session, as [its name, the head, the sections]: what the row says at once; what its transcript adds
+ * (the steps, the last reply, the files changed) when that is read. A session from another computer shows what the
+ * index knows and says where the rest is: its transcript is fetched only when it is opened. */
+function paneParts(s, pcs) {
+  const key = s.profile + '/' + s.id, mine = pn.key === key, t = mine ? pn.t : null, ss = mine ? pn.ss : null;
+  const remote = isRemote(s, pcs), device = s.device_name || nameOf(pcs, s.device) || (S.state && S.state.computer) || 'this computer';
+  const tool = TOOL[s.harness] || s.harness, title = s.title || 'Untitled session', hash = sessionHash(s, pcs);
+  const project = s.project_name || (s.cwd || '').split(/[\\/]/).filter(Boolean).pop() || 'no folder';
+  const steps = t ? t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking') : null;
+  const failed = steps ? steps.filter((st) => st.status === 'error').length : s.failed || 0;
+  const files = steps ? new Set(steps.filter((st) => st.change).map((st) => st.change.path)).size : null;
+  const tokens = t ? t.meta.tokens : s.tokens, endedAt = (t ? t.meta.last_active_at : 0) || s.last_active_at;
+  const head = `${toolIcon(s.harness, 28)}<div class="grow"><div class="name trunc" title="${esc(title)}" data-testid="pane-name">${esc(title)}</div>
+    <div class="row small muted pn-where"><span class="trunc">${esc(project)}</span><span>·</span>${syncOn(pcs) && s.device ? cdot(pcs, s.device, device, 'on') : ''}<span class="trunc">${esc(device)}</span></div></div>`;
+  // the state strip: live (and that the pane follows it) with the time of its last step; or when it ended, and what failed
+  const [tone, dot, state, note] = s.archived ? ['plain', '<i class="a-dot"></i>', `archived · ended ${esc(when(endedAt))}`, '']
+    : s.open ? ['', '<i class="live-pulse-dot"></i>', '<span class="acT">live · following</span>', `last step ${esc(hm(endedAt))}`]
+    : s.open_elsewhere ? ['', '<i class="live-pulse-dot"></i>', `<span class="acT">live on ${esc(device)}</span>`, `last step ${esc(hm(endedAt))}`]
+    : ['plain', `<i class="a-dot ${failed ? 'bad' : ''}"></i>`, `ended ${esc(when(endedAt))}`, failed ? `<b class="negT">${failed} failed</b>` : ''];
+  // ONE primary for the state, as on the row and on the session's page: archived, read only; running here, follow;
+  // from another computer, resume here or why not; else resume
+  const primary = s.archived ? '<span class="reason" data-testid="pane-reason">archived: it can be read, not resumed</span>'
+    : s.open ? `<a class="btn primary grow" href="${hash}" data-testid="pane-primary">${ic.play}Follow live</a>`
+    : remote ? (canResume(s.resumable) ? `<button class="btn primary grow" data-act="resume-here" data-s="${resumeData(s)}" data-testid="pane-primary">Resume here</button>` : `<span class="reason" title="${esc(s.resumable || '')}" data-testid="pane-reason">${esc(reasonShort(s.resumable) || 'on ' + device)}</span>`)
+    : `<button class="btn primary grow" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}" title="Resume in ${esc(termName())}" data-testid="pane-primary">Resume</button>`;
+  const model = s.model || (t && (t.turns.findLast((x) => x.model) || {}).model) || '';
+  const span = s.open || s.open_elsewhere ? `running ${dur(Date.now() - s.started_at)}` : `ended ${new Date(endedAt).toDateString() === new Date(s.started_at).toDateString() ? hm(endedAt) : when(endedAt)} · ${dur(endedAt - s.started_at)}`;
+  const tile = (label, value, cls = '', why = '') => `<div class="pane-tile" ${why ? `title="${esc(why)}"` : ''}><span class="label">${label}</span><b class="${cls}">${value}</b></div>`;
+  const unread = remote ? `In the transcript on ${device}` : pn.gone && mine ? 'The transcript could not be read' : 'Reading the transcript…';
+  const last5 = (steps || []).slice(-5), reply = t && t.turns.findLast((x) => x.answer && x.answer.length);
+  const step = (st) => { const bad = st.status === 'error', busy = st.status === 'running' || st.status === 'pending';
+    return `${stepMark(bad ? 'bad' : busy ? 'busy' : 'ok')}<b class="trunc">${esc(st.tool)}</b><span class="mono trunc" title="${esc(st.input)}">${esc(st.input)}</span><span class="small ${bad ? 'negT' : busy ? 'acT' : 'muted'} ${bad || busy ? 'strong' : ''}">${bad ? 'failed' : busy ? 'running' : st.change ? `+${st.change.added} −${st.change.removed}` : ''}</span>`; };
+  const rest = remote ? `<div class="pane-sec"><p class="pane-note" data-testid="pane-rest">Its steps and its last reply are in the transcript on ${esc(device)}. Open transcript fetches it to this computer.</p></div>`
+    : !t ? `<div class="pane-sec"><p class="pane-note" data-testid="pane-rest">${pn.gone && mine ? 'The transcript could not be read.' : 'Reading the transcript…'}</p></div>`
+    : `<div class="pane-sec"><div class="pane-sub"><span>Last steps</span><span>newest last</span></div>${last5.length ? `<div class="pn-steps" data-testid="pane-steps">${last5.map(step).join('')}</div>` : '<p class="pane-note">No step yet.</p>'}</div>
+      <div class="pane-sec"><div class="pane-sub"><span>Last reply</span><span>${esc(tool)}${reply && reply.answer_at ? ' · ' + esc(hm(reply.answer_at)) : ''}</span></div>${reply ? `<div class="a-tx pn-bubble" data-testid="pane-reply">${md(reply.answer.at(-1))}</div>` : '<p class="pane-note" data-testid="pane-reply">No reply yet.</p>'}</div>`;
+  return [title, head, `<div class="pane-sec">
+      <div class="pane-why ${tone}" data-testid="pane-state">${dot}<b>${state}</b><span class="grow"></span><span class="small muted">${note}</span></div>
+      <div class="pane-acts">${primary}<a class="btn grow" href="${hash}" ${s.open ? `data-act="pane-transcript" data-key="${esc(key)}"` : ''} data-testid="pane-open">Open transcript</a></div>
+      ${remote ? '' : `<div class="pane-acts"><button class="btn grow" data-act="export-md" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-title="${esc(title)}" data-testid="pane-export">Export as Markdown</button><button class="btn icon" data-act="session-menu" data-path="${esc(s.source_path)}" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}" data-resume="${!s.archived && s.open ? 1 : ''}" data-terms="${s.archived ? '' : 1}" aria-label="More" aria-haspopup="menu" data-testid="pane-menu">⋯</button></div>`}</div>
+    <div class="pane-sec"><dl class="pane-kv short"><dt>Account</dt><dd class="row" data-testid="pane-account">${toolIcon(s.harness, 14)}<span class="trunc">${esc(acctName(s.profile))}</span></dd><dt>Tool</dt><dd>${esc(tool)}</dd>
+      <dt>Model</dt><dd class="mono trunc">${model ? esc(model) : '<span class="dim" title="Its log names no model">—</span>'}</dd><dt>Started</dt><dd>${esc(when(s.started_at))} <span class="muted">· ${esc(span)}</span></dd></dl></div>
+    <div class="pane-sec"><div class="pane-tiles">${tile('Tokens', fmt(tokens))}${tile('Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—', '', ss && ss.requests ? '' : remote || !mine || (!t && !pn.gone) ? unread : 'None of its requests is in the usage records')}${tile('Failed commands', String(failed), failed ? 'negT' : '')}${tile('Files changed', files == null ? '—' : String(files), '', files == null ? unread : '')}</div></div>
+    ${rest}`];
+}
+/** Read what the pane shows of the selected session (not a session of another computer: its transcript stays where
+ * it is until it is opened), then draw the pane alone. `again`: its log file changed. */
+async function readPane(key, again = false) {
+  if (pn.key === key && (pn.busy || (!again && (pn.t || pn.gone)))) return;
+  if (pn.key !== key) Object.assign(pn, { key, t: null, ss: null, gone: false, at: null });
+  pn.busy = true;
+  const i = key.indexOf('/'), who = { profile: key.slice(0, i), id: key.slice(i + 1) };
+  const [t, ss] = await Promise.all([call('transcript', who).catch(() => null), call('session_stats', who).catch(() => null)]);
+  if (pn.key !== key) return; // another session was selected while this one was read
+  Object.assign(pn, { busy: false, t: t || pn.t, ss: ss || pn.ss, gone: !t && !pn.t });
+  if (S.route.view !== 'sessions' || selected() !== key || !last) return;
+  // a session the list does not hold has nothing but its transcript: the page is drawn with it; else the pane alone
+  if (!last.picked) return show();
+  patchPane(...paneParts(last.picked, last.pcs));
+}
+// the selected session is read once, and followed while it runs here: the list beside it is not drawn again
+let paneWatch = '';
+function followPane(key, s, pcs) {
+  if (s && isRemote(s, pcs)) return;
+  // read once; again when the list's fresh read says the session went on since (a session that is not watched)
+  const moved = !!s && pn.key === key && pn.at != null && pn.at !== s.last_active_at;
+  if (s) pn.at = s.last_active_at;
+  readPane(key, moved);
+  if (!s || !s.open || !s.source_path || paneWatch === key + '|' + s.source_path) return;
+  paneWatch = key + '|' + s.source_path;
+  watchFile(s, () => { const on = S.route.view === 'sessions' && selected() === key && !!document.getElementById('pane'); if (!on) paneWatch = ''; return on; }, () => readPane(key, true));
+}
+// Open transcript on a running session: its page from the start, not following (Follow live opens it at its end)
+action('pane-transcript', (el) => { Object.assign(rv, { sessionKey: el.dataset.key, open: new Set(), more: new Set(), mode: 'all', follow: false }); location.hash = el.getAttribute('href'); });
 
 // ---------- read a session ----------
 // a header, five numbers, and the conversation as a chat with each turn's steps (folded) where they happened;
@@ -324,24 +434,29 @@ function drawSession(sheet) {
   show();
 }
 
-// an open session redraws while its tool writes to it: the log file's size and time are checked every 2 s
+// an open session redraws while its tool writes to it: the log file's size and time are checked every 2 s.
+// One watch at a time: the session on its page, or the one in the Sessions pane (`alive` says whether it is still shown)
 let liveTimer;
-export function watchLive(m) {
+function watchFile(m, alive, changed) {
   clearInterval(liveTimer);
   if (!m.open || !m.source_path) return;
-  const key = rv.sessionKey;
-  let last = null;
+  let seen = null;
   liveTimer = setInterval(async () => {
-    if (S.route.view !== 'session' || rv.sessionKey !== key) return clearInterval(liveTimer);
+    if (!alive()) return clearInterval(liveTimer);
     if (document.visibilityState !== 'visible') return; // minimized: nothing is looked at
     let stamp;
     try { stamp = JSON.stringify(await call('file_stamp', { path: m.source_path })); } catch { return; }
-    if (last === null) { last = stamp; return; }
+    if (seen === null) { seen = stamp; return; }
     // hidden in the tray, the change is not drawn; it is still a change at the first look once the window shows
-    if (stamp === last || document.getElementById('dialog-root').innerHTML || !(await shown())) return;
-    last = stamp;
-    render(true);
+    if (stamp === seen || document.getElementById('dialog-root').innerHTML || !(await shown())) return;
+    seen = stamp;
+    changed();
   }, 2000);
+}
+export function watchLive(m) {
+  const key = rv.sessionKey;
+  paneWatch = '';
+  watchFile(m, () => S.route.view === 'session' && rv.sessionKey === key, () => render(true));
 }
 action('follow-end', () => {
   rv.follow = true;
@@ -357,12 +472,14 @@ const terminals = () => [
 ];
 action('terminal-menu', (el) => openMenu(el, terminals()));
 const setTerminal = (v) => mutate(() => call('settings_set', { key: 'terminal', value: v }), 'Saved');
-// ⋯: the log file's folder; for a session running here also Resume (the head's primary is Follow live) and the terminal
+// ⋯: the log file's folder; for a session running here also Resume (the head's primary is Follow live) and the terminal.
+// In the Sessions pane, whose Resume has no ▾ beside it, the terminal is chosen here for every session (`terms`)
 action('session-menu', (el) => { const d = el.dataset, win = !S.state || !S.state.os || S.state.os === 'windows'; openMenu(el, [
-  ...(d.resume ? [{ label: 'Resume in ' + termName(), run: () => attempt(() => call('resume', { profile: d.profile, id: d.id, cwd: d.cwd }), 'Resumed in a new terminal') }, ...(win ? terminals() : [])] : []),
+  ...(d.resume ? [{ label: 'Resume in ' + termName(), run: () => attempt(() => call('resume', { profile: d.profile, id: d.id, cwd: d.cwd }), 'Resumed in a new terminal') }] : []), ...((d.resume || d.terms) && win ? terminals() : []),
   { label: 'Open the log file folder', run: () => call('open_folder', { path: d.path.replace(/[\\/][^\\/]*$/, '') }) },
 ]); });
 action('export-md', async (el) => {
-  const path = await saveFile(`${(S.cache.transcript.meta.title || 'session').replace(/[^\w -]+/g, '').slice(0, 60)}.md`);
+  // (the pane's button carries the title of the session it shows; the session's page has its transcript)
+  const path = await saveFile(`${(el.dataset.title || (S.cache.transcript && S.cache.transcript.meta.title) || 'session').replace(/[^\w -]+/g, '').slice(0, 60)}.md`);
   if (path) attempt(() => call('export_markdown', { profile: el.dataset.profile, id: el.dataset.id, path }), 'Exported');
 });
