@@ -727,7 +727,7 @@ try {
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
     const counts = await exec("return [...document.querySelectorAll('.b-section')].map((s) => s.querySelectorAll('.b-setting').length)");
-    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them less the Tours row');
+    assert.deepEqual(counts.slice(0, 7), [5, 3, 2, 2, 2, 3, 3], 'settings per section: Appearance has Text size too');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
@@ -1112,6 +1112,62 @@ description: Bulk skill ${i}
     await waitFor(async () => (await exec(`return document.querySelector('[data-testid=st-autostart]').checked`)) === true, 'redrawn with it on');
     await click('[data-testid=st-autostart]');
     await waitFor(() => !entry(), 'and removed');
+  });
+
+  await test('text size: Compact, Comfortable and Large zoom the whole window, the choice survives a restart of the page, and hrm sets it and refuses a wrong one', async () => {
+    const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
+    const zoom = () => exec("return +getComputedStyle(document.documentElement).zoom");
+    const pick = async (v, z) => {
+      await click(`[data-testid=st-textsize] button[data-v=${v}]`);
+      await waitFor(() => saved().text_size === v, v + ' saved');
+      await waitFor(async () => (await zoom()) === z, `the window zoomed to ${z}`);
+      await waitFor(async () => (await exec("return document.querySelector('[data-testid=st-textsize] button.on')?.dataset.v")) === v, v + ' shown as chosen');
+    };
+    try {
+    await nav('#settings');
+    await $('[data-testid=st-textsize]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=st-textsize] button')].map((b) => b.textContent + ' ' + b.getAttribute('aria-pressed'))"), ['Compact false', 'Comfortable true', 'Large false'], 'three sizes, Comfortable unless chosen');
+    await hasText('[data-key=setting-textsize]', 'Applies to every page.');
+    assert.equal(await zoom(), 1);
+    // the sidebar is 208 px of the design at every size: Large draws it over more of the window
+    const share = () => exec("const r = document.querySelector('aside.rail').getBoundingClientRect(), f = document.querySelector('.frame').getBoundingClientRect(); return r.width / f.width");
+    const at1 = await share();
+    await pick('large', 1.12);
+    assert.ok(Math.abs((await share()) / at1 - 1.12) < 0.02, 'everything is 12% larger: ' + (await share()) / at1);
+    await exec("document.querySelector('[data-testid=sec-appearance]').scrollIntoView()");
+    await shot('14c-settings-large');
+    // a menu still opens under its button at this size, the tour still lights the part it names, and a dialog still fits the window
+    await nav('#accounts');
+    await click('[data-testid=menu-codex-main]');
+    // (under it, or over it when the button is near the bottom of the window)
+    const off = await exec("const m = document.querySelector('.menu').getBoundingClientRect(), b = document.querySelector('[data-testid=menu-codex-main]').getBoundingClientRect(), f = document.querySelector('.frame').getBoundingClientRect(); return [f.right - m.right, m.top, f.bottom - m.bottom, m.top - b.bottom, b.top - m.bottom, b.right - m.left].map(Math.round)");
+    assert.ok(off[0] >= 0 && off[1] >= 0 && off[2] >= 0 && ((off[3] >= 0 && off[3] <= 8) || (off[4] >= 0 && off[4] <= 8)) && off[5] > 0, 'the menu sits by its button, inside the window: ' + off);
+    await page.keyboard.press('Escape');
+    await click('[data-testid=tour-start]');
+    await $('.tour-spot');
+    const spot = await exec("const s = document.querySelector('.tour-spot').getBoundingClientRect(), t = document.querySelector('[data-testid=add-account]').getBoundingClientRect(), z = document.documentElement.currentCSSZoom; return [s.left - t.left, s.top - t.top, s.right - t.right, s.bottom - t.bottom].map((d) => Math.round(Math.abs(d) / z))");
+    assert.deepEqual(spot, [6, 6, 6, 6], 'the tour frames Add account, 6 px around it');
+    await click('[data-testid=tour-skip]');
+    await click('[data-testid=add-account]');
+    const dlg = await exec("const m = document.querySelector('.modal-card'), r = m.getBoundingClientRect(); return [Math.round(r.top), Math.round(window.innerHeight - r.bottom), Math.round(parseFloat(getComputedStyle(m).maxHeight) * document.documentElement.currentCSSZoom - (window.innerHeight - 40 * document.documentElement.currentCSSZoom))]");
+    assert.ok(dlg[0] >= 0 && dlg[1] >= 0 && Math.abs(dlg[2]) <= 1, 'the dialog is inside the window, as tall as the window allows at most: ' + dlg);
+    await exec("document.querySelector('[data-act=dialog-close]').click()");
+    // a restart of the page: the size is read from the settings again
+    await page.reload();
+    await waitFor(() => exec("return !!document.querySelector('#sheet .page-head')"), 'the window drawn again', 30000);
+    await waitFor(async () => (await zoom()) === 1.12, 'Large after the restart');
+    assert.ok(hrm('settings', 'text_size').includes('large'), 'the CLI reads it');
+    assert.throws(() => hrm('settings', 'text_size', 'huge'), /compact, comfortable or large/, 'a wrong size is refused');
+    assert.equal(saved().text_size, 'large', 'and changes nothing');
+    await nav('#settings');
+    await $('[data-testid=st-textsize]');
+    await pick('compact', 0.92);
+    assert.ok(Math.abs((await share()) / at1 - 0.92) < 0.02, 'everything is 8% smaller: ' + (await share()) / at1);
+    await pick('comfortable', 1);
+    } finally {
+      // whatever happened above, the tests after this one run at the usual size
+      await exec("return window.__TAURI__.core.invoke('call', { op: 'settings_set', args: { key: 'text_size', value: 'comfortable' } }).then(() => import('./core.js')).then((c) => c.loadState())");
+    }
   });
 
   await test('a walkthrough on a page\'s first visit, and setting tooltips with their defaults', async () => {

@@ -275,6 +275,13 @@ export function applyTheme(st) {
   themeSetting = st.settings.theme || 'system';
   document.documentElement.dataset.brand = st.settings.brand === 'vg' ? 'vg' : 'hm';
   document.documentElement.dataset.motion = st.settings.moving_routes === false ? 'still' : 'live';
+  // Text size: the whole window zooms, so every page, dialog and menu follows at once
+  // (not the tray popup: its window has one size, set where it is made)
+  if (!document.body.classList.contains('popup')) {
+    const z = { compact: 0.92, large: 1.12 }[st.settings.text_size] || 1;
+    document.documentElement.style.zoom = z;
+    document.documentElement.style.setProperty('--zoom', z); // for what is sized by the window's height (app.css --vh)
+  }
   setTheme();
 }
 
@@ -374,11 +381,20 @@ export function confirmDialog(title, body, okLabel = 'Confirm', danger = true) {
   });
 }
 
+// ---------- where things are, for what is placed by hand (the menu, the tour) ----------
+// Text size zooms the page. The browser then reports rectangles and the window in screen pixels, while a position is
+// set in the page's own pixels: these two answer in the page's, so a menu lands under its button at every size.
+const zoomNow = () => document.documentElement.currentCSSZoom || 1;
+/** An element's rectangle in the page's pixels. */
+export function rectOf(el) { const z = zoomNow(), r = el.getBoundingClientRect(); return { left: r.left / z, top: r.top / z, right: r.right / z, bottom: r.bottom / z, width: r.width / z, height: r.height / z }; }
+/** The window's [width, height] in the page's pixels. */
+export const windowSize = () => [window.innerWidth / zoomNow(), window.innerHeight / zoomNow()];
+
 // ---------- the popover menu under a ⋯ ----------
 let menuEl = null, menuAnchor = null, outside = null;
 export function openMenu(anchor, items) {
   closeMenu();
-  const r = anchor.getBoundingClientRect();
+  const r = rectOf(anchor), [W, H] = windowSize();
   const m = document.createElement('div');
   m.className = 'menu';
   m.setAttribute('role', 'menu');
@@ -387,10 +403,10 @@ export function openMenu(anchor, items) {
   document.body.appendChild(m);
   menuEl = m; menuAnchor = anchor;
   anchor.setAttribute('aria-expanded', 'true');
-  const left = Math.min(r.left, window.innerWidth - m.offsetWidth - 8);
+  const left = Math.min(r.left, W - m.offsetWidth - 8);
   m.style.left = left + 'px';
   // near the bottom of the window the menu opens upward, so every item stays reachable
-  m.style.top = (r.bottom + 4 + m.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - 4 - m.offsetHeight) : r.bottom + 4) + 'px';
+  m.style.top = (r.bottom + 4 + m.offsetHeight > H - 8 ? Math.max(8, r.top - 4 - m.offsetHeight) : r.bottom + 4) + 'px';
   m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); run(items[+b.dataset.i].run); } };
   m.onkeydown = (e) => {
     const bs = [...m.querySelectorAll('button')], i = bs.indexOf(document.activeElement);

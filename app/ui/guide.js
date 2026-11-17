@@ -1,7 +1,7 @@
 // The page tour, started from the ? in the top bar: it highlights one part of the page at a time with
 // a note beside it (Next / Back, or the arrow keys). Close or Esc ends it; the ? button starts it again.
 
-import { S, action, keyStore } from './core.js';
+import { S, action, keyStore, rectOf, windowSize } from './core.js';
 import { esc } from './lib.js';
 
 // [selector of the part to highlight (null: the middle of the window), title, explanation]
@@ -65,6 +65,7 @@ const TOURS = {
   ],
   settings: [
     ['[data-testid=tip-term]', 'What each setting means', 'Point at ⓘ next to a setting for what it does and what its default means.'],
+    ['[data-testid=st-textsize]', 'Text size', 'Compact, Comfortable or Large: the whole window follows, on every page.'],
   ],
   computers: [
     ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
@@ -99,10 +100,10 @@ function show() {
     ${tour.i ? '<button class="btn sm" data-act="tour-back">Back</button>' : ''}
     <button class="btn primary sm" data-act="tour-next" data-testid="tour-next">${last ? 'Done' : 'Next'}</button></span></div>`;
   document.body.appendChild(pop);
-  const W = window.innerWidth, H = window.innerHeight, pw = pop.offsetWidth, ph = pop.offsetHeight;
+  const [W, H] = windowSize(), pw = pop.offsetWidth, ph = pop.offsetHeight;
   if (target) {
     target.scrollIntoView({ block: 'nearest' });
-    const r = target.getBoundingClientRect();
+    const r = rectOf(target);
     const spot = document.createElement('div');
     spot.className = 'tour-spot';
     Object.assign(spot.style, { left: r.left - 6 + 'px', top: r.top - 6 + 'px', width: r.width + 12 + 'px', height: r.height + 12 + 'px' });

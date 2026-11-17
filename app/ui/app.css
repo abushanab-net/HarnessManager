@@ -64,6 +64,8 @@ html[data-brand="vg"] { --font-display: "EB Garamond", Garamond, Georgia, "Times
 :root { --space-2: 8px;
   /* the type scale (1.10): nothing a person reads is under --fs-small */
   --fs-title: 20px; --fs-section: 15px; --fs-body: 13px; --fs-small: 12px; --fs-key: 22px;
+  /* the window's height in the page's pixels: Text size zooms the page (core.js sets --zoom), and 100vh is zoomed with it */
+  --vh: calc(100vh / var(--zoom, 1));
   --font-text: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace; }
 /* ---------- base ---------- */
 [hidden] { display: none !important; }
@@ -1622,7 +1624,7 @@ html[data-theme="light"] .yc-cell.lv-4 { fill: var(--ac); }
 .modal-card {
   width: 100%;
   max-width: 640px;
-  max-height: 88vh;
+  max-height: calc(var(--vh) * .88);
   overflow-y: auto;
   background: var(--bg-panel);
   border: 1px solid var(--line-strong);
@@ -1837,12 +1839,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .cap-mini-row { grid-template-columns: 30px minmax(0,1fr) 34px; }
 .route-inspector-bar { flex-wrap: wrap; }
 .route-chain { flex-wrap: wrap; }
-.tray-popup { position: fixed; left: 202px; bottom: 16px; width: 540px; max-height: calc(100vh - 32px); }
+.tray-popup { position: fixed; left: 202px; bottom: 16px; width: 540px; max-height: calc(var(--vh) - 32px); }
 .tray-rings-grid { grid-template-columns: repeat(2,minmax(0,1fr)); max-height: 352px; overflow-x: hidden; padding-right: 4px; }
 .tray-ring-card { min-width: 0; }
 .tray-ring-card b { white-space: normal !important; overflow-wrap: anywhere; }
 
-.modal-card { max-height: calc(100vh - 40px); }
+.modal-card { max-height: calc(var(--vh) - 40px); }
 .tool-pick-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .tool-pick-card { min-width: 0; }
 .kind-pick-card { min-width: 0; }
@@ -1935,7 +1937,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .b-command { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; font-size: var(--fs-small); margin-top:4px; }
 .b-clamp { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:4px; font-size: var(--fs-small); }
 .b-empty { display:flex; flex-direction:column; gap:8px; padding:24px 8px; min-height:84px; }
-.b-matrix-wrap { max-height:calc(100vh - 270px); overflow:auto; min-height:0; }
+.b-matrix-wrap { max-height:calc(var(--vh) - 270px); overflow:auto; min-height:0; }
 .b-matrix { table-layout:fixed; }
 .b-matrix th { position:sticky; top:0; z-index:2; background:var(--bg-panel); }
 .b-matrix th:first-child { width:36%; }
@@ -2031,7 +2033,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
  .b-apps th:nth-child(5) { width:26%; }
 }
 
-.b-page[data-b-page="skills"] .b-matrix-wrap { max-height:calc(100vh - 360px); }
+.b-page[data-b-page="skills"] .b-matrix-wrap { max-height:calc(var(--vh) - 360px); }
 .b-live-prompt { font-family:inherit; }
 html[data-theme="dark"] .b-page { color-scheme:dark; }
 html[data-theme="light"] .b-page { color-scheme:light; }

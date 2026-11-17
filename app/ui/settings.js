@@ -7,7 +7,7 @@
 import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, keyStore } from './core.js';
 import { esc, when } from './lib.js';
 import { computersStatus } from './computers.js';
-import { pageHead } from './parts.js';
+import { pageHead, seg } from './parts.js';
 
 // ---------- the parts ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
@@ -52,7 +52,8 @@ view('settings', async (sheet, params) => {
       row('brand', 'Theme', info('brand', '<b>Harness (the default):</b> porcelain and night, Inter.<br><b>VektraGrid:</b> ivory and deep green, Garamond headings; deep teal leads, plum marks the router, sand gold is the warning.'), 'The look of this window; light and dark follow the choice below.', chips('brand', s.brand || 'hm', [['hm', 'Harness'], ['vg', 'VektraGrid']], 'st-brand'))
       + row('theme', 'Light and dark', info('theme', '<b>System (the default):</b> follows the light or dark setting of Windows or macOS.<br><b>Light</b> or <b>Dark</b>: always that.'), 'Follow the system, or keep one.', chips('theme', s.theme, [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], 'st-theme'))
       + row('quota', 'Limits shown as', info('quota', '<b>Left (the default):</b> how much of each limit you still have, as the tools show it.<br><b>Used:</b> how much has gone.'), 'Applies to every ring and bar.', chips('quota_display', s.quota_display, [['left', 'Left'], ['used', 'Used']], 'st-quota'))
-      + row('motion', 'Moving routes', info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live routes on the Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion')))}
+      + row('motion', 'Moving routes', info('motion', 'Pulses along the live routes, as fast as their traffic. Off, or with reduced motion in Windows or macOS, the routes are a still picture.<br><b>Default: on.</b>'), "The live routes on the Overview. Off, or the system's reduced motion, keeps them still.", sw('moving_routes', s.moving_routes, 'Animate the routes', 'st-motion'))
+      + row('textsize', 'Text size', info('textsize', '<b>Compact:</b> everything a little smaller, for more on one screen.<br><b>Comfortable (the default):</b> body text at 13 px, nothing under 12 px.<br><b>Large:</b> everything a little larger.'), 'Applies to every page.', seg('Text size', [['compact', 'Compact'], ['comfortable', 'Comfortable'], ['large', 'Large']], s.text_size || 'comfortable', (v) => `data-act="set-now" data-key="text_size" data-v="${v}"`, 'st-textsize')))}
     ${section('window', win ? 'Window and terminal' : 'Window',
       row('tray', 'Close to the tray', info('tray', '<b>On (the default):</b> the window\'s X hides Harness Manager to the tray; usage and limits keep refreshing, and the tray icon opens it again. Quit from the tray menu.<br><b>Off:</b> the X quits.'), 'The window hides and the app keeps refreshing until you choose Quit.', sw('close_to_tray', s.close_to_tray, 'Keep running in the tray', 'st-tray'))
       + (win ? row('auto', 'Launch at sign-in', info('auto', 'Starts Harness Manager in the tray when you sign in to Windows, so usage and limits are current when you open it.<br><b>Default: off.</b>'), 'Starts hidden in the tray.', `<label class="b-switch"><input type="checkbox" data-act="autostart" ${st.autostart ? 'checked' : ''} data-testid="st-autostart"> Start with Windows</label>`) : '')
