@@ -3,7 +3,7 @@
 // dialog with its Form / JSON switch, Import from apps. The page draws from its last data, so the search and the pager
 // never wait on the backend. The helpers at the top are shared with Skills and System prompts.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, render, shownTools, setNavCounts, notice, clearNotice, patch } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, openMenu, action, shownTools, setNavCounts, notice, clearNotice, patch } from './core.js';
 import { esc, ic, toolIcon, dur } from './lib.js';
 
 // ---------- the reference's pieces ----------
@@ -12,7 +12,7 @@ export const badge = (text, tone = 'neutral', title = '') => `<span class="plan-
 export const empty = (title, text = '') => `<div class="b-empty"><b>${esc(title)}</b>${text ? `<span class="muted">${esc(text)}</span>` : ''}</div>`;
 export const panel = (title, body, actions = '', attrs = '') => `<section class="panel-card" ${attrs}><div class="panel-head"><h2 class="panel-title">${title}</h2>${actions}</div>${body}</section>`;
 export const field = (id, label, value, { type = 'text', extra = '', testid = '' } = {}) => `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${extra} ${testid ? `data-testid="${testid}"` : ''}></div>`;
-export const dlgError = (msg) => (msg ? `<div class="dlg-text err" role="alert" id="dlg-err">${esc(msg)}</div>` : '');
+const dlgError = (msg) => (msg ? `<div class="dlg-text err" role="alert" id="dlg-err">${esc(msg)}</div>` : '');
 export const dlgFoot = (okLabel, okAct, okTestid = '') => `<div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="btn-primary" data-act="${okAct}" ${okTestid ? `data-testid="${okTestid}"` : ''}>${esc(okLabel)}</button></span></div>`;
 /** Previous · "1–25 of 41" · Next · Rows [25 ▾]; clamps st.page to the rows. The actions are `<act>-page` and `<act>-per`. */
 export function pagerHtml(n, st, act) {
@@ -57,9 +57,6 @@ action('skill-takeover', async (el) => {
   if (!r) return;
   toast(r.moved.length ? `Replaced ${r.moved.length} ${r.moved.length === 1 ? 'copy' : 'copies'}; the originals are in .hrm-backup` : 'Nothing to replace: no copy stood where a link should be');
   syncReport(r.sync);
-});
-action('item-remove', async (el) => {
-  if (await confirmDialog('Remove ' + el.dataset.name, `Remove <b>${esc(el.dataset.name)}</b> from every tool Harness Manager wrote it into?`, 'Remove')) syncReport(await mutate(() => call('item_remove', { kind: el.dataset.kind, name: el.dataset.name })));
 });
 
 // ---------- the list ----------

@@ -1,5 +1,5 @@
 // Across computers: the computers chip in the top bar, the "All computers · This computer" choice, and the helpers
-// every page uses to draw per-computer data (dots, split bars, names). The operations (computers_status,
+// every page uses to draw per-computer data (dots, names). The operations (computers_status,
 // computers_now, computers_set and the per-computer fields of home, sessions, projects and live) come from the sync
 // core; until it is there, an "unknown operation" answer reads as "sync off, no peers", so every page draws as today.
 // The direct connection: the pairing dialog (computers_pair_start | cancel | join and the computers-pairing event),
@@ -43,34 +43,18 @@ export function transportLine(c, d) {
 /** A computer's colour follows its place in the list: this one teal, then sand, iris, amber. */
 export const colorIdx = (c, id) => Math.max(0, computers(c).findIndex((d) => d.id === id)) % 4;
 export const cdot = (c, id, title, cls = '') => `<i class="cdot c${colorIdx(c, id)} ${cls}" title="${esc(title || nameOf(c, id))}"></i>`;
-export const cdots = (c, ids) => `<span class="cdots">${[...new Set(ids)].map((id) => cdot(c, id)).join('')}</span>`;
-/** A value split by computer ([{id, name, value}]): a thin bar in the computers' colours, and the largest named. */
-export function splitBar(c, parts) {
-  const total = parts.reduce((a, p) => a + (p.value || 0), 0);
-  if (parts.length < 2 || !total) return { bar: '', note: '' };
-  const top = parts.reduce((a, p) => (p.value > a.value ? p : a), parts[0]);
-  let x = 0;
-  return { bar: `<svg class="split-bar" aria-hidden="true">${parts.map((p) => { const w = ((p.value || 0) / total) * 100, r = `<rect class="c${colorIdx(c, p.id)}" x="${x.toFixed(2)}%" y="0" width="${w.toFixed(2)}%" height="100%"><title>${esc(p.name || nameOf(c, p.id))}</title></rect>`; x += w; return r; }).join('')}</svg>`,
-    note: `${esc(top.name || nameOf(c, top.id))} ${Math.round((top.value / total) * 100)}%` };
-}
-/** The split a home tile carries (tiles[*].by_device), by the tile's key. */
-export function tileSplit(d, key) {
-  const t = d && (d.tiles || (d.dash && d.dash.tiles)), x = !t ? null : Array.isArray(t) ? t.find((v) => (v.key || v.id || v.metric) === key) : t[key];
-  return (x && x.by_device) || [];
-}
 
 // ---------- All computers · This computer, remembered on this computer ----------
 const SCOPE_KEY = 'hm.scope';
 export const scope = () => { try { return localStorage.getItem(SCOPE_KEY) === 'here' ? 'here' : 'all'; } catch { return 'all'; } };
 export const setScope = (v) => { try { localStorage.setItem(SCOPE_KEY, v); } catch {} };
-export const scopeSeg = () => `<div class="chip-group" role="group" aria-label="Computers" data-testid="scope">${[['all', 'All computers'], ['here', 'This computer']].map(([v, l]) => `<button class="filter-chip ${scope() === v ? 'active' : ''}" aria-pressed="${scope() === v}" data-act="scope" data-v="${v}" data-testid="scope-${v}">${l}</button>`).join('')}</div>`;
 action('scope', (el) => { setScope(el.dataset.v); render(); });
 
 // ---------- the chip in the top bar ----------
 const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + ' ago');
 /** A dot per computer in its colour (the name and when it was heard on hover), dimmed when not heard from within three
  *  minutes, then "N computers" with the last sync round on hover; hidden with sync off. As the reference draws it. */
-export function drawChip(c) {
+function drawChip(c) {
   const el = document.getElementById('pcs');
   if (!el) return;
   el.hidden = !syncOn(c);
@@ -101,11 +85,11 @@ const onEnter = (ids, okId) => { for (const id of ids) document.getElementById(i
 
 // ---------- pairing: a six-digit code shown on one computer, typed on the other ----------
 /** "482915" -> "482 915": digits only, six at most. */
-export const fmtCode = (v) => String(v).replace(/\D/g, '').slice(0, 6).replace(/^(\d{3})(\d)/, '$1 $2');
+const fmtCode = (v) => String(v).replace(/\D/g, '').slice(0, 6).replace(/^(\d{3})(\d)/, '$1 $2');
 const mmss = (ms) => `${Math.max(0, Math.floor(ms / 60000))}:${String(Math.max(0, Math.floor((ms % 60000) / 1000))).padStart(2, '0')}`;
 let pairing = null; // { code, timer } while a code is shown here
 /** The dialog, on the Show a code or the Enter a code tab. */
-export function pairDialog(tab = 'show') {
+function pairDialog(tab = 'show') {
   const body = tab === 'show'
     ? `<div class="b-dialog-content" id="pair-show-body" data-testid="pair-show-body"><p class="muted">Asking for a code…</p></div>${foot(`<button class="btn-secondary" data-act="dialog-close" data-testid="pair-cancel">Cancel</button>`)}`
     : `${field('pair-code-in', 'Code', 'class="mono" inputmode="numeric" autocomplete="off" placeholder="482 915" maxlength="7" aria-label="The six-digit code" data-testid="pair-code-in"', 'The six digits shown on the other computer, under Pair a computer… › Show a code.')}
@@ -180,7 +164,7 @@ function afterJoin(st) {
   else if (h.joined && !h.ring) ringEnterDialog();
 }
 /** Join with a code…: the hub's address, and the code from another computer's Invite or the admin token for the first. */
-export function hubJoinDialog() {
+function hubJoinDialog() {
   const h = hubOf();
   openDialog(`${dlgHead('Join a hub')}
     ${field('hub-url', 'Address', `class="mono" type="url" value="${esc(h.url || '')}" placeholder="https://hub.example.com" autocomplete="off" aria-label="Hub address" data-testid="hub-url-in"`, 'The address of the hub you host (deploy/hub in the repository sets one up in ten lines).')}

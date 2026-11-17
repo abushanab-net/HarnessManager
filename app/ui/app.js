@@ -52,7 +52,7 @@ let stale = false;
 const refreshed = async () => {
   if (!(await shown())) { stale = true; return; }
   stale = false; setFresh();
-  if (['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) redrawSoon();
+  if (['home', 'accounts', 'account', 'projects', 'sessions'].includes(S.route.view)) redrawSoon();
 };
 if (ev) ev.listen('refreshed', () => { S.usageAt = Date.now(); refreshed(); });
 if (ev) onShown(() => { if (stale) { stale = false; refreshed(); } });

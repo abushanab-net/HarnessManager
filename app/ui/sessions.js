@@ -55,7 +55,7 @@ action('tag-edit', async (el) => {
 
 // ---------- sessions ----------
 // the list's state lives in the hash (#sessions?group=date&days=30&live=1&project=<key>&q=...), so every filter is a link
-export const clean = (p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== '' && v != null));
+const clean = (p) => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== '' && v != null));
 const sq = (patchParams) => go('sessions', clean({ ...S.route.params, ...patchParams }));
 export const href = (view, p) => '#' + view + (Object.keys(clean(p)).length ? '?' + new URLSearchParams(clean(p)) : '');
 export const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
@@ -105,7 +105,6 @@ view('sessions', async (sheet, params) => {
     if (full) g.sessions = full.sessions;
   }));
   const all = groups.flatMap((g) => g.sessions);
-  S.cache.sessionOrder = all.map((s) => ({ profile: s.profile, id: s.id }));
   const tools = [...new Set(all.map((s) => s.harness))].map((h) => TOOL[h]).join(', ').replace(/, ([^,]*)$/, ' and $1');
   // a running session sits at the top, whatever the grouping, never inside a fold
   const isLive = (s) => s.open || s.open_elsewhere;

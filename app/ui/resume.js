@@ -7,7 +7,7 @@ import { esc, when, ic } from './lib.js';
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 
 /** The Resume-here dialog for a session row from another computer (`s`: the row as `sessions` returned it). */
-export async function resumeHereDialog(s) {
+async function resumeHereDialog(s) {
   const from = s.device_name || 'the other computer';
   // this computer's clone of the repository: the project's root, as the Projects list knows it
   const projects = await call('projects', {}).catch(() => []);

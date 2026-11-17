@@ -3,10 +3,10 @@
 // needs attention and the 53-week year clock, and the latest replies with the request log behind a button.
 // Measured numbers are plain; estimates carry ≈; — means not read. No tokens-per-second on this page.
 
-import { S, call, view, render, attempt, changed, toast, loadState, action, acctName, refreshText, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate } from './core.js';
+import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate } from './core.js';
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
-import { accountViews, metricsOf, renderRingSvg, fmtDuration, fmtAbsoluteReset, money, TOOL, eligible, w5of, wkof, showUsed } from './accounts.js';
-import { computersStatus, syncOn, computers, nameOf, scope, setScope } from './computers.js';
+import { accountViews, metricsOf, renderRingSvg, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
+import { computersStatus, syncOn, computers, nameOf, scope } from './computers.js';
 
 const RANGES = [['today', 0], ['7d', 168], ['30d', 720], ['all', 24 * 400]], RANGE_LABEL = { today: 'Today', '7d': '7 d', '30d': '30 d', all: 'All' };
 // the page's own choices: the tool chips, which computer's sessions, the readout range, the year clock's computer,
@@ -153,7 +153,7 @@ function repliesTable(rows, pcs, peers) {
   return `<table class="replies-table" data-testid="latest-replies"><thead><tr><th>Time</th><th>Account</th><th>Model</th>${peers ? '<th>Computer</th>' : ''}<th class="num">Tokens</th><th class="num" title="${TIMING}">First reply</th></tr></thead><tbody>
     ${rows.slice(0, 5).map((r) => `<tr><td>${timeCell(r.ts)} <span class="ago">(${ago(Date.now() - r.ts)})</span></td><td><span class="cell-inline">${toolIcon(r.harness, 14)}<b>${esc(acctName(r.profile))}</b></span></td><td>${esc(r.model)}</td>${peers ? `<td><span class="cell-inline">${r.device ? pcDot(pcs, r.device) + esc(nameOf(S.cache.computers, r.device)) : ''}</span></td>` : ''}<td class="num">${fmt(r.input + r.output + r.cache_read + r.cache_write)}</td><td class="num ${r.ttft_ms > 4000 ? 'warnT' : ''}" data-testid="ttft">${firstReply(r)}</td></tr>`).join('') || `<tr><td colspan="${peers ? 6 : 5}" class="muted">No replies in this range.</td></tr>`}</tbody></table>`;
 }
-function requestTable(rows, pcs) {
+function requestTable(rows) {
   return `<table class="replies-table" data-testid="request-log"><thead><tr><th>Time</th><th>Account</th><th>Model</th><th>Computer</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num" title="${TIMING}">Speed ≈</th><th class="num" title="${TIMING}">First reply</th><th class="num">Cost ≈</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td class="mono">${timeCell(r.ts)}</td><td><span class="cell-inline">${toolIcon(r.harness, 14)}<b>${esc(acctName(r.profile))}</b></span></td><td class="mono">${esc(r.model)}</td><td>${r.device ? esc(nameOf(S.cache.computers, r.device)) : esc((S.state && S.state.computer) || '')}</td><td class="num">${fmt(r.input)}</td><td class="num">${fmt(r.output)}</td><td class="num">${fmt(r.cache_read)}</td><td class="num">${fmt(r.cache_write)}</td><td class="num" data-testid="speed">${speed(r)}</td><td class="num" data-testid="ttft">${firstReply(r)}</td><td class="num"><b>${money(r.cost, 4)}</b></td></tr>`).join('') || '<tr><td colspan="11" class="muted">No replies in this range.</td></tr>'}</tbody></table>`;
 }
@@ -260,10 +260,6 @@ action('home-more', async (el) => {
   const t = document.getElementById('home-table');
   if (t) t.innerHTML = requestTable(st.rows);
   if (st.rows.length >= r.total) el.remove();
-});
-action('home-sync', async () => {
-  const r = await attempt(() => call('refresh', { live: S.state && S.state.live_quota }));
-  if (r) { S.lastSync = Date.now(); toast(refreshText(r)); changed(); }
 });
 // Escape with nothing open returns the selection to the finding's account
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.route.view === 'home' && st.selected && !dialogOpen() && !document.querySelector('.menu')) { st.selected = null; render(); } });

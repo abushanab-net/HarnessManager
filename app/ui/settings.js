@@ -88,7 +88,7 @@ action('set-jump', (el) => jump(el.dataset.v));
 function computersSection(c, s, st, ts) {
   const on = syncOn(c), now = Date.now(), n = computers(c).length;
   const hub = c.hub || {}, hubOn = on && c.mode === 'hub';
-  const card = (d, i) => {
+  const card = (d) => {
     const me = d === c.this, seq = d.last_seq || 0, done = me ? (d.published_seq ?? seq) : (d.applied_seq || 0), pct = seq ? Math.min(100, Math.round((done / seq) * 100)) : 100;
     const stale = !me && !heardOn(d, now);
     const heard = me ? 'writing now' : d.connected ? 'connected' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';

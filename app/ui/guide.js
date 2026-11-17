@@ -132,7 +132,7 @@ function show() {
 }
 
 /** Start the tour of a page (from the first visit, or the ? button). */
-export function startTour(view) {
+function startTour(view) {
   const steps = visibleSteps(view);
   if (!steps.length) return false;
   tour = { view, steps, i: 0 };

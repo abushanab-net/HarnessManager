@@ -2,15 +2,14 @@
 // Add account with sign-in; Start in a folder; the account menu; the tray popup. The account adapter, the one
 // eligibility rule and the ring renderer live here and feed the Overview and the popup too.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, warmPage, keepPage, keyStore } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon } from './lib.js';
-import { tagsHtml } from './sessions.js';
-import { syncOn, computers, nameOf, cdot } from './computers.js';
-import { resumeData, reasonShort } from './resume.js';
+import './sessions.js'; // nothing of it is used here: kept so the modules still load in the order they did, in the window and in the tray popup
+import { syncOn, nameOf } from './computers.js';
 
 export const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
 /** The tools whose plans have windows to read; the others show usage only. */
-export const PLAN_TOOLS = ['claude', 'codex', 'agy'];
+const PLAN_TOOLS = ['claude', 'codex', 'agy'];
 export const money = (c, d = 2) => (c == null ? '—' : '$' + c.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }));
 /** "4 h 08 m", "2 d 14 h": the reference's duration. */
 export function fmtDuration(ms) {
@@ -31,8 +30,6 @@ export function fmtAbsoluteReset(at, now = Date.now()) {
 const agoText = (t, now) => (t == null ? 'never' : now - t < 60000 ? 'just now' : dur(now - t) + ' ago');
 /** The row's "read … ago" in short units (11 h ago), on its own line under the buttons, so they keep their size. */
 const readAgo = (t, now) => { const d = now - t; return d < 60000 ? 'just now' : (d < 3600e3 ? `${Math.floor(d / 60000)} m` : d < 86400e3 ? `${Math.floor(d / 3600e3)} h` : `${Math.floor(d / 86400e3)} d`) + ' ago'; };
-const tier = (p, id) => p.quota && p.quota.tiers.find((t) => t.id === id);
-const weekTier = (p) => tier(p, 'week') || (p.quota && p.quota.tiers.find((t) => t.id.startsWith('week')));
 const emailOf = (p) => p.identity.email || p.expected_email || '';
 const planOf = (p) => (p.kind === 'api_key' ? ['API key', 'warn'] : p.kind === 'routed' ? [`Routed · ${p.route || ''}`, 'r2'] : !p.identity.logged_in ? ['Not logged in', 'neg'] : p.identity.needs_login ? ['Login expired', 'neg'] : [p.identity.plan || 'Logged in', 'ac']);
 /** The setting: limits as what is left (the default) or what is used. */
@@ -40,7 +37,7 @@ export const showUsed = () => !!(S.state && S.state.settings && S.state.settings
 
 /** An account as every page draws it: the profile with its windows (left, used, reset, the forecast), its cap, and
  * where it runs; x is limits_extra (forecast, caps), pcs the computers (for sessions elsewhere). */
-export function acctView(p, x = {}, now = Date.now(), pcs = null) {
+function acctView(p, x = {}, now = Date.now(), pcs = null) {
   const tiers = (p.quota && p.quota.tiers) || [];
   const needsLogin = p.kind === 'subscription' && (p.identity.needs_login || !p.identity.logged_in);
   const windows = tiers.map((t) => {
@@ -62,7 +59,7 @@ export function acctView(p, x = {}, now = Date.now(), pcs = null) {
 /** Every shown account, as acctView draws it. */
 export const accountViews = (st, x, now, pcs) => { const ids = shownTools(st).map((h) => h.id); return st.profiles.filter((p) => ids.includes(p.harness)).map((p) => acctView(p, x, now, pcs)); };
 /** The one rule for a recommendation: a subscription, signed in, with measured windows none of which is used up. */
-export const eligible = (a) => a.kind === 'subscription' && !a.needsLogin && a.measured && a.windows.every((w) => !w.open || w.left > 0);
+const eligible = (a) => a.kind === 'subscription' && !a.needsLogin && a.measured && a.windows.every((w) => !w.open || w.left > 0);
 export const w5of = (a) => a.windows.find((w) => w.kind === '5h');
 export const wkof = (a) => a.windows.find((w) => w.kind === 'week') || a.windows[0];
 /** Most room, resets soonest, and every window running out: the Overview's deck, the Accounts finding and the tray share these. */
@@ -157,7 +154,7 @@ function accountRow(a, best, now, used, pcs) {
 }
 
 /** The finding: the account with the most room, then what else needs saying. */
-export function findings(accts, now) {
+function findings(accts, now) {
   const { bestRoomAcct: best } = metricsOf(accts);
   let text = '';
   if (best) { const s = w5of(best), w = wkof(best); text = `<span class="lead-name">${esc(best.name)}</span> has the most room: ${s ? s.used + '% of its 5-hour limit and ' : ''}${w ? w.used + '% of its week used.' : 'ready to start.'}`; }
@@ -322,7 +319,7 @@ async function startDialog(name) {
   openDialog(`${dlgHead('Start ' + label + ' in a folder…')}
     <div class="form-field"><label for="sd-acct">Account</label><select id="sd-acct" data-act="sd-acct"><option value="${esc(name)}" selected>${esc(label)}${p.identity.plan ? ' (' + esc(p.identity.plan) + ')' : ''}</option>${others.map((x) => `<option value="${esc(x.name)}">${esc(x.label)}${x.identity.plan ? ' (' + esc(x.identity.plan) + ')' : ''}</option>`).join('')}</select></div>
     <span class="dlg-text">Runs as <b>${esc(label)}</b>, with its own login, history and usage. Other accounts, and the consoles they have open, are not affected.</span>
-    <div class="form-field"><label for="sd-recent">Folder</label><div class="field-row">${recent.length ? `<select id="sd-recent" class="mono" data-act="sd-recent" aria-label="Recent folders of this account">${recent.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>` : ''}<button class="btn-secondary" id="sd-choose">Choose folder…</button></div><span class="mono muted" id="sd-dir" data-testid="sd-dir">${esc(dir || 'No folder chosen')}</span></div>
+    <div class="form-field"><label for="sd-recent">Folder</label><div class="field-row">${recent.length ? `<select id="sd-recent" class="mono" aria-label="Recent folders of this account">${recent.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select>` : ''}<button class="btn-secondary" id="sd-choose">Choose folder…</button></div><span class="mono muted" id="sd-dir" data-testid="sd-dir">${esc(dir || 'No folder chosen')}</span></div>
     ${SKIP[p.harness] ? `<label class="check-row"><input type="checkbox" id="sd-skip" data-testid="sd-skip"><span>Skip permission prompts (<code class="mono">${SKIP[p.harness]}</code>)</span></label><span class="muted">${esc(p.harness_label)} then runs commands and edits files without asking first. Only for folders you trust.</span>` : ''}
     <div class="form-field"><label for="sd-args">Extra arguments <span class="opt">(optional)</span></label><input class="mono" id="sd-args" placeholder='e.g. --model opus --append-system-prompt "Be brief"' data-testid="sd-args"><span class="muted">Added after the start command, for this terminal only. Separate with spaces; quote values that contain spaces.</span></div>
     <div class="modal-foot"><span class="acts"><button class="btn-secondary" data-act="dialog-close">Cancel</button><button class="btn-primary" id="sd-ok" data-testid="sd-ok" ${dir ? '' : 'disabled'}>▶ Open terminal</button></span></div>`, { size: 'sm', label: 'Start in a folder' });

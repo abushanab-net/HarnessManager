@@ -4,7 +4,7 @@
 
 import { S, call, view, toast, attempt, mutate, changed, confirmDialog, openDialog, closeDialog, dlgHead, openMenu, action, render, shownTools, setNavCounts, patch, pickFolder } from './core.js';
 import { esc, toolIcon, ic } from './lib.js';
-import { syncReport, head, badge, empty, panel, field, dlgError, dlgFoot, pagerHtml, toolHead, toolCell, findText } from './mcp.js';
+import { syncReport, head, badge, empty, panel, field, dlgFoot, pagerHtml, toolHead, toolCell, findText } from './mcp.js';
 
 const sk = { tab: 'installed', source: '', updates: {}, disc: null, loading: false, per: 25, page: 0, dq: '', repo: '' };
 const sourceOf = (s) => (s.source.startsWith('https://github.com/') ? s.source.replace('https://github.com/', '').split('/').slice(0, 2).join('/') : s.source === 'imported' ? 'Imported' : s.source === 'store' ? 'Store' : 'Local');
