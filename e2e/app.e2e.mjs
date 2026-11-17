@@ -1079,6 +1079,41 @@ description: Bulk skill ${i}
     await hasText('[data-testid=skill-row-hello]', 'now louder');
   });
 
+  await test('skills: one line above the matrix, and it and the tools\' header stay in view while the rows scroll', async () => {
+    await nav('#skills');
+    await $('[data-testid=skill-line]');
+    // enough rows to scroll, when this test runs on its own
+    if ((await exec("return document.querySelectorAll('[data-testid=skill-matrix] tbody tr[data-key]').length")) < 20) {
+      for (let i = 0; i < 24; i++) write(path.join(home, '.agents', 'skills', `tall-${String(i).padStart(2, '0')}`, 'SKILL.md'), `---\nname: tall-${i}\ndescription: Tall skill ${i}\n---\n`);
+      await nav('#home');
+      await nav('#skills');
+      await click('[data-testid=skill-adopt-all]');
+      await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=skill-matrix] tbody tr[data-key]').length")) >= 20, 'the skills managed');
+    }
+    // the store's folder, the source, the pager and the rows a page: one line at 1280, under the head
+    const line = await exec(`const l = document.querySelector('[data-testid=skill-line]'), kids = [...l.children].filter((e) => e.getBoundingClientRect().width);
+      return { mids: kids.map((e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); }), has: ['[data-testid=sk-tab-installed]', '.mono', '#sk-filter', '[data-testid=sk-next]', '[data-testid=sk-per]'].map((s) => !!l.querySelector(s)),
+        between: [...document.querySelectorAll('#sheet .page-body > *')].indexOf(l), pagers: document.querySelectorAll('[data-testid=sk-next]').length, wide: l.scrollWidth <= l.clientWidth };`);
+    assert.ok(Math.max(...line.mids) - Math.min(...line.mids) <= 1 && line.wide, 'one line: ' + JSON.stringify(line));
+    assert.deepEqual(line.has, [true, true, true, true, true], 'Installed or Discover, the store\'s folder, the source, the pager, the rows a page');
+    assert.equal(line.between, 1, 'the line comes right after the head');
+    assert.equal(line.pagers, 1, 'one pager');
+    // scrolled to the end of the list: the line is at the top of the page, the tools' header right under it, nothing over it
+    await exec("const s = document.getElementById('sheet'); s.scrollTop = s.scrollHeight");
+    const d = await exec(`const sheet = document.getElementById('sheet'), s = sheet.getBoundingClientRect(), one = document.querySelector('[data-testid=skill-line]').getBoundingClientRect();
+      const ths = [...document.querySelectorAll('[data-testid=skill-matrix] thead th.b-tool-cell')], r = ths[0].getBoundingClientRect(), rows = [...document.querySelectorAll('[data-testid=skill-matrix] tbody tr')];
+      const at = (th) => { const b = th.getBoundingClientRect(), e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest('thead')); };
+      return { scrolled: sheet.scrollTop, oneTop: one.top - s.top, thTop: r.top - one.bottom, seen: ths.map(at), labels: ths.map((t) => t.dataset.label), boxes: ths.every((t) => t.querySelector('[data-act=skill-bulk]').getBoundingClientRect().bottom <= s.bottom),
+        lastIn: rows[rows.length - 1].getBoundingClientRect().bottom <= s.bottom + 1, firstGone: rows[0].getBoundingClientRect().bottom < r.bottom };`);
+    assert.ok(d.scrolled > 300 && d.firstGone && d.lastIn, 'scrolled to the last row: ' + JSON.stringify(d));
+    assert.ok(Math.abs(d.oneTop) <= 1, 'the line stays at the top of the page: ' + d.oneTop);
+    assert.ok(Math.abs(d.thTop) <= 1, 'the header stays right under it: ' + d.thTop);
+    assert.ok(d.seen.length >= 2 && d.seen.every(Boolean) && d.boxes, 'every tool\'s name and its tick are in view, with nothing over them: ' + d.seen);
+    assert.ok(d.labels.includes('Claude Code') && d.labels.includes('Codex'), 'the columns keep their names: ' + d.labels);
+    await shot('12c-skills-scrolled');
+    await exec("document.getElementById('sheet').scrollTop = 0");
+  });
+
   await test('apps: each tool with its path and version, and Update runs its installer in a terminal', async () => {
     // Claude Code as npm installs it: <prefix>\claude.exe beside <prefix>\node_modules\@anthropic-ai\claude-code
     write(path.join(bin, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.300' }));

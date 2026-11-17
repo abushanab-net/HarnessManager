@@ -32,8 +32,9 @@ const PARTS = {
   '#session?profile=claude-main&id=s-main-1': [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px'], ['.page-head .actions', 'flexWrap', 'nowrap'], ['.a-split .btn', 'height', '30px']],
   '#routing': [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']],
   '#apps': [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
-  '#mcp': [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],
-  '#skills': [['.b-toolbar', 'display', 'flex'], ['.b-toolbar', 'flexWrap', 'wrap']],
+  // MCP servers and Skills: ONE line above the matrix, which stays put with the tools' header under it
+  '#mcp': [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky'], ['.b-matrix th', 'top', '42px'], ['.b-one', 'position', 'sticky'], ['.b-one', 'minHeight', '42px']],
+  '#skills': [['.b-one', 'display', 'flex'], ['.b-one', 'flexWrap', 'nowrap'], ['.b-one', 'position', 'sticky']],
   '#prompts': [['.b-prompt-grid', 'display', 'grid']],
   '#cli': [['.b-cli-grid', 'display', 'grid'], ['.b-cli-row', 'display', 'grid']],
   '#settings': [['.b-section', 'padding', '11px 13px'], ['.b-section-nav', 'position', 'sticky']],

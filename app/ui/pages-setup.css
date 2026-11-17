@@ -1,13 +1,38 @@
-/* MCP servers, Skills, System prompts: what the reference's pages need beyond app.css, and the critics' fixes. */
-/* the matrix grows with the page instead of scrolling inside it (two scrollbars at 1280); its head stays put in the sheet */
-.b-page[data-b-page] .b-matrix-wrap { max-height: none; overflow: visible; }
-.b-matrix .b-name .icon-btn.xs { font-size: var(--fs-small); }
-.b-matrix .b-name .btn-secondary { padding: 2px 6px; font-size: var(--fs-small); }
+/* MCP servers, Skills, System prompts, API keys & routing, Apps: what these pages need beyond app.css (1.10). */
+
+/* ---------- the matrix (MCP servers, Skills) ---------- */
+/* ONE line above the matrix: what the page says about its list, its filters, the pager and the rows a page. It stays at
+   the top of the page while the rows scroll, and the tools' header stays under it, so a checkbox column always has
+   its name. (42 px: its 30 px controls and 6 px of air each side, which the margin takes back from the page's gaps.) */
+.b-one { display: flex; align-items: center; gap: 12px; min-height: 42px; margin: -6px 0; position: sticky; top: 0; z-index: 4; background: var(--bg-canvas); min-width: 0; }
+.b-one > label { display: flex; align-items: center; gap: 8px; white-space: nowrap; flex: none; }
+.b-one > .plan-pill { flex: none; }
+.b-one .b-pager { padding: 0; flex: none; white-space: nowrap; }
+.b-one .b-pager label { margin-left: 4px; }
+.b-one select { height: 30px; padding: 0 8px; }
+.b-matrix-card { padding-top: 0; padding-bottom: 4px; }
+/* the header: under the line when the page scrolls; its rule is a shadow, which stays with it (a collapsed border does not) */
+.b-page[data-b-page] .b-matrix th { top: 42px; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--line-default); vertical-align: bottom; }
+.b-page[data-b-page] .b-tool-cell > span { min-height: 0; gap: 3px; }
+.b-page[data-b-page] .b-tool-cell > span .ticon { width: 20px; height: 20px; }
+.b-matrix input[type=checkbox] { width: 16px; height: 16px; }
+.b-matrix .b-actions-cell { text-align: right; }
 .b-matrix .b-actions-cell .icon-btn { vertical-align: middle; }
+/* the ⓘ beside a server's name: 28 px to press, quiet until pointed at */
+.b-matrix .b-name .icon-btn { border-color: transparent; background: none; color: var(--ink-muted); margin: -4px 0 -4px -4px; }
 /* a tool's hand-made entry: the cell says so under its box, and the box is outlined in amber */
 .b-tool-cell.b-kept input[type=checkbox] { outline: 1px dashed var(--warn); outline-offset: 2px; }
 .b-kept-mark { display: block; margin-top: 4px; font-size: var(--fs-small); color: var(--warn); white-space: nowrap; }
 .b-tool-cell small { white-space: nowrap; }
+
+/* ---------- Skills: Discover ---------- */
+.b-page[data-b-page=skills] .filter-chip { min-height: 28px; }
+/* "Install into": the tools stand together after the label; a repository's card keeps the page's gap from the next */
+.b-page[data-b-page=skills] .b-toolbar > label.filter-chip { margin-left: 0; }
+.b-page[data-b-page=skills] [data-testid=discover] { display: flex; flex-direction: column; gap: 12px; }
+
+/* ---------- System prompts ---------- */
+.b-page[data-b-page=prompts] .page-tabs .filter-chip { min-height: 28px; }
 /* a status pill in a card keeps its natural width; the live file sizes to its text, with a floor */
 .b-editor > .plan-pill, .b-prompt-choice > .plan-pill { align-self: flex-start; }
 .b-live-prompt { min-height: 160px; }
@@ -16,6 +41,7 @@
 .b-prompt-choice:hover { background: var(--bg-card-hover); }
 /* the dialogs (the Add / Edit server form is the wide one) */
 .modal-card.mcp-dlg { max-width: 760px; }
+.mcp-dlg .filter-chip { min-height: 28px; }
 .dlg .b-kv { display: flex; gap: 8px; align-items: flex-end; }
 .dlg .b-kv .form-field { flex: 1; min-width: 0; }
 .dlg .b-kv .btn-secondary { flex: none; }
