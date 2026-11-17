@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="pages-system.css">
 <link rel="stylesheet" href="pages-settings.css">
 <link rel="stylesheet" href="pages-accounts.css">
+<link rel="stylesheet" href="pages-palette.css">
 </head>
 <body>
 <svg width="0" height="0" class="svg-defs" aria-hidden="true"><defs>
@@ -47,7 +48,9 @@
   </aside>
   <div class="workspace">
     <header class="topbar" data-region="topbar">
-      <label class="search-box"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></svg><input id="find" type="search" aria-label="Search sessions" placeholder="Search sessions" autocomplete="off" data-testid="find"><kbd class="kbd">Ctrl K</kbd></label>
+      <label class="search-box"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/></svg><input id="find" type="search" aria-label="Search sessions" placeholder="Search sessions" autocomplete="off" data-testid="find"><kbd class="kbd" title="Press / to move here">/</kbd></label>
+      <!-- the search box filters the page it is on (or searches the sessions); the command palette (palette.js) is this button and Ctrl K -->
+      <button class="btn sm quiet cmd-btn" data-act="palette" aria-keyshortcuts="Control+K" title="Run an action, go to a page or find a session, from any page" aria-label="Run a command" data-testid="palette-open"><span class="cmd-label">Run a command</span><kbd class="kbd">Ctrl K</kbd></button>
       <div class="topbar-right">
         <a id="live-strip" class="status-chip" href="#sessions?live=1" hidden data-testid="live-strip"><i class="live-dot"></i><span class="live-n"></span></a>
         <a id="pcs" class="status-chip" href="#computers" hidden title="Your computers: lit when heard from within three minutes" data-testid="computers-chip"></a>

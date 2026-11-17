@@ -85,6 +85,21 @@ function panes() {
     return rows.length ? pane(id, title, rows.map((r) => r.outerHTML).join(''), `${rows.length} found`) : '';
   }).join('') || '<section class="card panel-card set-pane" data-testid="set-none"><p class="set-none">No setting matches.</p></section>';
 }
+/** What Search settings looks through, for the command palette (palette.js): every section with its rows, each row
+ * by the label and the help line the search above matches: [{ id, title, rows: [{ label, help }] }]. From the sections
+ * last drawn; when the page has not been opened yet they are read here, once. */
+export async function settingRows() {
+  if (!drawn.length) {
+    const st = S.state || await loadState();
+    const [b, ar] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null)]);
+    if (!drawn.length) drawn = sections(st, b, ar);
+  }
+  const t = document.createElement('template');
+  return drawn.map(([id, title, body]) => {
+    t.innerHTML = body;
+    return { id, title, rows: [...t.content.querySelectorAll('.srow')].map((r) => ({ label: r.querySelector('.what b').textContent, help: r.querySelector('.what p').textContent })) };
+  });
+}
 /** The two columns: the list of sections with the search on top (no section is lit while the search shows rows of several), and the right side. */
 function columns() {
   const finding = !!query.trim(), lit = (id) => (!finding && id === chosen ? 'class="on" aria-current="true"' : '');

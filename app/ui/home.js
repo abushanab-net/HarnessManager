@@ -157,6 +157,14 @@ function runwayRow(a, sel, used, pcs, now, today) {
     <td>${a.needsLogin ? `<button class="btn sm" data-act="login" data-name="${esc(a.id)}" data-testid="lane-login-${esc(a.id)}">Log in</button>` : `<button class="btn sm" data-act="start" data-name="${esc(a.id)}" ${lock ? `disabled title="Used up · back ${esc(clock(lock.resetsAt, now))}"` : `title="Start ${esc(a.name)} in a terminal"`} data-testid="lane-start-${esc(a.id)}">Start</button>`}</td></tr>`;
 }
 
+/** The account Use next names for one tool, among `accts` (accountViews), by the rule its card draws with: the most
+ * room (or, with "5h first", the 5-hour window that resets soonest), else one with no plan limits to run out; null
+ * when the tool has none. The command palette (palette.js) offers it as "Start …". */
+export function recommendedFor(accts, tool) {
+  const pool = accts.filter((a) => a.tool === tool), pm = metricsOf(pool);
+  return (st.preferExpiring && pm.expiringAcct) || pm.bestRoomAcct || pool.find((a) => a.noPlan && !a.needsLogin) || null;
+}
+
 // ---------- what needs attention: ONE entry per account, the most severe first, each with its one action ----------
 // the tools with a newer version, with both versions: read when the count the state gives changes ("2.10.0" is newer than "2.9.3")
 const newer = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < Math.max(x.length, y.length); i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };

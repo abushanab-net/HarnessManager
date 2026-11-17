@@ -55,7 +55,7 @@ view('projects', async (sheet, params) => {
     if (!sheet.querySelector('#pj-tiles')) sheet.innerHTML = `<div class="page-body">${pageHead('projects', 'Reading projects…')}</div>`;
     await fetchProjects();
   }
-  // Ctrl K on this page narrows the rows to a name (the lazy user's fix)
+  // the top bar's search (/) on this page narrows the rows to a name (the lazy user's fix)
   S.pageFind = (v) => { pj.q = (v || '').trim().toLowerCase(); draw(); };
   draw();
 });

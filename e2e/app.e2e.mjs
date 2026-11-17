@@ -3046,7 +3046,236 @@ description: Bulk skill ${i}
     } finally { for (const f of files) fs.rmSync(f, { force: true }); hrm('index', 'refresh'); }
   });
 
-  exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;
+  // ---------- the command palette (palette.js): Ctrl K, "Run a command" in the top bar ----------
+  const palOpen = async () => { await page.keyboard.press('Control+k'); await $('[data-testid=palette]'); };
+  const palGone = () => waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=palette]')")), 'the palette closed');
+  /** The rows' titles, in order; palChosen is the chosen row's place. */
+  const palRows = () => exec("return [...document.querySelectorAll('[data-testid=pal-row]')].map((r) => r.querySelector('.trunc > b').textContent)");
+  const palChosen = () => exec("return [...document.querySelectorAll('[data-testid=pal-row]')].findIndex((r) => r.classList.contains('on'))");
+  const palType = (t) => page.fill('[data-testid=pal-q]', t);
+  const hashIs = (h) => waitFor(async () => (await exec('return location.hash')) === h, 'the address ' + h);
+  /** The top bar's search emptied: what an earlier test typed into it stays in it from page to page. */
+  const clearFind = () => exec("const f = document.getElementById('find'); if (f.value) { f.value = ''; f.dispatchEvent(new Event('input')); }");
+
+  await test('command palette: Ctrl K opens it, also from a field, as a dialog with a listbox; arrows move, a resting pointer does not; Esc returns the focus; / moves to the page filter and is a character in a field', async () => {
+    await nav('#accounts');
+    await clearFind();
+    await $('[data-testid=accounts-table]');
+    // the top bar: the search keeps its job and its words, its hint is "/", and "Run a command" with Ctrl K stands beside it
+    assert.deepEqual(await exec("return [document.querySelector('.search-box .kbd').textContent, document.getElementById('find').placeholder, document.querySelector('[data-testid=palette-open]').textContent]"), ['/', 'Filter accounts', 'Run a commandCtrl K']);
+    await shot('70-palette-topbar');
+    // a narrow window keeps the button's key and drops its words, and the top bar holds everything
+    const bar = () => exec("const t = document.querySelector('.topbar'), b = document.querySelector('[data-testid=palette-open]'); return [innerWidth, getComputedStyle(b.querySelector('.cmd-label')).display !== 'none', b.querySelector('kbd').getBoundingClientRect().width > 0, b.getBoundingClientRect().height, t.scrollWidth <= t.clientWidth, b.getAttribute('aria-label')]");
+    assert.deepEqual(await bar(), [1280, true, true, 28, true, 'Run a command'], 'at 1280: the words and the key, 28 px tall');
+    await page.setViewportSize({ width: 1000, height: 800 });
+    try { assert.deepEqual(await bar(), [1000, false, true, 28, true, 'Run a command'], 'at 1000: the key alone, still named'); } finally { await page.setViewportSize({ width: 1280, height: 800 }); }
+    await page.focus('#find');
+    await palOpen();
+    const d = await exec(`const p = document.querySelector('[data-testid=palette]'), q = document.getElementById('pal-q'), on = p.querySelector('.pal-r.on');
+      return { is: [p.getAttribute('role'), p.getAttribute('aria-modal'), p.getAttribute('aria-label'), document.activeElement.id, q.getAttribute('role'), document.getElementById(q.getAttribute('aria-controls')).getAttribute('role')],
+        chosen: q.getAttribute('aria-activedescendant') === on.id && on.getAttribute('role') === 'option' && on.getAttribute('aria-selected') === 'true', inert: document.querySelector('.frame').inert,
+        foot: p.querySelector('.pal-f').textContent.replace(/\\s+/g, ''), hints: [...p.querySelectorAll('.pal-r kbd')].map((k) => k.textContent).slice(0, 3), n: p.querySelectorAll('.pal-r').length };`);
+    assert.deepEqual(d.is, ['dialog', 'true', 'Command palette', 'pal-q', 'combobox', 'listbox'], 'a dialog; the focus in its box, which owns the list');
+    assert.ok(d.chosen && d.inert, 'the first row is chosen and named to a screen reader; the page behind is inert');
+    assert.deepEqual(d.hints, ['↵', 'Ctrl+2', 'Ctrl+3'], '↵ on the chosen row, Ctrl+N on the next');
+    assert.ok(/^↑↓move↵runEscclose(\d+of)?\d+results$/.test(d.foot), 'the foot: ' + d.foot);
+    // the arrows move the choice, the ↵ with it, around the ends
+    await page.keyboard.press('ArrowDown');
+    assert.deepEqual([await palChosen(), await exec("return [...document.querySelectorAll('.pal-r kbd')].map((k) => k.textContent).slice(0, 3)"), await exec("return document.getElementById('pal-q').getAttribute('aria-activedescendant')")], [1, ['Ctrl+1', '↵', 'Ctrl+3'], 'pal-r1']);
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    assert.equal(await palChosen(), d.n - 1, 'up from the first row is the last');
+    // a pointer resting where a row is drawn does not take the choice; moving it does
+    const at = await exec("const r = document.getElementById('pal-r2').getBoundingClientRect(); return [r.left + 200, r.top + 20]");
+    await page.keyboard.press('Escape');
+    await palGone();
+    assert.equal(await exec('return document.activeElement.id'), 'find', 'Esc returns the focus to where it was');
+    await page.mouse.move(at[0], at[1]);
+    await palOpen();
+    await sleep(300);
+    assert.equal(await palChosen(), 0, 'rows drawn under a resting pointer: the first row stays chosen');
+    await page.mouse.move(at[0] + 4, at[1] + 2);
+    await page.mouse.move(at[0] + 8, at[1] + 3);
+    await waitFor(async () => (await palChosen()) === 2, 'the pointer moved: its row is chosen');
+    // Ctrl K again closes it; the button opens it, and a click outside closes it with the focus back on the button
+    await page.keyboard.press('Control+k');
+    await palGone();
+    await page.mouse.move(640, 700);
+    await click('[data-testid=palette-open]');
+    await $('[data-testid=palette]');
+    await page.mouse.click(100, 700);
+    await palGone();
+    assert.equal(await exec('return document.activeElement.dataset.testid'), 'palette-open');
+    // a dialog is modal: Ctrl K leaves it as it is
+    await click('[data-testid=add-account]');
+    await $('[data-testid=add-name]');
+    await page.keyboard.press('Control+k');
+    await sleep(200);
+    assert.ok(await exec("return !!document.querySelector('[data-testid=add-name]') && !document.querySelector('[data-testid=palette]')"), 'no palette over a dialog');
+    await page.keyboard.press('Escape');
+    // "/" moves to the page's filter when no field has the keys, and is not typed; in a field it is a character
+    await exec("document.activeElement.blur(); document.getElementById('sheet').focus()");
+    await page.keyboard.press('/');
+    assert.deepEqual(await exec("return [document.activeElement.id, document.getElementById('find').value]"), ['find', '']);
+    await page.keyboard.type('a/b');
+    assert.equal(await exec("return document.getElementById('find').value"), 'a/b', 'a / typed in the filter stays in it');
+    await page.fill('[data-testid=find]', '');
+    await exec(`document.getElementById('find').dispatchEvent(new Event('input'))`);
+    await nav('#settings');
+    await $('[data-testid=set-find]');
+    await page.focus('[data-testid=set-find]');
+    await page.keyboard.type('/');
+    assert.deepEqual(await exec("return [document.activeElement.id, document.getElementById('set-find').value]"), ['set-find', '/'], 'and in Search settings');
+    await page.fill('[data-testid=set-find]', '');
+  });
+
+  await test('command palette: with nothing typed it lists the useful actions and then the pages; typed words find a Settings row of another section, and Enter lands on that section', async () => {
+    await nav('#settings?tab=backups');
+    await $('[data-testid=sec-backups]');
+    await palOpen();
+    const e = await exec(`const g = [...document.querySelectorAll('#pal-list [role=group]')].map((x) => [x.querySelector('.pal-g').textContent, [...x.querySelectorAll('.pal-r')].map((r) => r.querySelector('.trunc').textContent)]);
+      return { g, icon: !!document.querySelector('#pal-r0 .pal-ic img.ticon'), page: !!document.querySelector('#pal-list [role=group]:last-child .pal-ic svg') };`);
+    assert.deepEqual(e.g.map(([n]) => n), ['Actions', 'Go to'], 'two groups: ' + JSON.stringify(e.g));
+    assert.ok(/^Start \S+ · recommended for /.test(e.g[0][1][0]) && e.icon, 'first, the recommended account of a tool, with the tool\'s own icon: ' + e.g[0][1][0]);
+    assert.ok(e.g[0][1].includes('Start in a folder…') && e.g[0][1].some((r) => r.startsWith('New session in ')), 'then Start in a folder… and a new session in the latest project: ' + e.g[0][1]);
+    assert.ok(e.g[1][1][0].startsWith('Overview') && e.g[1][1].length >= 3 && e.page, 'then the pages, with the sidebar\'s icons: ' + e.g[1][1]);
+    assert.ok(e.g[0][1].length + e.g[1][1].length <= 9, 'nine rows at most');
+    await palType('LAUNCH at');
+    await waitFor(async () => (await palRows())[0] === 'Settings › Launch at sign-in', 'the row of Window and terminal, found from Backups');
+    assert.deepEqual(await exec("const r = document.querySelector('.pal-r.on'); return [r.closest('[role=group]').querySelector('.pal-g').textContent, [...r.querySelectorAll('b mark')].map((m) => m.textContent).join('|'), getComputedStyle(r.querySelector('mark')).textDecorationLine, r.querySelector('.sub').textContent]"),
+      ['Go to', 'Launch|at', 'underline', ' · Starts hidden in the tray.'], 'under Go to, each typed word underlined whatever its case, the row\'s help line beside it');
+    await page.keyboard.press('Enter');
+    await hashIs('#settings?tab=window');
+    await $('[data-testid=sec-window] [data-testid=st-autostart]');
+    await palGone();
+    // the palette's rows are the ones Search settings looks through: the same labels, section by section
+    const both = await exec(`return import('./settings.js').then(async (s) => { const mine = (await s.settingRows()).find((x) => x.id === 'window').rows.map((r) => r.label);
+      return [mine, [...document.querySelectorAll('[data-testid=sec-window] .srow .what .row > b')].map((b) => b.textContent)]; })`);
+    assert.deepEqual(both[0], both[1]);
+  });
+
+  await test('command palette: Enter on "Start <account>" starts it as its Start button does, and Ctrl+3 runs the third row', async () => {
+    await nav('#accounts');
+    await clearFind();
+    await $('.acct-row [data-act=start]');
+    const [name, label] =await exec("const b = document.querySelector('.acct-row [data-act=start]'); return [b.dataset.name, b.closest('.acct-row').querySelector('.who b').textContent]");
+    const launches = () => readLines(termLog).filter((t) => JSON.stringify(t.args) === JSON.stringify(['run', name])).length;
+    const before = launches();
+    await palOpen();
+    await palType('start ' + label);
+    const i = await waitFor(async () => { const k = (await palRows()).indexOf('Start ' + label); return k >= 0 ? k + 1 : 0; }, 'Start ' + label + ' among the rows');
+    for (let k = 1; k < i; k++) await page.keyboard.press('ArrowDown');
+    assert.equal(await exec("return document.querySelector('.pal-r.on').closest('[role=group]').querySelector('.pal-g').textContent"), 'Actions');
+    await page.keyboard.press('Enter');
+    await palGone();
+    await waitFor(() => launches() === before + 1, 'the terminal log got the launch');
+    await hasText('#toast', 'Opened a terminal for ' + label);
+    assert.equal(await exec('return location.hash'), '#accounts', 'the page stays');
+    // Ctrl+3: the third row, without moving to it. "limits": Refresh limits, the Limits section, then the row of Appearance
+    await palOpen();
+    await palType('limits');
+    await waitFor(async () => (await palRows())[2] === 'Settings › Limits shown as', 'the third row');
+    assert.deepEqual((await palRows()).slice(0, 2), ['Refresh limits', 'Settings › Limits'], 'a title that starts with the word comes before one that has it later');
+    await page.keyboard.press('Control+3');
+    await hashIs('#settings?tab=appearance');
+    await palGone();
+  });
+
+  await test('command palette: the Sessions group finds a session by title, newest first and five at most, a running one says so; a title with <b> in it is shown as text; nine rows at most; typing asks the backend for sessions only', async () => {
+    const t = new Date().toISOString(), f = path.join(home, '.claude', 'projects', 'p', 's-palette-1.jsonl');
+    const title = '<b>Quince</b> probe & <img src=x onerror=alert(1)>';
+    write(f, jl([
+      { type: 'user', sessionId: 's-palette-1', cwd: repo, timestamp: t, message: { role: 'user', content: 'Quince probe' } },
+      { type: 'assistant', sessionId: 's-palette-1', cwd: repo, timestamp: t, message: { id: 'q1', model: 'claude-opus-5-5', usage: { input_tokens: 4, output_tokens: 2 }, content: [{ type: 'text', text: 'Done.' }] } },
+      { type: 'ai-title', aiTitle: title, sessionId: 's-palette-1' },
+    ]));
+    try {
+      hrm('index', 'refresh');
+      await nav('#home');
+      await drawn('the Overview');
+      // every operation asked of the backend from here on; "zebra" is answered here with seven sessions, one of them running
+      await exec(`const t = window.__TAURI__, now = Date.now(); window.__core = t.core; window.__ops = [];
+        const zebra = { total: 7, groups: [{ key: 'd', name: 'd', sessions: Array.from({ length: 7 }, (_, i) => ({ profile: 'claude-main', id: 'z' + i, harness: 'claude', title: 'Zebra run ' + i, project_name: 'zoo', last_active_at: now - (6 - i) * 60000, open: i === 6 })) }] };
+        const late = (ms) => new Promise((r) => setTimeout(r, ms)); // the projects answer late, as on a busy database
+        t.core = { ...t.core, invoke: (cmd, a, o) => { window.__ops.push(a && a.op); return a && a.op === 'sessions' && a.args.filter.query === 'zebra' ? Promise.resolve(zebra) : a && a.op === 'projects' ? late(400).then(() => window.__core.invoke(cmd, a, o)) : window.__core.invoke(cmd, a, o); } };`);
+      await palOpen();
+      // a row chosen before the projects arrive is still the chosen one after the list is drawn again with them
+      const second = (await palRows())[1];
+      await page.keyboard.press('ArrowDown');
+      await sleep(800);
+      assert.deepEqual([await palChosen(), (await palRows())[1]], [1, second], 'rows that arrive do not move the choice');
+      const opened = await exec('return window.__ops.splice(0)');
+      assert.ok(opened.filter((o) => o === 'projects').length === 1 && !opened.includes('sessions') && !opened.includes('state'), 'opening reads the projects once, and no session: ' + opened);
+      await page.keyboard.type('quince probe', { delay: 25 });
+      await waitFor(async () => (await palRows()).includes(title), 'the session, by its title');
+      await sleep(400);
+      const typed = await exec('return window.__ops.splice(0)');
+      assert.ok(typed.filter((o) => o === 'sessions').length <= 2 && !typed.some((o) => ['projects', 'state', 'backups', 'archive_status', 'home', 'detail', 'limits_extra'].includes(o)), 'twelve keys: the session search after a pause, nothing else: ' + typed);
+      const s = await exec(`const r = [...document.querySelectorAll('[data-testid=pal-row]')].find((x) => x.textContent.includes('Quince'));
+        return { g: r.closest('[role=group]').querySelector('.pal-g').textContent, inside: [...r.querySelectorAll('.trunc > b *')].map((x) => x.tagName + ':' + x.textContent), img: document.querySelectorAll('#pal-list img:not(.ticon)').length, sub: r.querySelector('.sub').textContent };`);
+      assert.deepEqual([s.g, s.inside, s.img], ['Sessions', ['MARK:Quince', 'MARK:probe'], 0], 'under Sessions; the markup of its title is text, only the typed words are marked');
+      assert.ok(s.sub.includes('platform-gitops') && s.sub.includes('Today'), 'its project and when: ' + s.sub);
+      // Enter opens the session's page
+      await page.keyboard.press('Enter');
+      await hashIs('#session?profile=claude-main&id=s-palette-1');
+      await palGone();
+      // newest first, five at most, and the running one says so
+      await palOpen();
+      await palType('zebra');
+      await waitFor(async () => (await palRows()).includes('Zebra run 6'), 'the sessions found');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('#pal-list [role=group]:last-child .pal-r .trunc')].map((r) => r.textContent.split(' · ').slice(0, 2).join(' · '))"),
+        ['Zebra run 6 · running now', 'Zebra run 5 · zoo', 'Zebra run 4 · zoo', 'Zebra run 3 · zoo', 'Zebra run 2 · zoo']);
+      assert.equal(await text('[data-testid=pal-count]'), '5 of 7 results');
+      // nine rows at most, whatever is typed
+      for (const q of ['', 's', 'a', 'se', 'start', 'settings']) {
+        await palType(q);
+        await sleep(450);
+        const [n, count] = await exec("return [document.querySelectorAll('[data-testid=pal-row]').length, document.querySelector('[data-testid=pal-count]').textContent]");
+        assert.ok(n > 0 && n <= 9, `"${q}": ${n} rows`);
+        const m = /^(?:(\d+) of )?(\d+) results?$/.exec(count);
+        assert.ok(m && +(m[1] || m[2]) === n && +m[2] >= n, `"${q}": the count says how many of how many: ${count}`);
+      }
+      assert.equal(await exec("return document.querySelectorAll('[data-testid=pal-row]').length"), 9, 'a word with many matches fills the nine');
+      await palType('zzzz-nothing');
+      await hasText('[data-testid=pal-none]', 'Nothing matches.');
+      await page.keyboard.press('Enter'); // nothing to run: it stays
+      assert.ok(await exec("return !!document.querySelector('[data-testid=palette]')"));
+      await page.keyboard.press('Escape');
+      await palGone();
+    } finally { await exec('if (window.__core) window.__TAURI__.core = window.__core'); fs.rmSync(f, { force: true }); hrm('index', 'refresh'); }
+  });
+
+  await test('command palette: it measures as its drawing (640 px near the top, 40 px rows, nothing under 12 px), in every theme', async () => {
+    await nav('#home');
+    await drawn('the Overview');
+    const was = await exec("return import('./core.js').then((c) => [c.S.state.settings.brand || 'hm', c.S.state.settings.theme])");
+    const look = (brand, theme) => exec("return import('./core.js').then(async (c) => { await c.call('settings_set', { key: 'brand', value: arguments[0] }); await c.call('settings_set', { key: 'theme', value: arguments[1] }); await c.loadState(); })", [brand, theme]);
+    try {
+      for (const [brand, theme] of [['hm', 'dark'], ['hm', 'light'], ['vg', 'dark'], ['vg', 'light']]) {
+        await look(brand, theme);
+        await page.mouse.move(640, 760);
+        await palOpen();
+        await sleep(500);
+        await shot(`70-palette-empty-${brand}-${theme}`);
+        await palType('start');
+        await sleep(600);
+        await shot(`70-palette-start-${brand}-${theme}`);
+        const d = await exec(`const cs = (e) => getComputedStyle(e), q = (s) => document.querySelector(s), box = (s) => q(s).getBoundingClientRect(), small = [];
+          for (const el of document.querySelectorAll('[data-testid=palette] *')) if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(cs(el).fontSize) < 12) small.push(el.className + ' ' + cs(el).fontSize);
+          return { card: [box('[data-testid=palette]').left, box('[data-testid=palette]').top, box('[data-testid=palette]').width], input: [box('.pal-in').height, cs(q('#pal-q')).fontSize], row: [box('.pal-r').height, cs(q('.pal-r')).fontSize, cs(q('.pal-r b')).fontWeight],
+            group: cs(q('.pal-g')).fontSize, foot: [box('.pal-f').height, cs(q('.pal-f')).fontSize], kbd: cs(q('.pal-r kbd')).fontSize, small, fits: box('[data-testid=palette]').bottom <= innerHeight,
+            cut: [...document.querySelectorAll('.pal-r')].filter((r) => r.scrollWidth > r.clientWidth + 1).length, bg: cs(q('[data-testid=palette]')).backgroundColor, canvas: cs(document.body).backgroundColor };`);
+        assert.deepEqual(d.card, [320, 8, 640], `${brand} ${theme}: 640 px wide, centred, 8 px from the top`);
+        assert.deepEqual([d.input, d.row, d.group, d.foot, d.kbd], [[52, '15px'], [40, '13px', '700'], '12px', [38, '12px'], '12px'], `${brand} ${theme}: the box 52 px at 15, rows 40 px at 13 with a bold title, the foot 38 px`);
+        assert.deepEqual([d.small, d.fits, d.cut], [[], true, 0], `${brand} ${theme}: nothing under 12 px, inside the window, no row wider than the card`);
+        assert.notEqual(d.bg, d.canvas, `${brand} ${theme}: the card stands off the page`);
+        await page.keyboard.press('Escape');
+        await palGone();
+      }
+    } finally { await look(was[0], was[1]); }
+  });
+
+  exitCode =results.some((r) => r[1] !== 'ok') ? 1 : 0;
 } catch (e) {
   console.error(e);
 } finally {
