@@ -311,8 +311,10 @@ impl Harness for Codex {
     fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
         let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).unwrap_or("");
         let name = name.strip_suffix(".zst").unwrap_or(name);
-        // rollout-2026-11-01T10-00-00-<id>.jsonl
-        let date = name.strip_prefix("rollout-").filter(|d| d.len() >= 10 && d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-' && d[..10].chars().filter(|c| c.is_ascii_digit()).count() == 8);
+        // both came from another computer: the id is an argument, the name a path part
+        if !crate::util::safe_name(&t.id) || (!name.is_empty() && !crate::util::safe_name(name)) { bail!("this session's names cannot be used on this computer"); }
+        // rollout-2026-11-01T10-00-00-<id>.jsonl; counted in bytes, so a name of other letters is never cut inside one
+        let date = name.strip_prefix("rollout-").filter(|d| d.len() >= 10 && d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-' && d.as_bytes()[..10].iter().filter(|b| b.is_ascii_digit()).count() == 8);
         let Some(d) = date else { bail!("the rollout's name ({name}) carries no date; Codex would not find it") };
         let dest = self.home(ctx, p).join("sessions").join(&d[..4]).join(&d[5..7]).join(&d[8..10]).join(name);
         if !dest.exists() {

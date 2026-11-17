@@ -191,7 +191,7 @@ impl Harness for PiLike {
     /// The log under `sessions/<this clone's folder, encoded the tool's way>/<its original name>`; Pi resumes
     /// by path, Oh My Pi by id.
     fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
-        let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".jsonl")).unwrap_or("");
+        let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".jsonl") && crate::util::safe_name(n)).unwrap_or("");
         if name.is_empty() { bail!("the session log's name is unknown") }
         let dest = self.home(ctx, p).join("sessions").join(session_dir_name(local_root, (self.id == "omp").then_some(ctx.home.as_path()))).join(name);
         if !dest.exists() {

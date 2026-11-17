@@ -14,11 +14,16 @@ use crate::model::{SessionMeta, Step, Transcript, Turn};
 use crate::projects::Resolver;
 use crate::registry::Registry;
 use crate::sync::folder;
-use crate::util::{now_ms, sha256_hex, write_atomic};
+use crate::util::{now_ms, read_capped, safe_name, sha256_hex, write_atomic};
 use crate::Ctx;
 
 /// A transcript over this many bytes is not carried.
 pub const MAX_TRANSCRIPT_BYTES: u64 = 20 * 1024 * 1024;
+/// No more than this is read of a transcript another computer sends (compressed): the hub's own limit for one.
+pub const MAX_FETCH_BYTES: u64 = 64 * 1024 * 1024;
+/// And no more than this of what it opens to: the carried limit with room for a rollout Codex kept compressed,
+/// which is measured there before it is opened.
+pub const MAX_PLAIN_BYTES: u64 = 8 * MAX_TRANSCRIPT_BYTES;
 /// The folder holds at most this much of this computer's transcripts; the oldest go first.
 pub const CAP_BYTES: i64 = 200 * 1024 * 1024;
 
@@ -54,15 +59,24 @@ pub struct Materialized {
 }
 
 /// Where a fetched copy lives: `<data>/transcripts/<origin>/<harness>/<profile>/<file without .zst>`.
-pub(crate) fn local_path(ctx: &Ctx, device: &str, harness: &str, profile: &str, file: &str) -> PathBuf {
+pub(crate) fn local_path(ctx: &Ctx, device: &str, harness: &str, profile: &str, file: &str) -> Result<PathBuf> {
     let name = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or("transcript");
-    ctx.data.join("transcripts").join(device).join(harness).join(profile).join(name.strip_suffix(".zst").unwrap_or(name))
+    // the names came from another computer, and a row merged before they were checked may hold any text
+    if !crate::sync::peer::store::safe_origin(device) || harness::by_id(harness).is_none() || !safe_name(profile) || !safe_name(name) { bail!("this transcript's names cannot be used as a path on this computer"); }
+    Ok(ctx.data.join("transcripts").join(device).join(harness).join(profile).join(name.strip_suffix(".zst").unwrap_or(name)))
+}
+
+/// A carried transcript opened, read up to the limit: a few kilobytes can open to any size.
+fn unpack(raw: &[u8]) -> Result<Vec<u8>> {
+    zstd::Decoder::new(raw).map_err(anyhow::Error::from).and_then(|d| read_capped(d, None, MAX_PLAIN_BYTES, "the transcript, opened,")).context("decompress the transcript")
 }
 
 /// The transcript of a session from another computer, fetched from the folder the first time (or again after
 /// a newer entry), then kept until the entry is tombstoned.
 pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) -> Result<FetchedTranscript> {
     let key = format!("{harness}/{profile}/{id}");
+    // they go on into paths, requests and the tool's arguments
+    if !crate::journal::session_key_ok(&key) || !crate::sync::peer::store::safe_origin(device) { bail!("this session's names cannot be used on this computer"); }
     let row: Option<(String, i64, String, String, Option<i64>)> = ctx.db.with(|c| {
         tables(c)?;
         Ok(c.query_row("select file, bytes, sha256, source_rel, fetched_at from transcripts where device=? and key=?", [device, &key],
@@ -70,20 +84,21 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
     })?;
     let name = crate::journal::device_names(ctx).get(device).cloned().unwrap_or_else(|| device.to_string());
     let Some((file, _, sha, source_rel, fetched_at)) = row else { return fetch_direct(ctx, device, &name, harness, profile, id) };
-    let path = local_path(ctx, device, harness, profile, &file);
+    if !crate::sync::transcripts::safe_rel(&file) { bail!("transcript entry names a path outside the folder"); }
+    let path = local_path(ctx, device, harness, profile, &file)?;
     if fetched_at.is_none() || !path.exists() {
-        if file.contains("..") || Path::new(&file).is_absolute() { bail!("transcript entry names a path outside the folder"); }
         // a connected computer first (phase 2's route), then the hub or the folder
         let raw = match crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, Some(&sha)) {
             Some(b) => b,
             None if ctx.settings.sync_mode == "hub" => crate::sync::hub::fetch_transcript(ctx, device, &key).context("fetch the transcript from the hub")?,
             None => {
                 let src = folder::root(ctx)?.join("devices").join(device).join(&file);
-                std::fs::read(&src).with_context(|| format!("read {} (waiting for the sync service?)", src.display()))?
+                std::fs::File::open(&src).map_err(anyhow::Error::from).and_then(|f| read_capped(f, None, MAX_FETCH_BYTES, "the transcript"))
+                    .with_context(|| format!("read {} (waiting for the sync service?)", src.display()))?
             }
         };
         if sha256_hex(&raw) != sha { bail!("the transcript in the folder does not match its journal entry yet; try again after the next sync"); }
-        let plain = zstd::decode_all(&raw[..]).context("decompress the transcript")?;
+        let plain = unpack(&raw)?;
         write_atomic(&path, &plain)?;
         ctx.db.with(|c| { c.execute("update transcripts set fetched_at=? where device=? and key=?", params![now_ms(), device, key])?; Ok(()) })?;
         crate::log::info(&format!("transcripts: fetched {key} from {name} ({} bytes)", plain.len()));
@@ -98,9 +113,9 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
 fn fetch_direct(ctx: &Ctx, device: &str, name: &str, harness: &str, profile: &str, id: &str) -> Result<FetchedTranscript> {
     let raw = crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, None)
         .with_context(|| format!("could not get this session's transcript from {name}: it is not connected now, or the session is over {} MB; it also comes through a sync folder or a hub", MAX_TRANSCRIPT_BYTES >> 20))?;
-    let plain = zstd::decode_all(&raw[..]).context("decompress the transcript")?;
-    let ext = if harness == "opencode" { "json" } else { "jsonl" };
-    let path = local_path(ctx, device, harness, profile, &format!("{id}.{ext}.zst"));
+    let plain = unpack(&raw)?;
+    let ext =if harness == "opencode" { "json" } else { "jsonl" };
+    let path = local_path(ctx, device, harness, profile, &format!("{id}.{ext}.zst"))?;
     write_atomic(&path, &plain)?;
     // the file's name where it ran is all the tools need of it (Codex and Pi keep it)
     let key = format!("{harness}/{profile}/{id}");
@@ -458,5 +473,55 @@ mod tests {
         let gone = t.path().join("not-here");
         assert!(resume_here(&b, &dev, "claude", "claude-main", "s1", Some(&gone)).unwrap_err().to_string().ends_with("is not a folder on this computer"));
         std::env::remove_var("HRM_TERMINAL_LOG");
+    }
+
+    #[test]
+    fn a_row_whose_names_are_not_plain_names_is_not_fetched_or_materialized() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        // as a version before this check merged it: the account climbs out of its computer's folder, to a file that is there
+        let stray = ctx.data.join("transcripts").join("x").join("s1.jsonl");
+        for d in [stray.parent().unwrap().to_path_buf(), ctx.data.join("transcripts").join("dev1").join("claude")] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(&stray, "{}\n").unwrap();
+        ctx.db.with(|c| { tables(c)?; c.execute("insert into transcripts values('dev1', 'claude/../../x/s1', 'transcripts/claude/x/s1.jsonl.zst', 1, 'x', 1, 'projects/p/s1.jsonl', 1)", [])?; Ok(()) }).unwrap();
+        assert!(fetch(&ctx, "dev1", "claude", "../../x", "s1").is_err());
+        let root = t.path().join("home").join("app");
+        std::fs::create_dir_all(&root).unwrap();
+        let src = t.path().join("fetched.jsonl");
+        std::fs::write(&src, "{}\n").unwrap();
+        let fetched = |harness: &str, id: &str, rel: &str| FetchedTranscript { device: "dev".into(), harness: harness.into(), profile: "main".into(), id: id.into(), path: src.clone(), source_rel: rel.into(), bytes: 3 };
+        // Claude Code names the copy by the id
+        assert!(harness::claude::Claude.materialize(&ctx, &profile("main", "claude"), &root, &fetched("claude", "../../evil", "")).is_err());
+        assert!(!t.path().join("home").join(".claude").join("evil.jsonl").exists());
+        // Codex is given the id as an argument, and cuts the date out of the rollout's name
+        let rollout = "sessions/2026/11/01/rollout-2026-11-01T10-00-00-cx-1.jsonl";
+        assert!(harness::codex::Codex.materialize(&ctx, &profile("main", "codex"), &root, &fetched("codex", "--config=x", rollout)).is_err());
+        assert!(harness::codex::Codex.materialize(&ctx, &profile("main", "codex"), &root, &fetched("codex", "cx-1", "sessions/rollout-2026-11-0é.jsonl")).is_err(), "an error, not a panic");
+        assert!(harness::codex::Codex.materialize(&ctx, &profile("main", "codex"), &root, &fetched("codex", "cx-1", "sessions/rollout-2026.jsonl")).is_err());
+        // Pi and Oh My Pi name the copy as the log was named
+        assert!(harness::pi::PI.materialize(&ctx, &profile("main", "pi"), &root, &fetched("pi", "pi-1", "sessions/x/-rf.jsonl")).is_err());
+        // and the names the tools do give still work
+        assert!(harness::codex::Codex.materialize(&ctx, &profile("main", "codex"), &root, &fetched("codex", "cx-1", rollout)).is_ok());
+    }
+
+    #[test]
+    fn a_transcript_that_opens_to_more_than_the_limit_is_refused() {
+        use std::io::Read;
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let b = computer(t.path(), "B", &shared, true);
+        // a few kilobytes as it travels, one byte over the limit once opened
+        let mut packed = vec![];
+        zstd::stream::copy_encode(std::io::repeat(0).take(MAX_PLAIN_BYTES + 1), &mut packed, 3).unwrap();
+        assert!(packed.len() < 100_000);
+        let file = "transcripts/claude/work/s1.jsonl.zst";
+        let at = shared.join("devices").join("dev1").join(file);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, &packed).unwrap();
+        b.db.with(|c| { tables(c)?; c.execute("insert into transcripts values('dev1', 'claude/work/s1', ?, ?, ?, 1, 'projects/p/s1.jsonl', null)", params![file, packed.len() as i64, sha256_hex(&packed)])?; Ok(()) }).unwrap();
+        let e = fetch(&b, "dev1", "claude", "work", "s1").unwrap_err();
+        assert!(format!("{e:#}").contains(" MB"), "{e:#}");
+        assert!(!b.data.join("transcripts").join("dev1").exists(), "nothing of it is kept");
     }
 }

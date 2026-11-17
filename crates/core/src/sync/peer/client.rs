@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use super::{identity, mdns, store};
 use crate::journal::{self, Peer};
-use crate::util::now_ms;
+use crate::util::{body_capped, now_ms};
 use crate::Ctx;
 
 /// Accepts exactly one certificate: the paired computer's.
@@ -63,13 +63,14 @@ impl Client {
         let r = self.http.get(format!("{}{path}", self.base)).send()?;
         if r.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
         if !r.status().is_success() { bail!("{path} answered {}", r.status()); }
-        Ok(Some(r.json()?))
+        Ok(Some(serde_json::from_slice(&body_capped(r, journal::MAX_JSON_BYTES, path)?)?))
     }
 
-    pub fn bytes(&self, path: &str) -> Result<Vec<u8>> {
+    /// An answer's bytes, when they are no more than `max`.
+    pub fn bytes(&self, path: &str, max: u64) -> Result<Vec<u8>> {
         let r = self.http.get(format!("{}{path}", self.base)).send()?;
         if !r.status().is_success() { bail!("{path} answered {}", r.status()); }
-        Ok(r.bytes()?.to_vec())
+        body_capped(r, max, path)
     }
 }
 
@@ -119,7 +120,7 @@ pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &s
     order.sort_by_key(|p| p.id != origin);
     for p in order.into_iter().filter(|p| sha.is_some() || p.id == origin) {
         let Some((c, _, _)) = reach(ctx, &id, p) else { continue };
-        match c.bytes(&format!("/v1/transcript/{origin}/{harness}/{profile}/{session}")) {
+        match c.bytes(&format!("/v1/transcript/{origin}/{harness}/{profile}/{session}"), crate::transcripts::MAX_FETCH_BYTES) {
             Ok(b) if sha.is_none_or(|s| crate::util::sha256_hex(&b) == s) => { crate::log::info(&format!("transcripts: {harness}/{profile}/{session} came from {}", p.name)); return Some(b); }
             Ok(_) => crate::log::info(&format!("transcripts: {} holds another version of {harness}/{profile}/{session}", p.name)),
             Err(_) => {}
@@ -140,7 +141,7 @@ fn pull_origin(ctx: &Ctx, c: &Client, origin: &str) -> Result<bool> {
     }
     if r["device"].is_object() { journal::learn_device(ctx, origin, &r["device"])?; }
     if journal::pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
-    let applied = journal::apply_manifest(ctx, origin, &r, &|file| c.bytes(&format!("/v1/chunk/{origin}/{file}")))?;
+    let applied = journal::apply_manifest(ctx, origin, &r, &|file| c.bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ))?;
     ctx.db.with(|c| {
         c.execute("update peers set incarnation=?1, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
             params![inc, r["last_seq"].as_i64().unwrap_or(0), applied, now_ms(), origin])?;

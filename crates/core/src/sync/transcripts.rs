@@ -147,16 +147,24 @@ pub fn carry_to(ctx: &Ctx, cap: i64, put: &dyn Fn(&str, &str, &[u8]) -> Result<(
     Ok(())
 }
 
+/// A carried transcript's place under its computer's folder, as every version writes it:
+/// `transcripts/<tool>/<account>/<file>`, each part a plain name.
+pub(crate) fn safe_rel(file: &str) -> bool {
+    let p: Vec<&str> = file.split('/').collect();
+    p.len() == 4 && p[0] == "transcripts" && p.iter().all(|s| crate::sync::peer::store::safe_file(s))
+}
+
 /// A `transcript` entry of another computer's journal: stored, fetched later when needed. A skipped one
 /// (too big there) replaces nothing and removes what was known of it.
 pub fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
     tables(tx)?;
+    if !crate::journal::session_key_ok(&e.key) { bail!("transcript entry with names that cannot be used here"); }
     if e.data.get("skipped").is_some() || e.data["file"].as_str().unwrap_or("").is_empty() {
         tx.execute("delete from transcripts where device=? and key=?", [device, &e.key])?;
         return Ok(());
     }
     let file = e.data["file"].as_str().context("transcript file")?;
-    if file.contains("..") || Path::new(file).is_absolute() { bail!("transcript path {file}"); }
+    if !safe_rel(file) { bail!("transcript entry with a path that cannot be used here"); }
     tx.execute("insert or replace into transcripts(device, key, file, bytes, sha256, mtime, source_rel, fetched_at) values(?,?,?,?,?,?,?,null)",
         params![device, e.key, file, e.data["bytes"].as_i64().unwrap_or(0), e.data["sha256"].as_str().unwrap_or(""), e.data["mtime"].as_i64().unwrap_or(0), e.data["source_rel"].as_str().unwrap_or("")])?;
     Ok(())

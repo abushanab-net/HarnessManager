@@ -358,6 +358,8 @@ impl Harness for Claude {
     /// One copy under `projects/<this clone's folder, encoded>/<id>.jsonl` (reused when there), resumed by its
     /// path as a fork, so neither the copy nor the original is written.
     fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        // the id came from another computer and names the copy
+        if !crate::util::safe_name(&t.id) { bail!("this session's id cannot be used as a file name here"); }
         let dest = self.home(ctx, p).join("projects").join(project_dir_name(local_root)).join(format!("{}.jsonl", t.id));
         if !dest.exists() {
             std::fs::create_dir_all(dest.parent().unwrap())?;
