@@ -3,13 +3,13 @@
 // computer, or to leave it. Nothing is counted twice, so restoring again adds nothing.
 
 import { S, call, action, attempt, changed, toast, openDialog, closeDialog, dlgHead, pickFolder, pickFile } from './core.js';
-import { esc, fmt, when } from './lib.js';
+import { esc, fmt } from './lib.js';
 
 const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
 const stamp = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
 /** The dialog for a source ({zip} or {folder}); `welcome` is the form shown when a folder is chosen or at first launch. */
-export async function restoreDialog(src, { welcome = false, preview = null } = {}) {
+async function restoreDialog(src, { welcome = false, preview = null } = {}) {
   const p = preview || await attempt(() => call('restore_preview', src));
   if (!p) return false;
   const done = () => { if (welcome) call('restore_welcome', { done: true }).catch(() => {}); };

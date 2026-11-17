@@ -189,11 +189,8 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 }).catch(() => {});
   page.on('console', (m) => { if (m.type() === 'error') console.log('     [window] ' + m.text()); });
   page.on('pageerror', (e) => console.log('     [window] ' + e.message));
-  // the first-visit tours are tested on their own; everywhere else they would sit in front of the page
-  const TOURED = ['home', 'accounts', 'account', 'projects', 'sessions', 'session', 'routing', 'mcp', 'skills', 'prompts', 'settings'];
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
-  // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
-  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off'); localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`, [TOURED]);
+  await exec(`localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`);
 
   await test('overview: the deck, the horizon lanes, the readouts, the year clock, attention, reply timing and the request log', async () => {
     await $('[data-testid=heatmap]');
@@ -223,7 +220,7 @@ try {
     await $('[data-testid=request-log] tbody tr');
     const off = await exec(`const t = document.querySelector('[data-testid=request-log]'); const r = t.querySelector('tbody tr');
       return [...t.querySelectorAll('thead th.num')].map((th) => Math.abs(th.getBoundingClientRect().right - r.children[th.cellIndex].getBoundingClientRect().right));`);
-    assert.ok(off.length === 7 && off.every((d) => d < 1), 'number headers aligned: ' + off);
+    assert.ok(off.length === 6 && off.every((d) => d < 1), 'number headers aligned: ' + off);
     await $('[data-testid=request-log] [data-testid=ttft]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');
@@ -276,7 +273,7 @@ try {
     await nav('#skills');
     await waitFor(async () => !(await shut()), 'open for the page shown');
     // the rail carries no rings, readouts or limits popup: the limits live in the tray icon's own window
-    assert.ok(!(await exec("return !!document.querySelector('[data-act=toggle-tray], #tray-root')")), 'no limits popup in the window');
+    assert.ok(!(await exec("return !!document.querySelector('#tray-root')")), 'no limits popup in the window');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
     await click('[data-testid=fold-pins]');
@@ -764,11 +761,11 @@ try {
     await $('[data-testid=activity]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
-      const before = await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''");
+      const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);
-      await waitFor(async () => (await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
+      await waitFor(async () => (await exec("return document.querySelector('#sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
       await waitFor(async () => {
-        const got = await exec("return [...document.querySelectorAll('#sheet .crumb, #sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
+        const got = await exec("return [...document.querySelectorAll('#sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
         let i = 0;
         for (const g of got) if (i < titles.length && g.startsWith(titles[i])) i++;
         return i === titles.length;
@@ -778,7 +775,7 @@ try {
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
     const counts = await exec("return [...document.querySelectorAll('.b-section')].map((s) => s.querySelectorAll('.b-setting').length)");
-    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 4], 'settings per section, as the design counts them');
+    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them less the Tours row');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
@@ -1100,7 +1097,7 @@ description: Bulk skill ${i}
       // card padding, table rows and type as the design pages set them
       const want = {
         sessions: [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
-        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']], account: [['.panel', 'padding', '16px']],
+        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
         routing: [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']], apps: [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
         mcp: [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],
         skills: [['.b-toolbar', 'display', 'flex'], ['.b-toolbar', 'flexWrap', 'wrap']],
@@ -1193,7 +1190,6 @@ description: Bulk skill ${i}
 
   await test('a walkthrough on a page\'s first visit, and setting tooltips with their defaults', async () => {
     const tour = () => exec(`return document.querySelector('[data-testid=tour]')?.innerText || ''`);
-    await exec(`localStorage.removeItem('hm.tour.accounts')`);
     await nav('#home');
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
@@ -1207,17 +1203,6 @@ description: Bulk skill ${i}
     await shot('15-tour');
     await page.keyboard.press('Escape');
     await waitFor(async () => !(await tour()), 'Esc ends it');
-    await nav('#home');
-    await nav('#accounts');
-    await $('[data-testid=accounts-table]');
-    assert.ok(!(await tour()), 'an ended tour stays ended');
-    await exec(`localStorage.removeItem('hm.tour.routing')`);
-    await nav('#routing');
-    await $('[data-testid=provider-add]');
-    await sleep(300);
-    assert.ok(!(await tour()), 'skipping one page\'s tour skips every page\'s');
-    await nav('#accounts');
-    await $('[data-testid=accounts-table]');
     await click('[data-testid=tour-start]');
     await waitFor(async () => (await tour()).includes('1 of'), 'the ? button replays it');
     await click('[data-testid=tour-skip]');
@@ -1226,11 +1211,9 @@ description: Bulk skill ${i}
     await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-refresh')).display`)) === 'block', 'tooltip shown');
     await hasText('#tip-refresh', 'Default: 5');
     await shot('16-settings-tooltip');
-    await click('[data-testid=guides-reset]');
     await click('[data-testid=tour-start]');
-    await waitFor(async () => (await tour()).includes('1 of'), 'Show the tours again, then ? starts the tour of this page');
+    await waitFor(async () => (await tour()).includes('1 of'), '? starts the tour of this page');
     await click('[data-testid=tour-skip]');
-    await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1')`, [TOURED]);
   });
 
   await test('rename an account: shown everywhere by its new name, the id stays', async () => {
@@ -1322,7 +1305,7 @@ description: Bulk skill ${i}
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
     await $('[data-testid=activity]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc')")), 'the Overview is as before: no computer switch, no computer dots');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc]')")), 'the Overview is as before: no computer switch');
     await nav('#sessions');
     await $('[data-testid=group]');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .a-srow .a-pc')")), 'Sessions as before');

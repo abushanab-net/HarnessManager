@@ -19,7 +19,6 @@
 .b-page[data-b-page="cli"] { max-width: 1180px; }
 .b-cli-row, .b-cli-examples > div { grid-template-columns: max-content minmax(0, 1fr); gap: 24px; align-items: baseline; }
 .b-cli-row code, .b-cli-examples code { overflow-wrap: anywhere; white-space: normal; }
-.b-page .page-heading .page-actions.chip-group { max-width: 55%; }
 
 /* settings: the description column stops at 46ch; controls are sized to their content */
 .b-setting { grid-template-columns: minmax(240px, 46ch) minmax(0, 1fr); }

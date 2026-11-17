@@ -3,7 +3,7 @@
 
 import { esc, dur } from './lib.js';
 
-export const S = { state: null, route: { view: 'accounts', params: {} }, cache: {}, timers: [] };
+export const S = { state: null, route: { view: 'accounts', params: {} }, cache: {} };
 
 /** Call the backend. Every operation goes through one Tauri command. */
 export async function call(op, args = {}) {
@@ -34,7 +34,7 @@ export function setAppUpdates(n) {
 
 /** Live sessions as a 4×4 grid of dots with n of them lit (the number on hover); nothing when none. */
 // drawn as SVG squares snapped to device pixels, so a lit one is a flat colour, not a blurred glow at 125 % scaling
-export const liveGrid = (n) => (n ? `<svg class="lgrid" width="11" height="11" viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 3}" y="${Math.floor(i / 4) * 3}" width="2" height="2" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
+const liveGrid = (n) => (n ? `<svg class="lgrid" width="11" height="11" viewBox="0 0 11 11" shape-rendering="crispEdges" role="img" aria-label="${n} live"><title>${n} live</title>${Array.from({ length: 16 }, (_, i) => `<rect x="${(i % 4) * 3}" y="${Math.floor(i / 4) * 3}" width="2" height="2" class="${i < n ? 'on' : ''}"/>`).join('')}</svg>` : '');
 
 /** The pinned projects under Projects in the rail (at most five), and the project count. */
 export function drawPins(list) {
@@ -64,20 +64,6 @@ export const acctName = (id) => ((S.state && S.state.profiles) || []).find((p) =
 /** The login an account holds now (its email, or the one typed for it); '' when unknown. Sessions do not record
  * their login, so this is the account's login today. */
 export const acctEmail = (id) => { const p = ((S.state && S.state.profiles) || []).find((x) => x.name === id); return (p && (p.identity.email || p.expected_email)) || ''; };
-
-/** Draw a chart for the width its box has now, and again whenever the window changes size (maximize, restore). */
-const fits = new Set();
-export function fit(el, draw) {
-  const f = () => { el.innerHTML = draw(el.clientWidth); };
-  f();
-  for (const x of fits) if (!x[0].isConnected) fits.delete(x); // pages redraw often: forget charts no longer shown
-  fits.add([el, f]);
-}
-let fitTimer;
-window.addEventListener('resize', () => {
-  clearTimeout(fitTimer);
-  fitTimer = setTimeout(() => { for (const x of fits) { if (x[0].isConnected) x[1](); else fits.delete(x); } }, 120);
-});
 
 /** What a refresh did: new records, a live read that failed, and why Claude limits can stay old. */
 export function refreshText(r) {
@@ -146,7 +132,7 @@ export function go(view, params = {}) {
   location.hash = '#' + view + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '');
 }
 
-export function parseHash() {
+function parseHash() {
   const h = location.hash.slice(1) || 'home';
   const [v, q] = h.split('?');
   return { view: v, params: Object.fromEntries(new URLSearchParams(q || '')) };
@@ -400,7 +386,7 @@ export function openMenu(anchor, items) {
   m.querySelector('button')?.focus();
   setTimeout(() => { outside = (e) => { if (!m.contains(e.target)) closeMenu(); }; document.addEventListener('click', outside); }, 0);
 }
-export function closeMenu() {
+function closeMenu() {
   if (outside) { document.removeEventListener('click', outside); outside = null; }
   if (menuEl) { menuEl.remove(); menuEl = null; }
   if (menuAnchor) { menuAnchor.removeAttribute('aria-expanded'); if (menuAnchor.isConnected) menuAnchor.focus({ preventScroll: true }); menuAnchor = null; }
@@ -488,7 +474,7 @@ export async function pickFile(filter) {
 // the pinned projects and the Setup pages fold; the shut ones are remembered on this computer (Setup starts shut)
 const FOLD_KEY = 'hm.nav.shut';
 const shutFolds = () => { try { const v = JSON.parse(localStorage.getItem(FOLD_KEY)); return Array.isArray(v) ? v : ['nav-setup']; } catch { return ['nav-setup']; } };
-export function setFold(id, shut, save = true) {
+function setFold(id, shut, save = true) {
   const f = document.getElementById(id), head = document.querySelector(`[data-fold="${id}"]`);
   if (!f || !head) return;
   f.hidden = shut;

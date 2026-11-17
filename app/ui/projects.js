@@ -135,7 +135,7 @@ action('project-pin', async (el) => {
   call('projects', { days: 30 }).then(drawPins).catch(() => {});
 });
 /** Rename a project where its name is: the pencil, a double-click, or the menu. Enter saves, Esc cancels. */
-export function renameProject(key) {
+function renameProject(key) {
   const el = document.querySelector(`.a-pname[data-name="${CSS.escape(key)}"]`);
   if (!el || el.querySelector('input')) return;
   const old = el.textContent;

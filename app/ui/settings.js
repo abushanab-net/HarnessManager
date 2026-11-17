@@ -4,7 +4,6 @@
 // card per computer) and Backups and archive are sections of the same page. Harness Manager's own update lives here.
 
 import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, dialogOpen, keyStore } from './core.js';
-import { resetGuides } from './guide.js';
 import { esc, when, dur } from './lib.js';
 import { winTrack } from './accounts.js';
 import { computersStatus, syncOn, computers, colorIdx, heardOn, transportLine, nameOf, syncChoices } from './computers.js';
@@ -73,7 +72,6 @@ view('settings', async (sheet, params) => {
     ${section('maintenance', 'Maintenance',
       row('find', 'Find tools again', info('find', 'Adds a main profile for each tool found on this computer that has none yet.<br><b>Default: run manually.</b>'), 'Add the main profiles of detected tools.', btn('Find tools', 'detect'))
       + row('import', 'Old launcher', info('import', 'Reads claude-accounts.json of the old PowerShell launcher on this computer. Keys can only be read on the computer that saved them.<br><b>Default: run manually.</b>'), 'Import accounts and keys from <span class="mono">claude-accounts.json</span> on this computer.', btn('Import…', 'import-ps', 'data-testid="import-ps"'))
-      + row('tours', 'Tours', info('tours', 'Each page has a tour of its parts, started from the ? at the top. Skip all tours turns them off; this turns them back on.<br><b>Default: on.</b>'), 'The ? at the top replays this page\'s tour.', btn('Show the tours again', 'guides-reset', 'data-testid="guides-reset"'))
       + row('relink', 'Link copies to the main profile', info('relink', 'Accounts made as independent copies of the tool\'s settings are replaced with links to the main profile, so one change reaches every account. The originals are kept in .hrm-backup beside them.<br><b>Default: run manually.</b>'), 'Replace old independent copies with links; keep originals in .hrm-backup.', btn('Link copies…', 'relink')))}
     ${section('computers', 'Computers', `<div data-testid="computers">${c ? computersSection(c, s, st, ts) : '<div class="b-setting"><span class="muted">Computers could not be read.</span></div>'}</div>`)}
     ${section('backups', 'Backups and archive', b ? backupsSection(b, ar, s) : '<div class="b-setting"><span class="muted">Backups could not be read.</span></div>')}
@@ -88,7 +86,7 @@ action('set-jump', (el) => jump(el.dataset.v));
 function computersSection(c, s, st, ts) {
   const on = syncOn(c), now = Date.now(), n = computers(c).length;
   const hub = c.hub || {}, hubOn = on && c.mode === 'hub';
-  const card = (d, i) => {
+  const card = (d) => {
     const me = d === c.this, seq = d.last_seq || 0, done = me ? (d.published_seq ?? seq) : (d.applied_seq || 0), pct = seq ? Math.min(100, Math.round((done / seq) * 100)) : 100;
     const stale = !me && !heardOn(d, now);
     const heard = me ? 'writing now' : d.connected ? 'connected' : d.last_seen ? (now - d.last_seen < 90000 ? 'writing now' : 'heard ' + ago(d.last_seen)) : 'not heard from yet';
@@ -239,7 +237,6 @@ action('autostart', async (el) => {
   if (on === undefined) { el.checked = !el.checked; return; }
   toast(on ? 'Harness Manager starts in the tray when you sign in' : 'It no longer starts at sign-in');
 });
-action('guides-reset', () => { resetGuides(); toast('Each page will show its tour again'); render(); });
 // a typed setting (the port, the account list's place): saved by the button beside it
 action('set-field', async (el) => {
   const raw = document.getElementById(el.dataset.from).value.trim(), value = el.dataset.key === 'router_port' ? +raw : raw;

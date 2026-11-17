@@ -29,57 +29,17 @@ export const dur = (ms) => {
 
 
 /** The tool's own icon (LobeHub Icons, see icons/README.md). */
-/** Pages rows in place: those off the page get `.paged`. Returns the pager's HTML, or nothing when one page holds all;
- * the page and size buttons carry `<act>-page` and `<act>-per` actions. */
-export function pager(rows, st, act) {
-  const pages = Math.max(1, Math.ceil(rows.length / st.per));
-  if (st.page >= pages) st.page = pages - 1;
-  rows.forEach((tr, i) => tr.classList.toggle('paged', i < st.page * st.per || i >= (st.page + 1) * st.per));
-  if (rows.length <= 25) return '';
-  return `<button class="btn sm" data-act="${act}-page" data-v="${Math.max(0, st.page - 1)}" ${st.page === 0 ? 'disabled' : ''} aria-label="Previous page">‹</button>${Array.from({ length: pages }, (_, i) => `<button class="btn sm ${i === st.page ? 'on' : ''}" data-act="${act}-page" data-v="${i}" data-testid="${act}-page-${i}">${i + 1}</button>`).join('')}<button class="btn sm" data-act="${act}-page" data-v="${Math.min(pages - 1, st.page + 1)}" ${st.page === pages - 1 ? 'disabled' : ''} aria-label="Next page">›</button>
-    <span class="help">${st.page * st.per + 1}–${Math.min(rows.length, (st.page + 1) * st.per)} of ${rows.length}</span><span class="seg3 mono">${[25, 50, 100].map((n) => `<a class="${st.per === n ? 'on' : ''}" data-act="${act}-per" data-v="${n}" data-testid="${act}-per-${n}">${n}</a>`).join('')}</span><span class="help">a page</span>`;
-}
 export const toolIcon = (h, s = 16) => `<img class="ticon" src="icons/${esc(h)}.svg" width="${s}" height="${s}" alt="">`;
-export const toolPill = (h, label) => `<span class="tool ${esc(h)}">${toolIcon(h, 13)}${esc(label || h)}</span>`;
 
 
 const I = (d, s = 16) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 export const ic = {
-  home: I('<path d="M3 11 12 4l9 7M5 10v10h5v-6h4v6h5V10"/>'),
-  dash: I('<path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 4h6v4h-6zM4 20h6v-4H4z"/>'),
-  users: I('<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 14.8c1.7.8 2.7 2.6 3 5.2"/>'),
-  chart: I('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'),
-  key: I('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/>'),
-  term: I('<rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="m7 10 3 2.5L7 15M12.5 15H17"/>'),
-  plug: I('<path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/>'),
-  spark: I('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'),
-  doc: I('<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6M9 13h8M9 17h6"/>'),
-  route: I('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>'),
-  gear: I('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
-  book: I('<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5zM4 21.5A2.5 2.5 0 0 1 6.5 19H20"/>'),
-  search: I('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 15),
   play: I('<path d="m7 4 13 8-13 8z"/>', 13),
-  plus: I('<path d="M12 5v14M5 12h14"/>', 14),
-  folder: I('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', 14),
-  refresh: I('<path d="M20 11a8 8 0 0 0-14.6-4.5L3 9M3 4v5h5M4 13a8 8 0 0 0 14.6 4.5L21 15M21 20v-5h-5"/>', 14),
   dots: I('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>', 16),
-  x: I('<path d="M6 6l12 12M18 6 6 18"/>', 14),
-  back: I('<path d="M19 12H5M11 6l-6 6 6 6"/>', 18),
-  prev: I('<path d="m15 6-6 6 6 6"/>', 16),
-  next: I('<path d="m9 6 6 6-6 6"/>', 16),
-  caret: I('<path d="m6 9 6 6 6-6"/>', 14),
   edit: I('<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>', 15),
   pin: I('<path d="M12 17v5M9 3h6l-1 7 3 3H7l3-3z"/>', 15),
   tag: I('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', 15),
-  eye: I('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', 15),
-  download: I('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', 15),
-  grid: I('<rect x="4" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.2"/>'),
   info: I('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>', 16),
-  toEnd: I('<path d="M12 4v14M6 12l6 6 6-6M5 21h14"/>', 15),
-  caretR: I('<path d="m9 6 6 6-6 6"/>', 14),
-  panel: I('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>', 17),
-  save: I('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', 17),
-  find: I('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>', 17),
 };
 /** The Harness Manager symbol: the Interlocking H (brand Concept B), drawn from the brand kit's master paths. */
 export const brandMark = (s = 28) => `<svg width="${s}" height="${s}" viewBox="60 10 410 500" role="img" aria-label="Harness Manager"><defs>

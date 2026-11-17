@@ -1,7 +1,6 @@
 /* Sessions, Session, Projects: the reference's pages-a.css on the app's role tokens, with the critics' fixes
    (tag hues outside the state colours, duration and diff as two columns, the account and computer wrapping at 1280,
-   sparklines on one scale, the share tracks without the stacked bar). Every class is prefixed a-. Self-contained:
-   the copy of these rules inside app.css can go. */
+   sparklines on one scale, the share tracks without the stacked bar). Every class is prefixed a-. */
 
 /* ---------- shared ---------- */
 .a-live { color: var(--ac); font-weight: 600; }
