@@ -734,6 +734,12 @@ fn settings_take_switches_and_lists_and_refuse_what_does_not_fit() {
     // a text setting keeps the words as typed, digits too
     e.ok(&["settings", "device_name", "42"]);
     assert_eq!(e.ok(&["settings", "device_name"]).trim(), "\"42\"");
+    // the text size is one of three, comfortable unless chosen
+    assert_eq!(e.ok(&["settings", "text_size"]).trim(), "\"comfortable\"");
+    e.ok(&["settings", "text_size", "large"]);
+    assert_eq!(e.ok(&["settings", "text_size"]).trim(), "\"large\"");
+    assert!(e.fail(&["settings", "text_size", "huge"]).contains("compact, comfortable or large"));
+    assert_eq!(e.ok(&["settings", "text_size"]).trim(), "\"large\"", "a refused value changes nothing");
     // what the sync's own checks guard is changed through them only
     for k in ["device_id", "incarnation", "sync_mode", "sync_folder", "hub_url", "direct_connection"] {
         assert!(e.fail(&["settings", k, "hub"]).contains("hrm computers set"), "{k}");
