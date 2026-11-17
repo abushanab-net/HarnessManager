@@ -189,11 +189,8 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 }).catch(() => {});
   page.on('console', (m) => { if (m.type() === 'error') console.log('     [window] ' + m.text()); });
   page.on('pageerror', (e) => console.log('     [window] ' + e.message));
-  // the first-visit tours are tested on their own; everywhere else they would sit in front of the page
-  const TOURED = ['home', 'accounts', 'account', 'projects', 'sessions', 'session', 'routing', 'mcp', 'skills', 'prompts', 'settings'];
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
-  // (skipping the home tour, when it is already up, must not turn every page's tour off: the tour test needs them)
-  await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1'); document.querySelector('[data-act=tour-skip]')?.click(); localStorage.removeItem('hm.tours.off'); localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`, [TOURED]);
+  await exec(`localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`);
 
   await test('overview: the deck, the horizon lanes, the readouts, the year clock, attention, reply timing and the request log', async () => {
     await $('[data-testid=heatmap]');
@@ -1193,7 +1190,6 @@ description: Bulk skill ${i}
 
   await test('a walkthrough on a page\'s first visit, and setting tooltips with their defaults', async () => {
     const tour = () => exec(`return document.querySelector('[data-testid=tour]')?.innerText || ''`);
-    await exec(`localStorage.removeItem('hm.tour.accounts')`);
     await nav('#home');
     await nav('#accounts');
     await $('[data-testid=accounts-table]');
@@ -1207,17 +1203,6 @@ description: Bulk skill ${i}
     await shot('15-tour');
     await page.keyboard.press('Escape');
     await waitFor(async () => !(await tour()), 'Esc ends it');
-    await nav('#home');
-    await nav('#accounts');
-    await $('[data-testid=accounts-table]');
-    assert.ok(!(await tour()), 'an ended tour stays ended');
-    await exec(`localStorage.removeItem('hm.tour.routing')`);
-    await nav('#routing');
-    await $('[data-testid=provider-add]');
-    await sleep(300);
-    assert.ok(!(await tour()), 'skipping one page\'s tour skips every page\'s');
-    await nav('#accounts');
-    await $('[data-testid=accounts-table]');
     await click('[data-testid=tour-start]');
     await waitFor(async () => (await tour()).includes('1 of'), 'the ? button replays it');
     await click('[data-testid=tour-skip]');
@@ -1226,11 +1211,9 @@ description: Bulk skill ${i}
     await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-refresh')).display`)) === 'block', 'tooltip shown');
     await hasText('#tip-refresh', 'Default: 5');
     await shot('16-settings-tooltip');
-    await click('[data-testid=guides-reset]');
     await click('[data-testid=tour-start]');
-    await waitFor(async () => (await tour()).includes('1 of'), 'Show the tours again, then ? starts the tour of this page');
+    await waitFor(async () => (await tour()).includes('1 of'), '? starts the tour of this page');
     await click('[data-testid=tour-skip]');
-    await exec(`for (const v of arguments[0]) localStorage.setItem('hm.tour.' + v, '1')`, [TOURED]);
   });
 
   await test('rename an account: shown everywhere by its new name, the id stays', async () => {

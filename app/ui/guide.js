@@ -1,7 +1,5 @@
 // The page tour, started from the ? in the top bar: it highlights one part of the page at a time with
-// a note beside it (Next / Back, or the arrow keys). Finishing a tour marks its page; Skip or Esc turns every
-// page's tour off. Remembered on this computer; the ? button replays the current page's tour, and
-// Settings > Show the tours again turns them all back on.
+// a note beside it (Next / Back, or the arrow keys). Close or Esc ends it; the ? button starts it again.
 
 import { S, action, keyStore } from './core.js';
 import { esc } from './lib.js';
@@ -71,14 +69,8 @@ const TOURS = {
     ['[data-testid=computers]', 'Computers', 'Name this computer and pick a shared folder your other computers also sync, or join a hub you host with a code. Each computer writes its own history there and reads the others\', so the Overview, Sessions and Projects add them all up. Keys and logins never go in either; the hub only ever holds sealed data.'],
     ['[data-testid=st-direct]', 'Direct connection', 'With this on, your computers find each other on this network or at an address you give and talk directly: what runs there within ten seconds, their history the moment it is written. The folder keeps working underneath.'],
     ['[data-testid=pair]', 'Pair a computer', 'Once per pair of computers: one shows a six-digit code, the other types it. Each card then says how that computer is reached, and Forget drops it again.'],
-    ['[data-testid=guides-reset]', 'Tours', 'Shows every page\'s tour again. The ? at the top replays the tour of the page you are on.'],
   ],
 };
-
-const key = (v) => 'hm.tour.' + v;
-const OFF = 'hm.tours.off';
-const seen = (v) => { try { return localStorage.getItem(OFF) === '1' || localStorage.getItem(key(v)) === '1'; } catch { return false; } };
-const remember = (k) => { try { localStorage.setItem(k, '1'); } catch {} };
 
 let tour = null; // { view, steps, i }
 
@@ -86,8 +78,7 @@ function visibleSteps(view) {
   return (TOURS[view] || []).filter(([sel]) => !sel || document.querySelector(sel));
 }
 
-function end(done = true, all = false) {
-  if (tour && done) remember(all ? OFF : key(tour.view));
+function end() {
   tour = null;
   document.querySelectorAll('.tour-spot, .tour-pop').forEach((e) => e.remove());
 }
@@ -103,7 +94,7 @@ function show() {
   pop.setAttribute('aria-label', title);
   pop.dataset.testid = 'tour';
   pop.innerHTML = `<div class="tour-step">${tour.i + 1} of ${tour.steps.length}</div><b>${esc(title)}</b><p>${esc(text.replace('{store}', keyStore()))}</p>
-    <div class="tour-acts"><button class="btn sm" data-act="tour-skip" data-testid="tour-skip" ${last ? '' : 'title="No more tours on any page; Settings can turn them back on"'}>${last ? 'Close' : 'Skip all tours'}</button><span>
+    <div class="tour-acts"><button class="btn sm" data-act="tour-skip" data-testid="tour-skip">Close</button><span>
     ${tour.i ? '<button class="btn outline sm" data-act="tour-back">Back</button>' : ''}
     <button class="btn primary sm" data-act="tour-next" data-testid="tour-next">${last ? 'Done' : 'Next'}</button></span></div>`;
   document.body.appendChild(pop);
@@ -131,7 +122,7 @@ function show() {
   pop.querySelector('[data-act=tour-next]').focus();
 }
 
-/** Start the tour of a page (from the first visit, or the ? button). */
+/** Start the tour of a page (from the ? button). */
 function startTour(view) {
   const steps = visibleSteps(view);
   if (!steps.length) return false;
@@ -142,15 +133,14 @@ function startTour(view) {
 
 document.addEventListener('rendered', (e) => {
   const { view } = e.detail;
-  if (tour && tour.view !== view) end(false); // left the page: its tour waits for the next visit
-  if (tour) { tour.steps = visibleSteps(view); tour.i = Math.min(tour.i, tour.steps.length - 1); if (tour.i < 0) end(false); else show(); return; }
+  if (tour && tour.view !== view) end(); // left the page: its tour ends
+  if (tour) { tour.steps = visibleSteps(view); tour.i = Math.min(tour.i, tour.steps.length - 1); if (tour.i < 0) end(); else show(); return; }
 });
 
 action('tour-next', () => { if (!tour) return; if (tour.i < tour.steps.length - 1) { tour.i++; show(); } else end(); });
 action('tour-back', () => { if (tour && tour.i > 0) { tour.i--; show(); } });
-// Skip before the last step: the user does not want tours, on this page or any other
-action('tour-skip', () => end(true, !!tour && tour.i < tour.steps.length - 1));
-action('tour-start', () => { end(false); if (!startTour(S.route.view)) end(false); });
+action('tour-skip', () => end());
+action('tour-start', () => { end(); if (!startTour(S.route.view)) end(); });
 
 document.addEventListener('keydown', (e) => {
   if (!tour) return;
@@ -159,8 +149,3 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft' && tour.i > 0) { e.preventDefault(); tour.i--; show(); }
 }, true);
 window.addEventListener('resize', () => { if (tour) show(); });
-
-/** Show every page's tour again. */
-export function resetGuides() {
-  try { localStorage.removeItem(OFF); for (const v of Object.keys(TOURS)) localStorage.removeItem(key(v)); } catch {}
-}
