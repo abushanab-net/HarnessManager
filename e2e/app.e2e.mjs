@@ -660,6 +660,35 @@ try {
     await waitFor(async () => (await exec(`return document.querySelectorAll('.a-srow').length`)) > 1, 'every session is back');
   });
 
+  await test('projects: one list, each project on one row with its share, its numbers and its actions', async () => {
+    await nav('#projects?days=all');
+    await $('[data-testid=project-cards] .a-pcard');
+    const d = await exec(`const rows = [...document.querySelectorAll('.a-pcard')], head = document.querySelector('[data-testid=project-dist] .a-prow.head');
+      // every place outside the tiles that names the project (the Busiest tile names it too)
+      const named = [...document.querySelectorAll('#sheet .page-body > :not(.account-stats) *')].filter((e) => !e.children.length && e.textContent.trim() === 'platform-gitops');
+      const x = (el) => [...el.children].map((c) => Math.round(c.getBoundingClientRect().right));
+      return { keys: rows.map((r) => r.dataset.key), named: named.length, lists: document.querySelectorAll('[data-testid=project-cards]').length, inOne: rows.every((r) => r.closest('[data-testid=project-dist]')),
+        old: !!document.querySelector('.a-pcards, a.a-nm, [data-act=p-dist]'), cols: [x(head), x(rows[0])],
+        parts: rows.map((r) => [!!r.querySelector('.a-share svg rect'), r.querySelectorAll(':scope > .num').length, !!r.querySelector('.a-area'), !!r.querySelector('.a-path'), !!r.querySelector('[data-act=tag-edit]'), !!r.querySelector('[data-act=project-pin]'), !!r.querySelector('[data-act=project-menu]')].join()),
+        h: rows.map((r) => Math.round(r.getBoundingClientRect().height)) };`);
+    assert.ok(d.keys.length >= 2 && new Set(d.keys).size === d.keys.length, 'a row per project: ' + d.keys);
+    assert.equal(d.named, 1, 'platform-gitops is listed once');
+    assert.ok(d.lists === 1 && d.inOne && !d.old, 'one list, in the card that says where the tokens and the cost went; no second table, no cards');
+    assert.ok(d.parts.every((p) => p === 'true,3,true,true,true,true,true'), 'each row: the share bar, cost, tokens and sessions, the sparkline, the path, the tags, the pin and the menu: ' + d.parts);
+    assert.deepEqual(d.cols[0], d.cols[1], 'the columns\' names sit over their columns');
+    assert.ok(d.h.every((h) => h === 52), 'rows 52 px: ' + d.h);
+    // the share follows the metric; the shares of the rows (and the others line, when there is one) add up to all
+    await click('[data-testid=pmetric-sessions]');
+    await hasText('[data-testid=project-dist] .a-prow.head', 'Share of sessions');
+    const sum = await exec("return [...document.querySelectorAll('[data-testid=project-cards] .a-share .num')].reduce((a, e) => a + parseInt(e.textContent, 10), 0)");
+    assert.ok(Math.abs(sum - 100) <= 2, 'the shares add up: ' + sum);
+    // the ⋯ of a row: open its sessions, pin, rename, merge, reset name
+    await click('[data-testid^=pcard-] [data-act=project-menu]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim())"), ['Open its sessions', 'Pin to the sidebar', 'Rename project', 'Merge into another project', 'Reset name']);
+    await page.keyboard.press('Escape');
+    await click('[data-testid=pmetric-tokens]');
+  });
+
   await test('projects: cost per project, pin, rename and tabs in place, and a project opened in Sessions', async () => {
     await nav('#projects');
     await $('[data-testid=project-tiles]');
@@ -671,9 +700,9 @@ try {
     // the sort, the chart's tabs and the page size redraw their part only: the tiles stay the same nodes
     await exec("window.__tiles = document.getElementById('pj-tiles')");
     await click('[data-testid=psort-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('active')"), 'sorted by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=psort-cost]')?.classList.contains('on')"), 'sorted by cost');
     await click('[data-testid=pmetric-cost]');
-    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('active')"), 'distribution by cost');
+    await waitFor(() => exec("return document.querySelector('[data-testid=pmetric-cost]')?.classList.contains('on')"), 'distribution by cost');
     assert.ok(await exec("return document.getElementById('pj-tiles') === window.__tiles"), 'the tiles were not redrawn');
     assert.ok((await exec('return location.hash')).includes('metric=cost'), 'the choice is in the hash: ' + (await exec('return location.hash')));
     // pin from the row's icon: the sidebar shows it, settings keep it, the page stays
@@ -718,8 +747,9 @@ try {
     await nav('#sessions');
     await hasText('[data-testid=page-title]', 'Sessions');
     await hasText('[data-testid=sessions-count]', 'in the last 7 days');
-    await $('[data-testid=rail-live]'); // the rail comes with the list
-    assert.equal(await exec("return document.querySelector('[data-testid=rail-live]').getAttribute('href')"), '#sessions?live=1');
+    // the list has no project rail of its own (the sidebar has the pinned projects): the Project picker comes with it
+    await $('[data-testid=pick-project]');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=rail], .a-rail')")), 'no project rail on the page');
   });
 
   await test('reading a session: steps, failed command, answer and changes', async () => {
@@ -805,8 +835,11 @@ try {
     await exec("document.querySelector('[data-testid=session-s-main-1] .a-tags a.a-tag').click()");
     await $('[data-testid=chip-tag]');
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 1, 'only the tagged session');
-    assert.ok(await exec("return !!document.querySelector('[data-testid=rail-tag-release]')"), 'the rail lists the tag');
+    // the Tag picker lists the tag, marked as the one in force
+    await click('[data-testid=pick-tag]');
+    await $('.menu [data-testid=pick-tag-release].on');
     await shot('06f-sessions-tags');
+    await page.keyboard.press('Escape');
     // a project's tag reaches its sessions: tag platform-gitops from the Projects page, then filter by it
     await nav('#projects');
     await $('[data-testid=project-cards]');
@@ -818,7 +851,59 @@ try {
     await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) >= 2, 'every session of the project carries the project tag');
     assert.ok(hrm('sessions', '--tag', 'client-x').includes('platform-gitops'), 'the CLI filters by tag too');
     await click('[data-testid=chip-tag]');
-    await click('[data-testid=rail-all]');
+    await waitFor(async () => !(await exec("return location.hash")).includes('tag='), 'the ✕ of the chip takes the tag off');
+  });
+
+  await test('sessions: one filter line, and the Project and Tag pickers filter as the page\'s own rail did', async () => {
+    const hash = () => exec('return location.hash');
+    const items = () => exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.innerText.replace(/\\s+/g, ' ').trim())");
+    await nav('#sessions?group=date&days=30');
+    await $('[data-testid=pick-project]');
+    // at 1280 the filters are one line: the grouping, the range, the two pickers
+    const line = await exec(`const f = document.querySelector('[data-testid=filters]'), kids = [...f.children].filter((e) => e.getBoundingClientRect().width);
+      return { w: window.innerWidth, mids: kids.map((e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); }), low: [...f.querySelectorAll('button')].filter((b) => b.closest('.seg') ? b.closest('.seg').getBoundingClientRect().height < 28 : b.getBoundingClientRect().height < 28).length,
+        text: f.innerText.replace(/\\s+/g, ' ') };`);
+    assert.equal(line.w, 1280);
+    assert.ok(Math.max(...line.mids) - Math.min(...line.mids) <= 1, 'one line: ' + line.mids);
+    assert.equal(line.low, 0, 'every control at least 28 px tall');
+    assert.ok(/Group by ?Project ?Date ?Account ?Tool ?Tag ?7 d ?30 d ?All ?Project ▾ ?Tag ▾/.test(line.text), line.text);
+    // the Project picker lists what the rail listed: Live now and All projects first, the projects with their counts, every project last
+    await click('[data-testid=pick-project]');
+    await $('.menu [data-testid=pick-live]');
+    const list = await items();
+    assert.equal(list[0], 'Live now');
+    assert.ok(/^All projects \d+$/.test(list[1]), list[1]);
+    assert.ok(list.some((t) => /^platform-gitops \d+$/.test(t)), 'a project with its count: ' + list);
+    assert.equal(list[list.length - 1], 'Every project, with costs →');
+    assert.ok(await exec("return document.querySelector('.menu [data-testid=pick-all]').classList.contains('on')"), 'All projects is the choice in force');
+    // a project: its sessions, with the grouping and the range kept in the address
+    await page.click('.menu [role=menuitem]:has-text("platform-gitops")');
+    await hasText('[data-testid=project-title]', 'platform-gitops');
+    assert.equal(await hash(), '#sessions?group=date&days=30&project=' + encodeURIComponent('github.com/example/platform-gitops'));
+    // Live now: the filter, said by its chip; the ✕ takes it off
+    await nav('#sessions?group=date&days=30');
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-live]');
+    await $('[data-testid=chip-live]');
+    assert.equal(await hash(), '#sessions?group=date&days=30&live=1');
+    await click('[data-testid=chip-live]');
+    await waitFor(async () => (await hash()) === '#sessions?group=date&days=30', 'the live filter off');
+    // the Tag picker: every tag with its chip and its count; one filters to what carries it
+    await click('[data-testid=pick-tag]');
+    await $('.menu [data-testid=pick-tag-release]');
+    assert.ok((await items()).some((t) => /^release \d+$/.test(t)) && (await exec("return !!document.querySelector('.menu [data-testid=pick-tag-release] .a-tag')")), 'a tag as its chip, with its count');
+    await click('.menu [data-testid=pick-tag-release]');
+    await $('[data-testid=chip-tag]');
+    assert.equal(await hash(), '#sessions?group=date&days=30&tag=release');
+    await waitFor(async () => (await exec("return document.querySelectorAll('.a-srow').length")) === 1, 'only the tagged session');
+    // All projects takes every filter off
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-all]');
+    await waitFor(async () => (await hash()) === '#sessions?group=date&days=30', 'every project again');
+    // Every project, with costs → opens Projects
+    await click('[data-testid=pick-project]');
+    await click('.menu [data-testid=pick-projects]');
+    await waitFor(async () => (await hash()) === '#projects', 'the Projects page');
   });
 
   await test('OpenCode and Antigravity sessions are listed and readable', async () => {
@@ -867,6 +952,53 @@ try {
     assert.ok(md.includes('## You') && md.includes('Add a Longhorn backup target for staging'));
     assert.ok(md.includes('`Bash` argocd app sync longhorn-staging (failed)'));
     assert.ok(md.includes('What changed'));
+  });
+
+  await test('session: the head\'s actions sit on one row at 1280: one primary, Export as Markdown beside it, the rest behind ⋯', async () => {
+    await nav('#session?profile=claude-main&id=s-main-1');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+    const head = () => exec(`const a = document.querySelector('.page-head .actions'), bs = [...a.querySelectorAll('button')], sheet = document.getElementById('sheet');
+      return { w: window.innerWidth, tops: [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().top)))], heights: [...new Set(bs.map((b) => Math.round(b.getBoundingClientRect().height)))],
+        inside: a.getBoundingClientRect().right <= sheet.getBoundingClientRect().right && sheet.scrollWidth <= sheet.clientWidth, labels: bs.map((b) => b.textContent.trim()),
+        primary: [...document.querySelectorAll('#sheet .btn.primary, #sheet .btn-primary')].filter((b) => b.getBoundingClientRect().width).map((b) => b.dataset.act) };`);
+    const d = await head();
+    assert.equal(d.w, 1280);
+    assert.ok(d.tops.length === 1 && d.inside, 'the actions on one row, inside the page: ' + JSON.stringify(d));
+    assert.deepEqual(d.heights, [30], 'each 30 px tall');
+    assert.ok(d.labels.length === 4 && d.labels[0] === 'Export as Markdown' && d.labels[1].startsWith('Resume in') && d.labels[2] === '▾' && d.labels[3] === '⋯', 'Export, Resume with its ▾, ⋯: ' + d.labels);
+    assert.deepEqual(d.primary, ['resume', 'terminal-menu'], 'one primary on the page: Resume, with the ▾ that is part of it');
+    // a title of three lines moves nothing: the name wraps, the actions stay one row
+    await exec("document.querySelector('[data-testid=session-title]').textContent = 'Longhorn backup target for staging, and every other cluster too '.repeat(4)");
+    const long = await head();
+    assert.ok(long.tops.length === 1 && long.inside, 'still one row beside a long title: ' + JSON.stringify(long));
+    // the rest is behind ⋯; the ▾ chooses the terminal
+    await click('[data-testid=session-menu]');
+    await hasText('.menu', 'Open the log file folder');
+    await page.keyboard.press('Escape');
+    await click('.page-head [data-act=terminal-menu]');
+    await hasText('.menu', 'Open sessions in a console window');
+    await page.keyboard.press('Escape');
+    // the tiles, the conversation and its three views are where they were
+    assert.equal(await exec("return document.querySelectorAll('#sheet .account-stat').length"), 5, 'five tiles');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=conv-panel] [data-testid=chat]') && !!document.querySelector('[data-testid=follow-end]')"), 'the conversation, with its ↓ Latest');
+    // a session running here (the sandbox has no console, so the transcript is answered as open): the primary is
+    // Follow live, and Resume is behind ⋯ with the terminal choice
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => (a && a.op === 'transcript' ? { ...r, meta: { ...r.meta, open: true, source_path: '' } } : r)) };`);
+    try {
+      await nav('#sessions');
+      await nav('#session?profile=claude-main&id=s-main-1');
+      await $('[data-testid=follow-live]');
+      const live = await head();
+      assert.deepEqual(live.labels, ['Export as Markdown', 'Follow live', '⋯'], 'a running session: Export, Follow live, ⋯');
+      assert.ok(live.tops.length === 1 && live.inside, 'on one row');
+      assert.deepEqual(live.primary, ['follow-end'], 'Follow live is the one primary');
+      await hasText('#sheet .a-pill.live', 'LIVE');
+      await click('[data-testid=session-menu]');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …'))"),
+        ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯');
+      await page.keyboard.press('Escape');
+    } finally { await exec('window.__TAURI__.core = window.__core'); await nav('#sessions'); }
   });
 
   await test('accounts: a card and a chip per tool, a header that folds, Add account as a dialog; a session with its Conversation panel', async () => {
@@ -1455,6 +1587,41 @@ description: Bulk skill ${i}
     await hasText('[data-testid=skill-row-hello]', 'now louder');
   });
 
+  await test('skills: one line above the matrix, and it and the tools\' header stay in view while the rows scroll', async () => {
+    await nav('#skills');
+    await $('[data-testid=skill-line]');
+    // enough rows to scroll, when this test runs on its own
+    if ((await exec("return document.querySelectorAll('[data-testid=skill-matrix] tbody tr[data-key]').length")) < 20) {
+      for (let i = 0; i < 24; i++) write(path.join(home, '.agents', 'skills', `tall-${String(i).padStart(2, '0')}`, 'SKILL.md'), `---\nname: tall-${i}\ndescription: Tall skill ${i}\n---\n`);
+      await nav('#home');
+      await nav('#skills');
+      await click('[data-testid=skill-adopt-all]');
+      await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=skill-matrix] tbody tr[data-key]').length")) >= 20, 'the skills managed');
+    }
+    // the store's folder, the source, the pager and the rows a page: one line at 1280, under the head
+    const line = await exec(`const l = document.querySelector('[data-testid=skill-line]'), kids = [...l.children].filter((e) => e.getBoundingClientRect().width);
+      return { mids: kids.map((e) => { const r = e.getBoundingClientRect(); return Math.round(r.top + r.height / 2); }), has: ['[data-testid=sk-tab-installed]', '.mono', '#sk-filter', '[data-testid=sk-next]', '[data-testid=sk-per]'].map((s) => !!l.querySelector(s)),
+        between: [...document.querySelectorAll('#sheet .page-body > *')].indexOf(l), pagers: document.querySelectorAll('[data-testid=sk-next]').length, wide: l.scrollWidth <= l.clientWidth };`);
+    assert.ok(Math.max(...line.mids) - Math.min(...line.mids) <= 1 && line.wide, 'one line: ' + JSON.stringify(line));
+    assert.deepEqual(line.has, [true, true, true, true, true], 'Installed or Discover, the store\'s folder, the source, the pager, the rows a page');
+    assert.equal(line.between, 1, 'the line comes right after the head');
+    assert.equal(line.pagers, 1, 'one pager');
+    // scrolled to the end of the list: the line is at the top of the page, the tools' header right under it, nothing over it
+    await exec("const s = document.getElementById('sheet'); s.scrollTop = s.scrollHeight");
+    const d = await exec(`const sheet = document.getElementById('sheet'), s = sheet.getBoundingClientRect(), one = document.querySelector('[data-testid=skill-line]').getBoundingClientRect();
+      const ths = [...document.querySelectorAll('[data-testid=skill-matrix] thead th.b-tool-cell')], r = ths[0].getBoundingClientRect(), rows = [...document.querySelectorAll('[data-testid=skill-matrix] tbody tr')];
+      const at = (th) => { const b = th.getBoundingClientRect(), e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!(e && e.closest('thead')); };
+      return { scrolled: sheet.scrollTop, oneTop: one.top - s.top, thTop: r.top - one.bottom, seen: ths.map(at), labels: ths.map((t) => t.dataset.label), boxes: ths.every((t) => t.querySelector('[data-act=skill-bulk]').getBoundingClientRect().bottom <= s.bottom),
+        lastIn: rows[rows.length - 1].getBoundingClientRect().bottom <= s.bottom + 1, firstGone: rows[0].getBoundingClientRect().bottom < r.bottom };`);
+    assert.ok(d.scrolled > 300 && d.firstGone && d.lastIn, 'scrolled to the last row: ' + JSON.stringify(d));
+    assert.ok(Math.abs(d.oneTop) <= 1, 'the line stays at the top of the page: ' + d.oneTop);
+    assert.ok(Math.abs(d.thTop) <= 1, 'the header stays right under it: ' + d.thTop);
+    assert.ok(d.seen.length >= 2 && d.seen.every(Boolean) && d.boxes, 'every tool\'s name and its tick are in view, with nothing over them: ' + d.seen);
+    assert.ok(d.labels.includes('Claude Code') && d.labels.includes('Codex'), 'the columns keep their names: ' + d.labels);
+    await shot('12c-skills-scrolled');
+    await exec("document.getElementById('sheet').scrollTop = 0");
+  });
+
   await test('apps: each tool with its path and version, and Update runs its installer in a terminal', async () => {
     // Claude Code as npm installs it: <prefix>\claude.exe beside <prefix>\node_modules\@anthropic-ai\claude-code
     write(path.join(bin, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version: '2.1.300' }));
@@ -1481,6 +1648,42 @@ description: Bulk skill ${i}
     await waitFor(() => fs.readFileSync(path.join(home, '.codex', 'AGENTS.md'), 'utf8') === 'Be brief and cite files.', 'AGENTS.md written');
     assert.ok(JSON.parse(hrm('prompts', 'list', '--json')).some((p) => p.body === 'hand-written instructions'), 'old content saved first');
     await shot('13-prompts');
+  });
+
+  await test('the list and setup pages keep the 1.10 rules: controls at least 28 px tall, one primary a screen, the head\'s actions on one row at 1280', async () => {
+    // a prompt chosen in its editor, so System prompts is measured in the state with the most buttons
+    await nav('#prompts');
+    await drawn('prompts');
+    if (await exec("return !!document.querySelector('[data-act=prompt-sel][data-testid]')")) { await click('[data-act=prompt-sel][data-testid]'); await $('#pr-body'); }
+    for (const h of ['#sessions?days=all', '#session?profile=claude-main&id=s-main-1', '#projects?days=all', '#mcp', '#skills', '#prompts', '#routing', '#apps', '#cli']) {
+      if (h !== '#prompts') { await nav(h); await drawn(h); }
+      const d = await exec(`const sheet = document.getElementById('sheet'), box = (e) => e.getBoundingClientRect(), seen = (e) => box(e).width > 0 && box(e).height > 0;
+        // what a pointer presses: a segmented choice counts as its frame; a tick box, a tag chip (20 px, in a line of text),
+        // the tag button (drawn at 24, pressed over 30) and the shared "← Back" line are not measured here
+        const low = [...sheet.querySelectorAll('button, select, summary, a[href], input:not([type=checkbox]):not([type=radio]), textarea')].filter(seen)
+          .filter((e) => !e.matches('a.a-tag, .a-tagbtn, .back-chip')).map((e) => [e, box(e.closest('.seg') || e).height]).filter(([, hgt]) => hgt < 28)
+          .map(([e, hgt]) => (e.dataset.testid || e.dataset.act || e.className || e.tagName) + ' ' + hgt.toFixed(1));
+        const primary = new Set([...sheet.querySelectorAll('.btn.primary, .btn-primary')].filter(seen).map((b) => b.closest('.a-split') || b));
+        const acts = [...sheet.querySelectorAll('.page-head .actions button')].filter(seen);
+        return { low: [...new Set(low)], primary: primary.size, rows: new Set(acts.map((b) => Math.round(box(b).top + box(b).height / 2))).size, acts: acts.length, wide: sheet.scrollWidth - sheet.clientWidth, w: window.innerWidth };`);
+      assert.equal(d.w, 1280);
+      assert.deepEqual(d.low, [], `${h}: controls under 28 px`);
+      assert.ok(d.primary <= 1, `${h}: at most one primary button on the page, not ${d.primary}`);
+      assert.ok(d.rows <= 1, `${h}: the head's ${d.acts} actions on one row`);
+      assert.ok(d.wide <= 0, `${h}: nothing wider than the page (${d.wide} px)`);
+      // the same page in the VektraGrid theme, dark and light, for review (only the attributes the stylesheet reads
+      // are changed, and put back: no setting is written)
+      const name = h.slice(1).split('?')[0];
+      for (const theme of ['dark', 'light']) {
+        await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = arguments[0]; return document.fonts.ready.then(() => 1)", [theme]);
+        await sleep(150);
+        await shot(`30-vg-${theme}-${name}`);
+        // OpenCode's icon is black as a file: one shared rule shows it in white on a dark theme, wherever it is drawn
+        const oc = await exec("const i = document.querySelector('#sheet img.ticon[src$=\"opencode.svg\"]'); return i ? getComputedStyle(i).filter : ''");
+        if (oc) assert.equal(oc, theme === 'dark' ? 'invert(1)' : 'none', `${h}: the OpenCode icon on a ${theme} theme`);
+      }
+      await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
+    }
   });
 
   await test('refresh says what it did, and why Claude limits stay old while Live is off', async () => {
@@ -2797,6 +3000,50 @@ description: Bulk skill ${i}
     await page.mouse.move(400, 300);
     await page.mouse.move(420, 320);
     await waitFor(async () => (await renders()) > n, 'the redraw that waited, once the window shows', 15000);
+  });
+
+  // (last: its two folders are projects of every later list)
+  await test('two projects of one name are told apart: in the Sessions groups, the Project picker and the Projects rows', async () => {
+    // two folders named api, neither a repository: nothing but their paths tells them apart
+    const dirs = ['acme', 'beta'].map((d) => path.join(home, 'Work', d, 'api'));
+    const files = dirs.map((dir, i) => {
+      fs.mkdirSync(dir, { recursive: true });
+      const f = path.join(home, '.claude', 'projects', 'p', `s-twin-${i}.jsonl`);
+      write(f, jl([{ type: 'user', sessionId: `s-twin-${i}`, cwd: dir, timestamp: new Date().toISOString(), message: { role: 'user', content: `Twinned session ${i}` } }]));
+      return f;
+    });
+    try {
+      hrm('index', 'refresh');
+      const want = ['acme\\api', 'beta\\api'];
+      // Sessions, grouped by project: two groups named api, each with the last two folders of its path beside the name
+      await nav('#sessions?days=all&q=twinned');
+      const heads = () => exec("return [...document.querySelectorAll('[data-testid=group]')].map((g) => [g.querySelector('.a-gname').textContent.trim(), (g.querySelector('[data-testid=group-hint]') || {}).textContent || ''])");
+      await waitFor(async () => (await heads()).filter(([n]) => n === 'api').length === 2, 'two groups named api');
+      assert.deepEqual((await heads()).filter(([n]) => n === 'api').map(([, h]) => h).sort(), want, 'a different second label on each');
+      await shot('61-sessions-same-name');
+      // the Project picker: the two carry it too; a project whose name is its own carries nothing
+      await click('[data-testid=pick-project]');
+      if (await exec("return !!document.querySelector('.menu [data-testid=pick-more]')")) await click('.menu [data-testid=pick-more]');
+      await $('.menu [data-testid=pick-all]');
+      const picks = await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => [(b.querySelector('.a-pkn > .trunc') || {}).textContent || '', (b.querySelector('.a-pkn small') || {}).textContent || ''])");
+      assert.deepEqual(picks.filter(([n]) => n === 'api').map(([, h]) => h).sort(), want, 'in the picker: ' + JSON.stringify(picks));
+      // every project of the menu: a name that is its own carries nothing; a name two share never reads the same twice
+      const projects = picks.filter(([n]) => n), count = (n) => projects.filter(([m]) => m === n).length;
+      assert.ok(projects.some(([n]) => count(n) === 1) && projects.every(([n, h]) => count(n) > 1 || h === ''), 'no second label where the name is enough: ' + JSON.stringify(projects));
+      assert.equal(new Set(projects.map((p) => p.join(' '))).size, projects.length, 'no two items read the same: ' + JSON.stringify(projects));
+      await shot('61b-picker-same-name');
+      await page.keyboard.press('Escape');
+      // Projects: each on its own row, the folders beside the name and its own path under it
+      await nav('#projects?days=all&per=50');
+      const rows = () => exec("return [...document.querySelectorAll('.a-pcard')].filter((r) => r.querySelector('.a-pname').textContent === 'api').map((r) => [(r.querySelector('[data-testid=dup-hint]') || {}).textContent || '', r.querySelector('.a-path').textContent])");
+      await waitFor(async () => (await rows()).length === 2, 'two rows named api');
+      const r = await rows();
+      assert.deepEqual(r.map(([h]) => h).sort(), want, 'beside the name: ' + JSON.stringify(r));
+      assert.ok(r[0][1] !== r[1][1] && r.every(([, p]) => p.endsWith('api')), 'and each its own path under it: ' + JSON.stringify(r));
+      const all = await exec("return [...document.querySelectorAll('.a-pcard')].map((r) => [r.querySelector('.a-pname').textContent, (r.querySelector('[data-testid=dup-hint]') || {}).textContent || '', r.querySelector('.a-path').textContent].join(' | '))");
+      assert.equal(new Set(all).size, all.length, 'no two rows read the same: ' + JSON.stringify(all));
+      await shot('61c-projects-same-name');
+    } finally { for (const f of files) fs.rmSync(f, { force: true }); hrm('index', 'refresh'); }
   });
 
   exitCode = results.some((r) => r[1] !== 'ok') ? 1 : 0;

@@ -32,10 +32,10 @@ const TOURS = {
   ],
   projects: [
     ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
-    ['[data-testid=project-cards]', 'One card per project', 'Open its sessions, start a new one, pin it to the sidebar, rename or merge it from the card\'s menu.'],
+    ['[data-testid=project-cards]', 'One row per project', 'Its share of the tokens, the cost or the sessions, then its numbers. Click a row for its sessions; start a new one, pin it to the sidebar, rename or merge it from the row\'s buttons.'],
   ],
   sessions: [
-    ['[data-testid=rail]', 'Projects, pinned and recent', 'What runs now, every project, the ones you pinned, and your tags. Pick one to see only its sessions.'],
+    ['[data-testid=filters]', 'One line of filters', 'Group the list, choose the range, and narrow it with the Project and Tag pickers: what runs now, every project, the ones you pinned, and your tags. A filter in force shows as a chip; its ✕ takes it off.'],
     ['[data-act=tag-edit]', 'Tags', 'Your own labels on a session or a project, shared across tools and accounts. Group by Tag, or click a tag to see what carries it.'],
     ['[data-testid=find]', 'Find a session', 'The search above narrows this list by title, folder, account and tool as you type.'],
     ['[data-testid=group]', 'Grouped by project', 'Sessions of the same repository sit together, whichever account or tool ran them. Open one to read it.'],

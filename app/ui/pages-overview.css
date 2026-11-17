@@ -18,8 +18,6 @@
 .ov .seg button { cursor: pointer; }
 .ov .seg .dim { font-weight: 500; }
 .ov-plan { display: inline-block; line-height: 18px; max-width: 104px; overflow: hidden; text-overflow: ellipsis; }
-/* OpenCode's mark is drawn in black: on a dark theme it is shown in white */
-html[data-theme="dark"] .ov img.ticon[src$="opencode.svg"] { filter: invert(1); }
 
 .ov-use { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 0; }
 .ov-who { gap: 10px; min-height: 28px; }

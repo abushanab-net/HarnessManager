@@ -17,7 +17,7 @@ async function resumeHereDialog(s) {
   openDialog(`${dlgHead(s.title || 'Untitled session')}
     <div class="dlg-text a-dlg" data-testid="resume-here-dialog">
       <div class="muted">${esc(s.project_name || s.project_key || 'no project')} · ${esc(acctName(s.profile))} · ${esc(TOOL[s.harness] || s.harness)}</div>
-      <dl class="facts-grid"><dt>Last ran on</dt><dd><b>${esc(from)}</b> · ${esc(when(s.last_active_at))}</dd><dt>Opens in</dt><dd><span class="mono" id="rh-dir" data-testid="resume-here-root">${esc(root || 'not cloned here: choose a folder')}</span> <button class="filter-chip" id="rh-pick" data-testid="resume-here-pick">Change…</button></dd></dl>
+      <dl class="facts-grid"><dt>Last ran on</dt><dd><b>${esc(from)}</b> · ${esc(when(s.last_active_at))}</dd><dt>Opens in</dt><dd><span class="mono" id="rh-dir" data-testid="resume-here-root">${esc(root || 'not cloned here: choose a folder')}</span> <button class="btn sm" id="rh-pick" data-testid="resume-here-pick">Change…</button></dd></dl>
       <span>Opens as a new session that continues from the ${esc(from)} transcript; the ${esc(from)} copy stays as it is.</span>
       <span class="a-hint">Only the conversation comes across: files changed since, attachments and running shells do not. Pull the branch first.</span>
     </div>

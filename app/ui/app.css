@@ -100,6 +100,8 @@ mark { background: var(--warn-soft); color: inherit; }
 .pc-dot.neg { background: var(--neg); } .pc-dot.warn { background: var(--warn); } .pc-dot.ac { background: var(--ac); }
 .pc-dot.mr { margin-right: 5px; }
 .ticon { display: inline-block; flex: none; vertical-align: middle; }
+/* OpenCode's official icon is one ink, black as a file: on a dark theme it is shown in white, wherever toolIcon draws it */
+html[data-theme="dark"] img.ticon[src$="opencode.svg"] { filter: invert(1); }
 #notice:empty { display: none; }
 .notice-bar.toast { background: var(--ac-soft); border-bottom-color: var(--ac-border); }
 .notice-bar .notice-act { margin-left: auto; }
@@ -1087,11 +1089,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .b-page select option { color:var(--ink-primary); background:var(--bg-panel); }
 .b-page textarea { resize:vertical; line-height:1.6; width:100%; }
 .b-page code { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--ac); }
-.b-toolbar,.b-statusline { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.b-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
 .b-toolbar > .form-field { flex:1; min-width:200px; }
 .b-toolbar > label { display:flex; align-items:center; gap:8px; margin-left:auto; }
 .b-name { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-.b-name > .btn-secondary { padding:2px 6px; font-size: var(--fs-small); }
 .b-good { color:var(--ac); }.b-warn { color:var(--warn); }.b-danger { color:var(--neg); }
 .plan-pill.b-good { background:var(--ac-soft); border-color:var(--ac-border); }
 .plan-pill.b-warn { background:var(--warn-soft); border-color:var(--warn-border); }
@@ -1099,7 +1100,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .b-command { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; font-size: var(--fs-small); margin-top:4px; }
 .b-clamp { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:4px; font-size: var(--fs-small); }
 .b-empty { display:flex; flex-direction:column; gap:8px; padding:24px 8px; min-height:84px; }
-.b-matrix-wrap { max-height:calc(var(--vh) - 270px); overflow:auto; min-height:0; }
 .b-matrix { table-layout:fixed; }
 .b-matrix th { position:sticky; top:0; z-index:2; background:var(--bg-panel); }
 .b-matrix th:first-child { width:36%; }
@@ -1117,8 +1117,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .b-actions-cell > button { padding:5px 7px; }
 .b-pager { display:flex; align-items:center; gap:8px; padding-top:4px; }
 .b-pager label { margin-left:auto; display:flex; align-items:center; gap:8px; }
-.panel-head .b-pager, .b-toolbar .b-pager { padding-top:0; margin-left:auto; }
-.b-matrix-wrap + .b-pager { border-top:1px solid var(--line-default); }
 .b-prompt-grid { display:grid; grid-template-columns:260px minmax(0,1fr); gap:12px; }
 .b-prompt-list { align-self:start; }
 .b-prompt-choice { padding:12px; background:var(--bg-card); border:1px solid var(--line-default); border-radius:var(--radius-control); text-align:left; color:var(--ink-primary); display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -1142,7 +1140,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .b-apps th:nth-child(4) { width:15%; }
 .b-apps th:nth-child(5) { width:23%; }
 .b-apps th:last-child { width:10%; }
-.b-apps .btn-primary { padding:6px 10px; }
 .b-apps td { vertical-align:middle; }
 .b-copy-row { background:var(--bg-card); font-size: var(--fs-small); }
 .b-copy-row td { overflow-wrap:anywhere; }
@@ -1174,7 +1171,6 @@ button:disabled { opacity: .55; cursor: not-allowed; }
  .b-apps th:nth-child(5) { width:26%; }
 }
 
-.b-page[data-b-page="skills"] .b-matrix-wrap { max-height:calc(var(--vh) - 360px); }
 .b-live-prompt { font-family:inherit; }
 html[data-theme="dark"] .b-page { color-scheme:dark; }
 html[data-theme="light"] .b-page { color-scheme:light; }
