@@ -223,15 +223,19 @@ hrm help <command>
 ## FAQ
 
 **Where are my logins and keys?** Logins stay where each tool saved them, in that account's folder.
-Harness Manager never refreshes, copies or stores a subscription login. API keys are in Windows Credential
-Manager, never in files, command-line arguments, logs or backups.
+Harness Manager never refreshes a subscription login or sends it anywhere. Antigravity is the one exception to
+"never copies": it has a single login for the whole computer, so a copy per account is kept in the credential
+store and put in place when that account starts. API keys, and the env and header values of your MCP servers,
+are in Windows Credential Manager, never in the account list, command-line arguments, logs or backups. On macOS
+and Linux there is no credential store yet: API-key accounts cannot be saved there, and MCP values stay in the
+account list file.
 
 **What does it store?** `%APPDATA%\HarnessManager` holds `profiles.json` (the account list),
 `settings.json`, `hm.db` (usage and sessions), `backups\` and `logs\`. In Settings you can point the account
 list at a OneDrive folder to share accounts between computers; keys and logins never leave the computer.
 
 **What goes over the network?** Update checks for Harness Manager (GitHub releases) and for the tools on the
-Apps page. Live Claude limits are off unless you turn them on. The router only sends what an API-key account
+Apps page, and the model price list (models.dev), once a day. Live Claude limits are off unless you turn them on. The router only sends what an API-key account
 asks it to send.
 
 **Does it change my existing setup?** It adds its own entries and records them in a ledger. It never removes
