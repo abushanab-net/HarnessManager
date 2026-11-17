@@ -16,11 +16,16 @@ use crate::db::{quota_point_in, upsert_session, upsert_usage};
 use crate::model::{SessionMeta, UsageRow};
 use crate::sync::peer::{identity, store};
 use crate::sync::{folder, peer};
-use crate::util::{now_ms, sha256_hex};
+use crate::util::{now_ms, safe_name, sha256_hex};
 use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
 const CHUNK_BYTES: usize = 1_000_000;
+/// No more than this is read of a chunk another computer sends: four times the size they are cut at, as one long
+/// entry may run over it.
+pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
+/// And of a JSON answer (a chunk list, presence, the hub's devices).
+pub const MAX_JSON_BYTES: u64 = 32 * 1024 * 1024;
 /// A peer whose `hello` answered within this long is connected.
 pub const CONNECTED_MS: i64 = 30_000;
 
@@ -164,8 +169,19 @@ fn mirror(ctx: &Ctx, root: &Path) -> Result<()> {
     folder::write_manifest(&dir, &man)
 }
 
-/// One entry of another computer's journal into this database.
-fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
+/// A session's journal key, `<tool>/<account>/<id>`, as another computer may send it: the three become path parts
+/// and arguments here, so the tool is one this version knows and the other two are plain names.
+pub(crate) fn session_key_ok(key: &str) -> bool {
+    let mut p = key.splitn(3, '/');
+    matches!((p.next(), p.next(), p.next()), (Some(h), Some(a), Some(i)) if crate::harness::by_id(h).is_some() && safe_name(a) && safe_name(i))
+}
+
+/// On a computer's card while an entry of a kind this version does not know holds its journal back.
+const UPDATE_HERE: &str = "it sent a kind of entry this version does not know: update Harness Manager on this computer to take the rest of its journal";
+
+/// One entry of another computer's (`device`) journal into this database, on the computer `here`. `Ok(false)`:
+/// its kind is one this version does not know (a newer version wrote it), and nothing was done.
+fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
     match e.op.as_str() {
         "usage" => {
             let r: UsageRow = serde_json::from_value(e.data.clone()).context("usage entry")?;
@@ -173,6 +189,9 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         }
         "session" => {
             let m: SessionMeta = serde_json::from_value(e.data.clone()).context("session entry")?;
+            if !session_key_ok(&e.key) || e.key != crate::db::session_key(&m) { bail!("session entry with names that cannot be used here"); }
+            // a session this computer holds as its own (one continued here) is never another computer's to take over
+            if tx.query_row("select 1 from sessions where key=? and device=?", [e.key.as_str(), here], |_| Ok(())).optional()?.is_some() { bail!("session entry for a session of this computer"); }
             upsert_session(tx, &e.key, &m, device)?;
         }
         "quota" => {
@@ -187,18 +206,18 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
                 tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t])?;
             }
         }
-        // never a usage row: what was spent was spent
+        // never a usage row: what was spent was spent; and of the sessions, only that computer's own
         "tombstone" => match e.key.split_once('/').context("tombstone key")? {
-            ("session", k) => { tx.execute("delete from sessions where key=?", [k])?; }
+            ("session", k) => { tx.execute("delete from sessions where key=? and device=?", [k, device])?; }
             ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
             ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
-            (other, _) => bail!("tombstone of {other}"),
+            _ => return Ok(false),
         },
         // phase 3: the entry is stored, the file fetched when the session is read or resumed here
         "transcript" => crate::sync::transcripts::apply(tx, device, e)?,
-        other => bail!("unknown op {other}"),
+        _ => return Ok(false),
     }
-    Ok(())
+    Ok(true)
 }
 
 /// The public key this computer knows for an origin, "" when none yet.
@@ -209,15 +228,18 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
 /// One computer's new chunks, in manifest order, each read through `read`, checked against its sha256 and (when
 /// the origin's key is known) its signature, kept in the local store for relay, and applied in one transaction
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
-/// tries again. Returns the sequence applied up to.
+/// tries again. Stops too at the first entry of a kind this version does not know, with the cursor just before
+/// it, and says so on that computer's row: the entry and all after it are taken once this computer is updated.
+/// Returns the sequence applied up to.
 pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
     if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
     let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
+    let (mut newer, mut through) = (false, false);
     for ch in man["chunks"].as_array().into_iter().flatten() {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
-        if to <= cur || file.is_empty() || file.contains(['/', '\\']) { continue; }
+        if to <= cur || !store::safe_file(file) { continue; }
         let bytes = match read(file) {
             Ok(b) => b,
             Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
@@ -232,25 +254,34 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
             break;
         }
         let text = String::from_utf8_lossy(&bytes);
-        let (mut n, mut bad) = (0, 0);
+        let (mut n, mut bad, mut upto) = (0, 0, to);
         ctx.db.with(|c| {
             let tx = c.transaction()?;
             for line in text.lines().filter(|l| !l.trim().is_empty()) {
                 let Ok(e) = serde_json::from_str::<Entry>(line) else { bad += 1; continue };
                 if e.seq <= cur { continue; }
-                match apply(&tx, id, &e) {
-                    Ok(()) => n += 1,
+                match apply(&tx, id, &ctx.db.device, &e) {
+                    Ok(true) => n += 1,
+                    // skipped, it would be lost for good: it and all after it wait, the cursor just before it
+                    Ok(false) => { upto = e.seq - 1; newer = true; break; }
                     Err(err) => { bad += 1; crate::log::warn(&format!("journal: entry {} of {file} from {id} skipped: {err:#}", e.seq)); }
                 }
             }
-            tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, to])?;
+            tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, upto])?;
             tx.commit()?;
             Ok(())
         })?;
         if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
+        cur = upto;
+        if newer {
+            crate::log::warn(&format!("journal: entry {} of {file} from {id} is of a kind this version does not know; it and what follows wait until Harness Manager is updated on this computer", upto + 1));
+            break;
+        }
         crate::log::info(&format!("journal: {n} entries from {id} applied ({file}{})", if bad > 0 { format!(", {bad} skipped") } else { String::new() }));
-        cur = to;
+        through = true;
     }
+    // said on that computer's card while it waits, and taken off once a chunk is read through again (after the update)
+    ctx.db.with(|c| { c.execute("update peers set last_error = case when ?1 then ?2 else '' end where device_id = ?3 and (?1 or (?4 and last_error = ?2))", params![newer, UPDATE_HERE, id, through])?; Ok(()) })?;
     Ok(cur)
 }
 
@@ -284,7 +315,7 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
         let presence = std::fs::read_to_string(dir.join("presence.json")).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
         let man = folder::read_manifest(&dir);
         let applied = match &man {
-            Some(m) => match apply_manifest(ctx, &id, m, &|file| Ok(std::fs::read(dir.join("journal").join(file))?)) {
+            Some(m) => match apply_manifest(ctx, &id, m, &|file| crate::util::read_capped(std::fs::File::open(dir.join("journal").join(file))?, None, MAX_CHUNK_READ, file)) {
                 Ok(seq) => Some(seq),
                 Err(e) => { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None }
             },
@@ -762,5 +793,113 @@ mod tests {
         round(&a).unwrap();
         round(&b).unwrap();
         assert!(b.db.remote_sessions().unwrap().is_empty());
+    }
+
+    /// What another computer publishes, merged here: `entries` as one chunk of `id`'s journal. No key is known for
+    /// it, so nothing is checked against a signature. Returns the sequence applied up to.
+    fn merge_from(ctx: &Ctx, id: &str, entries: &[Value]) -> i64 {
+        let bytes = entries.iter().map(|e| format!("{e}\n")).collect::<String>().into_bytes();
+        let to = entries.last().and_then(|e| e["seq"].as_i64()).unwrap_or(0);
+        let man = json!({"incarnation": "i", "chunks": [{"file": format!("i-1-{to}.jsonl"), "from": 1, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}]});
+        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone())).unwrap()
+    }
+
+    fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
+
+    fn session(harness: &str, profile: &str, id: &str, title: &str, at: i64) -> Value {
+        serde_json::to_value(SessionMeta { harness: harness.into(), profile: profile.into(), id: id.into(), title: title.into(), last_active_at: at, ..Default::default() }).unwrap()
+    }
+
+    fn keys_of(ctx: &Ctx, table: &str) -> Vec<String> {
+        ctx.db.with(|c| { crate::transcripts::tables(c)?; Ok(c.prepare(&format!("select key from {table} order by key"))?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?) }).unwrap()
+    }
+
+    #[test]
+    fn a_session_or_transcript_whose_names_are_not_plain_names_is_not_merged() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let s = |seq: i64, h: &str, p: &str, id: &str| entry(seq, "session", &format!("{h}/{p}/{id}"), session(h, p, id, "t", 5));
+        let tr = |seq: i64, key: &str| entry(seq, "transcript", key, json!({"file": "transcripts/claude/work/s1.jsonl.zst", "bytes": 1, "sha256": "x", "mtime": 1, "source_rel": "projects/p/s1.jsonl"}));
+        let long = "a".repeat(200);
+        let entries = [
+            // a path, an option, a letter outside ASCII, nothing, a drive, a tool this version does not know, a name too long
+            s(1, "claude", "work", "..\\..\\evil"), s(2, "claude", "work", "../evil"), s(3, "claude", "work", "--dangerously-skip-permissions"), s(4, "claude", "work", "é"),
+            s(5, "claude", "work", ""), s(6, "claude", "..", "s1"), s(7, "claude", "C:work", "s1"), s(8, "nope", "work", "s1"), s(9, "claude", "work", &long), s(10, "claude", "work", ".hidden"),
+            // the key names one session, the entry another
+            entry(11, "session", "claude/work/s1", session("claude", "work", "..\\evil", "t", 5)),
+            tr(12, "claude/work/..\\..\\evil"), tr(13, "claude/../s1"), tr(14, "nope/work/s1"), tr(15, "claude/work/-x"), tr(16, "claude/work"),
+            // and the names the tools do give
+            s(17, "claude", "work", "0b1c2d3e-aaaa-bbbb-cccc-1234567890ab"), s(18, "opencode", "oc_main", "ses_5f3a.1"), tr(19, "claude/work/s1"),
+        ];
+        assert_eq!(merge_from(&ctx, "peer-1", &entries), 19);
+        assert_eq!(keys_of(&ctx, "sessions"), ["claude/work/0b1c2d3e-aaaa-bbbb-cccc-1234567890ab", "opencode/oc_main/ses_5f3a.1"]);
+        assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
+    }
+
+    #[test]
+    fn a_file_name_from_another_computer_that_is_not_a_plain_name_is_never_opened() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        // most of them without a slash: a hidden file, an option, a parent folder, a drive, a stream, a device, a name too long
+        let long = "a".repeat(200);
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        for name in [".i-1-1.jsonl", "-i-1-1.jsonl", "..", "../up.jsonl", "C:evil.jsonl", "i-1-1.jsonl:stream", "NUL", "nul.jsonl", long.as_str()] {
+            let man = json!({"incarnation": "i", "chunks": [{"file": name, "from": 1, "to": 1, "sha256": sha256_hex(b""), "bytes": 0}]});
+            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }).unwrap(), 0, "{name}");
+            assert!(store::chunk(&ctx, "peer-1", name).is_err(), "{name}");
+            assert!(store::put_chunk(&ctx, "peer-1", "i", &json!({"file": name, "from": 1, "to": 1, "bytes": 0}), b"").is_err(), "{name}");
+        }
+        assert_eq!(*asked.borrow(), Vec::<String>::new(), "none was asked for");
+        assert!(!store::dir(&ctx, "peer-1").join("up.jsonl").exists() && store::manifest(&ctx, "peer-1").is_none(), "and none was kept");
+        // a transcript's place in its computer's folder is transcripts/<tool>/<account>/<file>, each a plain name
+        let tr = |file: &str| entry(1, "transcript", "claude/work/s1", json!({"file": file, "bytes": 1, "sha256": "x", "mtime": 1, "source_rel": "projects/p/s1.jsonl"}));
+        for (i, file) in ["C:evil.zst", "transcripts/claude/work/C:evil.zst", "transcripts/claude/work/s1.jsonl.zst:stream", "transcripts\\claude\\work\\s1.jsonl.zst",
+            "transcripts/claude/work/sub/s1.jsonl.zst", "elsewhere/claude/work/s1.jsonl.zst", "transcripts/claude/-work/s1.jsonl.zst"].into_iter().enumerate() {
+            assert_eq!(merge_from(&ctx, &format!("peer-{}", i + 2), &[tr(file)]), 1);
+        }
+        assert_eq!(keys_of(&ctx, "transcripts"), Vec::<String>::new());
+        merge_from(&ctx, "peer-9", &[tr("transcripts/claude/work/s1.jsonl.zst")]);
+        assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
+    }
+
+    #[test]
+    fn another_computers_entry_never_takes_or_removes_a_session_that_is_not_its_own() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let mine: SessionMeta = serde_json::from_value(session("codex", "work", "abc", "mine", 5)).unwrap();
+        ctx.db.with(|c| Ok(upsert_session(c, "codex/work/abc", &mine, &ctx.db.device)?)).unwrap();
+        let row = |key: &str| -> Option<(String, String)> { ctx.db.with(|c| Ok(c.query_row("select device, title from sessions where key=?", [key], |r| Ok((r.get(0)?, r.get(1)?))).optional()?)).unwrap() };
+        // the same session, newer, as another computer's; then its removal
+        merge_from(&ctx, "peer-1", &[entry(1, "session", "codex/work/abc", session("codex", "work", "abc", "theirs", 9)), entry(2, "session", "codex/work/other", session("codex", "work", "other", "theirs", 9)),
+            entry(3, "tombstone", "session/codex/work/abc", json!({}))]);
+        assert_eq!(row("codex/work/abc"), Some((ctx.db.device.clone(), "mine".to_string())), "this computer's session stays its own, and stays");
+        assert_eq!(row("codex/work/other"), Some(("peer-1".to_string(), "theirs".to_string())));
+        // a third computer cannot remove the second's; the second can
+        merge_from(&ctx, "peer-2", &[entry(1, "tombstone", "session/codex/work/other", json!({}))]);
+        assert!(row("codex/work/other").is_some());
+        merge_from(&ctx, "peer-1", &[entry(4, "tombstone", "session/codex/work/other", json!({}))]);
+        assert_eq!(row("codex/work/other"), None);
+    }
+
+    #[test]
+    fn an_entry_of_a_kind_this_version_does_not_know_waits_for_the_update_with_all_that_follows() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let usage = |seq: i64| entry(seq, "usage", &format!("claude:{seq}"), serde_json::to_value(row(&format!("claude:{seq}"), 1_000)).unwrap());
+        let error = || -> String { ctx.db.with(|c| Ok(c.query_row("select coalesce(last_error, '') from peers where device_id='peer-1'", [], |r| r.get(0))?)).unwrap() };
+        let newer = [usage(1), entry(2, "hologram", "k", json!({})), usage(3)];
+        for _ in 0..2 {
+            assert_eq!(merge_from(&ctx, "peer-1", &newer), 1, "it stops before the entry it cannot read");
+            assert_eq!((count(&ctx, "select count(*) from usage"), count(&ctx, "select seq from cursors2 where device_id='peer-1'")), (1, 1));
+            assert!(error().contains("update Harness Manager"), "said on that computer's card: {}", error());
+        }
+        // a broken entry of a kind it does know is skipped, as before, and what follows is taken
+        assert_eq!(merge_from(&ctx, "peer-2", &[entry(1, "quota", "no-slash", json!({})), usage(7)]), 7);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 2);
+        // updated (the kind is one it reads now): that entry and the one after it come in, and the card is clear
+        assert_eq!(merge_from(&ctx, "peer-1", &[usage(1), usage(2), usage(3)]), 3);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 4);
+        assert_eq!(error(), "");
     }
 }

@@ -523,3 +523,35 @@ fn an_event_from_the_hub_runs_a_round_on_the_other_computer() {
     while std::time::Instant::now() < until && seen.lock().unwrap().is_empty() { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert!(!seen.lock().unwrap().is_empty(), "the status was told");
 }
+
+#[test]
+fn an_answer_from_the_hub_longer_than_the_asker_allows_is_not_read() {
+    let rt = runtime();
+    let (url, _hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = joined(t.path(), &url);
+    a.ctx.db.insert_usage(&[row("claude:1", 1_000)], &Prices::new()).unwrap();
+    journal::round(&a.ctx).unwrap();
+    let me = &a.ctx.settings.device_id;
+    let man = store::manifest(&a.ctx, me).unwrap();
+    let path = format!("/v1/chunk/{me}/{}", man["chunks"][0]["file"].as_str().unwrap());
+    let hub = Hub::open(&b.ctx).unwrap();
+    let sealed = hub.get_bytes(&path, journal::MAX_CHUNK_READ).unwrap().len() as u64;
+    assert!(sealed > man["chunks"][0]["bytes"].as_u64().unwrap(), "sealed: a little longer than the chunk");
+    assert!(hub.get_bytes(&path, sealed).is_ok());
+    let e = hub.get_bytes(&path, sealed - 1).unwrap_err();
+    assert!(format!("{e:#}").contains("not taken"), "one byte over: {e:#}");
+}
+
+#[test]
+fn the_sockets_state_is_written_when_it_changes_and_not_while_it_stays() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+    ctx.db.with(|c| Ok(c.execute_batch("create table writes(n); create trigger ws_writes after insert on kv when new.k = 'hub:ws' begin insert into writes values(1); end;")?)).unwrap();
+    // as the watch thread does every two seconds on a computer that is not on a hub
+    for _ in 0..5 { set_ws(&ctx, "0"); }
+    assert_eq!(count(&ctx, "select count(*) from writes"), 1);
+    for _ in 0..2 { set_ws(&ctx, "1"); }
+    set_ws(&ctx, "0");
+    assert_eq!((count(&ctx, "select count(*) from writes"), ctx.db.kv_get("hub:ws").unwrap().as_deref()), (3, Some("0")));
+}

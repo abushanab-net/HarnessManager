@@ -50,7 +50,7 @@ impl Claude {
         if i64_at(&creds, &["claudeAiOauth", "expiresAt"]) < now_ms() + 60_000 {
             bail!("Claude Code's login on this computer has expired; it refreshes the next time this account runs");
         }
-        let url = std::env::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|_| "https://api.anthropic.com/api/oauth/usage".into());
+        let url = crate::testenv::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|| "https://api.anthropic.com/api/oauth/usage".into());
         let r = reqwest::blocking::Client::new()
             .get(url)
             .bearer_auth(token)
@@ -358,6 +358,8 @@ impl Harness for Claude {
     /// One copy under `projects/<this clone's folder, encoded>/<id>.jsonl` (reused when there), resumed by its
     /// path as a fork, so neither the copy nor the original is written.
     fn materialize(&self, ctx: &Ctx, p: &Profile, local_root: &Path, t: &crate::transcripts::FetchedTranscript) -> Result<crate::transcripts::Materialized> {
+        // the id came from another computer and names the copy
+        if !crate::util::safe_name(&t.id) { bail!("this session's id cannot be used as a file name here"); }
         let dest = self.home(ctx, p).join("projects").join(project_dir_name(local_root)).join(format!("{}.jsonl", t.id));
         if !dest.exists() {
             std::fs::create_dir_all(dest.parent().unwrap())?;

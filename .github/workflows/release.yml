@@ -1,10 +1,12 @@
 name: release
-# Push a tag vX.Y.Z: the app is built for Windows, macOS and Linux at the same time, signed for the updater and
-# published as release X.Y.Z with latest.json (what installed copies check). Only the newest 2 releases are kept.
+# Push a tag vX.Y.Z: the tests run first (ci.yml); only when they pass is the app built for Windows, macOS and
+# Linux at the same time, signed for the updater and published as release X.Y.Z with latest.json (what installed
+# copies check). Only the newest 2 releases are kept. Every job runs on the self-hosted runners named by the
+# RUNNER_* variables: a missing variable fails the job, it never falls back to a GitHub-hosted runner.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+']
-permissions: { contents: write, packages: write }
+permissions: { contents: write }
 concurrency: { group: release, cancel-in-progress: false }
 env:
   CARGO_INCREMENTAL: 0
@@ -12,8 +14,12 @@ env:
   GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
   draft:
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    needs: test
+    runs-on: ${{ vars.RUNNER_LINUX }}
     outputs: { id: '${{ steps.r.outputs.id }}' }
     steps:
       - id: r
@@ -28,16 +34,17 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe }
+          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE }}", bundles: nsis, ext: .exe }
           # Windows on ARM: cross-compiled on the same x64 runner (the aarch64-pc-windows-msvc target and the
           # MSVC ARM64 build tools must be on the runner image); its asset lands in latest.json as windows-aarch64.
           # experimental: a failure here must not cancel the release of the other three
-          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE || 'windows-latest' }}", bundles: nsis, ext: .exe, target: aarch64-pc-windows-msvc, experimental: true }
+          - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE }}", bundles: nsis, ext: .exe, target: aarch64-pc-windows-msvc, experimental: true }
           # Tauri's own .dmg lays out its window through Finder, which a runner without a desktop session may not
           # control; the .dmg is made with hdiutil after the build instead
-          - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE || 'macos-latest' }}", bundles: app, ext: '' }
-          # 22.04: an AppImage built on the oldest supported glibc runs on the most distributions
-          - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE || 'ubuntu-22.04' }}", bundles: 'appimage,deb', ext: '' }
+          - { os: macos, runner: "${{ vars.RUNNER_MAC_RELEASE }}", bundles: app, ext: '' }
+          # an AppImage built on the oldest supported glibc runs on the most distributions: the runner image behind
+          # RUNNER_LINUX_RELEASE decides that (it was Ubuntu 22.04's when this was written)
+          - { os: linux, runner: "${{ vars.RUNNER_LINUX_RELEASE }}", bundles: 'appimage,deb', ext: '' }
     runs-on: ${{ matrix.runner }}
     continue-on-error: ${{ matrix.experimental || false }}
     timeout-minutes: 45
@@ -157,8 +164,10 @@ jobs:
   hub:
     # the hub's image, ghcr.io/<owner>/hrm-hub:<X.Y.Z> and :latest. The job needs the docker CLI and a daemon
     # (or buildx) on the homek8-general runners; if they have none, give them Docker rather than moving this
-    # job to a GitHub-hosted runner
+    # job to a GitHub-hosted runner. It waits for the build: no image is pushed for a release that failed
+    needs: build
     runs-on: homek8-general
+    permissions: { contents: read, packages: write }
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -175,7 +184,7 @@ jobs:
 
   publish:
     needs: [draft, build]
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNNER_LINUX }}
     steps:
       - name: Publish, then keep only the newest 2 releases
         run: |
@@ -183,3 +192,11 @@ jobs:
           gh release list --limit 100 --exclude-drafts --json tagName,publishedAt \
             --jq 'sort_by(.publishedAt) | reverse | .[2:][] | .tagName' |
             while read -r tag; do echo "deleting release $tag (its tag stays)"; gh release delete "$tag" -y; done
+
+  # a build that failed or was cancelled leaves no draft behind: a re-run of the tag starts from a clean slate
+  discard:
+    needs: [draft, build]
+    if: ${{ always() && needs.draft.result == 'success' && needs.build.result != 'success' }}
+    runs-on: ${{ vars.RUNNER_LINUX }}
+    steps:
+      - run: gh api -X DELETE "repos/$GH_REPO/releases/${{ needs.draft.outputs.id }}" --silent
