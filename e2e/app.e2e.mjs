@@ -775,7 +775,7 @@ try {
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
     const counts = await exec("return [...document.querySelectorAll('.b-section')].map((s) => s.querySelectorAll('.b-setting').length)");
-    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 4], 'settings per section, as the design counts them');
+    assert.deepEqual(counts.slice(0, 7), [4, 3, 2, 2, 2, 3, 3], 'settings per section, as the design counts them less the Tours row');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
