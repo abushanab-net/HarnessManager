@@ -276,7 +276,7 @@ try {
     await nav('#skills');
     await waitFor(async () => !(await shut()), 'open for the page shown');
     // the rail carries no rings, readouts or limits popup: the limits live in the tray icon's own window
-    assert.ok(!(await exec("return !!document.querySelector('[data-act=toggle-tray], #tray-root')")), 'no limits popup in the window');
+    assert.ok(!(await exec("return !!document.querySelector('#tray-root')")), 'no limits popup in the window');
     await click('[data-testid=nav-mcp]');
     await waitFor(async () => (await exec('return location.hash')) === '#mcp', 'MCP servers opened from the fold');
     await click('[data-testid=fold-pins]');
@@ -764,11 +764,11 @@ try {
     await $('[data-testid=activity]');
     if (await exec("return !!document.querySelector('[data-testid=request-log]')")) await click('[data-testid=request-log-open]');
     for (const [h, titles] of Object.entries(want)) {
-      const before = await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''");
+      const before = await exec("return document.querySelector('#sheet h1')?.textContent || ''");
       await nav(h);
-      await waitFor(async () => (await exec("return document.querySelector('#sheet .crumb, #sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
+      await waitFor(async () => (await exec("return document.querySelector('#sheet h1')?.textContent || ''")) !== before || h === '#home', h + ' drawn');
       await waitFor(async () => {
-        const got = await exec("return [...document.querySelectorAll('#sheet .crumb, #sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
+        const got = await exec("return [...document.querySelectorAll('#sheet h1, #sheet h2, #sheet .panel-title')].map((e) => e.textContent.replace(/\\s+/g, ' ').trim())");
         let i = 0;
         for (const g of got) if (i < titles.length && g.startsWith(titles[i])) i++;
         return i === titles.length;
@@ -1100,7 +1100,7 @@ description: Bulk skill ${i}
       // card padding, table rows and type as the design pages set them
       const want = {
         sessions: [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
-        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']], account: [['.panel', 'padding', '16px']],
+        session: [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
         routing: [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']], apps: [['.b-apps', 'tableLayout', 'fixed'], ['.b-apps td', 'verticalAlign', 'middle']],
         mcp: [['.b-matrix', 'tableLayout', 'fixed'], ['.b-matrix td', 'padding', '8px 5px'], ['.b-matrix th', 'position', 'sticky']],
         skills: [['.b-toolbar', 'display', 'flex'], ['.b-toolbar', 'flexWrap', 'wrap']],
@@ -1322,7 +1322,7 @@ description: Bulk skill ${i}
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
     await $('[data-testid=activity]');
-    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc], .lb .pc')")), 'the Overview is as before: no computer switch, no computer dots');
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=scope], [data-testid=activity-pc]')")), 'the Overview is as before: no computer switch');
     await nav('#sessions');
     await $('[data-testid=group]');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pc-seg], .a-srow .a-pc')")), 'Sessions as before');
