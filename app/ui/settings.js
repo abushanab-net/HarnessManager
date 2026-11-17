@@ -150,7 +150,7 @@ action('peer-forget', async (el) => {
   if (await confirmDialog('Forget ' + el.dataset.name, `Forget <b>${esc(el.dataset.name)}</b>? This computer stops connecting to it and drops its certificate; what was merged from it stays. Pair again to reconnect.`, 'Forget')) mutate(() => call('computers_forget', { id: el.dataset.id }), 'Forgotten');
 });
 // presence arrives every 10 s while a peer is connected: the page follows in place (the reconciler keeps what is being edited)
-document.addEventListener('presence', () => { if (S.route.view === 'settings' && S.state && !dialogOpen()) render(); });
+document.addEventListener('presence', () => { if (S.route.view === 'settings' && S.state && !dialogOpen()) render(true); });
 
 // ---------- Backups and archive ----------
 function backupsSection(b, ar, s) {

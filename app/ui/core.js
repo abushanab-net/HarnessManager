@@ -141,17 +141,19 @@ export function parseHash() {
 }
 
 // renders run one after another, so a slow earlier page never paints over the one you moved to
-let chain = Promise.resolve(), queued = null;
-export function render() {
+let chain = Promise.resolve(), queued = null, quiet = true, keepEdits = false;
+/** Draw the page. `background` is a redraw nobody asked for (a refresh, a poll): it keeps what the reader typed. */
+export function render(background = false) {
+  quiet = quiet && background === true; // joined by a redraw the reader asked for, the waiting one is theirs
   // one redraw waits at most: a burst of refreshes while a page loads draws it once more, not once per event
   if (!queued) {
-    const run = () => { queued = null; return renderNow(); };
+    const run = () => { queued = null; const q = quiet; quiet = true; return renderNow(q); };
     queued = chain = chain.then(run, run);
   }
   return queued;
 }
 
-async function renderNow() {
+async function renderNow(background) {
   // a redraw of the same page (a refresh, a filter) keeps its scroll position; moving to another page starts at the top.
   // The position is the one the sheet had when its content was replaced, not when the redraw began: a page's data takes
   // seconds to load, and restoring the older position pulled the reader back up while they scrolled
@@ -173,6 +175,7 @@ async function renderNow() {
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
   if (!sameHash) { delete sheet.dataset.warm; sheet.scrollTop = 0; }
+  keepEdits = background && sameHash;
   try {
     await fn(sheet, S.route.params);
     const top = S.sheetTop; // what the reader had before fn replaced the content; the replacement's own scroll event has not fired yet
@@ -182,7 +185,7 @@ async function renderNow() {
   } catch (e) {
     sheet.className = 'sheet';
     sheet.innerHTML = `<div class="page-body"><section class="panel-card empty-state"><h1>Something went wrong</h1><span class="negT">${esc(String(e))}</span><div><button class="btn-secondary" data-act="reload">Try again</button></div></section></div>`;
-  }
+  } finally { keepEdits = false; }
 }
 
 // ---------- the keyed reconciler: a page redraws in place, keeping what the reader had ----------
@@ -190,9 +193,14 @@ async function renderNow() {
 // existing elements: scroll positions, the focused control with its caret and selection, open folds, and the animated
 // nodes with their phase. A page draws with patch(sheet, html) instead of sheet.innerHTML = html.
 const nodeKey = (n) => (n.nodeType !== 1 ? null : n.id ? '#' + n.id : n.dataset.key ? 'k:' + n.dataset.key : n.dataset.testid ? 't:' + n.dataset.testid : null);
-function patchNode(cur, next) {
+/** A field that shows something other than the markup last gave it: the reader changed it and has not saved it yet. */
+const edited = (el) => (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') ? el.checked !== el.defaultChecked
+  : el instanceof HTMLSelectElement ? el.value !== (([...el.options].find((o) => o.defaultSelected) || el.options[0] || {}).value ?? '')
+  : (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.value !== el.defaultValue);
+function patchNode(cur, next, keep) {
   if (cur.nodeType !== next.nodeType || cur.nodeName !== next.nodeName) { const r = next.cloneNode(true); cur.replaceWith(r); return r; }
   if (cur.nodeType !== 1) { if (cur.nodeValue !== next.nodeValue) cur.nodeValue = next.nodeValue; return cur; }
+  const held = keep && edited(cur); // asked before the new markup is taken: that changes what "last gave it" means
   for (const a of [...cur.attributes]) if (!next.hasAttribute(a.name)) cur.removeAttribute(a.name);
   for (const a of [...next.attributes]) if (cur.getAttribute(a.name) !== a.value) cur.setAttribute(a.name, a.value);
   const keyed = new Map();
@@ -203,10 +211,11 @@ function patchNode(cur, next) {
     let m = k ? keyed.get(k) : cursor && !nodeKey(cursor) && cursor.nodeName === child.nodeName ? cursor : null;
     if (m && k) keyed.delete(k);
     if (!m) { m = child.cloneNode(true); cur.insertBefore(m, cursor); }
-    else { if (m !== cursor) cur.insertBefore(m, cursor); m = patchNode(m, child); }
+    else { if (m !== cursor) cur.insertBefore(m, cursor); m = patchNode(m, child, keep); }
     cursor = m.nextSibling;
   }
   while (cursor) { const n = cursor.nextSibling; cursor.remove(); cursor = n; }
+  if (held) return cur;
   if (cur instanceof HTMLInputElement) {
     if (cur.type === 'checkbox' || cur.type === 'radio') { if (document.activeElement !== cur) cur.checked = next.checked; }
     else if (document.activeElement !== cur && cur.value !== next.value) cur.value = next.value;
@@ -216,6 +225,8 @@ function patchNode(cur, next) {
 }
 const focusKey = (el) => (el && el !== document.body ? (el.id ? '#' + CSS.escape(el.id) : el.dataset.testid ? `[data-testid="${CSS.escape(el.dataset.testid)}"]` : el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : null) : null);
 export function patch(root, html) {
+  // a background redraw of the page shown keeps what the reader typed
+  const keep = keepEdits && root.id === 'sheet';
   const scrolls = [...root.querySelectorAll('*')].filter((el) => el.scrollTop || el.scrollLeft).map((el) => [el, el.scrollTop, el.scrollLeft]);
   const active = document.activeElement, sel = root.contains(active) ? focusKey(active) : null;
   const range = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
@@ -224,7 +235,7 @@ export function patch(root, html) {
   const next = document.createElement(root.tagName);
   next.append(t.content);
   for (const a of [...root.attributes]) next.setAttribute(a.name, a.value);
-  patchNode(root, next);
+  patchNode(root, next, keep);
   for (const [el, top, left] of scrolls) if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; }
   if (sel && !root.contains(document.activeElement)) {
     const el = root.querySelector(sel);
@@ -317,7 +328,7 @@ export function closeDialog() {
   if (opener && opener.isConnected) opener.focus({ preventScroll: true });
   opener = null;
   // a background refresh that arrived while the dialog was open catches up now
-  if (S.dirty) { S.dirty = false; render(); }
+  if (S.dirty) { S.dirty = false; render(true); }
 }
 export const dialogOpen = () => !!document.getElementById('dialog-root').innerHTML;
 

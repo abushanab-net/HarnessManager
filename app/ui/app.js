@@ -43,7 +43,7 @@ const redrawSoon = () => {
       call('today').then(setTodayBadge).catch(() => {});
       if (document.getElementById('dialog-root').innerHTML) S.dirty = true; // a dialog stays as it is; the page catches up when it closes
       else if (S.route.view === 'projects') await refreshProjects(); // the tiles and rows take the new numbers where they are
-      else await render();
+      else await render(true);
     } finally { drawing = false; lastDraw = Date.now(); if (again) { again = false; redrawSoon(); } }
   }, Math.max(250, 4000 - (Date.now() - lastDraw)));
 };
@@ -73,7 +73,7 @@ if (ev) ev.listen('self-update', (e) => {
 });
 
 // open consoles change without any file being written; look again every minute on the accounts list
-setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && document.visibilityState === 'visible') render(); }, 60000);
+setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && document.visibilityState === 'visible') render(true); }, 60000);
 
 // the limits popup by the tray icon opens this window at an account
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });

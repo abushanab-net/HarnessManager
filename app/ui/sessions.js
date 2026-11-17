@@ -274,7 +274,7 @@ export function watchLive(m) {
     if (last === null) { last = stamp; return; }
     if (stamp === last || document.getElementById('dialog-root').innerHTML) return;
     last = stamp;
-    render();
+    render(true);
   }, 2000);
 }
 action('follow-end', () => {
