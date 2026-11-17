@@ -134,10 +134,11 @@ async fn chunk(State(ctx): State<Arc<Ctx>>, Path((origin, file)): Path<(String, 
 /// copy fetched here. The asker checks the sha256 against the journal entry.
 async fn transcript(State(ctx): State<Arc<Ctx>>, Path((origin, harness, profile, id)): Path<(String, String, String, String)>) -> Response {
     blocking(move || {
+        if origin == ctx.settings.device_id && !switch(&ctx, "sync_transcripts", ctx.settings.sync_transcripts) { return StatusCode::NOT_FOUND.into_response(); }
         let r = if origin == ctx.settings.device_id { crate::sync::transcripts::own_zst(&ctx, &harness, &profile, &id) } else {
             let key = format!("{harness}/{profile}/{id}");
             ctx.db.with(|c| { crate::transcripts::tables(c)?; Ok(c.query_row("select file from transcripts where device=? and key=? and fetched_at is not null", [&origin, &key], |r| r.get::<_, String>(0))?) })
-                .and_then(|file| Ok(std::fs::read(crate::transcripts::local_path(&ctx, &origin, &harness, &profile, &file))?))
+                .and_then(|file| Ok(std::fs::read(crate::transcripts::local_path(&ctx, &origin, &harness, &profile, &file)?)?))
                 .and_then(|plain| Ok(zstd::encode_all(&plain[..], 3)?))
         };
         match r {
@@ -148,8 +149,17 @@ async fn transcript(State(ctx): State<Arc<Ctx>>, Path((origin, harness, profile,
 }
 
 async fn presence(State(ctx): State<Arc<Ctx>>) -> Response {
-    blocking(move || match folder::presence(&ctx) {
-        Ok(v) => Json(v).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+    blocking(move || {
+        if !switch(&ctx, "sync_presence", ctx.settings.sync_presence) { return StatusCode::NOT_FOUND.into_response(); }
+        match folder::presence(&ctx) {
+            Ok(v) => Json(v).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
+        }
     }).await
+}
+
+/// A Computers switch as it is saved now: the listener keeps the context it started with, and a switch turned
+/// off since then holds at once. `started` when the settings cannot be read.
+fn switch(ctx: &Ctx, name: &str, started: bool) -> bool {
+    crate::util::read_json(&ctx.data.join("settings.json")).and_then(|s| s[name].as_bool()).unwrap_or(started)
 }

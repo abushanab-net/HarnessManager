@@ -3,7 +3,7 @@
 // Switches and chips save at once; typed fields have a button beside them. Computers (the two sync cards, the rows, a
 // card per computer) and Backups and archive are sections of the same page. Harness Manager's own update lives here.
 
-import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, applyTheme, patch, dialogOpen } from './core.js';
+import { S, call, view, toast, attempt, mutate, changed, openDialog, closeDialog, dlgHead, confirmDialog, action, render, pickFolder, saveFile, pickFile, loadState, patch, dialogOpen } from './core.js';
 import { resetGuides } from './guide.js';
 import { esc, when, dur } from './lib.js';
 import { winTrack } from './accounts.js';
@@ -11,7 +11,7 @@ import { computersStatus, syncOn, computers, colorIdx, heardOn, transportLine, n
 
 // ---------- the parts ----------
 /** An ⓘ that explains a setting on hover or keyboard focus. */
-const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${id}" data-testid="tip-${id}">i</button><span role="tooltip" id="tip-${id}">${html}</span></span>`;
+const info = (id, html) => `<span class="b-tip"><button type="button" class="icon-btn" aria-label="About this setting" aria-describedby="tip-${esc(id)}" data-testid="tip-${esc(id)}">i</button><span role="tooltip" id="tip-${esc(id)}">${html}</span></span>`;
 /** A row: the title with its ⓘ, the description, the control. */
 const row = (key, title, tip, text, ctl) => `<div class="b-setting" data-key="setting-${key}"><div><div class="b-name"><b>${title}</b>${tip || ''}</div><div class="muted">${text}</div></div><div class="b-setting-control">${ctl}</div></div>`;
 // a switch that saves as soon as it is flipped, and a chip group that does the same
@@ -38,9 +38,7 @@ const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + 
 
 view('settings', async (sheet, params) => {
   sheet.className = 'sheet';
-  const st = await call('state');
-  S.state = st;
-  applyTheme(st);
+  const st = await loadState();
   const s = st.settings;
   const c = await computersStatus().catch(() => null);
   const [ts, b, ar] = await Promise.all([c && syncOn(c) ? call('transcripts_status').catch(() => null) : null, call('backups').catch(() => null), call('archive_status').catch(() => null)]);
@@ -150,7 +148,7 @@ action('peer-forget', async (el) => {
   if (await confirmDialog('Forget ' + el.dataset.name, `Forget <b>${esc(el.dataset.name)}</b>? This computer stops connecting to it and drops its certificate; what was merged from it stays. Pair again to reconnect.`, 'Forget')) mutate(() => call('computers_forget', { id: el.dataset.id }), 'Forgotten');
 });
 // presence arrives every 10 s while a peer is connected: the page follows in place (the reconciler keeps what is being edited)
-document.addEventListener('presence', () => { if (S.route.view === 'settings' && S.state && !dialogOpen()) render(); });
+document.addEventListener('presence', () => { if (S.route.view === 'settings' && S.state && !dialogOpen()) render(true); });
 
 // ---------- Backups and archive ----------
 function backupsSection(b, ar, s) {

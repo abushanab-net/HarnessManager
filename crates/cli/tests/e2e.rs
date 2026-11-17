@@ -18,8 +18,8 @@ struct Env {
 }
 
 fn target_dir() -> PathBuf {
-    // tests run from target/debug/deps
-    std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf()
+    // where cargo put hrm.exe: the test's own folder moved in cargo 1.100, so it is not derived from that
+    Path::new(env!("CARGO_BIN_EXE_hrm")).parent().unwrap().to_path_buf()
 }
 
 impl Env {
@@ -221,7 +221,15 @@ fn api_key_profile_keeps_the_key_out_of_argv_and_files() {
     let p = e.profile("team-ci");
     assert_eq!(p["identity"]["plan"], "API key");
     assert_eq!(p["identity"]["logged_in"], true);
+    // Claude Code asks before it uses an environment key, and "No" is its default: the key is approved for it,
+    // also after it was declined once (it would show its login screen at every start)
+    let pj = e.home.join(".claude-team-ci").join(".claude.json");
+    let responses = |pj: &Path| serde_json::from_str::<Value>(&std::fs::read_to_string(pj).unwrap()).unwrap()["customApiKeyResponses"].clone();
+    assert_eq!(responses(&pj), json!({"approved": ["sk-ant-test-123"], "rejected": []}));
+    write(&pj, &json!({"hasCompletedOnboarding": true, "numStartups": 3, "customApiKeyResponses": {"approved": [], "rejected": ["sk-ant-test-123", "other"]}}).to_string());
     e.ok(&["run", "team-ci", "--", "-p", "hi"]);
+    assert_eq!(responses(&pj), json!({"approved": ["sk-ant-test-123"], "rejected": ["other"]}));
+    assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&pj).unwrap()).unwrap()["numStartups"], 3, "the rest of the file is kept");
     let run = e.runs().pop().unwrap();
     assert_eq!(run["env"]["ANTHROPIC_API_KEY"], "sk-ant-test-123");
     assert_eq!(run["env"]["ANTHROPIC_MODEL"], "claude-sonnet-5-5");
@@ -237,6 +245,7 @@ fn api_key_profile_keeps_the_key_out_of_argv_and_files() {
     e.ok(&["key", "set", "team-ci"]);
     e.ok(&["run", "team-ci"]);
     assert_eq!(e.runs().pop().unwrap()["env"]["ANTHROPIC_API_KEY"], "sk-ant-new");
+    assert!(responses(&pj)["approved"].as_array().unwrap().contains(&json!("sk-ant-new")), "a replaced key is approved too");
     e.ok(&["key", "delete", "team-ci"]);
     assert!(e.fail(&["run", "team-ci"]).contains("no API key saved"));
 }
@@ -449,7 +458,12 @@ fn mcp_servers_are_written_per_tool_and_only_ours_are_removed() {
 
     let claude: Value = serde_json::from_str(&std::fs::read_to_string(e.home.join(".claude.json")).unwrap()).unwrap();
     assert_eq!(claude["mcpServers"]["docs"]["type"], "http");
+    assert_eq!(claude["mcpServers"]["docs"]["headers"]["Authorization"], "Bearer t");
     assert_eq!(claude["mcpServers"]["fs"]["command"], "different");
+    // a header's value is in the credential store: the account list keeps its key only, and `mcp list` shows it as before
+    let list = std::fs::read_to_string(e.data.join("profiles.json")).unwrap();
+    assert!(!list.contains("Bearer t") && list.contains("Authorization"), "{list}");
+    assert_eq!(e.json(&["mcp", "list"])["servers"][1]["headers"]["Authorization"], "Bearer t");
     let codex = std::fs::read_to_string(e.home.join(".codex").join("config.toml")).unwrap();
     assert!(codex.contains("[mcp_servers.fs]") && codex.contains("command = \"npx\"") && codex.contains("http_headers"));
     assert!(codex.contains("model = \"gpt-6\"") && codex.contains("[mcp_servers.handmade]"), "the rest of config.toml is kept");
@@ -470,6 +484,26 @@ fn mcp_servers_are_written_per_tool_and_only_ours_are_removed() {
     e.ok(&["mcp", "import", "codex"]);
     let l = e.json(&["mcp", "list"]);
     assert!(l["servers"].as_array().unwrap().iter().any(|s| s["name"] == "handmade"));
+}
+
+#[test]
+fn mcp_values_an_older_version_left_in_the_list_move_to_the_credential_store_at_the_next_command() {
+    let e = Env::new();
+    std::fs::create_dir_all(e.home.join(".claude")).unwrap();
+    e.ok(&["list"]);
+    // as 1.9.14 saved it: the values in the file
+    let path = e.data.join("profiles.json");
+    let mut reg: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    reg["mcp"] = json!([{"name": "github", "transport": "stdio", "command": "npx", "env": {"GITHUB_TOKEN": "ghp_old"}}]);
+    write(&path, &reg.to_string());
+    e.ok(&["list"]);
+    let list = std::fs::read_to_string(&path).unwrap();
+    assert!(!list.contains("ghp_old") && list.contains("\"GITHUB_TOKEN\": null"), "{list}");
+    assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "ghp_old");
+    // the server given again with the value emptied: it stays empty, its credential went with the edit
+    e.ok(&["mcp", "add", "github", "--command", "npx", "--env", "GITHUB_TOKEN="]);
+    assert_eq!(e.json(&["mcp", "list"])["servers"][0]["env"]["GITHUB_TOKEN"], "");
+    assert!(hrm_core::secrets::read(&format!("{}:mcp:github:env:GITHUB_TOKEN", e.prefix)).is_none());
 }
 
 #[test]
@@ -688,6 +722,52 @@ fn settings_can_be_read_and_changed() {
     assert!(e.ok(&["settings", "terminal"]).contains("console"));
     e.ok(&["settings", "router_port", "16000"]);
     assert!(e.ok(&["router", "status"]).contains("16000"));
+}
+
+#[test]
+fn settings_take_switches_and_lists_and_refuse_what_does_not_fit() {
+    let e = Env::new();
+    e.ok(&["settings", "close_to_tray", "false"]);
+    assert_eq!(e.ok(&["settings", "close_to_tray"]).trim(), "false");
+    e.ok(&["settings", "hidden_tools", r#"["codex", "agy"]"#]);
+    assert_eq!(serde_json::from_str::<Value>(&e.ok(&["settings", "hidden_tools"])).unwrap(), json!(["codex", "agy"]));
+    // a text setting keeps the words as typed, digits too
+    e.ok(&["settings", "device_name", "42"]);
+    assert_eq!(e.ok(&["settings", "device_name"]).trim(), "\"42\"");
+    // what the sync's own checks guard is changed through them only
+    for k in ["device_id", "incarnation", "sync_mode", "sync_folder", "hub_url", "direct_connection"] {
+        assert!(e.fail(&["settings", k, "hub"]).contains("hrm computers set"), "{k}");
+    }
+    // the wrong type is reported, and nothing of the above was saved
+    assert!(e.fail(&["settings", "close_to_tray", "maybe"]).contains("does not fit close_to_tray"));
+    assert!(e.fail(&["settings", "router_port", "70000"]).contains("does not fit router_port"));
+    assert!(e.fail(&["settings", "no_such", "1"]).contains("no setting named no_such"));
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(e.data.join("settings.json")).unwrap()).unwrap();
+    assert_eq!((&saved["close_to_tray"], &saved["router_port"], &saved["sync_mode"], &saved["hub_url"]), (&json!(false), &json!(15731), &json!("off"), &json!("")));
+}
+
+#[test]
+fn moving_the_account_list_takes_the_accounts_along_and_keeps_a_list_already_there() {
+    let names = |e: &Env| e.json(&["list"]).as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let a = Env::new();
+    a.ok(&["add", "work", "--no-login"]);
+    // no file there yet (nor its folder): the list is copied before the setting points at it
+    let shared = a.home.join("OneDrive").join("hm").join("profiles.json");
+    a.ok(&["settings", "registry_path", shared.to_str().unwrap()]);
+    assert!(shared.is_file());
+    assert_eq!(names(&a), ["work"]);
+    // a second computer pointing at the list already there joins it: the file is kept, not replaced by its own
+    let b = Env::new();
+    b.ok(&["add", "other", "--no-login"]);
+    b.ok(&["settings", "registry_path", shared.to_str().unwrap()]);
+    assert_eq!(names(&b), ["work"]);
+    assert_eq!(names(&a), ["work"]);
+    // a place the list cannot go to is refused with the reason, and the setting stays
+    write(&a.home.join("blocker"), "a file, not a folder");
+    assert!(a.fail(&["settings", "registry_path", a.home.join("blocker").join("profiles.json").to_str().unwrap()]).contains("could not put the account list"));
+    assert!(a.fail(&["settings", "registry_path", a.home.join("OneDrive").to_str().unwrap()]).contains("is a folder"));
+    assert!(a.fail(&["settings", "registry_path", "profiles.json"]).contains("full path"));
+    assert_eq!(serde_json::from_str::<Value>(&a.ok(&["settings", "registry_path"])).unwrap(), json!(shared.to_str().unwrap()));
 }
 
 #[test]

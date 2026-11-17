@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds } from './core.js';
+import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
@@ -41,19 +41,25 @@ const redrawSoon = () => {
     drawing = true;
     try {
       call('today').then(setTodayBadge).catch(() => {});
-      if (document.getElementById('dialog-root').innerHTML) S.dirty = true; // a dialog stays as it is; the page catches up when it closes
+      if (editing()) S.dirty = true; // a dialog, or a name being typed, stays as it is; the page catches up when it closes
       else if (S.route.view === 'projects') await refreshProjects(); // the tiles and rows take the new numbers where they are
-      else await render();
+      else await render(true);
     } finally { drawing = false; lastDraw = Date.now(); if (again) { again = false; redrawSoon(); } }
   }, Math.max(250, 4000 - (Date.now() - lastDraw)));
 };
-if (ev) ev.listen('refreshed', () => {
-  S.usageAt = Date.now(); setFresh();
+// hidden in the tray, the window draws nothing: it remembers that it is stale and draws once when it is shown again
+let stale = false;
+const refreshed = async () => {
+  if (!(await shown())) { stale = true; return; }
+  stale = false; setFresh();
   if (['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) redrawSoon();
-});
+};
+if (ev) ev.listen('refreshed', () => { S.usageAt = Date.now(); refreshed(); });
+if (ev) onShown(() => { if (stale) { stale = false; refreshed(); } });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
-call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
+// (through the shared loader: this answer may be the one that carries the first-run report)
+loadState().then((st) => { setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
 // a newer Harness Manager found by an earlier check: the dot on Settings
 call('self_latest').then((v) => v && setSelfUpdate(v)).catch(() => {});
 // how many MCP servers and skills there are, beside their pages; the pinned projects under Projects
@@ -73,7 +79,7 @@ if (ev) ev.listen('self-update', (e) => {
 });
 
 // open consoles change without any file being written; look again every minute on the accounts list
-setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && document.visibilityState === 'visible') render(); }, 60000);
+setInterval(async () => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && await shown()) render(true); }, 60000);
 
 // the limits popup by the tray icon opens this window at an account
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });

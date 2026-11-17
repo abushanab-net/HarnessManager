@@ -1,9 +1,23 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 /// Write via a temp file in the same folder and rename, so readers never see half a file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, false) }
+
+/// `write_atomic` for a key or a token kept as a file: on unix the file is its owner's alone (mode 0600) from the
+/// moment it exists. On Windows it is a plain file, under the user's own profile.
+pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, true) }
+
+/// A key file an earlier version wrote for every user to read, made its owner's alone; nothing to do on Windows.
+pub fn make_private(path: &Path) {
+    #[cfg(unix)]
+    { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)); }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+fn write_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -13,7 +27,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = path.with_extension(format!("hrm-tmp-{}-{n}", std::process::id()));
     let written = (|| -> std::io::Result<()> {
         use std::io::Write;
-        let mut f = std::fs::File::create(&tmp)?;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        { if private { std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600); } }
+        #[cfg(not(unix))]
+        let _ = private;
+        let mut f = o.open(&tmp)?;
         f.write_all(bytes)?;
         f.sync_all()
     })();
@@ -24,6 +44,21 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         return Err(e);
     }
     Ok(())
+}
+
+/// What a reader gives, when it is no more than `max` bytes: what another computer sends is refused by the length
+/// it declares (when it declares one), and never read past the cap, so nothing larger than this app sends is held.
+pub fn read_capped(r: impl std::io::Read, declared: Option<u64>, max: u64, what: &str) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut b = vec![];
+    if declared.is_some_and(|n| n > max) || r.take(max + 1).read_to_end(&mut b)? as u64 > max { bail!("{what} is over {} MB; not taken", max >> 20); }
+    Ok(b)
+}
+
+/// An HTTP answer's body through `read_capped`.
+pub fn body_capped(r: reqwest::blocking::Response, max: u64, what: &str) -> Result<Vec<u8>> {
+    let declared = r.content_length();
+    read_capped(r, declared, max, what)
 }
 
 /// A file's text, or "" when it does not exist. Any other failure (locked, not yet downloaded by OneDrive)
@@ -37,8 +72,12 @@ pub fn read_or_empty(path: &Path) -> Result<String> {
 }
 
 /// A system-wide named mutex shared by every Harness Manager process (and thread); released on drop.
-/// Re-taking it on a thread that already holds it does not block.
-pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE);
+/// Re-taking it on a thread that already holds it does not block. Off Windows it is a locked file.
+pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE, #[cfg(not(windows))] Option<(std::fs::File, String)>);
+
+// the names this thread holds: a file lock taken twice through two handles would wait for itself
+#[cfg(not(windows))]
+thread_local! { static HELD: std::cell::RefCell<std::collections::HashSet<String>> = Default::default(); }
 
 impl NamedLock {
     pub fn take(name: &str) -> NamedLock {
@@ -51,8 +90,29 @@ impl NamedLock {
             if !h.is_null() { unsafe { WaitForSingleObject(h, 10_000) }; }
             NamedLock(h)
         }
+        // an advisory lock on a file in the temp folder, which every process of this user shares; closing the file
+        // (the drop) releases it, and so does the end of a process that held it
         #[cfg(not(windows))]
-        { let _ = name; NamedLock() }
+        {
+            if !HELD.with(|h| h.borrow_mut().insert(name.to_string())) { return NamedLock(None); }
+            let path = std::env::temp_dir().join(format!("HarnessManager-{name}.lock"));
+            // shortcut: on a shared /tmp every user locks the same file (another user's opens for reading, which is
+            // enough), so two users wait for each other, 10 s at most; a folder per user if that ever shows
+            let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).or_else(|_| std::fs::File::open(&path)).ok();
+            if let Some(f) = &file {
+                // the same 10 s as on Windows, then on without the lock
+                let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                while matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)) && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(20)); }
+            }
+            NamedLock(file.map(|f| (f, name.to_string())).or_else(|| { HELD.with(|h| h.borrow_mut().remove(name)); None }))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl Drop for NamedLock {
+    fn drop(&mut self) {
+        if let Some((_, name)) = &self.0 { HELD.with(|h| h.borrow_mut().remove(name)); }
     }
 }
 
@@ -161,13 +221,24 @@ fn login_shell_path() -> Option<String> {
     out.split(MARK).nth(1).filter(|p| !p.is_empty()).map(String::from)
 }
 
+/// CON, NUL, COM1 ... name devices on Windows, not files or folders.
+fn device_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    matches!(l.as_str(), "con" | "prn" | "aux" | "nul")
+        || (l.len() == 4 && (l.starts_with("com") || l.starts_with("lpt")) && l.as_bytes()[3].is_ascii_digit() && l.as_bytes()[3] != b'0')
+}
+
 /// Valid profile and item names: letters, digits, `-` and `_`, as they also become folder names.
 pub fn valid_name(name: &str) -> bool {
-    // CON, NUL, COM1 ... name devices on Windows, not folders
-    let l = name.to_ascii_lowercase();
-    let device = matches!(l.as_str(), "con" | "prn" | "aux" | "nul")
-        || (l.len() == 4 && (l.starts_with("com") || l.starts_with("lpt")) && l.as_bytes()[3].is_ascii_digit() && l.as_bytes()[3] != b'0');
-    !device && !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !device_name(name) && !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// A name another computer sent, before it becomes part of a path or an argument here: ASCII letters, digits,
+/// `-`, `_` and `.`, up to 128 of them, not starting with `-` (an option) or `.` (a parent folder, a hidden file),
+/// and no device. No separator, drive or stream is made of these, on any system.
+pub fn safe_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 128 && !s.starts_with(['-', '.']) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && !device_name(s.split('.').next().unwrap_or(""))
 }
 
 pub fn file_sig(path: &Path) -> Option<(i64, u64)> {
@@ -229,5 +300,60 @@ mod unix_tests {
         assert_eq!(dirs.len(), dirs.iter().collect::<std::collections::HashSet<_>>().len(), "no folder twice: {p}");
         // the login shell answered: whatever it adds (nvm, Homebrew, npm's prefix) comes first
         println!("PATH after: {p}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_a_named_lock_lets_one_thread_in_at_a_time_and_the_same_one_again() {
+        let name = format!("test-{}", std::process::id());
+        let (held, again) = (NamedLock::take(&name), NamedLock::take(&name));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let other = { let name = name.clone(); std::thread::spawn(move || { let _l = NamedLock::take(&name); tx.send(()).unwrap(); }) };
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(400)).is_err(), "another thread waits while it is held");
+        drop(again);
+        drop(held);
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "and gets it once it is released");
+        other.join().unwrap();
+        #[cfg(not(windows))]
+        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("HarnessManager-{name}.lock")));
+    }
+
+    #[test]
+    fn unix_a_key_kept_as_a_file_is_its_owners_alone() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("keys").join("device.key");
+        write_atomic_private(&f, b"seed").unwrap();
+        write_atomic_private(&f, b"seed again").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"seed again");
+        assert_eq!(std::fs::read_dir(f.parent().unwrap()).unwrap().count(), 1, "no temp file is left");
+        make_private(&f);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = || std::fs::metadata(&f).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(), 0o600);
+            // one an earlier version wrote for every user to read
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+            make_private(&f);
+            assert_eq!(mode(), 0o600);
+        }
+    }
+
+    #[test]
+    fn a_capped_read_stops_at_the_cap() {
+        assert_eq!(read_capped(&b"12345"[..], Some(5), 5, "it").unwrap(), b"12345");
+        assert!(read_capped(&b"123456"[..], None, 5, "it").is_err(), "one byte over, with no length declared");
+        assert!(read_capped(std::io::empty(), Some(6), 5, "it").is_err(), "refused by the length it declares alone");
+        assert!(read_capped(std::io::repeat(0), None, 1_000, "it").is_err(), "an endless answer is left after the cap");
+    }
+
+    #[test]
+    fn a_safe_name_is_one_plain_path_part_on_any_system() {
+        for ok in ["s1", "0b1c2d3e-aaaa-bbbb-cccc-1234567890ab", "ses_5f3a.1", "rollout-2026-11-01T10-00-00-cx-1.jsonl", "a", &"a".repeat(128)] { assert!(safe_name(ok), "{ok}"); }
+        for bad in ["", ".", "..", ".hidden", "-x", "--resume", "a/b", "a\\b", "C:evil", "a:stream", "a b", "é", "a\n", "a\0", "NUL", "nul.jsonl", "COM1.txt", &"a".repeat(129)] { assert!(!safe_name(bad), "{bad:?}"); }
     }
 }

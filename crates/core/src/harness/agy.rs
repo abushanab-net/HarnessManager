@@ -17,7 +17,7 @@ use crate::Ctx;
 pub struct Agy;
 
 /// Credential Antigravity reads its login from. `HRM_AGY_CRED` lets tests use their own.
-pub fn live_target() -> String { std::env::var("HRM_AGY_CRED").unwrap_or_else(|_| "gemini:antigravity".into()) }
+pub fn live_target() -> String { crate::testenv::var("HRM_AGY_CRED").unwrap_or_else(|| "gemini:antigravity".into()) }
 
 fn snapshot_target(profile: &str) -> String { format!("{}:agy:{profile}", crate::secrets::prefix()) }
 

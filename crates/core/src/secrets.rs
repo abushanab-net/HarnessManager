@@ -3,13 +3,17 @@
 
 use anyhow::Result;
 
-pub fn prefix() -> String { std::env::var("HRM_CRED_PREFIX").unwrap_or_else(|_| "HarnessManager".into()) }
+pub fn prefix() -> String { crate::testenv::var("HRM_CRED_PREFIX").unwrap_or_else(|| "HarnessManager".into()) }
 
 /// Target name for a profile's API key.
 pub fn key_target(profile: &str) -> String { format!("{}:key:{profile}", prefix()) }
 
 /// Target name for a router provider's key.
 pub fn provider_target(provider: &str) -> String { format!("{}:provider:{provider}", prefix()) }
+
+/// Target name for one env or header value of an MCP server (`kind`: "env" or "header").
+// shortcut: two names that differ only in letter case, or a ':' placed just so, give one target; the list file then keeps the value (see Registry::save). Encode the parts if that ever matters.
+pub fn mcp_target(server: &str, kind: &str, key: &str) -> String { format!("{}:mcp:{server}:{kind}:{key}", prefix()) }
 
 pub fn set_key(target: &str, secret: &str) -> Result<()> {
     if secret.trim().is_empty() { anyhow::bail!("the key is empty"); }

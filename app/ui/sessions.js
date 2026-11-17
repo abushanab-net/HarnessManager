@@ -3,7 +3,7 @@
 // The tags shared with Projects and Accounts live here too. Every redraw goes through patch(), so a live arrival
 // keeps the reader's scroll, focus and open folds.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown } from './core.js';
 import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
@@ -63,7 +63,7 @@ const sMore = new Set(), sFold = new Set();
 let railMore = false;
 // the page reads the index in pages of 50 rows; the search, the computer and every filter are the backend's
 const PER = 50;
-const seg = (k, opts, cur, label, tid) => `${label ? `<span class="a-lbl">${label}</span>` : ''}<div class="chip-group" role="group" aria-label="${label || k}">${opts.map(([v, l]) => `<button class="filter-chip ${cur === v ? 'active' : ''}" data-act="s-set" data-k="${k}" data-v="${esc(v)}" aria-pressed="${cur === v}" data-testid="${tid(v)}">${esc(l)}</button>`).join('')}</div>`;
+const seg = (k, opts, cur, label, tid) => `${label ? `<span class="a-lbl">${label}</span>` : ''}<div class="chip-group" role="group" aria-label="${label || k}">${opts.map(([v, l]) => `<button class="filter-chip ${cur === v ? 'active' : ''}" data-act="s-set" data-k="${k}" data-v="${esc(v)}" aria-pressed="${cur === v}" data-testid="${esc(tid(v))}">${esc(l)}</button>`).join('')}</div>`;
 
 /** One row: status dot, title and where, tags, account (its tool's icon first), computer (sync on), tokens, when, one action. */
 function sessionRow(s, pcs) {
@@ -140,7 +140,7 @@ view('sessions', async (sheet, params) => {
     ? `<a class="filter-chip back-chip" href="#projects">← Projects</a><header class="page-heading"><div><h1 class="a-h1row" data-testid="project-title">${nameEl(cur)}<button class="a-ib" data-act="project-rename" data-key="${esc(cur.key)}" title="Rename (or double-click the name)" aria-label="Rename ${esc(cur.name)}">${ic.edit}</button>${pinBtn(cur)}${tagsHtml(cur.tags, 'project', cur.key, cur.name)}</h1><div class="heading-facts mono a-path">${esc(cur.remote || cur.root || '')}</div>
         <div class="a-pstats" data-testid="project-stats"><span><b>${money(cur.cost)}</b> ≈ list prices</span><span><b>${fmt(cur.tokens)}</b> tokens</span><span><b>${cur.sessions}</b> ${cur.sessions === 1 ? 'session' : 'sessions'}</span><span><b>${(cur.accounts || []).length}</b> ${(cur.accounts || []).length === 1 ? 'account' : 'accounts'}</span>${cur.live ? `<span class="a-live"><b>${cur.live}</b> running</span>` : ''}</div></div>
       <div class="page-actions"><button class="icon-btn" data-act="project-menu" data-key="${esc(cur.key)}" data-name="${esc(cur.name)}" data-pinned="${cur.pinned ? 1 : ''}" aria-label="Pin, rename or merge" aria-haspopup="menu">⋯</button>${cur.root ? `<button class="btn-primary" data-act="project-new" data-dir="${esc(cur.root)}" data-name="${esc(cur.name)}" data-profile="${esc(all[0] ? all[0].profile : '')}" data-testid="project-new">New session</button>` : ''}</div></header>`
-    : `<header class="page-heading"><div><h1 data-testid="sessions-finding">${running.length ? `${plural(running.length, 'session is', 'sessions are')} running now; open one to follow it live.` : `Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.`}</h1><div class="heading-facts" data-testid="sessions-count">${plural(total, 'session')}${days !== 'all' ? ' · ' + days + ' days' : ''} · ${plural(groups.length, group === 'project' ? 'project' : 'group')}${sync ? ' · ' + plural(computers(pcs).length, 'computer') : ''} · tokens from the logs · cost ≈ list prices</div></div>
+    : `<header class="page-heading"><div><h1 data-testid="sessions-finding">${running.length ? `${plural(running.length, 'session is', 'sessions are')} running now; open one to follow it live.` : `Every tool's sessions in one place${tools ? ', from ' + esc(tools) : ''}.`}</h1><div class="heading-facts" data-testid="sessions-count">${plural(total, 'session')}${days !== 'all' ? ' · ' + esc(days) + ' days' : ''} · ${plural(groups.length, group === 'project' ? 'project' : 'group')}${sync ? ' · ' + plural(computers(pcs).length, 'computer') : ''} · tokens from the logs · cost ≈ list prices</div></div>
       <div class="page-actions"><button class="btn-primary" data-act="session-new" data-testid="session-new">New session</button></div></header>`;
   // a project's view has no rail of other projects: its own accounts and tags are chips in the bar, and a panel
   // about the project appears only when it spans several folders or accounts
@@ -149,7 +149,7 @@ view('sessions', async (sheet, params) => {
   const ptags = cur ? [...new Set([...(cur.tags || []), ...all.flatMap((s) => s.tags || [])])] : [];
   const about = cur && (folders.length > 1 || accts.length > 1) ? `<aside class="a-rail a-about" aria-label="This project" data-testid="project-about">
       <div class="a-rail-sec">This project</div><div class="a-kv"><b>${money(cur.cost)}</b><span>≈ list prices</span><b>${fmt(cur.tokens)}</b><span>tokens</span><b>${cur.sessions}</b><span>${cur.sessions === 1 ? 'session' : 'sessions'}</span></div>
-      ${cur.series && cur.series.some((v) => v) ? `<div class="a-rail-sec">${days === 'all' ? 'Activity' : days + ' days'}</div>${area(cur.series)}` : ''}
+      ${cur.series && cur.series.some((v) => v) ? `<div class="a-rail-sec">${days === 'all' ? 'Activity' : esc(days) + ' days'}</div>${area(cur.series)}` : ''}
       ${running.length ? `<div class="a-rail-sec">Running</div>${running.map((s) => `<a class="a-rail-item" href="#session?profile=${encodeURIComponent(s.profile)}&id=${encodeURIComponent(s.id)}"><i class="a-dot live"></i><span>${esc(s.title || 'Untitled session')}</span><span></span></a>`).join('')}` : ''}
       ${accts.length > 1 ? `<div class="a-rail-sec">Accounts</div>${accts.map((a) => { const n = all.filter((s) => s.profile === a).length; return `<div class="a-arow"><span>${esc(acctName(a))}</span><span>${n}${all.length ? ' · ' + Math.round((n / all.length) * 100) + '%' : ''}</span></div>`; }).join('')}` : ''}
       ${folders.length > 1 ? `<div class="a-rail-sec">Folders</div>${folders.slice(0, 6).map((f) => `<div class="a-afold mono" title="${esc(f)}">${esc(f)}</div>`).join('')}${folders.length > 6 ? `<div class="a-afold">${folders.length - 6} more</div>` : ''}` : ''}</aside>` : '';
@@ -269,12 +269,14 @@ export function watchLive(m) {
   let last = null;
   liveTimer = setInterval(async () => {
     if (S.route.view !== 'session' || rv.sessionKey !== key) return clearInterval(liveTimer);
+    if (document.visibilityState !== 'visible') return; // minimized: nothing is looked at
     let stamp;
     try { stamp = JSON.stringify(await call('file_stamp', { path: m.source_path })); } catch { return; }
     if (last === null) { last = stamp; return; }
-    if (stamp === last || document.getElementById('dialog-root').innerHTML) return;
+    // hidden in the tray, the change is not drawn; it is still a change at the first look once the window shows
+    if (stamp === last || document.getElementById('dialog-root').innerHTML || !(await shown())) return;
     last = stamp;
-    render();
+    render(true);
   }, 2000);
 }
 action('follow-end', () => {

@@ -201,6 +201,28 @@ pub fn sync_claude(_ctx: &Ctx, main_home: &Path, main_json: &Path, prof: &Path) 
     Ok(rep)
 }
 
+/// Claude Code uses an API key from the environment only when the key's last 20 characters are listed under
+/// `customApiKeyResponses.approved` in `.claude.json`. Otherwise it asks, "No" is the default answer, and a
+/// declined key means its login screen at every start. The account was added to use this key, so approve it.
+pub fn approve_claude_key(pj_path: &Path, key: &str) -> Result<()> {
+    let key = key.trim();
+    let tail = Value::from(key.get(key.len().saturating_sub(20)..).unwrap_or(key));
+    let sig = crate::util::file_sig(pj_path);
+    let mut pj = match read_obj(pj_path)? {
+        Some(m) => m,
+        None if pj_path.exists() => return Ok(()), // Claude Code is about to write it again: next launch
+        None => Map::from_iter([("hasCompletedOnboarding".to_string(), Value::Bool(true))]),
+    };
+    let list = |k: &str| pj.get("customApiKeyResponses").and_then(|r| r.get(k)).and_then(|a| a.as_array().cloned()).unwrap_or_default();
+    let (mut approved, mut rejected) = (list("approved"), list("rejected"));
+    if approved.contains(&tail) { return Ok(()); }
+    rejected.retain(|v| v != &tail);
+    approved.push(tail);
+    pj.insert("customApiKeyResponses".into(), serde_json::json!({"approved": approved, "rejected": rejected}));
+    if crate::util::file_sig(pj_path) != sig { return Ok(()); } // Claude Code wrote it meanwhile: next launch
+    write_atomic(pj_path, serde_json::to_string_pretty(&Value::Object(pj))?.as_bytes())
+}
+
 /// Replace folders the old PowerShell launcher copied into a profile with links to the main profile.
 /// Copies are moved to `<profile>/.hrm-backup/<name>` first.
 pub fn relink_copies(main_home: &Path, prof: &Path) -> Result<Vec<String>> {

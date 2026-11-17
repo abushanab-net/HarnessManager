@@ -1,5 +1,6 @@
 name: ci
-# One job: build once, then the Rust tests and the desktop UI tests run at the same time.
+# Windows: build once, then the Rust tests and the desktop UI tests run at the same time. macOS: the code only it
+# builds. The release workflow calls this one and waits for it, so a tag never publishes untested code.
 on:
   pull_request:
     paths-ignore: ['**.md', 'docs/**']
@@ -7,6 +8,7 @@ on:
     branches: [develop]
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:   # run by hand, e.g. after a push that CI skipped
+  workflow_call:       # release.yml: the tests are the gate of every release
 permissions: { contents: read }
 concurrency: { group: 'ci-${{ github.ref }}', cancel-in-progress: true }
 env:
@@ -15,9 +17,10 @@ env:
   CARGO_TERM_COLOR: always
 jobs:
   test:
-    # the self-hosted Windows runner (variable RUNNER_WIN) when set; a pull request from a fork always runs on
-    # GitHub's runner, so code from outside never runs on our machines
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'windows-latest') || vars.RUNNER_WIN || 'windows-latest' }}
+    # the self-hosted Windows runner (variable RUNNER_WIN); with the variable missing the job fails instead of
+    # moving to a hosted runner. The one exception: a pull request from a fork runs on GitHub's runner, because
+    # code from outside must never run on our machines
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'windows-latest') || vars.RUNNER_WIN }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
@@ -37,6 +40,8 @@ jobs:
         run: cargo build --workspace && cargo test --workspace --no-run
       - name: Test (Rust and UI in parallel)
         shell: bash
+        # the across-computers UI tests too: a second computer in a sync folder, pairing, and a hub in this job
+        env: { HRM_E2E_SYNC: 1, HRM_E2E_PEERS: 1, HRM_E2E_HUB: 1 }
         run: |
           set +e   # wait for both and print both logs, even when one fails
           cargo test --workspace --no-fail-fast > rust.log 2>&1 & r=$!
@@ -52,9 +57,10 @@ jobs:
         with: { name: ui-tests, path: e2e/.work, retention-days: 3, if-no-files-found: ignore }
 
   macos:
-    # the code only macOS builds (the shell's PATH, Terminal.app windows) compiles, and its tests pass; a fork's
-    # pull request runs on GitHub's Mac, like the Windows job
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'macos-latest') || vars.RUNNER_MAC_RELEASE || 'macos-latest' }}
+    # the code only macOS builds (the shell's PATH, Terminal.app windows) compiles, and its tests pass. The
+    # self-hosted Mac (variable RUNNER_MAC_RELEASE), or a failed job when the variable is missing; a fork's pull
+    # request runs on GitHub's Mac for the same reason as the Windows job
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'macos-latest') || vars.RUNNER_MAC_RELEASE }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5

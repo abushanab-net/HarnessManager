@@ -12,6 +12,18 @@ export async function call(op, args = {}) {
   return t.core.invoke('call', { op, args });
 }
 
+/** Whether the window can be seen. Minimized, the page knows it is hidden; hidden in the tray it does not (WebView2
+ * goes on calling the page visible there), so the window itself is asked. */
+const win = () => window.__TAURI__.window.getCurrentWindow();
+export const shown = async () => document.visibilityState === 'visible' && (await win().isVisible().catch(() => true));
+/** Run fn when the window may be back in view: restored from the taskbar, or shown from the tray, which focuses it;
+ * the pointer moving over it is the sign when the system showed it without giving it the focus. */
+export function onShown(fn) {
+  document.addEventListener('visibilitychange', fn);
+  window.addEventListener('pointermove', fn);
+  win().listen('tauri://focus', fn).catch(() => {});
+}
+
 /** The number of tools with a newer version, beside Setup and Apps in the rail. */
 export function setAppUpdates(n) {
   for (const el of document.querySelectorAll('#apps-count, #n-apps')) {
@@ -141,17 +153,19 @@ export function parseHash() {
 }
 
 // renders run one after another, so a slow earlier page never paints over the one you moved to
-let chain = Promise.resolve(), queued = null;
-export function render() {
+let chain = Promise.resolve(), queued = null, quiet = true, keepEdits = false;
+/** Draw the page. `background` is a redraw nobody asked for (a refresh, a poll): it keeps what the reader typed. */
+export function render(background = false) {
+  quiet = quiet && background === true; // joined by a redraw the reader asked for, the waiting one is theirs
   // one redraw waits at most: a burst of refreshes while a page loads draws it once more, not once per event
   if (!queued) {
-    const run = () => { queued = null; return renderNow(); };
+    const run = () => { queued = null; const q = quiet; quiet = true; return renderNow(q); };
     queued = chain = chain.then(run, run);
   }
   return queued;
 }
 
-async function renderNow() {
+async function renderNow(background) {
   // a redraw of the same page (a refresh, a filter) keeps its scroll position; moving to another page starts at the top.
   // The position is the one the sheet had when its content was replaced, not when the redraw began: a page's data takes
   // seconds to load, and restoring the older position pulled the reader back up while they scrolled
@@ -173,16 +187,23 @@ async function renderNow() {
   const fn = routes[S.route.view] || routes.home;
   const sheet = document.getElementById('sheet');
   if (!sameHash) { delete sheet.dataset.warm; sheet.scrollTop = 0; }
+  keepEdits = background && sameHash;
   try {
     await fn(sheet, S.route.params);
+    S.drawn = location.hash; // the page the sheet shows now
+    // the notice of a read that failed goes when the page reads again
+    if (S.readFailed) { if ((document.getElementById('notice-text') || {}).textContent === S.readFailed) clearNotice(); S.readFailed = null; }
     const top = S.sheetTop; // what the reader had before fn replaced the content; the replacement's own scroll event has not fired yet
     if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
     // pages can add to a freshly drawn sheet (the tour in guide.js)
     document.dispatchEvent(new CustomEvent('rendered', { detail: { sheet, view: routes[S.route.view] ? S.route.view : 'home' } }));
   } catch (e) {
+    // a read that fails while its page is on screen leaves the page as it was, and says so
+    if (sameHash && S.drawn === location.hash) return notice(S.readFailed = String(e).replace(/^Error: /, ''));
+    S.drawn = null;
     sheet.className = 'sheet';
     sheet.innerHTML = `<div class="page-body"><section class="panel-card empty-state"><h1>Something went wrong</h1><span class="negT">${esc(String(e))}</span><div><button class="btn-secondary" data-act="reload">Try again</button></div></section></div>`;
-  }
+  } finally { keepEdits = false; }
 }
 
 // ---------- the keyed reconciler: a page redraws in place, keeping what the reader had ----------
@@ -190,9 +211,14 @@ async function renderNow() {
 // existing elements: scroll positions, the focused control with its caret and selection, open folds, and the animated
 // nodes with their phase. A page draws with patch(sheet, html) instead of sheet.innerHTML = html.
 const nodeKey = (n) => (n.nodeType !== 1 ? null : n.id ? '#' + n.id : n.dataset.key ? 'k:' + n.dataset.key : n.dataset.testid ? 't:' + n.dataset.testid : null);
-function patchNode(cur, next) {
+/** A field that shows something other than the markup last gave it: the reader changed it and has not saved it yet. */
+const edited = (el) => (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') ? el.checked !== el.defaultChecked
+  : el instanceof HTMLSelectElement ? el.value !== (([...el.options].find((o) => o.defaultSelected) || el.options[0] || {}).value ?? '')
+  : (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.value !== el.defaultValue);
+function patchNode(cur, next, keep) {
   if (cur.nodeType !== next.nodeType || cur.nodeName !== next.nodeName) { const r = next.cloneNode(true); cur.replaceWith(r); return r; }
   if (cur.nodeType !== 1) { if (cur.nodeValue !== next.nodeValue) cur.nodeValue = next.nodeValue; return cur; }
+  const held = keep && edited(cur); // asked before the new markup is taken: that changes what "last gave it" means
   for (const a of [...cur.attributes]) if (!next.hasAttribute(a.name)) cur.removeAttribute(a.name);
   for (const a of [...next.attributes]) if (cur.getAttribute(a.name) !== a.value) cur.setAttribute(a.name, a.value);
   const keyed = new Map();
@@ -203,10 +229,11 @@ function patchNode(cur, next) {
     let m = k ? keyed.get(k) : cursor && !nodeKey(cursor) && cursor.nodeName === child.nodeName ? cursor : null;
     if (m && k) keyed.delete(k);
     if (!m) { m = child.cloneNode(true); cur.insertBefore(m, cursor); }
-    else { if (m !== cursor) cur.insertBefore(m, cursor); m = patchNode(m, child); }
+    else { if (m !== cursor) cur.insertBefore(m, cursor); m = patchNode(m, child, keep); }
     cursor = m.nextSibling;
   }
   while (cursor) { const n = cursor.nextSibling; cursor.remove(); cursor = n; }
+  if (held) return cur;
   if (cur instanceof HTMLInputElement) {
     if (cur.type === 'checkbox' || cur.type === 'radio') { if (document.activeElement !== cur) cur.checked = next.checked; }
     else if (document.activeElement !== cur && cur.value !== next.value) cur.value = next.value;
@@ -216,6 +243,9 @@ function patchNode(cur, next) {
 }
 const focusKey = (el) => (el && el !== document.body ? (el.id ? '#' + CSS.escape(el.id) : el.dataset.testid ? `[data-testid="${CSS.escape(el.dataset.testid)}"]` : el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : null) : null);
 export function patch(root, html) {
+  // a background redraw of the page shown keeps what the reader typed, and waits for a name being typed in place
+  const keep = keepEdits && root.id === 'sheet';
+  if (keep && root.querySelector('input.a-rename')) { S.dirty = true; return; }
   const scrolls = [...root.querySelectorAll('*')].filter((el) => el.scrollTop || el.scrollLeft).map((el) => [el, el.scrollTop, el.scrollLeft]);
   const active = document.activeElement, sel = root.contains(active) ? focusKey(active) : null;
   const range = active && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
@@ -224,7 +254,7 @@ export function patch(root, html) {
   const next = document.createElement(root.tagName);
   next.append(t.content);
   for (const a of [...root.attributes]) next.setAttribute(a.name, a.value);
-  patchNode(root, next);
+  patchNode(root, next, keep);
   for (const [el, top, left] of scrolls) if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; }
   if (sel && !root.contains(document.activeElement)) {
     const el = root.querySelector(sel);
@@ -277,7 +307,10 @@ export function keepPage(sheet, key) {
 try { S.cache.html = JSON.parse(localStorage.getItem('hm.pages') || '{}') || {}; } catch { S.cache.html = {}; }
 
 export async function loadState() {
-  S.state = await call('state');
+  const st = await call('state');
+  // the backend hands the first-run report to one answer only: it stays on the state for the pages that show it
+  st.first_run ||= S.state && S.state.first_run;
+  S.state = st;
   applyTheme(S.state);
   const n = S.state.profiles.length;
   document.getElementById('brand-sub').textContent = `${S.state.computer} · ${n} ${n === 1 ? 'account' : 'accounts'}`;
@@ -317,9 +350,11 @@ export function closeDialog() {
   if (opener && opener.isConnected) opener.focus({ preventScroll: true });
   opener = null;
   // a background refresh that arrived while the dialog was open catches up now
-  if (S.dirty) { S.dirty = false; render(); }
+  if (S.dirty) { S.dirty = false; render(true); }
 }
 export const dialogOpen = () => !!document.getElementById('dialog-root').innerHTML;
+/** A dialog is open, or a name is being typed in place: a background redraw waits until it closes. */
+export const editing = () => dialogOpen() || !!document.querySelector('#sheet input.a-rename');
 
 export const dlgHead = (title) => `<div class="modal-head dh"><h2>${esc(title)}</h2><button class="icon-btn" data-act="dialog-close" aria-label="Close">✕</button></div>`;
 
@@ -351,7 +386,7 @@ export function openMenu(anchor, items) {
   m.style.left = left + 'px';
   // near the bottom of the window the menu opens upward, so every item stays reachable
   m.style.top = (r.bottom + 4 + m.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - 4 - m.offsetHeight) : r.bottom + 4) + 'px';
-  m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); items[+b.dataset.i].run(); } };
+  m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); run(items[+b.dataset.i].run); } };
   m.onkeydown = (e) => {
     const bs = [...m.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
     if (e.key === 'ArrowDown') { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
@@ -374,6 +409,13 @@ const actions = {
   reload: () => render(),
 };
 export function action(name, fn) { actions[name] = fn; }
+/** Run an action or a menu item; what it throws, now or later, is said in the notice bar instead of nowhere. */
+const failed = (e) => notice(String(e).replace(/^Error: /, ''));
+function run(fn, ...args) {
+  try { const r = fn(...args); if (r && typeof r.catch === 'function') r.catch(failed); } catch (e) { failed(e); }
+}
+// and a failure no one waited for
+window.addEventListener('unhandledrejection', (e) => failed(e.reason));
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -384,11 +426,11 @@ document.addEventListener('click', (e) => {
   // a dropdown acts when its choice changes (below), not when it is clicked open
   if (el.tagName === 'SELECT') return;
   // checkboxes keep their default (toggling); everything else is handled here
-  if (fn) { if (!(el.tagName === 'INPUT' && el.type === 'checkbox')) e.preventDefault(); fn(el, e); }
+  if (fn) { if (!(el.tagName === 'INPUT' && el.type === 'checkbox')) e.preventDefault(); run(fn, el, e); }
 });
 document.addEventListener('change', (e) => {
   const el = e.target.closest && e.target.closest('select[data-act]');
-  if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
+  if (el && actions[el.dataset.act]) run(actions[el.dataset.act], el, e);
 });
 
 /** The open modal or tray, whose Tab order is trapped. */
@@ -410,8 +452,9 @@ document.addEventListener('keydown', (e) => {
     if (menuEl) { closeMenu(); return; }
   }
   if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('find').focus(); }
-  // a non-button element acting as one (role="button") answers Enter and Space like a button
-  const rb = e.target.closest && e.target.closest('[role=button][data-act], [tabindex="0"][data-act]');
+  // a non-button element acting as one (role="button") answers Enter and Space like a button, when the focus is on
+  // it: a button inside such a row acts for itself
+  const rb = e.target.matches && e.target.matches('[role=button][data-act], [tabindex="0"][data-act]') && e.target;
   if (rb && rb.tagName !== 'BUTTON' && rb.tagName !== 'INPUT' && rb.tagName !== 'SELECT' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); rb.click(); }
 });
 // moving to another page: the dialog, the menu and the notice of the page left go with it

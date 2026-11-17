@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::harness;
 use crate::registry::{McpServer, Prompt, Registry, Skill, SkillRepo, Target};
@@ -93,19 +93,83 @@ fn to_codex(s: &McpServer) -> toml_edit::Table {
     t
 }
 
-fn from_claude(name: &str, v: &Value) -> Option<McpServer> {
-    let transport = v["type"].as_str().unwrap_or(if v.get("url").is_some() { "http" } else { "stdio" }).to_string();
+/// One entry of a tool's config as the neutral server (a TOML entry comes here through `toml_json`). Env and headers
+/// are read from any table form; a value that is not text reads as empty.
+fn from_entry(format: &str, name: &str, v: &Value) -> McpServer {
+    let strs = |x: &Value| -> Vec<String> { x.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() };
     let map = |x: &Value| -> BTreeMap<String, String> { x.as_object().map(|o| o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect()).unwrap_or_default() };
-    Some(McpServer {
-        name: name.into(),
-        transport,
-        command: v["command"].as_str().map(String::from),
-        args: v["args"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
-        env: map(&v["env"]),
-        url: v["url"].as_str().or(v["serverUrl"].as_str()).map(String::from),
-        headers: map(&v["headers"]),
-        ..Default::default()
-    })
+    let url = v["url"].as_str().or(v["serverUrl"].as_str()).map(String::from);
+    let by_url = if url.is_some() { "http" } else { "stdio" };
+    let mut s = McpServer { name: name.into(), command: v["command"].as_str().map(String::from), args: strs(&v["args"]), env: map(&v["env"]), url, headers: map(&v["headers"]), ..Default::default() };
+    match format {
+        "opencode-json" => {
+            if let Some((c, rest)) = strs(&v["command"]).split_first() { s.command = Some(c.clone()); s.args = rest.to_vec(); }
+            s.env = map(&v["environment"]);
+            s.transport = if v["type"] == "remote" { "http" } else { "stdio" }.into();
+        }
+        "codex-toml" => { s.headers = map(&v["http_headers"]); s.transport = by_url.into(); }
+        _ => s.transport = v["type"].as_str().unwrap_or(by_url).into(),
+    }
+    s
+}
+
+/// A TOML entry as JSON for `from_entry`: tables in either form (inline, or a table of their own), arrays and text.
+fn toml_json(i: &toml_edit::Item) -> Value {
+    if let Some(t) = i.as_table_like() { return Value::Object(t.iter().map(|(k, v)| (k.to_string(), toml_json(v))).collect()); }
+    if let Some(a) = i.as_array() { return a.iter().map(|v| v.as_str().map(Value::from).unwrap_or(Value::Null)).collect(); }
+    i.as_str().map(Value::from).unwrap_or(Value::Null)
+}
+
+/// The keys of a tool's entry that Harness Manager writes. Every other key in an entry is the tool's or the user's
+/// (a timeout, a switch that turns the server off, ...) and stays as it is.
+fn owned_keys(format: &str) -> &'static [&'static str] {
+    match format {
+        "codex-toml" => &["command", "args", "env", "url", "http_headers"],
+        "opencode-json" => &["type", "command", "environment", "url", "headers"],
+        "agy-json" => &["command", "args", "env", "serverUrl", "url", "headers"],
+        _ => &["type", "command", "args", "env", "url", "headers"],
+    }
+}
+
+/// The server as this computer writes it into a tool's entry `cur`: a value not set here (empty) is the entry's own,
+/// and is left out when the entry has none. So an empty value never replaces one a tool has.
+// shortcut: a value meant to be empty reaches only the tools whose entry already has its key; mark "empty on purpose" in the list if someone needs it
+fn localized(s: &McpServer, cur: Option<&McpServer>) -> McpServer {
+    let (mut s, none) = (s.clone(), McpServer::default());
+    let cur = cur.unwrap_or(&none);
+    s.fill_unset(cur);
+    s.env.retain(|k, v| !v.is_empty() || cur.env.contains_key(k));
+    s.headers.retain(|k, v| !v.is_empty() || cur.headers.contains_key(k));
+    s
+}
+
+/// Bring the owned keys of a JSON entry in step with `new`. A map goes key by key: an empty value keeps what the entry has.
+fn merge_json(e: &mut Map<String, Value>, new: &Value, keys: &[&str]) {
+    for k in keys {
+        match (new.get(*k), e.get_mut(*k)) {
+            (None, _) => { e.shift_remove(*k); }
+            (Some(Value::Object(want)), Some(Value::Object(cur))) => {
+                cur.retain(|k, _| want.contains_key(k));
+                for (k, v) in want { if v != "" || !cur.contains_key(k) { cur.insert(k.clone(), v.clone()); } }
+            }
+            (Some(v), _) => { e.insert(k.to_string(), v.clone()); }
+        }
+    }
+}
+
+/// The same for a TOML entry; a map the entry keeps as a table of its own stays in that form.
+fn merge_toml(e: &mut dyn toml_edit::TableLike, new: &toml_edit::Table, keys: &[&str]) {
+    for k in keys {
+        let Some(v) = new.get(k) else { e.remove(k); continue };
+        if e.get(k).map(toml_json) == Some(toml_json(v)) { continue; }
+        if let (Some(cur), Some(want)) = (e.get_mut(k).and_then(|c| c.as_table_like_mut()), v.as_table_like()) {
+            let gone: Vec<String> = cur.iter().map(|(k, _)| k.to_string()).filter(|k| !want.contains_key(k)).collect();
+            for k in gone { cur.remove(&k); }
+            for (k, v) in want.iter() { if v.as_str() != Some("") || !cur.contains_key(k) { cur.insert(k, v.clone()); } }
+            continue;
+        }
+        e.insert(k, v.clone());
+    }
 }
 
 /// Write `wanted` into one MCP config file, removing only entries the ledger says are ours.
@@ -120,24 +184,33 @@ fn write_mcp_file(ctx: &Ctx, path: &Path, format: &str, wanted: &[&McpServer], r
         for (n, on) in ledger { ctx.db.ledger_set(&target, "mcp", &n, on)?; }
         Ok(())
     };
-    if format == "codex-toml" {
-        let text = crate::util::read_or_empty(path)?;
+    let sig = crate::util::file_sig(path);
+    let text = crate::util::read_or_empty(path)?;
+    let (was_written, was_removed) = (rep.written.len(), rep.removed.len());
+    // per server: the entry the tool has now, read as the neutral server, and whether `new` read the same way says the same
+    let same = |cur: &Option<McpServer>, new: &Value, name: &str| cur.as_ref().map(|c| to_claude(c) == to_claude(&from_entry(format, name, new)));
+    let out = if format == "codex-toml" {
         let mut doc: toml_edit::DocumentMut = text.parse().with_context(|| format!("{} is not valid TOML; left unchanged", path.display()))?;
+        // as it prints untouched, to tell a change from a file with Windows line ends, which prints with plain ones
+        let before = doc.to_string();
         if !doc.contains_key("mcp_servers") {
             let mut t = toml_edit::Table::new();
             t.set_implicit(true);
             doc["mcp_servers"] = toml_edit::Item::Table(t);
         }
-        let servers = doc["mcp_servers"].as_table_mut().context("mcp_servers is not a table")?;
+        let servers = doc["mcp_servers"].as_table_like_mut().context("mcp_servers is not a table")?;
         for s in wanted {
-            let new = to_codex(s);
-            if let Some(existing) = servers.get(&s.name) {
-                if !owned.contains(&s.name) && existing.to_string().trim() != toml_edit::Item::Table(new.clone()).to_string().trim() {
-                    rep.conflicts.push(format!("{}: {}", path.display(), s.name));
-                    continue;
-                }
+            let cur = servers.get(&s.name).map(|e| from_entry(format, &s.name, &toml_json(e)));
+            let new = to_codex(&localized(s, cur.as_ref()));
+            match same(&cur, &toml_json(&toml_edit::Item::Table(new.clone())), &s.name) {
+                Some(false) if !owned.contains(&s.name) => { rep.conflicts.push(format!("{}: {}", path.display(), s.name)); continue; }
+                // the entry already says the same: left exactly as the tool has it
+                Some(true) => {}
+                _ => match servers.get_mut(&s.name).and_then(|e| e.as_table_like_mut()) {
+                    Some(e) => merge_toml(e, &new, owned_keys(format)),
+                    None => { servers.insert(&s.name, toml_edit::Item::Table(new)); }
+                },
             }
-            servers.insert(&s.name, toml_edit::Item::Table(new));
             ledger.push((s.name.clone(), true));
             rep.written.push(format!("{}: {}", path.display(), s.name));
         }
@@ -146,38 +219,55 @@ fn write_mcp_file(ctx: &Ctx, path: &Path, format: &str, wanted: &[&McpServer], r
             ledger.push((n.clone(), false));
             rep.removed.push(format!("{}: {}", path.display(), n));
         }
-        write_atomic(path, doc.to_string().as_bytes())?;
-        return commit(ledger);
-    }
-    let text = crate::util::read_or_empty(path)?;
-    let mut root = if text.trim().is_empty() { json!({}) } else {
-        serde_json::from_str::<Value>(&text).with_context(|| format!("{} is not valid JSON; left unchanged", path.display()))?
-    };
-    let key = if format == "opencode-json" { "mcp" } else { "mcpServers" };
-    let obj = root.as_object_mut().context("config is not a JSON object")?;
-    let servers = obj.entry(key).or_insert_with(|| json!({})).as_object_mut().context("server list is not an object")?;
-    for s in wanted {
-        let new = match format {
-            "opencode-json" => to_opencode(s),
-            "agy-json" => match to_agy(s) { Some(v) => v, None => { rep.skipped.push(format!("{}: {} (SSE is not supported there)", path.display(), s.name)); continue; } },
-            _ => to_claude(s),
+        Some(doc.to_string()).filter(|out| out != &before)
+    } else {
+        let mut root = if text.trim().is_empty() { json!({}) } else {
+            serde_json::from_str::<Value>(&text).with_context(|| format!("{} is not valid JSON; left unchanged", path.display()))?
         };
-        if let Some(existing) = servers.get(&s.name) {
-            if !owned.contains(&s.name) && existing != &new {
-                rep.conflicts.push(format!("{}: {}", path.display(), s.name));
-                continue;
+        let key = if format == "opencode-json" { "mcp" } else { "mcpServers" };
+        let obj = root.as_object_mut().context("config is not a JSON object")?;
+        let before = match obj.get(key) { Some(v) => v.as_object().cloned().context("server list is not an object")?, None => Map::new() };
+        let mut servers = before.clone();
+        for s in wanted {
+            let cur = servers.get(&s.name).map(|e| from_entry(format, &s.name, e));
+            let s = &localized(s, cur.as_ref());
+            let new = match format {
+                "opencode-json" => to_opencode(s),
+                "agy-json" => match to_agy(s) { Some(v) => v, None => { rep.skipped.push(format!("{}: {} (SSE is not supported there)", path.display(), s.name)); continue; } },
+                _ => to_claude(s),
+            };
+            match same(&cur, &new, &s.name) {
+                Some(false) if !owned.contains(&s.name) => { rep.conflicts.push(format!("{}: {}", path.display(), s.name)); continue; }
+                Some(true) => {}
+                _ => match servers.get_mut(&s.name).and_then(|e| e.as_object_mut()) {
+                    Some(e) => merge_json(e, &new, owned_keys(format)),
+                    None => { servers.insert(s.name.clone(), new); }
+                },
             }
+            ledger.push((s.name.clone(), true));
+            rep.written.push(format!("{}: {}", path.display(), s.name));
         }
-        servers.insert(s.name.clone(), new);
-        ledger.push((s.name.clone(), true));
-        rep.written.push(format!("{}: {}", path.display(), s.name));
+        for n in owned.difference(&wanted_names) {
+            servers.shift_remove(n);
+            ledger.push((n.clone(), false));
+            rep.removed.push(format!("{}: {}", path.display(), n));
+        }
+        if servers == before { None } else {
+            obj.insert(key.into(), Value::Object(servers));
+            Some(serde_json::to_string_pretty(&root)?)
+        }
+    };
+    // nothing to change: the file is not written, so a tool that is rewriting it at this moment loses nothing to us
+    if let Some(out) = out {
+        // the tool wrote it since it was read here: this sync leaves it, the next one starts from the new file
+        if crate::util::file_sig(path) != sig {
+            rep.written.truncate(was_written);
+            rep.removed.truncate(was_removed);
+            crate::log::info(&format!("{} changed while its MCP servers were being written; left for the next sync", path.display()));
+            return Ok(());
+        }
+        write_atomic(path, out.as_bytes())?;
     }
-    for n in owned.difference(&wanted_names) {
-        servers.remove(n);
-        ledger.push((n.clone(), false));
-        rep.removed.push(format!("{}: {}", path.display(), n));
-    }
-    write_atomic(path, serde_json::to_string_pretty(&root)?.as_bytes())?;
     commit(ledger)
 }
 
@@ -236,47 +326,19 @@ pub fn import_mcp_from(ctx: &Ctx, reg: &mut Registry, prof: &crate::registry::Pr
     let harness_id = prof.harness.as_str();
     let h = harness::of(prof);
     let Some((file, fmt)) = h.item_paths(ctx, prof).mcp else { return Ok((vec![], vec![])) };
-    let mut found: Vec<McpServer> = vec![];
-    if fmt == "codex-toml" {
+    let entries = if fmt == "codex-toml" {
         let doc: toml_edit::DocumentMut = std::fs::read_to_string(&file).unwrap_or_default().parse()?;
-        if let Some(t) = doc.get("mcp_servers").and_then(|t| t.as_table()) {
-            for (name, item) in t.iter() {
-                let Some(tt) = item.as_table() else { continue };
-                let s = |k: &str| tt.get(k).and_then(|v| v.as_str()).map(String::from);
-                let kv = |k: &str| -> BTreeMap<String, String> { tt.get(k).and_then(|v| v.as_inline_table()).map(|it| it.iter().map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string())).collect()).unwrap_or_default() };
-                found.push(McpServer {
-                    name: name.into(),
-                    transport: if s("url").is_some() { "http".into() } else { "stdio".into() },
-                    command: s("command"),
-                    args: tt.get("args").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
-                    env: kv("env"),
-                    url: s("url"),
-                    headers: kv("http_headers"),
-                    ..Default::default()
-                });
-            }
-        }
+        toml_json(doc.as_item())["mcp_servers"].take()
     } else {
-        let root = read_json(&file).unwrap_or(Value::Null);
-        let key = if fmt == "opencode-json" { "mcp" } else { "mcpServers" };
-        for (name, v) in root[key].as_object().cloned().unwrap_or_default() {
-            let s = if fmt == "opencode-json" {
-                let cmd: Vec<String> = v["command"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
-                let mut s = from_claude(&name, &json!({"url": v["url"], "headers": v["headers"], "env": v["environment"]})).unwrap();
-                s.transport = if v["type"] == "remote" { "http".into() } else { "stdio".into() };
-                if let Some((c, rest)) = cmd.split_first() { s.command = Some(c.clone()); s.args = rest.to_vec(); }
-                s
-            } else {
-                from_claude(&name, &v).unwrap()
-            };
-            found.push(s);
-        }
-    }
+        read_json(&file).unwrap_or(Value::Null)[if fmt == "opencode-json" { "mcp" } else { "mcpServers" }].take()
+    };
+    let found: Vec<McpServer> = entries.as_object().into_iter().flatten().filter(|(_, v)| v.is_object()).map(|(name, v)| from_entry(fmt, name, v)).collect();
     let target = file.display().to_string();
     let (mut added, mut kept) = (vec![], vec![]);
     for s in found {
         match reg.mcp.iter().find(|m| m.name == s.name) {
-            Some(m) if to_claude(m) != to_claude(&s) => { kept.push(s.name); continue; }
+            // a value not set on this computer is no difference: the tool's own value is its to keep
+            Some(m) if to_claude(&localized(m, Some(&s))) != to_claude(&s) => { kept.push(s.name); continue; }
             Some(_) => {}
             None => reg.mcp.push(s.clone()),
         }
@@ -335,8 +397,7 @@ pub fn add_mcp(reg: &mut Registry, s: McpServer) -> Result<()> {
     if !matches!(s.transport.as_str(), "stdio" | "http" | "sse") { bail!("transport must be stdio, http or sse"); }
     if s.transport == "stdio" && s.command.as_deref().unwrap_or("").is_empty() { bail!("a stdio server needs a command"); }
     if s.transport != "stdio" && s.url.as_deref().unwrap_or("").is_empty() { bail!("an {} server needs a URL", s.transport); }
-    reg.mcp.retain(|m| m.name != s.name);
-    reg.mcp.push(s);
+    reg.replace_mcp(s);
     Ok(())
 }
 
@@ -509,7 +570,7 @@ impl Drop for Repos { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self
 
 fn download_repo(owner: &str, repo: &str, branch: &str, into: &Path) -> Result<PathBuf> {
     // HRM_GITHUB_CODELOAD points the download at a mock server in tests
-    let base = std::env::var("HRM_GITHUB_CODELOAD").unwrap_or_else(|_| "https://codeload.github.com".into());
+    let base = crate::testenv::var("HRM_GITHUB_CODELOAD").unwrap_or_else(|| "https://codeload.github.com".into());
     let zip_url = format!("{base}/{owner}/{repo}/zip/{}", if branch == "HEAD" { "HEAD".to_string() } else { format!("refs/heads/{branch}") });
     let bytes = reqwest::blocking::Client::new().get(&zip_url).header("User-Agent", "Harness Manager").send()?.error_for_status()?.bytes()?;
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))?;
