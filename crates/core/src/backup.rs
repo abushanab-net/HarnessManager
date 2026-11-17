@@ -28,7 +28,7 @@ pub fn dir(ctx: &Ctx) -> PathBuf { ctx.data.join("backups") }
 /// the outbox, which is not in a backup either.
 fn keep_kv(k: &str) -> bool {
     !(k.starts_with("discover:") || k.starts_with("pricing:") || k.starts_with("apps:") || k.starts_with("self:")
-        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:") || k.starts_with("journal:") || k.starts_with("computers:"))
+        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:") || k.starts_with("journal:") || k.starts_with("computers:") || k.starts_with("backup:"))
 }
 
 #[cfg(test)]
@@ -95,6 +95,53 @@ mod keep_tests {
         assert_eq!(serde_json::from_str::<Value>(&dev).unwrap()["name"], ctx.settings.device_name);
         let with = create_with(&ctx, "Manual", true).unwrap();
         assert!(names(&with).contains(&"transcripts/claude/work/s1.jsonl.zst".to_string()), "{:?}", names(&with));
+    }
+
+    #[test]
+    fn a_session_id_in_two_files_does_not_fail_the_backup_and_a_failed_one_leaves_no_part_file() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        // the same session id under two project folders, as a tool leaves it after a copy or a fork
+        for (folder, text, mtime) in [("a", "{\"type\":\"older\"}\n", 1), ("b", "{\"type\":\"newer\"}\n", 2)] {
+            let src = t.path().join(folder).join("s1.jsonl");
+            std::fs::create_dir_all(src.parent().unwrap()).unwrap();
+            std::fs::write(&src, text).unwrap();
+            let m = crate::model::SessionMeta { harness: "claude".into(), profile: "work".into(), id: "s1".into(), source_path: src.display().to_string(), ..Default::default() };
+            ctx.db.put_session(&format!("claude|work|{}", src.display()), &m, mtime, 1).unwrap();
+        }
+        let b = create_with(&ctx, "Manual", true).expect("a zip refuses a name twice: the backup failed on this");
+        let mut z = zip::ZipArchive::new(std::fs::File::open(dir(&ctx).join(&b.name)).unwrap()).unwrap();
+        let mut packed = vec![];
+        z.by_name("transcripts/claude/work/s1.jsonl.zst").unwrap().read_to_end(&mut packed).unwrap();
+        assert_eq!(String::from_utf8(zstd::decode_all(&packed[..]).unwrap()).unwrap(), "{\"type\":\"newer\"}\n", "the newest file is the one kept");
+        let parts = |d: &Path| std::fs::read_dir(d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".part")).count();
+        assert_eq!(parts(&dir(&ctx)), 0);
+
+        // a write that cannot finish (its name is taken by a folder) leaves nothing behind
+        let taken = dir(&ctx).join("taken.zip");
+        std::fs::create_dir_all(&taken).unwrap();
+        assert!(write_zip(&ctx, &taken, true).is_err());
+        assert_eq!(parts(&dir(&ctx)), 0, "no part file after a failed write");
+
+        // what an older version left is removed by the automatic backup's round, and a fresh one is not
+        std::fs::write(dir(&ctx).join("2026-11-12 08.41.00 Automatic.zip.part"), b"half").unwrap();
+        assert_eq!(sweep_parts(&dir(&ctx), 3_600_000), 0, "one that may still be written stays");
+        assert_eq!(sweep_parts(&dir(&ctx), 0), 1);
+        assert_eq!(parts(&dir(&ctx)), 0);
+    }
+
+    #[test]
+    fn a_failed_automatic_backup_is_tried_again_in_an_hour_not_at_every_round() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        // the backups folder cannot be made: a file has its name
+        std::fs::write(dir(&ctx), b"in the way").unwrap();
+        assert!(auto(&ctx).is_err(), "the first try fails and says so");
+        assert!(matches!(auto(&ctx), Ok(None)), "the next round does not try again");
+        std::fs::remove_file(dir(&ctx)).unwrap();
+        assert!(matches!(auto(&ctx), Ok(None)), "still within the hour");
+        ctx.db.kv_set("backup:failed_at", &(now_ms() - 3_700_000).to_string()).unwrap();
+        assert!(auto(&ctx).unwrap().is_some(), "after the hour it is made");
     }
 }
 
@@ -182,17 +229,21 @@ fn history(ctx: &Ctx) -> Result<Vec<(&'static str, String)>> {
 /// for every session whose file is still in the tool's folder (archived ones are already compressed, in the archive).
 fn transcripts(ctx: &Ctx) -> Result<Vec<(String, Vec<u8>)>> {
     let rows: Vec<String> = ctx.db.with(|c| {
-        let mut st = c.prepare("select json from sessions where device = ? and instr(key, '|') > 0 and harness in ('claude', 'codex', 'pi', 'omp')")?;
+        let mut st = c.prepare("select json from sessions where device = ? and instr(key, '|') > 0 and harness in ('claude', 'codex', 'pi', 'omp') order by mtime desc")?;
         let v = st.query_map([&ctx.db.device], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })?;
-    let mut out = vec![];
+    let (mut out, mut seen) = (vec![], std::collections::HashSet::new());
     for j in rows {
         let m: Value = serde_json::from_str(&j).unwrap_or(Value::Null);
         let (h, p, id, path) = (m["harness"].as_str().unwrap_or(""), m["profile"].as_str().unwrap_or(""), m["id"].as_str().unwrap_or(""), Path::new(m["source_path"].as_str().unwrap_or("")));
         if id.is_empty() || id.contains(['/', '\\']) || !path.is_file() { continue; }
+        let name = format!("transcripts/{h}/{p}/{id}.jsonl.zst");
+        // one session id can be in two files (a copy in another project folder, a fork): the newest goes in, since a
+        // zip refuses a name twice and the whole backup failed on it
+        if !seen.insert(name.clone()) { continue; }
         let Ok(text) = crate::harness::parse::read_text(path) else { continue };
-        out.push((format!("transcripts/{h}/{p}/{id}.jsonl.zst"), zstd::encode_all(text.as_bytes(), 3)?));
+        out.push((name, zstd::encode_all(text.as_bytes(), 3)?));
     }
     Ok(out)
 }
@@ -215,7 +266,7 @@ fn write_zip(ctx: &Ctx, out: &Path, with_transcripts: bool) -> Result<()> {
     })?;
     if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
     let tmp = out.with_extension("zip.part");
-    {
+    let write = || -> Result<()> {
         let f = std::fs::File::create(&tmp).with_context(|| format!("create {}", tmp.display()))?;
         let mut z = zip::ZipWriter::new(f);
         let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -248,9 +299,21 @@ fn write_zip(ctx: &Ctx, out: &Path, with_transcripts: bool) -> Result<()> {
             }
         }
         z.finish()?;
-    }
-    std::fs::rename(&tmp, out).with_context(|| format!("save {}", out.display()))?;
-    Ok(())
+        Ok(())
+    };
+    // a write that fails leaves no part file: with transcripts one is over a gigabyte, and the next try makes another
+    let done = write().and_then(|()| std::fs::rename(&tmp, out).with_context(|| format!("save {}", out.display())));
+    if done.is_err() { let _ = std::fs::remove_file(&tmp); }
+    done
+}
+
+/// Part files a failed or interrupted backup left in `d`, once they are older than `older_ms` (one being written now is not).
+fn sweep_parts(d: &Path, older_ms: i64) -> usize {
+    let Ok(rd) = std::fs::read_dir(d) else { return 0 };
+    rd.flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".zip.part")).filter(|e| {
+        let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a.as_millis() as i64).unwrap_or(i64::MAX);
+        age >= older_ms && std::fs::remove_file(e.path()).is_ok()
+    }).count()
 }
 
 /// Make a backup with this label ("Automatic", "Manual", "Before restore", ...), with transcripts as the setting says.
@@ -281,8 +344,7 @@ fn copy_to_folder(ctx: &Ctx, name: &str) -> Result<()> {
     let Some(d) = folder_dir(ctx) else { return Ok(()) };
     std::fs::create_dir_all(&d)?;
     let tmp = d.join(format!("{name}.part"));
-    std::fs::copy(dir(ctx).join(name), &tmp)?;
-    std::fs::rename(&tmp, d.join(name))?;
+    if let Err(e) = std::fs::copy(dir(ctx).join(name), &tmp).and_then(|_| std::fs::rename(&tmp, d.join(name))) { let _ = std::fs::remove_file(&tmp); return Err(e.into()); }
     for b in list_in(&d).into_iter().skip((ctx.settings.backup_keep as usize).max(1)) { std::fs::remove_file(d.join(&b.name))?; }
     Ok(())
 }
@@ -312,8 +374,17 @@ pub fn prune(ctx: &Ctx, keep: usize) -> Result<()> {
 pub fn auto(ctx: &Ctx) -> Result<Option<Backup>> {
     let hours = ctx.settings.backup_hours as i64;
     if hours == 0 { return Ok(None); }
+    // what earlier failures left behind goes first, also when no backup is due
+    let swept = sweep_parts(&dir(ctx), 3_600_000) + folder_dir(ctx).map(|d| sweep_parts(&d, 3_600_000)).unwrap_or(0);
+    if swept > 0 { crate::log::info(&format!("backup: removed {swept} part files that failed backups left")); }
     if list(ctx).first().map(|b| now_ms() - b.at < hours * 3_600_000).unwrap_or(false) { return Ok(None); }
-    let b = create(ctx, "Automatic")?;
+    // a backup that failed is tried again in an hour, not at every refresh round
+    let failed_at = ctx.db.kv_get("backup:failed_at").ok().flatten().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+    if now_ms() - failed_at < 3_600_000 { return Ok(None); }
+    let b = match create(ctx, "Automatic") {
+        Ok(b) => b,
+        Err(e) => { let _ = ctx.db.kv_set("backup:failed_at", &now_ms().to_string()); return Err(e); }
+    };
     prune(ctx, ctx.settings.backup_keep as usize)?;
     let _ = ctx.db.event("ok", "backup", &format!("Automatic backup made: {:.1} MB, {} kept.", b.size as f64 / 1_048_576.0, ctx.settings.backup_keep));
     Ok(Some(b))
