@@ -13,7 +13,7 @@ use crate::util::write_atomic;
 pub struct Settings {
     /// Absolute path of profiles.json; empty means `<data>/profiles.json`.
     pub registry_path: String,
-    /// "wt" (Windows Terminal), "powershell" or "cmd".
+    /// "wt" (Windows Terminal) or "console" (the classic console window).
     pub terminal: String,
     pub refresh_minutes: u32,
     /// With live limits on, read a Claude account's limits from Anthropic when its cached ones are older than this.
@@ -48,7 +48,7 @@ pub struct Settings {
     pub device_name: String,
     /// Made once per fresh database: a restore keeps `device_id` and starts a new incarnation.
     pub incarnation: String,
-    /// "off", "folder" (a shared folder) or "hub" (a hub you host; later).
+    /// "off", "folder" (a shared folder) or "hub" (a hub you host).
     pub sync_mode: String,
     /// The shared folder, absolute, when `sync_mode` is "folder".
     pub sync_folder: String,
