@@ -20,17 +20,16 @@ const TOURS = {
   ],
   accounts: [
     ['[data-testid=add-account]', 'Add an account', 'Each account gets its own folder and login. Sign in once; Harness Manager keeps the accounts apart.'],
-    ['[data-testid=usage-panel]', 'Tokens per day', 'Every account\'s tokens for each day of the range, priced at API list prices in the rows below. Subscriptions are not billed per token.'],
-    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. Each limit shows how much is left and when it resets.'],
-    ['[data-testid=accounts-table] .acct-windows-col', 'Limits', 'Every limit of the plan: 5-hour, weekly and per model. The ↻ button beside a Claude account reads its limits from Anthropic right now.'],
-    ['[data-testid=accounts-table] .btn-lane-start', 'Start', 'Opens a terminal running the tool as this account. Log in appears instead when the account has not signed in yet.'],
-    ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Log in again, open the account\'s folder, its settings, or remove it.'],
-    ['[data-testid=best-note]', 'The account with the most room', 'The account furthest from its limits says so: start your next session there.'],
+    ['[data-testid=accounts-table]', 'Your accounts, by tool', 'One card per tool, one row per account. "main" is the tool\'s own login on this computer. The ring is what is left of the week.'],
+    ['[data-testid=accounts-table] .lims', 'Limits', 'The limits of the plan in one line: 5-hour, weekly and per model, each with what is left. Point at one for its reset.'],
+    ['[data-testid=accounts-table] .acts .btn', 'Start', 'Opens a terminal running the tool as this account. Log in stands in its place when the account is logged out or its login has expired.'],
+    ['[data-testid=accounts-table] [data-act=account-menu]', 'More', 'Start in a folder, refresh the limits, rename or edit the account, open its folder, log in again, or remove it.'],
+    ['[data-testid=usage-panel]', 'Tokens per day and by model', 'Folded until you open it: every account\'s tokens for each day of the range, and the range by model, at API list prices. Subscriptions are not billed per token.'],
   ],
   account: [
     ['.page-tabs', 'Overview, Sessions, Projects, Settings', 'Plan, limits and usage; this account\'s sessions and projects; and its email, key or endpoint.'],
     ['[data-act=start-in-folder]', 'Start in a folder', 'Opens the account in the project folder you pick.'],
-    ['.page-head [data-act=account-menu]', 'More', 'Log in again, open its folder, or remove the account.'],
+    ['.page-head [data-act=account-menu]', 'More', 'Refresh the limits, rename the account, open its folder, log in again, or remove it.'],
   ],
   projects: [
     ['[data-testid=project-tiles]', 'Every project at a glance', 'Tokens, cost at API list prices, how many run now, and the busiest one. A project is a folder your tools ran in.'],
