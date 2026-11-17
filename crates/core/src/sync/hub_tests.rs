@@ -542,3 +542,16 @@ fn an_answer_from_the_hub_longer_than_the_asker_allows_is_not_read() {
     let e = hub.get_bytes(&path, sealed - 1).unwrap_err();
     assert!(format!("{e:#}").contains("not taken"), "one byte over: {e:#}");
 }
+
+#[test]
+fn the_sockets_state_is_written_when_it_changes_and_not_while_it_stays() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
+    ctx.db.with(|c| Ok(c.execute_batch("create table writes(n); create trigger ws_writes after insert on kv when new.k = 'hub:ws' begin insert into writes values(1); end;")?)).unwrap();
+    // as the watch thread does every two seconds on a computer that is not on a hub
+    for _ in 0..5 { set_ws(&ctx, "0"); }
+    assert_eq!(count(&ctx, "select count(*) from writes"), 1);
+    for _ in 0..2 { set_ws(&ctx, "1"); }
+    set_ws(&ctx, "0");
+    assert_eq!((count(&ctx, "select count(*) from writes"), ctx.db.kv_get("hub:ws").unwrap().as_deref()), (3, Some("0")));
+}

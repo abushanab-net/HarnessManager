@@ -474,6 +474,12 @@ async fn listen(ctx: &Ctx, base: &str, token: &str, ctx_of: &CtxOf, on_status: &
     }
 }
 
+/// Whether the events socket is up, for the status: written when it changes, not every two seconds by a computer
+/// that is not on a hub.
+fn set_ws(ctx: &Ctx, v: &str) {
+    if ctx.db.kv_get("hub:ws").ok().flatten().as_deref() != Some(v) { let _ = ctx.db.kv_set("hub:ws", v); }
+}
+
 /// Keeps the events socket open while the app runs, on its own thread; without it, a round every 30 s is the
 /// fallback. Nothing happens while the hub is not this computer's transport.
 pub fn watch(ctx_of: CtxOf, on_status: OnStatus) {
@@ -484,14 +490,14 @@ pub fn watch(ctx_of: CtxOf, on_status: OnStatus) {
         loop {
             let ctx = ctx_of();
             if ctx.settings.sync_mode != "hub" || token(&ctx).is_none() {
-                let _ = ctx.db.kv_set("hub:ws", "0");
+                set_ws(&ctx, "0");
                 std::thread::sleep(Duration::from_secs(2));
                 continue;
             }
             // the blocking client is made outside the runtime: reqwest's own runtime must not be dropped inside it
             let r = Hub::open(&ctx).and_then(|hub| rt.block_on(listen(&ctx, &hub.base, &hub.token, &ctx_of, &on_status)));
             let wait = match &r { Err(e) => { fails += 1; crate::log::info(&format!("hub: {e:#}; trying again")); (1u64 << fails.min(5)).min(30) } Ok(_) => { fails = 0; 1 } };
-            let _ = ctx.db.kv_set("hub:ws", "0");
+            set_ws(&ctx, "0");
             std::thread::sleep(Duration::from_secs(wait));
             let ctx = ctx_of();
             if ctx.settings.sync_mode == "hub" { if let Ok(v) = journal::round(&ctx) { on_status(v); } }
