@@ -220,7 +220,7 @@ try {
     await $('[data-testid=request-log] tbody tr');
     const off = await exec(`const t = document.querySelector('[data-testid=request-log]'); const r = t.querySelector('tbody tr');
       return [...t.querySelectorAll('thead th.num')].map((th) => Math.abs(th.getBoundingClientRect().right - r.children[th.cellIndex].getBoundingClientRect().right));`);
-    assert.ok(off.length === 7 && off.every((d) => d < 1), 'number headers aligned: ' + off);
+    assert.ok(off.length === 6 && off.every((d) => d < 1), 'number headers aligned: ' + off);
     await $('[data-testid=request-log] [data-testid=ttft]');
     await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=request-log] tbody tr').length")) === 5, 'five requests');
     await hasText('[data-testid=request-log]', 'claude-opus-5-5');

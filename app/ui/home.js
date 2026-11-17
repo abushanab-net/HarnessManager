@@ -16,7 +16,6 @@ const H = 3600e3, DAY = 24 * H, HORIZON = 7 * DAY;
 const ago = (ms) => (ms < 60000 ? 'just now' : dur(ms) + ' ago');
 const TIMING = 'Approximate: worked out from the times each tool wrote the parts of the answer to its log';
 const firstReply = (r) => (r.ttft_ms != null ? `≈ ${(r.ttft_ms / 1000).toFixed(1)} s` : '<span class="dash">—</span>');
-const speed = (r) => (r.gen_ms >= 300 && r.output > 0 ? `≈ ${Math.round(r.output / (r.gen_ms / 1000)).toLocaleString()} tok/s` : '<span class="dash">—</span>');
 const timeCell = (ts) => (new Date(ts).toDateString() === new Date().toDateString() ? hm(ts) : new Date(ts).toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + hm(ts));
 
 export function setTodayBadge(cost) {
@@ -154,12 +153,12 @@ function repliesTable(rows, pcs, peers) {
     ${rows.slice(0, 5).map((r) => `<tr><td>${timeCell(r.ts)} <span class="ago">(${ago(Date.now() - r.ts)})</span></td><td><span class="cell-inline">${toolIcon(r.harness, 14)}<b>${esc(acctName(r.profile))}</b></span></td><td>${esc(r.model)}</td>${peers ? `<td><span class="cell-inline">${r.device ? pcDot(pcs, r.device) + esc(nameOf(S.cache.computers, r.device)) : ''}</span></td>` : ''}<td class="num">${fmt(r.input + r.output + r.cache_read + r.cache_write)}</td><td class="num ${r.ttft_ms > 4000 ? 'warnT' : ''}" data-testid="ttft">${firstReply(r)}</td></tr>`).join('') || `<tr><td colspan="${peers ? 6 : 5}" class="muted">No replies in this range.</td></tr>`}</tbody></table>`;
 }
 function requestTable(rows) {
-  return `<table class="replies-table" data-testid="request-log"><thead><tr><th>Time</th><th>Account</th><th>Model</th><th>Computer</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num" title="${TIMING}">Speed ≈</th><th class="num" title="${TIMING}">First reply</th><th class="num">Cost ≈</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr><td class="mono">${timeCell(r.ts)}</td><td><span class="cell-inline">${toolIcon(r.harness, 14)}<b>${esc(acctName(r.profile))}</b></span></td><td class="mono">${esc(r.model)}</td><td>${r.device ? esc(nameOf(S.cache.computers, r.device)) : esc((S.state && S.state.computer) || '')}</td><td class="num">${fmt(r.input)}</td><td class="num">${fmt(r.output)}</td><td class="num">${fmt(r.cache_read)}</td><td class="num">${fmt(r.cache_write)}</td><td class="num" data-testid="speed">${speed(r)}</td><td class="num" data-testid="ttft">${firstReply(r)}</td><td class="num"><b>${money(r.cost, 4)}</b></td></tr>`).join('') || '<tr><td colspan="11" class="muted">No replies in this range.</td></tr>'}</tbody></table>`;
+  return `<table class="replies-table" data-testid="request-log"><thead><tr><th>Time</th><th>Account</th><th>Model</th><th>Computer</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num" title="${TIMING}">First reply</th><th class="num">Cost ≈</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td class="mono">${timeCell(r.ts)}</td><td><span class="cell-inline">${toolIcon(r.harness, 14)}<b>${esc(acctName(r.profile))}</b></span></td><td class="mono">${esc(r.model)}</td><td>${r.device ? esc(nameOf(S.cache.computers, r.device)) : esc((S.state && S.state.computer) || '')}</td><td class="num">${fmt(r.input)}</td><td class="num">${fmt(r.output)}</td><td class="num">${fmt(r.cache_read)}</td><td class="num">${fmt(r.cache_write)}</td><td class="num" data-testid="ttft">${firstReply(r)}</td><td class="num"><b>${money(r.cost, 4)}</b></td></tr>`).join('') || '<tr><td colspan="10" class="muted">No replies in this range.</td></tr>'}</tbody></table>`;
 }
 function openRequestLog() {
   const n = (S.state && S.state.profiles.length) || 0;
-  openDialog(`${dlgHead('Request log')}<span class="panel-note">${st.total.toLocaleString()} ${st.total === 1 ? 'request' : 'requests'} ${RANGE_LABEL[st.range].toLowerCase()} · costs are what these tokens would cost at API list prices (models.dev); subscriptions are not billed per token · speed and first reply are approximate</span>
+  openDialog(`${dlgHead('Request log')}<span class="panel-note">${st.total.toLocaleString()} ${st.total === 1 ? 'request' : 'requests'} ${RANGE_LABEL[st.range].toLowerCase()} · costs are what these tokens would cost at API list prices (models.dev); subscriptions are not billed per token · first reply is approximate</span>
     <div class="table-wrap" id="home-table">${requestTable(st.rows)}</div>${st.rows.length < st.total ? '<div class="more-row"><button class="btn-secondary" data-act="home-more" data-testid="home-more">Show 50 more</button></div>' : ''}`, { size: 'xl', label: 'Request log' });
 }
 
