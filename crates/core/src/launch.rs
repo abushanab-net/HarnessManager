@@ -55,7 +55,7 @@ fn ignore_ctrl_c() {}
 /// Resolve a harness binary: `HRM_BIN_<ID>` (tests point this at the fake harness), else PATH.
 pub fn resolve_program(harness_id: &str, default_name: &str) -> Result<PathBuf> {
     let var = format!("HRM_BIN_{}", harness_id.to_ascii_uppercase());
-    if let Ok(p) = std::env::var(&var) {
+    if let Some(p) = crate::testenv::var(&var) {
         return Ok(PathBuf::from(p));
     }
     match which(default_name) {
@@ -66,7 +66,7 @@ pub fn resolve_program(harness_id: &str, default_name: &str) -> Result<PathBuf> 
 
 /// The `hrm` executable that terminals run: `HRM_EXE`, else `hrm.exe` next to the current executable.
 pub fn hrm_exe() -> PathBuf {
-    if let Ok(p) = std::env::var("HRM_EXE") {
+    if let Some(p) = crate::testenv::var("HRM_EXE") {
         return PathBuf::from(p);
     }
     let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("hrm"));
@@ -106,7 +106,7 @@ pub fn short_path(p: &Path) -> PathBuf {
 /// Open a new terminal window running `hrm <args>`. `terminal` is "wt" or "console".
 /// `HRM_TERMINAL_LOG` records the request instead (end-to-end tests).
 pub fn open_terminal(terminal: &str, title: &str, hrm_args: &[String], cwd: Option<&Path>) -> Result<()> {
-    if let Ok(log) = std::env::var("HRM_TERMINAL_LOG") {
+    if let Some(log) = crate::testenv::var("HRM_TERMINAL_LOG") {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
         writeln!(f, "{}", serde_json::to_string(&Recorded { title, args: hrm_args, cwd })?)?;
@@ -200,7 +200,7 @@ pub mod autostart {
     use windows_sys::Win32::System::Registry::{RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ};
     const VALUE: &str = "HarnessManager";
     fn w(s: &str) -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() }
-    fn key() -> String { std::env::var("HRM_AUTOSTART_KEY").unwrap_or_else(|_| r"Software\Microsoft\Windows\CurrentVersion\Run".into()) }
+    fn key() -> String { crate::testenv::var("HRM_AUTOSTART_KEY").unwrap_or_else(|| r"Software\Microsoft\Windows\CurrentVersion\Run".into()) }
 
     /// The command Windows runs at sign-in, if the entry is there.
     pub fn get() -> Option<String> {

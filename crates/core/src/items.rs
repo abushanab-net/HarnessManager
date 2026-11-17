@@ -509,7 +509,7 @@ impl Drop for Repos { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self
 
 fn download_repo(owner: &str, repo: &str, branch: &str, into: &Path) -> Result<PathBuf> {
     // HRM_GITHUB_CODELOAD points the download at a mock server in tests
-    let base = std::env::var("HRM_GITHUB_CODELOAD").unwrap_or_else(|_| "https://codeload.github.com".into());
+    let base = crate::testenv::var("HRM_GITHUB_CODELOAD").unwrap_or_else(|| "https://codeload.github.com".into());
     let zip_url = format!("{base}/{owner}/{repo}/zip/{}", if branch == "HEAD" { "HEAD".to_string() } else { format!("refs/heads/{branch}") });
     let bytes = reqwest::blocking::Client::new().get(&zip_url).header("User-Agent", "Harness Manager").send()?.error_for_status()?.bytes()?;
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec()))?;

@@ -3,7 +3,7 @@
 
 use anyhow::Result;
 
-pub fn prefix() -> String { std::env::var("HRM_CRED_PREFIX").unwrap_or_else(|_| "HarnessManager".into()) }
+pub fn prefix() -> String { crate::testenv::var("HRM_CRED_PREFIX").unwrap_or_else(|| "HarnessManager".into()) }
 
 /// Target name for a profile's API key.
 pub fn key_target(profile: &str) -> String { format!("{}:key:{profile}", prefix()) }

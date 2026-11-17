@@ -626,22 +626,21 @@ fn real_main(cli: Cli) -> Result<i32> {
             for h in hs { println!("{:<10} {:<12} {}", h.id, h.label, if h.installed { "installed" } else { "not installed" }); }
         }
         Cmd::Settings { key, value } => {
-            let mut ctx = ctx;
-            let mut v = serde_json::to_value(&ctx.settings)?;
+            let v = serde_json::to_value(&ctx.settings)?;
             match (key, value) {
                 (None, _) => println!("{}", serde_json::to_string_pretty(&v)?),
                 (Some(k), None) => println!("{}", v.get(&k).context("no such setting")?),
                 (Some(k), Some(val)) => {
-                    let cur = v.get(&k).context("no such setting")?.clone();
-                    v[&k] = if cur.is_number() { serde_json::json!(val.parse::<u64>()?) } else { serde_json::json!(val) };
-                    ctx.settings = serde_json::from_value(v)?;
-                    ctx.save_settings()?;
+                    // JSON, so true, 30 and ["codex"] are a switch, a number and a list; a text setting takes the words as typed
+                    let json = if v[&k].is_string() { None } else { serde_json::from_str(&val).ok() };
+                    service::settings_set(&ctx, &k, json.unwrap_or_else(|| serde_json::json!(val)))?;
                     println!("{k} = {val}");
                 }
             }
         }
         Cmd::Open => {
-            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "harnessmanager" });
+            // the bundle's binary beside hrm, named by mainBinaryName in tauri.conf.json on every system
+            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "HarnessManager" });
             std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
         }
         Cmd::Computers { cmd } => {
