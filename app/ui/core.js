@@ -424,8 +424,9 @@ document.addEventListener('keydown', (e) => {
     if (menuEl) { closeMenu(); return; }
   }
   if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('find').focus(); }
-  // a non-button element acting as one (role="button") answers Enter and Space like a button
-  const rb = e.target.closest && e.target.closest('[role=button][data-act], [tabindex="0"][data-act]');
+  // a non-button element acting as one (role="button") answers Enter and Space like a button, when the focus is on
+  // it: a button inside such a row acts for itself
+  const rb = e.target.matches && e.target.matches('[role=button][data-act], [tabindex="0"][data-act]') && e.target;
   if (rb && rb.tagName !== 'BUTTON' && rb.tagName !== 'INPUT' && rb.tagName !== 'SELECT' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); rb.click(); }
 });
 // moving to another page: the dialog, the menu and the notice of the page left go with it

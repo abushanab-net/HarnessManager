@@ -212,7 +212,7 @@ view('accounts', async (sheet) => {
       ${modelsOpen ? `<section class="panel-card" data-testid="models-panel"><div class="panel-head"><h2 class="panel-title">By model (${au.days}d)</h2><span class="panel-note">API list prices ≈</span></div>
         <div class="model-rows">${au.models.map((m) => `<div class="win-bar-line"><span class="mono">${esc(m.key)}</span>${winTrack(Math.max(4, Math.round((m.tokens / topModel) * 100)))}<span>${fmt(m.tokens)}</span><span class="r">${m.cost == null ? '—' : money(m.cost)}</span></div>`).join('') || '<span class="muted">No usage yet.</span>'}</div></section>` : ''}
     </div>
-    <div class="horizon-filterbar boxed"><div class="chip-group" role="group" aria-label="Tool"><button class="filter-chip ${!acctTool ? 'active' : ''}" data-act="acct-tool" data-v="" data-testid="chip-all">All (${accts.length})</button>${tools.map((h) => `<button class="filter-chip ${acctTool === h.id ? 'active' : ''}" data-act="acct-tool" data-v="${h.id}" data-testid="chip-${h.id}">${toolIcon(h.id, 14)}<span>${esc(h.label)}</span></button>`).join('')}</div>
+    <div class="horizon-filterbar boxed"><div class="chip-group" role="group" aria-label="Tool"><button class="filter-chip ${!acctTool ? 'active' : ''}" aria-pressed="${!acctTool}" data-act="acct-tool" data-v="" data-testid="chip-all">All (${accts.length})</button>${tools.map((h) => `<button class="filter-chip ${acctTool === h.id ? 'active' : ''}" aria-pressed="${acctTool === h.id}" data-act="acct-tool" data-v="${h.id}" data-testid="chip-${h.id}">${toolIcon(h.id, 14)}<span>${esc(h.label)}</span></button>`).join('')}</div>
       <span class="panel-note">Sorted by room left · ${readAgo} · click or press Enter on any row for account detail</span></div>
     <div data-testid="accounts-table">${groups.map((h) => {
       const list = shown.filter((a) => a.tool === h.id).sort((a, b) => (eligible(b) - eligible(a)) || (b.measured - a.measured) || ((b.measured && a.measured) ? (wkof(b).left - wkof(a).left) : 0));
@@ -356,7 +356,7 @@ function newInProject(dir, project, preferred) {
   const pick = (n) => {
     name = n;
     const flag = SKIP[ps.find((x) => x.name === n).harness];
-    document.querySelectorAll('.np-accts .filter-chip').forEach((b) => b.classList.toggle('active', b.dataset.name === n));
+    document.querySelectorAll('.np-accts .filter-chip').forEach((b) => { b.classList.toggle('active', b.dataset.name === n); b.setAttribute('aria-pressed', b.dataset.name === n); });
     document.getElementById('np-skipw').hidden = !flag;
     document.getElementById('np-flag').textContent = flag || '';
     document.getElementById('np-skip').checked = false;
