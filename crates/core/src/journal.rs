@@ -176,8 +176,12 @@ pub(crate) fn session_key_ok(key: &str) -> bool {
     matches!((p.next(), p.next(), p.next()), (Some(h), Some(a), Some(i)) if crate::harness::by_id(h).is_some() && safe_name(a) && safe_name(i))
 }
 
-/// One entry of another computer's (`device`) journal into this database, on the computer `here`.
-fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<()> {
+/// On a computer's card while an entry of a kind this version does not know holds its journal back.
+const UPDATE_HERE: &str = "it sent a kind of entry this version does not know: update Harness Manager on this computer to take the rest of its journal";
+
+/// One entry of another computer's (`device`) journal into this database, on the computer `here`. `Ok(false)`:
+/// its kind is one this version does not know (a newer version wrote it), and nothing was done.
+fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
     match e.op.as_str() {
         "usage" => {
             let r: UsageRow = serde_json::from_value(e.data.clone()).context("usage entry")?;
@@ -207,13 +211,13 @@ fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<()> {
             ("session", k) => { tx.execute("delete from sessions where key=? and device=?", [k, device])?; }
             ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
             ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
-            (other, _) => bail!("tombstone of {other}"),
+            _ => return Ok(false),
         },
         // phase 3: the entry is stored, the file fetched when the session is read or resumed here
         "transcript" => crate::sync::transcripts::apply(tx, device, e)?,
-        other => bail!("unknown op {other}"),
+        _ => return Ok(false),
     }
-    Ok(())
+    Ok(true)
 }
 
 /// The public key this computer knows for an origin, "" when none yet.
@@ -224,12 +228,15 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
 /// One computer's new chunks, in manifest order, each read through `read`, checked against its sha256 and (when
 /// the origin's key is known) its signature, kept in the local store for relay, and applied in one transaction
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
-/// tries again. Returns the sequence applied up to.
+/// tries again. Stops too at the first entry of a kind this version does not know, with the cursor just before
+/// it, and says so on that computer's row: the entry and all after it are taken once this computer is updated.
+/// Returns the sequence applied up to.
 pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
     if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
     let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
+    let (mut newer, mut through) = (false, false);
     for ch in man["chunks"].as_array().into_iter().flatten() {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || !store::safe_file(file) { continue; }
@@ -247,25 +254,34 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
             break;
         }
         let text = String::from_utf8_lossy(&bytes);
-        let (mut n, mut bad) = (0, 0);
+        let (mut n, mut bad, mut upto) = (0, 0, to);
         ctx.db.with(|c| {
             let tx = c.transaction()?;
             for line in text.lines().filter(|l| !l.trim().is_empty()) {
                 let Ok(e) = serde_json::from_str::<Entry>(line) else { bad += 1; continue };
                 if e.seq <= cur { continue; }
                 match apply(&tx, id, &ctx.db.device, &e) {
-                    Ok(()) => n += 1,
+                    Ok(true) => n += 1,
+                    // skipped, it would be lost for good: it and all after it wait, the cursor just before it
+                    Ok(false) => { upto = e.seq - 1; newer = true; break; }
                     Err(err) => { bad += 1; crate::log::warn(&format!("journal: entry {} of {file} from {id} skipped: {err:#}", e.seq)); }
                 }
             }
-            tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, to])?;
+            tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, upto])?;
             tx.commit()?;
             Ok(())
         })?;
         if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
+        cur = upto;
+        if newer {
+            crate::log::warn(&format!("journal: entry {} of {file} from {id} is of a kind this version does not know; it and what follows wait until Harness Manager is updated on this computer", upto + 1));
+            break;
+        }
         crate::log::info(&format!("journal: {n} entries from {id} applied ({file}{})", if bad > 0 { format!(", {bad} skipped") } else { String::new() }));
-        cur = to;
+        through = true;
     }
+    // said on that computer's card while it waits, and taken off once a chunk is read through again (after the update)
+    ctx.db.with(|c| { c.execute("update peers set last_error = case when ?1 then ?2 else '' end where device_id = ?3 and (?1 or (?4 and last_error = ?2))", params![newer, UPDATE_HERE, id, through])?; Ok(()) })?;
     Ok(cur)
 }
 
@@ -863,5 +879,27 @@ mod tests {
         assert!(row("codex/work/other").is_some());
         merge_from(&ctx, "peer-1", &[entry(4, "tombstone", "session/codex/work/other", json!({}))]);
         assert_eq!(row("codex/work/other"), None);
+    }
+
+    #[test]
+    fn an_entry_of_a_kind_this_version_does_not_know_waits_for_the_update_with_all_that_follows() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let usage = |seq: i64| entry(seq, "usage", &format!("claude:{seq}"), serde_json::to_value(row(&format!("claude:{seq}"), 1_000)).unwrap());
+        let error = || -> String { ctx.db.with(|c| Ok(c.query_row("select coalesce(last_error, '') from peers where device_id='peer-1'", [], |r| r.get(0))?)).unwrap() };
+        let newer = [usage(1), entry(2, "hologram", "k", json!({})), usage(3)];
+        for _ in 0..2 {
+            assert_eq!(merge_from(&ctx, "peer-1", &newer), 1, "it stops before the entry it cannot read");
+            assert_eq!((count(&ctx, "select count(*) from usage"), count(&ctx, "select seq from cursors2 where device_id='peer-1'")), (1, 1));
+            assert!(error().contains("update Harness Manager"), "said on that computer's card: {}", error());
+        }
+        // a broken entry of a kind it does know is skipped, as before, and what follows is taken
+        assert_eq!(merge_from(&ctx, "peer-2", &[entry(1, "quota", "no-slash", json!({})), usage(7)]), 7);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 2);
+        // updated (the kind is one it reads now): that entry and the one after it come in, and the card is clear
+        assert_eq!(merge_from(&ctx, "peer-1", &[usage(1), usage(2), usage(3)]), 3);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 4);
+        assert_eq!(error(), "");
     }
 }
