@@ -280,14 +280,17 @@ available elsewhere (`launch.rs`, `autostart`).
 - `index.html` loads `app.js`, which imports one module per page: `home.js` (Overview), `sessions.js`,
   `projects.js`, `accounts.js`, `computers-page.js`, `mcp.js`, `skills.js`, `prompts.js`, `routing.js`,
   `apps.js`, `cli.js`, `settings.js`; plus `computers.js` (the top-bar chip and the pairing, hub and recovery-key
-  dialogs), `guide.js` (the page tour), `restore.js` and `resume.js` (their dialogs).
+  dialogs), `guide.js` (the page tour), `restore.js` and `resume.js` (their dialogs), `palette.js` (the command
+  palette on `Ctrl K`) and `pane.js` (the detail pane Sessions and Accounts share).
+- `limits.js` draws the limit ring and the account summary. It imports no page, so the tray popup (`popup.js`)
+  loads it alone; `accounts.js` re-exports its names for the pages.
 - `core.js` is the shared runtime: backend calls, app state, the hash router (`view(name, render)`), the render
   queue, the keyed reconciler, the one dialog controller, the menu, notices and the theme. `lib.js` holds
   helpers (escaping, formatting, icons, charts, Markdown). `parts.js` holds the parts every page shares: the page
   names, the page head (the name and one status sentence), the segmented choice, the pill, and the rule for an
   account that needs attention.
 - Styles: `app.css` for the shell and shared parts, then one stylesheet per page group: `pages-overview.css`,
-  `pages-sessions.css`, `pages-accounts.css`, `pages-setup.css`, `pages-system.css`, `pages-settings.css`.
+  `pages-sessions.css`, `pages-accounts.css`, `pages-setup.css`, `pages-system.css`, `pages-settings.css`, `pages-palette.css`.
 - **Redraw model.** Renders run one after another, and a burst of requests collapses into one. A page draws
   with `patch(sheet, html)`: the reconciler matches children by id, `data-key` or `data-testid` and keeps scroll
   positions, focus, the caret and fields the reader is editing. When the backend emits `refreshed`, `app.js`
