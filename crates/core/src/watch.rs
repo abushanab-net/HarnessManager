@@ -43,7 +43,8 @@ fn run(ctx_of: CtxOf, on_refresh: OnRefresh) {
         if dirs != watched || (watcher.is_none() && !dirs.is_empty()) {
             // accounts came or went: a fresh watcher over the folders of today
             let tx = tx.clone();
-            match notify::recommended_watcher(move |r: notify::Result<notify::Event>| { if let Ok(e) = r { for p in e.paths { let _ = tx.send(p); } } }) {
+            // a file being opened or closed is no change: Linux reports those too, also the refresh's own reads, which would start the next refresh
+            match notify::recommended_watcher(move |r: notify::Result<notify::Event>| { if let Ok(e) = r { if !e.kind.is_access() { for p in e.paths { let _ = tx.send(p); } } } }) {
                 Ok(mut w) => {
                     for d in &dirs {
                         if let Err(e) = w.watch(d, RecursiveMode::Recursive) {

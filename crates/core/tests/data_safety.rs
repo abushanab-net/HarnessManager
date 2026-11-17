@@ -6,6 +6,8 @@ use hrm_core::registry::{Kind, Profile, ProjectAlias, Registry};
 use hrm_core::{items, Ctx};
 
 fn ctx() -> (tempfile::TempDir, Ctx) {
+    // every test here has the tests' credential names: none reads this computer's own keys
+    std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
     let dir = tempfile::tempdir().unwrap();
     let ctx = Ctx::open_at(&dir.path().join("data"), &dir.path().join("home")).unwrap();
     (dir, ctx)
@@ -104,6 +106,8 @@ fn an_open_claude_console_names_its_session() {
     assert!(harness::claude::Claude.running(&ctx, &p).is_empty());
 }
 
+// the swap of Antigravity's login between accounts is on Windows only (harness::agy::can_swap)
+#[cfg(windows)]
 #[test]
 fn an_unfinished_antigravity_sign_in_never_lands_on_the_main_login() {
     let (dir, ctx) = ctx();
@@ -187,6 +191,8 @@ fn a_limit_window_whose_reset_time_passed_is_empty() {
     assert_eq!(q.tiers[2].used, 5.0);
 }
 
+// a file held open without sharing is how Windows makes a file busy
+#[cfg(windows)]
 #[test]
 fn a_server_removed_while_the_config_file_is_busy_is_removed_later() {
     use std::os::windows::fs::OpenOptionsExt;
@@ -290,6 +296,7 @@ fn a_skill_whose_source_is_gone_is_not_reported_up_to_date() {
     assert_eq!(items::check_skill_updates(&ctx, &reg), vec![("s".to_string(), None)]);
 }
 
+#[cfg(windows)]
 #[test]
 fn the_program_given_to_windows_terminal_has_no_space() {
     let dir = tempfile::tempdir().unwrap();
@@ -320,6 +327,7 @@ fn rename_changes_only_the_shown_name() {
     assert_eq!(ctx.registry().unwrap().get("work").unwrap().label, None, "empty goes back to the id");
 }
 
+#[cfg(windows)]
 #[test]
 fn default_terminal_reads_the_windows_setting() {
     // must agree with the setting Windows itself shows; "reg" is the reference

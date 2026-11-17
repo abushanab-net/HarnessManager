@@ -21,6 +21,10 @@ pub fn live_target() -> String { crate::testenv::var("HRM_AGY_CRED").unwrap_or_e
 
 fn snapshot_target(profile: &str) -> String { format!("{}:agy:{profile}", crate::secrets::prefix()) }
 
+/// Harness Manager can swap Antigravity's login between accounts: where it knows the credential Antigravity keeps it in.
+// shortcut: Windows only. Where Antigravity keeps its login on macOS and Linux is not known, so there one account runs on Antigravity's own login; answer true here once `live_target` names that place
+pub fn can_swap() -> bool { cfg!(windows) }
+
 const ACTIVE_KEY: &str = "agy:active";
 /// Stored while a sign-in runs: the slot holds a login nobody owns yet. If the sign-in never finishes
 /// (cancelled, app closed), that login must not be filed under the main profile.
@@ -159,6 +163,11 @@ impl Harness for Agy {
     }
 
     fn activate(&self, ctx: &Ctx, p: &Profile) -> Result<()> {
+        if !can_swap() {
+            // the main account is Antigravity's own login, as it is; another one (it came with a shared account list) has no login here
+            if p.main { return Ok(()); }
+            bail!("'{}' cannot start here: Harness Manager switches Antigravity's login between accounts on Windows only. On this computer Antigravity runs as its main account.", p.name);
+        }
         if self.active(ctx).as_deref() == Some(p.name.as_str()) { return Ok(()); }
         self.check_switch(ctx, p)?;
         let Some((user, blob)) = crate::secrets::read(&snapshot_target(&p.name)) else {
@@ -343,6 +352,23 @@ mod tests {
         assert_eq!(q.tier("week:claude and gpt models").unwrap().label, "Week · Claude and GPT models");
         assert!(q.tier("week").unwrap().resets_at.unwrap() > 0);
         assert!(super::parse_usage(&serde_json::Value::Null, 1).tiers.is_empty());
+    }
+
+    /// Off Windows there is no swap: the main account starts on Antigravity's own login, and a second one is refused.
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_antigravity_runs_as_its_main_account_alone() {
+        use crate::harness::Harness;
+        use crate::registry::{Kind, Profile};
+        let d = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&d.path().join("data"), &d.path().join("home")).unwrap();
+        let acct = |name: &str, main| Profile { name: name.into(), label: None, harness: "agy".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        // no login was ever saved here, and the start is not held up by a swap
+        super::Agy.activate(&ctx, &acct("agy-main", true)).unwrap();
+        assert!(super::Agy.activate(&ctx, &acct("second", false)).unwrap_err().to_string().contains("on Windows only"));
+        let add = crate::service::add_profile(&ctx, crate::service::AddRequest { name: "second".into(), harness: "agy".into(), kind: Kind::Subscription, email: None, api_key: None, base_url: None, model: None, route: None, main: false });
+        assert!(add.err().unwrap().to_string().contains("on Windows only"));
+        assert!(ctx.registry().unwrap().profiles.is_empty());
     }
 
     #[test]

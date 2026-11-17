@@ -296,7 +296,7 @@ impl Registry {
             if !live.insert(t.to_lowercase()) || v.is_empty() || secrets::get_key(&t).as_deref() == Some(v.as_str()) { continue; }
             // replaced, not written over: under a name spelled with other letter case Windows keeps a second entry, which the old one hides
             let _ = secrets::delete(&t);
-            // too large for a credential, or no store on this platform: the value is kept, in the file
+            // too large for a credential, or refused by the store: the value is kept, in the file
             if let Err(e) = secrets::write(&t, "hrm", v.as_bytes()) {
                 WARNED.call_once(|| crate::log::warn(&format!("an MCP server's value stays in {}: {e:#}", path.display())));
             }
@@ -317,9 +317,8 @@ impl Registry {
     }
 
     /// Values an older version left in the file move to the credential store: a load and a save, only when the file holds one.
-    // shortcut: only Windows has a store so far (see secrets), so elsewhere a start moves nothing and warns of nothing; drop the test with the Keychain build
     pub fn move_mcp_values(path: &Path) -> Result<()> {
-        if cfg!(windows) && Self::read(path, |_| String::new())?.mcp.iter().any(|s| s.env.values().chain(s.headers.values()).any(|v| !v.is_empty())) { Self::load(path)?.save(path)?; }
+        if Self::read(path, |_| String::new())?.mcp.iter().any(|s| s.env.values().chain(s.headers.values()).any(|v| !v.is_empty())) { Self::load(path)?.save(path)?; }
         Ok(())
     }
 

@@ -1,7 +1,6 @@
 //! MCP servers between the shared list, the credential store and the tools' own config files: no env or header
 //! value is kept in the list file or in a backup, and a tool's entry keeps everything Harness Manager does not own.
-// the credential store these tests read is Windows Credential Manager, the only one there is so far
-#![cfg(windows)]
+// the credential store these tests read: Windows Credential Manager, and off Windows the private file a test's prefix selects
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -344,6 +343,8 @@ fn a_list_written_by_an_older_version_moves_its_values_at_the_first_start() {
     assert_eq!(hrm_core::util::file_sig(&path), sig);
 }
 
+// the refusal is Windows Credential Manager's size limit; the private file a test uses elsewhere takes any value
+#[cfg(windows)]
 #[test]
 fn a_value_the_store_refuses_stays_in_the_list_file_and_out_of_backups() {
     let _s = store();
