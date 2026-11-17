@@ -146,6 +146,8 @@ async function waitFor(fn, what, ms = 15000) {
 }
 const $ = (css) => waitFor(async () => (await page.$(css)) || null, css);
 const click = async (css) => { await $(css); await page.click(css); };
+/** A double click: on a row of Sessions or Accounts it opens the item's full page (a click selects it for the pane). */
+const dbl = async (css) => { await $(css); await page.dblclick(css); };
 const type = async (css, t) => {
   await $(css);
   const enter = t.endsWith('\n');
@@ -753,7 +755,7 @@ try {
 
   await test('reading a session: steps, failed command, answer and changes', async () => {
     await nav('#sessions');
-    await click('[data-testid=read-s-main-1]');
+    await dbl('[data-testid=read-s-main-1]');
     await hasText('[data-testid=session-title]', 'Longhorn backup target');
     // the steps inline in the chat, folded: each says what it ran; a click unfolds its output
     await hasText('[data-testid=chat] .a-steps', 'argocd app sync longhorn-staging');
@@ -911,12 +913,12 @@ try {
     const noFolder = await exec("return [...document.querySelectorAll('[data-testid=group]')].find((g) => g.textContent.includes('No folder')).textContent");
     assert.ok(!noFolder.includes('github.com'), 'a session without a folder has no repository');
     assert.ok(noFolder.includes('1 msg') || noFolder.includes('2 msgs'));
-    await click('[data-testid=read-ses_oc1]');
+    await dbl('[data-testid=read-ses_oc1]');
     await hasText('[data-testid=session-title]', 'Fix the flaky build');
     await hasText('[data-testid=chat]', 'cargo test --workspace');
     await hasText('[data-testid=chat]', 'The build is stable again.');
     await nav('#sessions');
-    await click('[data-testid=read-agy-conv-1]');
+    await dbl('[data-testid=read-agy-conv-1]');
     await hasText('[data-testid=chat]', 'Explain the release script');
     await hasText('[data-testid=chat]', 'It builds hrm.exe and the installer.');
     await click('[data-testid=resume]');
@@ -1310,8 +1312,8 @@ try {
     await click('[data-testid=remove-confirm]');
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-side-route]')")), 'removed');
     assert.ok(!JSON.parse(hrm('list', '--json')).some((x) => x.name === 'side-route'), 'gone from the list of accounts');
-    // a click on the row itself (not on a button) still opens the account's page
-    await click('[data-testid=row-team-ci] .who');
+    // a double click on the row itself (not on a button) still opens the account's page (a click selects it for the pane)
+    await dbl('[data-testid=row-team-ci] .who');
     await waitFor(async () => (await exec('return location.hash')) === '#account?name=team-ci', 'the row opens its account');
   });
 
@@ -1418,6 +1420,455 @@ try {
       assert.deepEqual([d.title, d.field], ['15px', '13px'], kind + ': on the type scale (its title 15, what is typed 13)');
     }
     await click('.dlg .dh [data-act=dialog-close]');
+  });
+
+  // ---------- 1.11: the detail pane on Sessions and Accounts, and the groundwork in the same files ----------
+  /** Run fn while the window's backend calls are recorded (`ops()` empties the record: "op", or "op:name" for a call
+   * about one account or session). `change(op, a, r)` may alter an answer, `fake(op, a)` may give one without asking. */
+  const withOps = async (fn, change = '', fake = '') => {
+    await exec(`const t = window.__TAURI__, change = new Function('op', 'a', 'r', arguments[0] || ''), fake = new Function('op', 'a', arguments[1] || ''); window.__core = t.core; window.__ops = [];
+      t.core = { ...t.core, invoke: (cmd, a, o) => { if (!a || !a.op) return window.__core.invoke(cmd, a, o);
+        const args = a.args || {}; window.__ops.push(a.op + (args.name || args.id ? ':' + (args.name || args.id) : ''));
+        const f = fake(a.op, args); if (f !== undefined) return Promise.resolve(f);
+        return window.__core.invoke(cmd, a, o).then((r) => { change(a.op, args, r); return r; }); } };`, [change, fake]);
+    try { return await fn(); } finally { await exec('window.__TAURI__.core = window.__core'); }
+  };
+  const ops = () => exec('return window.__ops.splice(0)');
+  /** What a click asks the backend, by the end of the turn it is handled in: the reads of that click and of nothing
+   * else (a background refresh draws in a turn of its own). */
+  const asks = (css) => exec("return new Promise((done) => { window.__ops.length = 0; document.querySelector(arguments[0]).click(); setTimeout(() => done(window.__ops.slice()), 0); })", [css]);
+  /** The pane and the list beside it, as measured. */
+  const paneFacts = () => exec(`const q = (s) => document.querySelector(s), p = q('#pane'), sheet = q('#sheet'), body = q('#sheet > .page-body'), z = document.documentElement.currentCSSZoom || 1, at = document.activeElement.closest('[data-sel]');
+    const box = (e) => e.getBoundingClientRect();
+    return { hash: location.hash, pane: !!p, role: p && p.getAttribute('role'), label: p && p.getAttribute('aria-label'), width: p && Math.round(box(p).width / z), position: p && getComputedStyle(p).position,
+      edges: p && [Math.round(box(sheet).right - box(p).right), Math.round(box(p).top - box(sheet).top), Math.round(box(sheet).bottom - box(p).bottom)],
+      list: Math.round(box(body).width / z), sheet: Math.round(box(sheet).width / z), current: [...document.querySelectorAll('#sheet [data-sel][aria-current]')].map((r) => r.dataset.sel), focus: at ? at.dataset.sel : document.activeElement.id || document.activeElement.tagName,
+      primaries: [...document.querySelectorAll('#sheet .btn.primary')].filter((b) => box(b).width).map((b) => (b.closest('#pane') ? 'pane:' : 'page:') + b.textContent.trim()) };`);
+  /** What the pane must measure on every page: no text under 12 px, no control under 28 px, nothing wider than the
+   * pane, and nothing of it above its own top edge. */
+  const paneRules = () => exec(`const p = document.getElementById('pane'), z = document.documentElement.currentCSSZoom || 1, small = [], low = [], above = [];
+    for (const el of p.querySelectorAll('*')) {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(getComputedStyle(el).fontSize) < 12) small.push(el.tagName + '.' + (el.className.baseVal ?? el.className) + ' ' + el.textContent.trim().slice(0, 20));
+      if (el.matches('button, a[href], input, select') && Math.round(r.height / z) < 28) low.push((el.dataset.testid || el.className) + ' ' + r.height / z);
+      if (r.top + p.scrollTop * z < p.getBoundingClientRect().top - 1) above.push(el.dataset.testid || el.className);
+    }
+    return { small, low, wide: p.scrollWidth > p.clientWidth, above };`);
+  /** What a click on a row asks the backend, by the time the page has drawn the address with the selection in it. */
+  const selectAsks = (css) => exec("return new Promise((done) => { window.__ops.length = 0; addEventListener('hashchange', () => setTimeout(() => done(window.__ops.slice()), 0), { once: true }); document.querySelector(arguments[0]).click(); })", [css]);
+  const gone = (what) => waitFor(async () => !(await exec("return !!document.getElementById('pane')")), what);
+  const hashIs = (h, what) => waitFor(async () => (await exec('return location.hash')) === h, what + ' (' + h + ')');
+  const SES = 'claude-main/s-main-1', SES_HASH = '#sessions?sel=claude-main%2Fs-main-1';
+
+  await test('detail pane, sessions: a click selects the row, puts sel in the address and shows the session beside the drawn columns; the arrows move the selection; Back clears it; Esc closes the pane and the rows are the 1.10 rows again; Enter, a double click and Open transcript open the full page', async () => {
+    await exec("localStorage.removeItem('hm.pane.sessions')");
+    await nav('#home');
+    await nav('#sessions');
+    await drawn('sessions');
+    await $('[data-testid=session-s-main-1]');
+    const rowOf = () => exec("const r = document.querySelector('[data-testid=session-s-main-1]'); return { cells: r.children.length, act: !!r.querySelector('.a-act [data-act=resume]'), where: !!r.querySelector('.a-where'), mail: !!r.querySelector('.a-acct small'), head: document.querySelector('.a-lh').children.length, primary: document.querySelector('[data-testid=session-new]').classList.contains('primary') }");
+    const before = await rowOf();
+    assert.ok(before.act && before.where && before.primary, 'the 1.10 row, with its Resume: ' + JSON.stringify(before));
+    await withOps(async () => {
+      assert.deepEqual(await selectAsks('[data-testid=read-s-main-1]'), ['transcript:s-main-1', 'session_stats:s-main-1'], 'selecting a row reads the session for the pane, by the reads its page uses, and not the list again');
+      await $('#pane');
+      await hasText('[data-testid=pane-reply]', 'What changed');
+    });
+    const f = await paneFacts();
+    assert.equal(f.hash, SES_HASH, 'the selection is in the address');
+    assert.deepEqual([f.role, f.label, f.width, f.position], ['complementary', 'Longhorn backup target for staging', 380, 'static'], 'the pane: a region named by the session, 380 px, beside the list');
+    assert.deepEqual([f.list, f.edges], [f.sheet - 380, [0, 0, 0]], 'from under the top bar to the bottom, the list in the rest');
+    assert.deepEqual([f.current, f.focus], [[SES], SES], 'the row is the current one, and the focus stays on it, in the list');
+    assert.deepEqual(f.primaries, ['pane:Resume'], 'one primary on the screen: the pane\'s');
+    const open = await rowOf();
+    assert.deepEqual([open.act, open.where, open.mail, open.primary, open.head, open.cells], [false, false, false, false, before.head - 1, before.cells - 1], 'beside the pane: the drawn columns, no action of its own, New session a secondary');
+    // what the pane says: the state, the account with its tool's icon, the four tiles, the last steps with their marks, the last reply
+    await hasText('[data-testid=pane-state]', 'ended');
+    await hasText('[data-testid=pane-state]', '1 failed');
+    assert.ok(await exec("return !!document.querySelector('[data-testid=pane-account] img[src*=claude]') && !!document.querySelector('#pane .pane-top img[src*=claude]')"), 'the tool\'s own icon, in the head and by the account');
+    const p = await exec(`const q = (s) => [...document.querySelectorAll(s)]; return { tiles: q('#pane .pane-tile').map((t) => t.innerText.replace(/\\s+/g, ' ').trim()), marks: q('#pane .pn-mark').map((m) => m.getAttribute('aria-label')), steps: document.querySelector('[data-testid=pane-steps]').innerText.replace(/\\s+/g, ' '),
+      kv: document.querySelector('#pane .pane-kv').innerText.replace(/\\s+/g, ' '), acts: q('#pane .pane-acts > *').map((b) => b.textContent.trim()), open: document.querySelector('[data-testid=pane-open]').getAttribute('href') };`);
+    assert.deepEqual(p.tiles.map((t) => t.replace(/ [\d.,k%M—]+$/, '')), ['Tokens', 'Read from cache', 'Failed commands', 'Files changed'], 'four tiles: ' + p.tiles);
+    assert.ok(p.tiles[2].endsWith(' 1') && p.tiles[3].endsWith(' 1'), 'one failed command, one file changed: ' + p.tiles);
+    assert.deepEqual(p.marks, ['done', 'failed'], 'each step with its mark, named');
+    assert.ok(p.steps.includes('Edit apps/longhorn/values-staging.yaml +2 −1') && p.steps.includes('Bash argocd app sync longhorn-staging failed'), 'the last steps, newest last: ' + p.steps);
+    assert.ok(/Account claude-main Tool Claude Code Model claude-opus-5-5 Started Today \d\d:\d\d · ended \d\d:\d\d · \d+ m/.test(p.kv), 'the facts: ' + p.kv);
+    assert.deepEqual([p.acts, p.open], [['Resume', 'Open transcript', 'Export as Markdown', '⋯'], '#session?profile=claude-main&id=s-main-1'], 'the primary with Open transcript, then Export and ⋯');
+    assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'nothing under 12 px, no control under 28 px, nothing wider than the pane');
+    // ⋯ holds what the session page's ⋯ holds, and Esc closes the menu, not the pane
+    await click('[data-testid=pane-menu]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim())"), ['Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'the terminal and the log folder behind ⋯');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => !(await exec("return !!document.querySelector('.menu')")), 'the menu closed');
+    assert.ok((await paneFacts()).pane, 'and the pane stayed');
+    await shot('21-sessions-pane-light');
+    for (const [brand, theme] of [['hm', 'dark'], ['vg', 'light']]) {
+      await exec('document.documentElement.dataset.brand = arguments[0]; document.documentElement.dataset.theme = arguments[1]', [brand, theme]);
+      await sleep(300);
+      await shot(`21-sessions-pane-${brand === 'vg' ? 'vektragrid-' : ''}${theme}`);
+    }
+    await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
+    // Export as Markdown works from the pane (the native save dialog cannot be driven; it is answered with a path)
+    const exported = path.join(sb, 'export-pane.md');
+    await exec('window.__TAURI__.dialog.save = async (o) => { window.__saveAs = o.defaultPath; return arguments[0]; }', [exported]);
+    await click('[data-testid=pane-export]');
+    await waitFor(() => fs.existsSync(exported), 'the export file');
+    assert.ok(fs.readFileSync(exported, 'utf8').startsWith('# Longhorn backup target for staging'), 'the session, as Markdown');
+    assert.equal(await exec('return window.__saveAs'), 'Longhorn backup target for staging.md', 'offered under the title of the session shown');
+    // Down and Up move the selection (and the focus with it) without a step in the history
+    await page.focus('[data-testid=read-s-main-1]');
+    const len = await exec('return history.length');
+    await page.keyboard.press('ArrowDown');
+    await waitFor(async () => { const g = await paneFacts(); return g.current.length === 1 && g.current[0] !== SES && g.focus === g.current[0] && g.label !== 'Longhorn backup target for staging'; }, 'Down selects the next row, shows it and takes the focus there');
+    await page.keyboard.press('ArrowUp');
+    await waitFor(async () => { const g = await paneFacts(); return g.current[0] === SES && g.focus === SES; }, 'Up selects the row above');
+    assert.equal(await exec('return history.length'), len, 'moving the selection adds no step to the history');
+    // Back clears the selection
+    await exec('history.back()');
+    await hashIs('#sessions', 'Back clears the selection');
+    await gone('the pane goes with the selection');
+    assert.deepEqual(await rowOf(), before, 'the 1.10 rows');
+    // Esc closes the pane: the selection stays in the address, the rows are the 1.10 rows, the list has the full width
+    await click('[data-testid=read-s-main-1]');
+    await $('#pane');
+    await page.keyboard.press('Escape');
+    await gone('Esc closes the pane');
+    const closed = await paneFacts();
+    assert.deepEqual([closed.hash, closed.current], [SES_HASH, [SES]], 'the selection stays');
+    assert.ok(closed.sheet - closed.list <= 16, 'the list takes the full width again: ' + closed.list + ' of ' + closed.sheet);
+    assert.deepEqual(await rowOf(), before, 'and the rows are the 1.10 rows again');
+    // closed is remembered for the page: the address with a selection opens no pane, until a click on a row
+    assert.equal(await exec("return localStorage.getItem('hm.pane.sessions')"), '0');
+    await nav('#home');
+    await nav(SES_HASH);
+    await drawn('sessions');
+    assert.deepEqual([(await paneFacts()).pane, (await paneFacts()).current], [false, [SES]], 'closed stays closed, the row stays selected');
+    await click('[data-testid=session-s-main-1] .num');
+    await $('#pane');
+    assert.equal(await exec("return localStorage.getItem('hm.pane.sessions')"), '1', 'a click on a row opens it again');
+    // the pane's ✕ closes it too, and the focus goes back to the row
+    await page.focus('[data-testid=pane-close]');
+    await page.keyboard.press('Enter');
+    await gone('✕ closes the pane');
+    assert.equal((await paneFacts()).focus, SES, 'the focus is back on the row');
+    await click('[data-testid=read-s-main-1]');
+    await $('#pane');
+    // a reload keeps the selection and the pane
+    await page.reload();
+    await waitFor(() => exec("return !!document.getElementById('pane') && !!document.querySelector('[data-testid=pane-reply]')"), 'the pane after a reload', 30000);
+    assert.deepEqual([(await paneFacts()).hash, (await paneFacts()).label], [SES_HASH, 'Longhorn backup target for staging'], 'the same session');
+    // Enter on the selected row, a double click, and Open transcript go to the full page; Back returns to the pane
+    await page.focus('[data-testid=read-s-main-1]');
+    await page.keyboard.press('Enter');
+    await hashIs('#session?profile=claude-main&id=s-main-1', 'Enter on the selected row opens the session');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+    await exec('history.back()');
+    await $('#pane');
+    await dbl('[data-testid=session-s-main-1] .num');
+    await hashIs('#session?profile=claude-main&id=s-main-1', 'a double click opens the session');
+    await exec('history.back()');
+    await click('[data-testid=pane-open]');
+    await hashIs('#session?profile=claude-main&id=s-main-1', 'Open transcript opens the session');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+  });
+
+  await test('detail pane, sessions: its one primary per state: Follow live for a session running here, Resume here or the reason for one from another computer (which says where the rest is), the reason for an archived one', async () => {
+    // the sandbox has no running console, no second computer and no archive here: the list's answer says so for four sessions
+    await exec("localStorage.removeItem('hm.pane.sessions')");
+    await withOps(async () => {
+      await nav('#home');
+      await nav('#sessions');
+      await drawn('sessions');
+      const pick = async (id) => { await ops(); await click(`[data-testid="read-${id}"]`); await waitFor(async () => ((await paneFacts()).current[0] || '').endsWith('/' + id) && (await paneFacts()).pane, id + ' in the pane'); };
+      const pane = () => exec(`const q = (t) => document.querySelector('#pane [data-testid=' + t + ']'), tx = (t) => (q(t) ? q(t).textContent.trim() : null);
+        return { primary: tx('pane-primary'), reason: tx('pane-reason'), state: tx('pane-state'), rest: tx('pane-rest'), export: !!q('pane-export'), open: q('pane-open').getAttribute('href') };`);
+      // running here: Follow live, and the strip says it is live and followed, with the time of its last step
+      await pick('s-main-1');
+      const live = await pane();
+      assert.equal(live.primary, 'Follow live');
+      assert.ok(/^live · following\s*last step \d\d:\d\d$/.test(live.state), 'the state strip: ' + live.state);
+      assert.deepEqual((await paneFacts()).primaries, ['pane:Follow live'], 'one primary');
+      assert.equal(await exec("return document.querySelector('[data-testid=pane-primary]').getAttribute('href')"), '#session?profile=claude-main&id=s-main-1', 'which opens its page, following');
+      await click('[data-testid=pane-menu]');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …'))"),
+        ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯, as on its page');
+      await page.keyboard.press('Escape');
+      // from another computer, resumable here: Resume here; what the index knows is shown, the rest is said to be there, and nothing is fetched
+      await pick('cx-1');
+      const far = await pane();
+      assert.deepEqual([far.primary, far.export], ['Resume here', false]);
+      assert.ok(far.rest.includes('in the transcript on LAPTOP'), 'where the rest is: ' + far.rest);
+      assert.ok(far.open.includes('device=dev-laptop'), 'Open transcript opens the other computer\'s: ' + far.open);
+      await sleep(400);
+      assert.ok(!(await ops()).some((o) => o.startsWith('transcript')), 'its transcript is not fetched for the pane');
+      await hasText('#pane .pane-top', 'LAPTOP');
+      // from another computer, not resumable here: the reason in the primary's place
+      await pick('ses_oc1');
+      const no = await pane();
+      assert.deepEqual([no.primary, no.reason, (await paneFacts()).primaries], [null, 'running on LAPTOP', []], 'the reason, and no primary');
+      assert.ok((await exec("return document.querySelector('[data-testid=pane-reason]').title")).includes('close it there first'), 'the whole reason on hover');
+      // archived: read only
+      await pick('agy-conv-1');
+      const old = await pane();
+      assert.deepEqual([old.primary, old.reason], [null, 'archived: it can be read, not resumed']);
+      assert.ok(old.state.startsWith('archived · ended'), old.state);
+    }, `if (op === 'sessions') for (const g of r.groups) for (const s of g.sessions) {
+        if (s.id === 's-main-1') s.open = true;
+        if (s.id === 'cx-1') Object.assign(s, { device: 'dev-laptop', device_name: 'LAPTOP', resumable: true });
+        if (s.id === 'ses_oc1') Object.assign(s, { device: 'dev-laptop', device_name: 'LAPTOP', resumable: 'running on LAPTOP: close it there first' });
+        if (s.id === 'agy-conv-1') s.archived = true;
+      }`);
+    await nav('#home');
+  });
+
+  await test('detail pane, sessions: the pane of a running session follows it as its tool writes, while the list is not drawn again', async () => {
+    const file = path.join(home, '.claude', 'projects', 'p', 's-pane-live.jsonl');
+    const t0 = new Date().toISOString();
+    const pair = (i, q, a) => [{ type: 'user', sessionId: 's-pane-live', cwd: repo, timestamp: t0, message: { role: 'user', content: q } },
+      { type: 'assistant', sessionId: 's-pane-live', cwd: repo, timestamp: t0, message: { id: 'pl' + i, model: 'claude-opus-5-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: a }] } }];
+    try {
+      write(file, jl(pair(0, 'Watch the pane', 'First answer.')));
+      await exec("localStorage.removeItem('hm.pane.sessions')");
+      // (the sandbox has no running console, so the list's answer says this session is open)
+      await withOps(async () => {
+        await nav('#home');
+        await nav('#sessions');
+        await waitFor(() => exec("return !!document.querySelector('[data-testid=session-s-pane-live]')"), 'the new session in the list', 20000);
+        await click('[data-testid=read-s-pane-live]');
+        await hasText('[data-testid=pane-primary]', 'Follow live');
+        await hasText('[data-testid=pane-reply]', 'First answer.');
+        // every row is marked: a list drawn again from nothing would lose the marks
+        await exec("for (const r of document.querySelectorAll('.a-srow')) r.__kept = true; document.querySelector('.a-smain').__kept = true");
+        await waitFor(async () => (await ops()).includes('file_stamp'), 'the live watch looks at its log file');
+        await sleep(2200);
+        await ops();
+        fs.appendFileSync(file, jl(pair(1, 'And now?', 'Written while you watched.')));
+        await hasText('[data-testid=pane-reply]', 'Written while you watched.');
+        const asked = await ops();
+        assert.ok(asked.includes('file_stamp') && asked.includes('transcript:s-pane-live'), 'the watch saw the file change and the pane read the transcript again: ' + asked);
+        assert.ok(await exec("return document.querySelector('.a-smain').__kept === true && [...document.querySelectorAll('.a-srow')].every((r) => r.__kept)"), 'the list and its rows are the ones that were there');
+        assert.equal((await paneFacts()).current[0], 'claude-main/s-pane-live', 'the selection stayed');
+      }, "if (op === 'sessions') for (const g of r.groups) for (const s of g.sessions) if (s.id === 's-pane-live') s.open = true;");
+    } finally { fs.rmSync(file, { force: true }); await nav('#home'); }
+  });
+
+  await test('detail pane, accounts: a click selects the account and puts sel in the address; the pane has ONE primary per state (Start; Log in, with Start disabled and the reason), the row\'s whole menu, its tabs and Remove at the foot; Esc gives the 1.10 rows back; Enter and Open go to the account\'s page', async () => {
+    await exec("localStorage.removeItem('hm.pane.accounts')");
+    await reopenAccounts();
+    const rowOf = () => exec(`const r = document.querySelector('[data-testid=row-codex-main]'), z = document.documentElement.currentCSSZoom || 1;
+      return { cells: r.children.length, acts: [...r.querySelectorAll('.acts button')].map((b) => b.textContent.trim()), spark: !!r.querySelector('.spark'), height: Math.round(r.getBoundingClientRect().height / z),
+        head: [...document.querySelectorAll('.page-head .actions .btn')].map((b) => b.textContent.trim() + (b.classList.contains('primary') ? ' (primary)' : '')), cols: [...document.querySelectorAll('.acct-cols .label')].map((l) => l.textContent) };`);
+    const before = await rowOf();
+    assert.deepEqual([before.cells, before.acts, before.spark, before.height, before.cols], [7, ['Start', '⋯'], true, 56, []], 'the 1.10 row: ' + JSON.stringify(before));
+    assert.equal(before.head.at(-1), 'Add account (primary)');
+    // the row's menu, to compare with the pane's
+    await click('[data-testid=menu-codex-main]');
+    await $('.menu.acct-menu');
+    const rowMenu = await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent.trim())");
+    await page.keyboard.press('Escape');
+    let f;
+    await withOps(async () => {
+      assert.deepEqual(await selectAsks('[data-testid=row-codex-main] .who'), ['detail:codex-main'], 'selecting a row reads the account for the pane, and not the list again');
+      await $('#pane');
+      await $('[data-testid=pane-recent] .pane-mini');
+      f = await paneFacts();
+      await shot('22-accounts-pane-light');
+      // in a low window the pane scrolls on its own, and its head (the name, with its pills under it when they have
+      // no room beside it) stays whole inside it
+      await page.setViewportSize({ width: 1280, height: 600 });
+      await waitFor(async () => (await exec("const p = document.getElementById('pane'); return p.scrollHeight > p.clientHeight")), 'the pane scrolls on its own in a low window');
+      assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'in a low window nothing of the pane is cut');
+      await page.setViewportSize({ width: 1280, height: 800 });
+      // a tab of the pane is drawn from what was read
+      assert.deepEqual(await asks('[data-testid=pane-tab-sessions]'), [], 'the Sessions tab asks the backend nothing');
+      await $('[data-testid=pane-tabbody] [data-testid=session-cx-1]');
+      assert.deepEqual(await asks('[data-testid=pane-tab-projects]'), [], 'nor does the Projects tab');
+      await hasText('[data-testid=pane-tabbody]', 'platform-gitops');
+      assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'the Projects tab fits the pane');
+      const tabs = await exec(`return [...document.querySelectorAll('#pane .pane-tabs > *')].map((t) => [t.tagName, t.textContent.trim(), t.getAttribute('aria-current'), getComputedStyle(t).textDecorationLine, t.getAttribute('href')])`);
+      assert.deepEqual(tabs, [['BUTTON', 'Overview', null, 'none', null], ['BUTTON', 'Sessions', null, 'none', null], ['BUTTON', 'Projects', 'true', 'none', null], ['A', 'Settings', null, 'underline', '#account?name=codex-main&tab=settings']],
+        'Overview, Sessions and Projects are tabs of the pane; Settings is a link to the account\'s page, drawn as a link');
+      await click('[data-testid=pane-tab-overview]');
+      await $('[data-testid=pane-limits]');
+    });
+    assert.deepEqual([f.hash, f.role, f.label, f.width, f.position, f.list], ['#accounts?sel=codex-main', 'complementary', 'codex-main', 380, 'static', f.sheet - 380], 'the selection in the address, the pane a region named by the account, beside the list');
+    assert.deepEqual([f.current, f.focus, f.primaries], [['codex-main'], 'codex-main', ['pane:Start']], 'the row current and focused; one primary on the screen, the pane\'s Start');
+    const open = await rowOf();
+    assert.deepEqual([open.cells, open.acts, open.spark, open.height, open.cols, open.head], [5, [], false, 44, ['Account', 'Limits left', '7 days', 'State'], ['Export CSV', 'Add account']],
+      'beside the pane: the drawn columns on 44 px rows, no action of its own, Add account a secondary');
+    assert.ok((await text('[data-testid=state-codex-main]')).trim().length > 3, 'the state in words');
+    const facts = await rowFacts();
+    assert.deepEqual([[...new Set(facts.heights)], facts.wrapped, facts.overlap], [[44], [], []], 'every row 44 px, nothing wrapped, no column into the next');
+    const p = await exec(`const q = (t) => document.querySelector('#pane [data-testid=' + t + ']'), tx = (t) => (q(t) ? q(t).innerText.replace(/\\s+/g, ' ').trim() : null);
+      return { who: tx('pane-who'), limits: tx('pane-limits'), runway: q('pane-runway').textContent.replace(/\\s+/g, ' ').trim(), cli: tx('pane-cli'), folder: tx('pane-folder-path'), remove: [tx('pane-remove'), getComputedStyle(q('pane-remove')).color], why: tx('pane-why'), next: !!q('pane-next'),
+        icon: !!document.querySelector('#pane .pane-top img[src*=codex]'), acts: [...document.querySelectorAll('#pane .pane-acts > *')].map((b) => b.textContent.trim()), tiles: [...document.querySelectorAll('#pane .pane-tile')].map((t) => t.innerText.replace(/\\s+/g, ' ').trim()),
+        subs: [...document.querySelectorAll('#pane .pane-sub > :first-child')].map((s) => s.textContent), pills: [...document.querySelectorAll('#pane .pane-top .pill')].map((x) => x.textContent) };`);
+    assert.ok(p.icon && p.who.startsWith('alex@example.org · ChatGPT'), 'the tool\'s icon, the login and the plan: ' + p.who);
+    assert.ok(/^79% week Limits left resets in Week 79% /.test(p.limits), 'the ring with the limit windows, what is left and when each resets: ' + p.limits);
+    assert.ok(p.runway.startsWith('Reset runway') && p.runway.includes('week window, now to +7 d') && p.runway.includes('resets ') && p.runway.includes('Now+2 d+4 d+6 d+7 d'), 'the runway lane, from now to +7 d with its reset: ' + p.runway);
+    assert.deepEqual(p.subs, ['Reset runway', 'Last 7 days', 'Recent sessions'], 'the sections, in the drawing\'s order');
+    assert.ok(/ tokens$/.test(p.tiles[0]) && /^(≈ \$[\d.,]+|—) at API list prices$/.test(p.tiles[1]), 'the range\'s tokens and ≈ cost: ' + p.tiles);
+    assert.deepEqual([p.cli, p.acts], ['hrm run codex-main', ['Start', 'Start in folder…', '⋯']], 'the command line, and Start, Start in folder… and ⋯');
+    assert.ok(p.folder.endsWith('.codex'), 'its folder: ' + p.folder);
+    assert.deepEqual(p.remove, ['Hide main profile…', 'rgb(180, 40, 24)'], 'at the foot, in the danger colour (a main profile is hidden, not removed)');
+    assert.ok(p.pills.includes('main') && p.next === p.pills.includes('Use next') && (!p.next || p.why.startsWith('Why this one:')), 'main, and Use next with its reason when it is the recommendation: ' + p.pills + ' / ' + p.why);
+    assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'nothing under 12 px, no control under 28 px, nothing wider than the pane');
+    // the pane's ⋯ is the row's whole menu
+    await click('[data-testid=pane-menu]');
+    await $('.menu.acct-menu');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent.trim())"), rowMenu, 'the same menu as the row\'s');
+    await page.keyboard.press('Escape');
+    for (const [brand, theme] of [['hm', 'dark'], ['vg', 'dark']]) {
+      await exec('document.documentElement.dataset.brand = arguments[0]; document.documentElement.dataset.theme = arguments[1]', [brand, theme]);
+      await sleep(300);
+      await shot(`22-accounts-pane-${brand === 'vg' ? 'vektragrid-' : ''}${theme}`);
+    }
+    await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
+    // a logged-out account (the sandbox's claude-main): Log in is the primary, Start is disabled and says why
+    await click('[data-testid=row-claude-main] .who');
+    await waitFor(async () => (await paneFacts()).label === 'claude-main', 'claude-main in the pane');
+    const out = await exec(`const q = (t) => document.querySelector('#pane [data-testid=' + t + ']'), s = q('pane-start');
+      return { primary: q('pane-primary').textContent.trim(), act: q('pane-primary').dataset.act, start: [s.textContent.trim(), s.disabled, s.title], pill: q('pane-out').textContent, why: q('pane-why').textContent.trim(), cli: q('pane-cli').textContent, limits: q('pane-limits').innerText.replace(/\\s+/g, ' ').trim(), runway: !!q('pane-runway') };`);
+    assert.deepEqual([out.primary, out.act, out.start, out.pill], ['Log in', 'login', ['Start', true, 'Not logged in: log in first'], 'Logged out'], 'Log in is the primary; Start is disabled with the reason in its title');
+    assert.deepEqual([out.why, out.cli, out.runway], ['Not logged in. Plan and limits are read after the first login.', 'hrm login claude-main', false], 'the banner says why, the command line is the one that works');
+    assert.ok(out.limits.includes('5-hour — log in') && out.limits.includes('Week — log in'), 'unread limits are —, with the reason: ' + out.limits);
+    assert.deepEqual((await paneFacts()).primaries, ['pane:Log in'], 'one primary');
+    await page.keyboard.press('Escape');
+    await gone('Esc closes the pane');
+    assert.deepEqual([(await paneFacts()).hash, (await paneFacts()).current], ['#accounts?sel=claude-main', ['claude-main']], 'the selection stays in the address');
+    assert.deepEqual(await rowOf(), before, 'and the rows are the 1.10 rows again');
+    // Back clears the selection (the second selection replaced the first in the history)
+    await exec('history.back()');
+    await hashIs('#accounts', 'Back clears the selection');
+    // an expired login and a limit used up say so in the banner
+    await withOps(async () => {
+      await nav('#home');
+      await nav('#accounts?sel=codex-main');
+      await drawn('accounts');
+      await click('[data-testid=row-codex-main] .who');
+      await hasText('[data-testid=pane-why]', 'Week used up. Back ');
+      assert.equal((await text('[data-testid=state-codex-main]')).replace(/\s+/g, ' ').split(' back ')[0], 'Used up', 'and the row\'s state does');
+      // three limit windows beside the pane: each on the row with its short name whole, each on its own line in the pane
+      const lims = await exec("return [...document.querySelectorAll('[data-testid=row-codex-main] .lim .t')].map((t) => [t.textContent, t.firstElementChild.scrollWidth > t.firstElementChild.clientWidth])");
+      assert.deepEqual(lims, [['5h100%', false], ['Wk0%', false], ['Fable88%', false]], 'the row\'s three limits, no name cut');
+      assert.ok(/5-hour 100% .* Week 0% .* Week · Fable 88% /.test((await text('[data-testid=pane-limits]')).replace(/\s+/g, ' ')), 'the pane\'s three windows: ' + (await text('[data-testid=pane-limits]')).replace(/\s+/g, ' '));
+      const facts = await rowFacts();
+      assert.deepEqual([[...new Set(facts.heights)], facts.wrapped, facts.overlap], [[44], [], []], 'and the rows still hold: 44 px, nothing wrapped, no column into the next');
+    }, `if (op === 'state') { const soon = Date.now() + 3600e3, q = r.profiles.find((x) => x.name === 'codex-main').quota, t = q.tiers.find((x) => x.id === 'week'); t.used = 100; t.resets_at = soon;
+      q.tiers.unshift({ id: 'session', label: '5-hour session', used: 0, resets_at: soon }); q.tiers.push({ id: 'week:fable', label: 'Week · Fable', used: 12, resets_at: soon }); }`);
+    await withOps(async () => {
+      await nav('#home');
+      await nav('#accounts?sel=codex-main');
+      await drawn('accounts');
+      await hasText('[data-testid=pane-why]', 'Login expired. Plan and limits not read since ');
+      await hasText('[data-testid=pane-primary]', 'Log in');
+      assert.equal(await exec("return document.querySelector('[data-testid=pane-start]').title"), 'Its login has expired: log in first');
+    }, "if (op === 'state') r.profiles.find((x) => x.name === 'codex-main').identity.needs_login = true;");
+    // Enter on the selected row and the pane's Open go to the account's page
+    await reopenAccounts();
+    await click('[data-testid=row-codex-main] .who');
+    await $('#pane');
+    await page.keyboard.press('Enter');
+    await hashIs('#account?name=codex-main', 'Enter on the selected row opens the account');
+    await exec('history.back()');
+    await click('[data-testid=pane-open]');
+    await hashIs('#account?name=codex-main', 'Open opens the account');
+    await hasText('[data-testid=detail-name]', 'codex-main');
+  });
+
+  await test('detail pane: at Large text the pane lies over the list instead of squeezing it, on Sessions and on Accounts', async () => {
+    const size = (v) => exec("return window.__TAURI__.core.invoke('call', { op: 'settings_set', args: { key: 'text_size', value: arguments[0] } }).then(() => import('./core.js')).then((c) => c.loadState())", [v]);
+    await exec("localStorage.removeItem('hm.pane.sessions'); localStorage.removeItem('hm.pane.accounts')");
+    try {
+      await nav('#home');
+      await nav(SES_HASH);
+      await drawn('sessions');
+      await $('#pane');
+      const usual = await paneFacts();
+      assert.deepEqual([usual.position, usual.list], ['static', usual.sheet - 380], 'at the usual size: beside the list');
+      await size('large');
+      await waitFor(async () => (await exec("return +getComputedStyle(document.documentElement).zoom")) === 1.12, 'Large');
+      for (const [hash, name] of [[SES_HASH, 'sessions'], ['#accounts?sel=codex-main', 'accounts']]) {
+        await nav(hash);
+        await drawn(name);
+        await $('#pane');
+        const big = await paneFacts();
+        assert.ok(big.sheet - 380 < 560, name + ': too narrow for both: ' + big.sheet);
+        assert.deepEqual([big.position, big.list, big.width, big.edges], ['absolute', big.sheet, 380, [0, 0, 0]], name + ': the pane lies over the list from the right, and the list keeps its width');
+        assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, name + ': the pane holds at this size');
+        await shot(`23-${name}-pane-large`);
+        await page.keyboard.press('Escape');
+        await gone(name + ': Esc closes it');
+        await exec('localStorage.removeItem(arguments[0])', ['hm.pane.' + name]);
+      }
+    } finally { await size('comfortable'); await nav('#home'); }
+  });
+
+  await test('the tray popup loads the limits alone: none of the Sessions, Projects, Computers, resume or restore modules; Accounts still exports the shared names', async () => {
+    // the popup's own page, loaded in a frame of this window: what it fetched is what its window loads
+    const loaded = await exec(`return new Promise((done, fail) => { const f = document.createElement('iframe'); f.hidden = true; f.src = 'limits.html';
+      f.onload = () => setTimeout(() => { const names = f.contentWindow.performance.getEntriesByType('resource').map((e) => e.name.split('/').pop().split('?')[0]); f.remove(); done(names); }, 800);
+      f.onerror = () => fail(new Error('limits.html did not load')); document.body.append(f); })`);
+    for (const need of ['popup.js', 'limits.js', 'core.js', 'lib.js']) assert.ok(loaded.includes(need), need + ' is loaded: ' + loaded);
+    for (const none of ['sessions.js', 'projects.js', 'computers.js', 'resume.js', 'restore.js', 'accounts.js', 'pane.js']) assert.ok(!loaded.includes(none), none + ' is not loaded by the popup: ' + loaded);
+    const missing = await exec("return import('./accounts.js').then((a) => ['TOOL', 'money', 'fmtDuration', 'fmtAbsoluteReset', 'showUsed', 'acctView', 'accountViews', 'eligible', 'w5of', 'wkof', 'metricsOf', 'renderRingSvg', 'winTrack', 'trayHtml', 'drawTray'].filter((n) => a[n] === undefined))");
+    assert.deepEqual(missing, [], 'the names other modules import from accounts.js are still there');
+    assert.ok(await exec("return Promise.all([import('./accounts.js'), import('./limits.js')]).then(([a, l]) => a.metricsOf === l.metricsOf && a.drawTray === l.drawTray)"), 'and they are the limits module\'s');
+  });
+
+  await test('a click that only changes what is shown asks the backend nothing: a step unfolded in a session, an Accounts group folded, the charts opened, a tool chosen', async () => {
+    await nav('#session?profile=claude-main&id=s-main-1');
+    await hasText('[data-testid=session-title]', 'Longhorn');
+    await drawn('the session');
+    await withOps(async () => {
+      const step = '[data-testid=chat] .a-step:has(.a-bad) [data-act=step-open]';
+      assert.deepEqual(await asks(step), [], 'unfolding a step reads nothing');
+      await hasText('[data-testid=chat]', 'connection closed');
+      assert.deepEqual(await asks('[data-testid=mode-failed]'), [], 'nor does choosing Failed');
+      await waitFor(async () => !(await text('[data-testid=chat]')).includes('values-staging.yaml'), 'Failed lists only the failed command');
+      assert.deepEqual(await asks('[data-testid=mode-all]'), [], 'nor All');
+      await hasText('[data-testid=chat]', 'values-staging.yaml');
+      assert.deepEqual(await asks(step), [], 'nor folding the step again');
+      await waitFor(async () => !(await text('[data-testid=chat]')).includes('connection closed'), 'folded again');
+      await nav('#accounts');
+      await drawn('accounts');
+      await $('[data-testid=row-codex-main]');
+      const fold = '[data-testid=group-codex] [data-act=acct-fold]';
+      assert.deepEqual(await asks(fold), [], 'folding a group reads nothing');
+      await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-codex-main]')")), 'Codex folded');
+      assert.deepEqual(await asks(fold), [], 'nor does opening it again');
+      await $('[data-testid=row-codex-main]');
+      const charts = '[data-testid=usage-panel] [data-act=acct-fold]', isOpen = () => exec("return document.querySelector(arguments[0]).getAttribute('aria-expanded')", [charts]);
+      const was = await isOpen();
+      assert.deepEqual(await asks(charts), [], 'nor the charts panel, opened');
+      await waitFor(async () => (await isOpen()) !== was, 'the charts panel toggled');
+      assert.deepEqual(await asks(charts), [], 'or folded');
+      await waitFor(async () => (await isOpen()) === was, 'and back');
+      assert.deepEqual(await asks('[data-testid=chip-codex]'), [], 'nor choosing a tool');
+      await waitFor(async () => (await exec("return document.querySelectorAll('[data-testid=accounts-table] .tool-group-card').length")) === 1, 'only Codex');
+      assert.deepEqual(await asks('[data-testid=chip-all]'), [], 'or every tool again');
+    });
+  });
+
+  await test('Refresh limits reads live for every tool the core can ask (Claude Code and Antigravity) and falls back to the general refresh for the others', async () => {
+    await nav('#accounts');
+    await drawn('accounts');
+    const kinds = await exec("return import('./core.js').then((c) => Object.fromEntries(c.S.state.profiles.map((p) => [p.name, p.harness + ' ' + p.kind])))");
+    assert.deepEqual([kinds['claude-main'], kinds['agy-main'], kinds['codex-main']], ['claude subscription', 'agy subscription', 'codex subscription']);
+    // (the reads themselves are answered here: the sandbox's tools have no live limits to give)
+    await withOps(async () => {
+      const refresh = async (name) => {
+        await sleep(300);
+        await ops();
+        await exec("const b = document.createElement('button'); b.dataset.act = 'limits-refresh'; b.dataset.name = arguments[0]; b.hidden = true; document.body.append(b); b.click(); b.remove();", [name]);
+        return waitFor(async () => { const o = (await ops()).filter((x) => x.startsWith('quota_live') || x === 'refresh'); return o.length ? o : null; }, 'a read of the limits of ' + name);
+      };
+      assert.deepEqual(await refresh('claude-main'), ['quota_live:claude-main'], 'Claude Code: read live');
+      assert.deepEqual(await refresh('agy-main'), ['quota_live:agy-main'], 'Antigravity: read live too');
+      assert.deepEqual(await refresh('codex-main'), ['refresh'], 'Codex: the general refresh');
+    }, '', "if (op === 'quota_live') return { tiers: [], fetched_at: Date.now() }; if (op === 'refresh') return { new_rows: 0, quota_errors: [] };");
+    await nav('#home');
   });
 
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
@@ -2392,7 +2843,7 @@ description: Bulk skill ${i}
     await click('.modal-foot [data-act=dialog-close]');
     await shot('41-sessions-resume-here');
     // reading it: fetched from the folder, shown through Claude Code's parser
-    await click('[data-testid=read-laptop-s7]');
+    await dbl('[data-testid=read-laptop-s7]');
     await hasText('[data-testid=session-title]', 'Rotate the staging certificates (laptop)');
     await hasText('[data-testid=chat] .a-msg.ai', 'Certificates rotated on the laptop.');
     await hasText('[data-testid=session-from]', 'LAPTOP');
@@ -2593,7 +3044,7 @@ description: Bulk skill ${i}
     await hasText('[data-testid=archived-s-old-1]', 'archived');
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=session-s-old-1] [data-act=resume]')")), 'no Resume on an archived session');
     await shot('45-sessions-archived');
-    await click('[data-testid=read-s-old-1]');
+    await dbl('[data-testid=read-s-old-1]');
     await hasText('[data-testid=chat] .a-msg.ai', 'The old manifests are tidy.');
     await hasText('[data-testid=resume-reason]', 'archived');
     await shot('46-session-archived');
@@ -2879,10 +3330,13 @@ description: Bulk skill ${i}
     await waitFor(async () => launches() === before + 1 || (await exec('return location.hash')) !== '#accounts', 'Enter did something');
     assert.equal(await exec('return location.hash'), '#accounts', 'the page did not move to the account');
     assert.equal(launches(), before + 1, 'the terminal log got the launch');
-    // the row itself still answers Enter
+    // the row itself still answers Enter: it selects the row (as a click does), and Enter on the selected row opens the account
     await page.focus(`[data-testid="row-${name}"]`);
     await page.keyboard.press('Enter');
-    await waitFor(async () => (await exec('return location.hash')).startsWith('#account?name='), 'Enter on the row opens the account');
+    await waitFor(async () => (await exec('return location.hash')) === '#accounts?sel=' + name, 'Enter on the row selects it');
+    await waitFor(async () => (await exec("const a = document.activeElement; return a.getAttribute('aria-current') && a.dataset.sel")) === name, 'the row is drawn as the selected one, with the focus on it');
+    await page.keyboard.press('Enter');
+    await waitFor(async () => (await exec('return location.hash')).startsWith('#account?name='), 'Enter on the selected row opens the account');
   });
 
   await test('Enter opens a Needs attention item, and a chosen filter chip says it is pressed', async () => {
