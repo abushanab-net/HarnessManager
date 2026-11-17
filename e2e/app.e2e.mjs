@@ -1421,6 +1421,18 @@ try {
     await click('.dlg .dh [data-act=dialog-close]');
   });
 
+  await test('the tray popup loads the limits alone: none of the Sessions, Projects, Computers, resume or restore modules; Accounts still exports the shared names', async () => {
+    // the popup's own page, loaded in a frame of this window: what it fetched is what its window loads
+    const loaded = await exec(`return new Promise((done, fail) => { const f = document.createElement('iframe'); f.hidden = true; f.src = 'limits.html';
+      f.onload = () => setTimeout(() => { const names = f.contentWindow.performance.getEntriesByType('resource').map((e) => e.name.split('/').pop().split('?')[0]); f.remove(); done(names); }, 800);
+      f.onerror = () => fail(new Error('limits.html did not load')); document.body.append(f); })`);
+    for (const need of ['popup.js', 'limits.js', 'core.js', 'lib.js']) assert.ok(loaded.includes(need), need + ' is loaded: ' + loaded);
+    for (const none of ['sessions.js', 'projects.js', 'computers.js', 'resume.js', 'restore.js', 'accounts.js', 'pane.js']) assert.ok(!loaded.includes(none), none + ' is not loaded by the popup: ' + loaded);
+    const missing = await exec("return import('./accounts.js').then((a) => ['TOOL', 'money', 'fmtDuration', 'fmtAbsoluteReset', 'showUsed', 'acctView', 'accountViews', 'eligible', 'w5of', 'wkof', 'metricsOf', 'renderRingSvg', 'winTrack', 'trayHtml', 'drawTray'].filter((n) => a[n] === undefined))");
+    assert.deepEqual(missing, [], 'the names other modules import from accounts.js are still there');
+    assert.ok(await exec("return Promise.all([import('./accounts.js'), import('./limits.js')]).then(([a, l]) => a.metricsOf === l.metricsOf && a.drawTray === l.drawTray)"), 'and they are the limits module\'s');
+  });
+
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
     const claudeMcp = () => JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
     await nav('#mcp');

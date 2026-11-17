@@ -3,7 +3,7 @@
 
 import { S, call, applyTheme, shown, onShown } from './core.js';
 import { brandMark } from './lib.js';
-import { drawTray } from './accounts.js';
+import { drawTray } from './limits.js'; // not accounts.js: the popup loads no page (sessions, projects, computers, resume, restore)
 
 const root = document.getElementById('tray-root');
 const draw = () => call('state').then(async (st) => { S.state = st; applyTheme(st); await drawTray(root); const m = document.getElementById('tray-mark'); if (m) m.innerHTML = brandMark(16); }).catch(() => {});
