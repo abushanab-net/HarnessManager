@@ -348,3 +348,25 @@ fn an_answer_longer_than_the_asker_allows_is_not_read() {
     let e = c.bytes(&path, len - 1).unwrap_err();
     assert!(format!("{e:#}").contains("not taken"), "one byte over: {e:#}");
 }
+
+#[test]
+fn presence_and_transcripts_switched_off_are_not_served_to_a_paired_computer_either() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    let mut reg = a.ctx.registry().unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+    a.ctx.save_registry(&reg).unwrap();
+    let f = a.ctx.home.join(".claude").join("projects").join("app").join("s1.jsonl");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, "{}\n").unwrap();
+    a.ctx.db.journal_session(&crate::model::SessionMeta { harness: "claude".into(), profile: "claude-main".into(), id: "s1".into(), last_active_at: 1, source_path: f.display().to_string(), ..Default::default() }).unwrap();
+    let a_cert: String = b.ctx.db.with(|c| Ok(c.query_row("select cert_pem from peers where device_id=?", [&a.ctx.settings.device_id], |r| r.get(0))?)).unwrap();
+    let c = Client::connect(&identity::load(&b.ctx).unwrap(), &a_cert, "127.0.0.1", port(&a)).unwrap();
+    let transcript = format!("/v1/transcript/{}/claude/claude-main/s1", a.ctx.settings.device_id);
+    assert!(c.json("/v1/presence").unwrap().is_some() && c.json(&transcript).is_err(), "both on: presence answers, and the transcript (which is no JSON)");
+    // switched off while the listener runs: it holds at once
+    journal::configure(&a.ctx.data, &a.ctx.home, &json!({"sync_presence": false, "sync_transcripts": false})).unwrap();
+    assert_eq!(c.json("/v1/presence").unwrap(), None);
+    assert_eq!(c.json(&transcript).unwrap(), None);
+}
