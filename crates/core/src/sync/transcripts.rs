@@ -151,6 +151,7 @@ pub fn carry_to(ctx: &Ctx, cap: i64, put: &dyn Fn(&str, &str, &[u8]) -> Result<(
 /// (too big there) replaces nothing and removes what was known of it.
 pub fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
     tables(tx)?;
+    if !crate::journal::session_key_ok(&e.key) { bail!("transcript entry with names that cannot be used here"); }
     if e.data.get("skipped").is_some() || e.data["file"].as_str().unwrap_or("").is_empty() {
         tx.execute("delete from transcripts where device=? and key=?", [device, &e.key])?;
         return Ok(());

@@ -16,7 +16,7 @@ use crate::db::{quota_point_in, upsert_session, upsert_usage};
 use crate::model::{SessionMeta, UsageRow};
 use crate::sync::peer::{identity, store};
 use crate::sync::{folder, peer};
-use crate::util::{now_ms, sha256_hex};
+use crate::util::{now_ms, safe_name, sha256_hex};
 use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
@@ -164,6 +164,13 @@ fn mirror(ctx: &Ctx, root: &Path) -> Result<()> {
     folder::write_manifest(&dir, &man)
 }
 
+/// A session's journal key, `<tool>/<account>/<id>`, as another computer may send it: the three become path parts
+/// and arguments here, so the tool is one this version knows and the other two are plain names.
+pub(crate) fn session_key_ok(key: &str) -> bool {
+    let mut p = key.splitn(3, '/');
+    matches!((p.next(), p.next(), p.next()), (Some(h), Some(a), Some(i)) if crate::harness::by_id(h).is_some() && safe_name(a) && safe_name(i))
+}
+
 /// One entry of another computer's journal into this database.
 fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
     match e.op.as_str() {
@@ -173,6 +180,7 @@ fn apply(tx: &Connection, device: &str, e: &Entry) -> Result<()> {
         }
         "session" => {
             let m: SessionMeta = serde_json::from_value(e.data.clone()).context("session entry")?;
+            if !session_key_ok(&e.key) || e.key != crate::db::session_key(&m) { bail!("session entry with names that cannot be used here"); }
             upsert_session(tx, &e.key, &m, device)?;
         }
         "quota" => {
@@ -762,5 +770,46 @@ mod tests {
         round(&a).unwrap();
         round(&b).unwrap();
         assert!(b.db.remote_sessions().unwrap().is_empty());
+    }
+
+    /// What another computer publishes, merged here: `entries` as one chunk of `id`'s journal. No key is known for
+    /// it, so nothing is checked against a signature. Returns the sequence applied up to.
+    fn merge_from(ctx: &Ctx, id: &str, entries: &[Value]) -> i64 {
+        let bytes = entries.iter().map(|e| format!("{e}\n")).collect::<String>().into_bytes();
+        let to = entries.last().and_then(|e| e["seq"].as_i64()).unwrap_or(0);
+        let man = json!({"incarnation": "i", "chunks": [{"file": format!("i-1-{to}.jsonl"), "from": 1, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}]});
+        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone())).unwrap()
+    }
+
+    fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
+
+    fn session(harness: &str, profile: &str, id: &str, title: &str, at: i64) -> Value {
+        serde_json::to_value(SessionMeta { harness: harness.into(), profile: profile.into(), id: id.into(), title: title.into(), last_active_at: at, ..Default::default() }).unwrap()
+    }
+
+    fn keys_of(ctx: &Ctx, table: &str) -> Vec<String> {
+        ctx.db.with(|c| { crate::transcripts::tables(c)?; Ok(c.prepare(&format!("select key from {table} order by key"))?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?) }).unwrap()
+    }
+
+    #[test]
+    fn a_session_or_transcript_whose_names_are_not_plain_names_is_not_merged() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let s = |seq: i64, h: &str, p: &str, id: &str| entry(seq, "session", &format!("{h}/{p}/{id}"), session(h, p, id, "t", 5));
+        let tr = |seq: i64, key: &str| entry(seq, "transcript", key, json!({"file": "transcripts/claude/work/s1.jsonl.zst", "bytes": 1, "sha256": "x", "mtime": 1, "source_rel": "projects/p/s1.jsonl"}));
+        let long = "a".repeat(200);
+        let entries = [
+            // a path, an option, a letter outside ASCII, nothing, a drive, a tool this version does not know, a name too long
+            s(1, "claude", "work", "..\\..\\evil"), s(2, "claude", "work", "../evil"), s(3, "claude", "work", "--dangerously-skip-permissions"), s(4, "claude", "work", "é"),
+            s(5, "claude", "work", ""), s(6, "claude", "..", "s1"), s(7, "claude", "C:work", "s1"), s(8, "nope", "work", "s1"), s(9, "claude", "work", &long), s(10, "claude", "work", ".hidden"),
+            // the key names one session, the entry another
+            entry(11, "session", "claude/work/s1", session("claude", "work", "..\\evil", "t", 5)),
+            tr(12, "claude/work/..\\..\\evil"), tr(13, "claude/../s1"), tr(14, "nope/work/s1"), tr(15, "claude/work/-x"), tr(16, "claude/work"),
+            // and the names the tools do give
+            s(17, "claude", "work", "0b1c2d3e-aaaa-bbbb-cccc-1234567890ab"), s(18, "opencode", "oc_main", "ses_5f3a.1"), tr(19, "claude/work/s1"),
+        ];
+        assert_eq!(merge_from(&ctx, "peer-1", &entries), 19);
+        assert_eq!(keys_of(&ctx, "sessions"), ["claude/work/0b1c2d3e-aaaa-bbbb-cccc-1234567890ab", "opencode/oc_main/ses_5f3a.1"]);
+        assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
     }
 }

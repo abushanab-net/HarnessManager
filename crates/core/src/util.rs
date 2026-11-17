@@ -161,13 +161,24 @@ fn login_shell_path() -> Option<String> {
     out.split(MARK).nth(1).filter(|p| !p.is_empty()).map(String::from)
 }
 
+/// CON, NUL, COM1 ... name devices on Windows, not files or folders.
+fn device_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    matches!(l.as_str(), "con" | "prn" | "aux" | "nul")
+        || (l.len() == 4 && (l.starts_with("com") || l.starts_with("lpt")) && l.as_bytes()[3].is_ascii_digit() && l.as_bytes()[3] != b'0')
+}
+
 /// Valid profile and item names: letters, digits, `-` and `_`, as they also become folder names.
 pub fn valid_name(name: &str) -> bool {
-    // CON, NUL, COM1 ... name devices on Windows, not folders
-    let l = name.to_ascii_lowercase();
-    let device = matches!(l.as_str(), "con" | "prn" | "aux" | "nul")
-        || (l.len() == 4 && (l.starts_with("com") || l.starts_with("lpt")) && l.as_bytes()[3].is_ascii_digit() && l.as_bytes()[3] != b'0');
-    !device && !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    !device_name(name) && !name.is_empty() && name.len() <= 64 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// A name another computer sent, before it becomes part of a path or an argument here: ASCII letters, digits,
+/// `-`, `_` and `.`, up to 128 of them, not starting with `-` (an option) or `.` (a parent folder, a hidden file),
+/// and no device. No separator, drive or stream is made of these, on any system.
+pub fn safe_name(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 128 && !s.starts_with(['-', '.']) && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        && !device_name(s.split('.').next().unwrap_or(""))
 }
 
 pub fn file_sig(path: &Path) -> Option<(i64, u64)> {
@@ -229,5 +240,16 @@ mod unix_tests {
         assert_eq!(dirs.len(), dirs.iter().collect::<std::collections::HashSet<_>>().len(), "no folder twice: {p}");
         // the login shell answered: whatever it adds (nvm, Homebrew, npm's prefix) comes first
         println!("PATH after: {p}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_safe_name_is_one_plain_path_part_on_any_system() {
+        for ok in ["s1", "0b1c2d3e-aaaa-bbbb-cccc-1234567890ab", "ses_5f3a.1", "rollout-2026-11-01T10-00-00-cx-1.jsonl", "a", &"a".repeat(128)] { assert!(safe_name(ok), "{ok}"); }
+        for bad in ["", ".", "..", ".hidden", "-x", "--resume", "a/b", "a\\b", "C:evil", "a:stream", "a b", "é", "a\n", "a\0", "NUL", "nul.jsonl", "COM1.txt", &"a".repeat(129)] { assert!(!safe_name(bad), "{bad:?}"); }
     }
 }

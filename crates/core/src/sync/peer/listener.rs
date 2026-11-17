@@ -137,7 +137,7 @@ async fn transcript(State(ctx): State<Arc<Ctx>>, Path((origin, harness, profile,
         let r = if origin == ctx.settings.device_id { crate::sync::transcripts::own_zst(&ctx, &harness, &profile, &id) } else {
             let key = format!("{harness}/{profile}/{id}");
             ctx.db.with(|c| { crate::transcripts::tables(c)?; Ok(c.query_row("select file from transcripts where device=? and key=? and fetched_at is not null", [&origin, &key], |r| r.get::<_, String>(0))?) })
-                .and_then(|file| Ok(std::fs::read(crate::transcripts::local_path(&ctx, &origin, &harness, &profile, &file))?))
+                .and_then(|file| Ok(std::fs::read(crate::transcripts::local_path(&ctx, &origin, &harness, &profile, &file)?)?))
                 .and_then(|plain| Ok(zstd::encode_all(&plain[..], 3)?))
         };
         match r {
