@@ -78,3 +78,15 @@ html[data-theme="dark"] :is(.a-filters, .tool-group-header, .page-head .title, .
 .a-charts { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .a-charts > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .model-rows .win-bar-line { grid-template-columns: minmax(92px, 170px) 1fr 64px 76px; }
+
+/* ---- the page of one account ---- */
+/* its small controls (the tabs, Open and Follow on a session, the folder, All N) at the 28 px floor */
+.a-account :is(.filter-chip:not(.back-chip), .btn-follow, .facts-grid dd .btn-secondary) { min-height: 28px; }
+.page-head .actions .btn > .trunc { max-width: 220px; }
+/* nothing read: the Limits card is one line across the page (the reason, then the action that fixes it), and the login's
+   facts take two columns under it, so no half of the row is an empty box */
+.account-columns.solo { grid-template-columns: minmax(0, 1fr); }
+.a-unread { display: flex; align-items: center; gap: 12px; min-height: 30px; }
+.a-unread .panel-title { flex: none; }
+.account-columns.solo .facts-grid { grid-template-columns: 110px minmax(0, 1fr) 110px minmax(0, 1fr); }
+.account-chart .stack-lbl { white-space: nowrap; }

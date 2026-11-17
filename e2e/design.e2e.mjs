@@ -27,6 +27,7 @@ const SMALL_TEXT_ALLOWED = [
 const PARTS = {
   '#accounts': [['.a-filters .seg > *', 'height', '24px'], ['.tool-group-header', 'height', '36px'], ['.acct-row', 'height', '56px'], ['.acct-row', 'columnGap', '14px'], ['.a-ring', 'width', '44px'], ['.a-ring b', 'fontSize', '12px'],
     ['.acct-row .lim', 'width', '72px'], ['.acct-row .acts .btn', 'height', '28px'], ['.acct-row .acts .btn.icon', 'width', '30px']],
+  '#account?name=claude-main': [['.account-columns', 'display', 'grid'], ['.page-head .btn.primary', 'height', '30px']],
   '#sessions': [['.a-gh', 'padding', '7px 12px'], ['.a-srow', 'padding', '6px 10px'], ['.a-gname', 'fontSize', '13px']],
   '#session?profile=claude-main&id=s-main-1': [['.a-conv', 'padding', '0px'], ['.a-chat', 'padding', '12px 14px']],
   '#routing': [['.b-router-stats b', 'fontSize', '20px'], ['.b-router-stats', 'display', 'grid']],

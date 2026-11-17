@@ -972,6 +972,89 @@ try {
     await waitFor(async () => (await exec('return location.hash')) === '#account?name=team-ci', 'the row opens its account');
   });
 
+  await test('account page: a logged-out account has Log in as its primary and Start disabled with the reason; a Limits card with nothing read holds the reason and the fix; the head\'s actions stay on one line', async () => {
+    const head = () => exec(`const q = (s) => document.querySelector(s), acts = [...document.querySelectorAll('.page-head .actions > *')], start = q('[data-testid=detail-start]'), body = q('.page-body').getBoundingClientRect();
+      return { primary: [...document.querySelectorAll('.page-head .btn.primary')].map((b) => b.textContent.trim()), buttons: acts.map((b) => b.textContent.trim()), start: [start.disabled, start.title],
+        tops: [...new Set(acts.map((b) => Math.round(b.getBoundingClientRect().top)))].length, inside: acts.at(-1).getBoundingClientRect().right <= body.right - 13, name: Math.round(q('.page-head h1').getBoundingClientRect().height) };`);
+    const limits = () => exec(`const c = document.querySelector('[data-testid=limits-card]'), cols = c.parentElement, fix = c.querySelector('[data-testid=limits-fix]'), w = cols.getBoundingClientRect().width;
+      return { text: c.innerText.replace(/\\s+/g, ' ').trim(), fix: fix ? fix.textContent.trim() : null, bars: c.querySelectorAll('.account-limit').length, solo: cols.classList.contains('solo'),
+        widths: [...cols.children].map((k) => Math.round((k.getBoundingClientRect().width / w) * 100)), height: Math.round(c.getBoundingClientRect().height) };`);
+    // logged out (the sandbox's claude-main has no login)
+    await nav('#account?name=claude-main');
+    await drawn('the account');
+    await $('[data-testid=detail-login]');
+    let h = await head();
+    assert.deepEqual(h.primary, ['Log in'], 'the one primary is the action that works: Log in');
+    assert.deepEqual(h.buttons, ['Start in a folder…', 'Start', 'Log in', '⋯'], 'Start stays, as a secondary');
+    assert.deepEqual(h.start, [true, 'Not logged in: log in first'], 'disabled, with the reason in its title');
+    assert.deepEqual([h.tops, h.inside, h.name], [1, true, 24], 'the actions on one line, inside the page; the name on one line');
+    let l = await limits();
+    assert.ok(l.text.startsWith('Limits — Not read: this account is not logged in.'), 'the Limits card says why nothing is read: ' + l.text);
+    assert.equal(l.fix, 'Log in', 'and holds the action that fixes it');
+    assert.deepEqual([l.solo, l.widths, l.bars], [true, [100, 100], 0], 'one line across the page, the login card under it: no half of the row is empty');
+    assert.ok(l.height <= 60, 'the card is as tall as its one line: ' + l.height);
+    await shot('05c-account-logged-out');
+    try {
+      await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = 'dark'");
+      await sleep(300);
+      await shot('05d-account-vektragrid-dark');
+    } finally { await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'"); }
+    // every tab of the page: no text under 12 px, and every control at least 28 px tall (the back line is the shared head's)
+    for (const tab of ['overview', 'sessions', 'projects', 'settings']) {
+      await click(`[data-testid=tab-${tab}]`);
+      await drawn('the ' + tab + ' tab');
+      const t = await exec(`const small = [], low = [];
+        for (const el of document.querySelectorAll('#sheet *')) {
+          const r = el.getBoundingClientRect();
+          if (!r.width || !r.height) continue;
+          if ([...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && parseFloat(getComputedStyle(el).fontSize) < 12) small.push(getComputedStyle(el).fontSize + ' ' + el.className + ' ' + el.textContent.trim().slice(0, 24));
+          if (el.matches('button, a[href], input, select') && !el.matches('.back-chip') && r.height < 28) low.push(Math.round(r.height) + 'px ' + (el.dataset.testid || el.className) + ' ' + el.textContent.trim().slice(0, 24));
+        }
+        return { small, low };`);
+      assert.deepEqual(t, { small: [], low: [] }, tab + ': text under 12 px, controls under 28 px');
+    }
+    await click('[data-testid=tab-overview]');
+    await drawn('the overview tab');
+    assert.equal(await exec("return document.querySelector('[data-testid=limits-fix]').dataset.act"), 'login', 'the card\'s Log in is the same action');
+    await click('[data-testid=detail-login]');
+    await $('[data-testid=login-code]');
+    await click('.dlg .dh [data-act=dialog-close]');
+    // logged in, limits read: Start is the primary, the limits beside the login card
+    await nav('#account?name=work-max');
+    await drawn('the account');
+    await $('[data-testid=limits-card] .account-limit');
+    h = await head();
+    assert.deepEqual([h.primary, h.buttons, h.start[0]], [['Start work-max'], ['Start in a folder…', 'Start work-max', '⋯'], false], 'Start <name> is the primary of an account that can start');
+    assert.deepEqual([h.tops, h.inside], [1, true], 'on one line');
+    l = await limits();
+    assert.ok(!l.solo && l.bars >= 2 && l.fix === null, 'its limits as bars, beside the login card');
+    // logged in, nothing read yet: Refresh limits fixes it
+    await nav('#account?name=codex-personal');
+    await drawn('the account');
+    await $('[data-testid=limits-fix]');
+    l = await limits();
+    assert.ok(l.text.startsWith('Limits — Not read yet') && l.fix === 'Refresh limits' && l.solo, 'not read yet: Refresh limits: ' + l.text);
+    await click('[data-testid=limits-fix]');
+    await waitFor(async () => /new record|up to date/.test(await exec("return document.getElementById('toast')?.textContent || ''")), 'Refresh limits reported');
+    // an API key has no limits, and nothing to fix
+    await nav('#account?name=team-ci');
+    await drawn('the account');
+    await $('[data-testid=limits-card]');
+    l = await limits();
+    assert.ok(l.text.includes('billed per token') && l.fix === null && l.solo, 'an API key: the plain fact: ' + l.text);
+    // a long account name does not push the actions onto a second line
+    await exec(`const t = window.__TAURI__; window.__core = t.core;
+      t.core = { ...t.core, invoke: (cmd, a, o) => window.__core.invoke(cmd, a, o).then((r) => { if (a && a.op === 'detail') r.view.label = 'An account with a very long name that would not fit beside its buttons'; return r; }) };`);
+    try {
+      await nav('#account?name=work-max&tab=sessions');
+      await drawn('the account');
+      await hasText('[data-testid=detail-name]', 'An account with a very long name');
+      h = await head();
+      assert.deepEqual([h.tops, h.inside, h.name], [1, true, 24], 'a long name is cut, the actions stay on one line');
+      assert.ok(await exec("const b = document.querySelector('[data-testid=detail-start]').getBoundingClientRect(); return b.width <= 260"), 'and so is the name on Start');
+    } finally { await exec('window.__TAURI__.core = window.__core'); }
+  });
+
   await test('MCP servers: add, write to tools, edit as JSON, search, and import from apps', async () => {
     const claudeMcp = () => JSON.parse(fs.readFileSync(path.join(home, '.claude.json'), 'utf8')).mcpServers || {};
     await nav('#mcp');
