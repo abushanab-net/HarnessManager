@@ -12,6 +12,18 @@ export async function call(op, args = {}) {
   return t.core.invoke('call', { op, args });
 }
 
+/** Whether the window can be seen. Minimized, the page knows it is hidden; hidden in the tray it does not (WebView2
+ * goes on calling the page visible there), so the window itself is asked. */
+const win = () => window.__TAURI__.window.getCurrentWindow();
+export const shown = async () => document.visibilityState === 'visible' && (await win().isVisible().catch(() => true));
+/** Run fn when the window may be back in view: restored from the taskbar, or shown from the tray, which focuses it;
+ * the pointer moving over it is the sign when the system showed it without giving it the focus. */
+export function onShown(fn) {
+  document.addEventListener('visibilitychange', fn);
+  window.addEventListener('pointermove', fn);
+  win().listen('tauri://focus', fn).catch(() => {});
+}
+
 /** The number of tools with a newer version, beside Setup and Apps in the rail. */
 export function setAppUpdates(n) {
   for (const el of document.querySelectorAll('#apps-count, #n-apps')) {

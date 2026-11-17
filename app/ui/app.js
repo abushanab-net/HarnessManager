@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds, editing } from './core.js';
+import { S, render, go, call, setAppUpdates, setNavCounts, setFresh, applyTheme, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
 import { setTodayBadge } from './home.js';
@@ -47,10 +47,15 @@ const redrawSoon = () => {
     } finally { drawing = false; lastDraw = Date.now(); if (again) { again = false; redrawSoon(); } }
   }, Math.max(250, 4000 - (Date.now() - lastDraw)));
 };
-if (ev) ev.listen('refreshed', () => {
-  S.usageAt = Date.now(); setFresh();
+// hidden in the tray, the window draws nothing: it remembers that it is stale and draws once when it is shown again
+let stale = false;
+const refreshed = async () => {
+  if (!(await shown())) { stale = true; return; }
+  stale = false; setFresh();
   if (['home', 'accounts', 'account', 'usage', 'projects', 'sessions'].includes(S.route.view)) redrawSoon();
-});
+};
+if (ev) ev.listen('refreshed', () => { S.usageAt = Date.now(); refreshed(); });
+if (ev) onShown(() => { if (stale) { stale = false; refreshed(); } });
 
 // tools with a newer version: from the last check now, and from the check at launch when it finishes
 call('state').then((st) => { applyTheme(st); setAppUpdates(st.app_updates); const v = document.getElementById('nav-version'); if (v) v.textContent = 'v' + st.version; }).catch(() => {});
@@ -73,7 +78,7 @@ if (ev) ev.listen('self-update', (e) => {
 });
 
 // open consoles change without any file being written; look again every minute on the accounts list
-setInterval(() => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && document.visibilityState === 'visible') render(true); }, 60000);
+setInterval(async () => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && await shown()) render(true); }, 60000);
 
 // the limits popup by the tray icon opens this window at an account
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });

@@ -3,7 +3,7 @@
 // The tags shared with Projects and Accounts live here too. Every redraw goes through patch(), so a live arrival
 // keeps the reader's scroll, focus and open folds.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown } from './core.js';
 import { esc, fmt, hm, when, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, computers, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
@@ -269,10 +269,12 @@ export function watchLive(m) {
   let last = null;
   liveTimer = setInterval(async () => {
     if (S.route.view !== 'session' || rv.sessionKey !== key) return clearInterval(liveTimer);
+    if (document.visibilityState !== 'visible') return; // minimized: nothing is looked at
     let stamp;
     try { stamp = JSON.stringify(await call('file_stamp', { path: m.source_path })); } catch { return; }
     if (last === null) { last = stamp; return; }
-    if (stamp === last || document.getElementById('dialog-root').innerHTML) return;
+    // hidden in the tray, the change is not drawn; it is still a change at the first look once the window shows
+    if (stamp === last || document.getElementById('dialog-root').innerHTML || !(await shown())) return;
     last = stamp;
     render(true);
   }, 2000);
