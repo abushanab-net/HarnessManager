@@ -349,6 +349,66 @@ body.popup .tray-rings-grid { max-height: none; }
 .card { background: var(--bg-panel); border: 1px solid var(--line-subtle); border-radius: var(--radius-card); box-shadow: var(--shadow-card); }
 .card-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line-subtle); }
 
+/* ---------- the detail pane Sessions and Accounts share (pane.js; zone 3 of the drawings' b.css) ---------- */
+/* A sheet whose last child is the pane: the list in its own scrolling column, the pane 380 px at the right from under
+   the top bar to the bottom, scrolling on its own. The list's own narrow-window rules then measure the list. */
+.sheet:has(> .pane) { flex-direction: row; overflow: hidden; }
+.sheet:has(> .pane) > .page-body { flex: 1 1 0; min-width: 0; overflow: auto; container: sheet / inline-size; }
+.sheet:has(> .pane) > .page-body > * { flex-shrink: 0; }
+.pane { flex: none; width: 380px; max-width: 100%; min-height: 0; overflow: auto; display: flex; flex-direction: column; background: var(--bg-panel); border-left: 1px solid var(--line-default); }
+/* too narrow for both (the list would be under 560 px; Large text at 1280 is): the pane lies over the list instead of squeezing it */
+@container sheet (max-width: 939px) { .sheet > .pane { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; box-shadow: var(--shadow-lg); } }
+/* the selected row: the accent at its left edge and a tint (and aria-current, for what does not see colour) */
+[data-sel] { cursor: pointer; }
+.sheet [data-sel][aria-current] { background: var(--ac-soft); box-shadow: inset 3px 0 0 var(--ac); }
+/* the pane's parts: who it is, one reason line, the actions, then the details */
+.pane-sec { padding: 12px 16px; border-bottom: 1px solid var(--line-subtle); flex: none; min-width: 0; }
+.pane-sec.foot { margin-top: auto; border-bottom: 0; border-top: 1px solid var(--line-subtle); padding: 8px 16px; }
+.pane-sec:last-child { border-bottom: 0; }
+/* (.pane-top, not .pane-head: that name is the head of a Settings section, with a height of its own) */
+.pane-top { display: flex; gap: 8px; align-items: flex-start; border-bottom: 0; padding-bottom: 0; }
+.pane-top > .ticon { margin: 4px 2px 0 0; }
+.pane-top .name { font-size: var(--fs-section); font-weight: 650; line-height: 20px; }
+.pane-top .row { gap: 6px; }
+/* a name with its pills: the pills go under a name they have no room beside, so the name is never the part cut */
+.pane-name { flex-wrap: wrap; row-gap: 2px; }
+.pane-top .btn.sm { padding: 0 4px; margin-right: -4px; } .pane-top .btn.icon { width: 28px; padding: 0; margin: 0 -6px 0 0; }
+.pane-why { display: flex; align-items: center; gap: 8px; border: 1px solid var(--ac-border); background: var(--ac-soft); border-radius: var(--radS); padding: 8px 10px; line-height: 18px; min-width: 0; }
+.pane-why.bad { border-color: var(--neg-border); background: var(--neg-soft); }
+.pane-why.warn { border-color: var(--warn-border); background: var(--warn-soft); }
+.pane-why.plain { border-color: var(--line-default); background: var(--bg-card); }
+.pane-why b { font-weight: 650; }
+.pane-acts { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
+.pane-acts + .pane-acts { margin-top: 8px; }
+.pane-acts .btn.grow { flex: 1 1 0; justify-content: center; }
+.pane-acts .reason { flex: 1 1 0; min-width: 0; color: var(--ink-muted); font-size: var(--fs-small); }
+.pane-tabs { display: flex; gap: 18px; padding: 0 16px; height: 36px; flex: none; border-bottom: 1px solid var(--line-subtle); }
+.pane-tabs > * { display: flex; align-items: center; font-weight: 600; color: var(--ink-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.pane-tabs > button:hover { color: var(--ink-primary); }
+.pane-tabs > .on { color: var(--ink-primary); border-bottom-color: var(--ac); }
+/* a part of the item that has no room here: a link to its place on the full page, drawn as a link, not as a tab */
+.pane-tabs > a { margin-left: auto; font-weight: 500; color: var(--ac); text-decoration: underline; text-underline-offset: 3px; }
+.pane-sub { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); margin-bottom: 8px; }
+.pane-sub > :last-child:not(:first-child) { margin-left: auto; font-weight: 400; }
+.pane-sub a { color: var(--ac); font-weight: 600; }
+.pane-kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); column-gap: 8px; row-gap: 6px; align-items: center; }
+.pane-kv.short { grid-template-columns: 64px minmax(0, 1fr); }
+.pane-kv > dt { color: var(--ink-muted); font-size: var(--fs-small); }
+.pane-kv > dd { min-width: 0; }
+.pane-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pane-tile { border: 1px solid var(--line-subtle); background: var(--bg-card); border-radius: var(--radS); padding: 7px 10px; min-width: 0; }
+.pane-tile > b { display: block; font-size: var(--fs-section); font-weight: 700; line-height: 20px; }
+.pane-tile > b.negT { color: var(--neg); }
+.pane-cli { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 3px 0 10px; border: 1px solid var(--line-subtle); border-radius: var(--radS); background: var(--bg-input); }
+.pane-cli + .pane-cli { margin-top: 8px; }
+.pane-cli .btn { border-color: transparent; background: transparent; color: var(--ink-muted); width: 28px; height: 28px; }
+.pane-cli .btn:hover { color: var(--ink-primary); background: var(--bg-card-hover); }
+.pane-mini { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; column-gap: 10px; align-items: center; height: 42px; border-bottom: 1px solid var(--line-subtle); line-height: 17px; text-decoration: none; }
+.pane-mini:last-child { border-bottom: 0; }
+.pane-mini:hover b { color: var(--ac); }
+.pane-mini b { display: block; font-weight: 600; }
+.pane-note { color: var(--ink-muted); font-size: var(--fs-small); line-height: 18px; }
+
 /* ---------- the reference's components (styles.css), hues renamed to roles ---------- */
 /* Toast / One-line Notice Bar */
 .notice-bar {
