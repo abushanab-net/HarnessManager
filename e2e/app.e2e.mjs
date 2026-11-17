@@ -702,11 +702,11 @@ try {
       '#projects': ['Projects', 'Where the tokens and the cost went'],
       '#sessions': ['Sessions', 'platform-gitops'],
       '#session?profile=claude-main&id=s-main-1': ['Longhorn backup target for staging', 'Conversation'],
-      '#computers': ['Computers'],
+      '#computers': ['Computers', 'How your computers sync'],
       '#routing': ['API keys & routing', 'Local router', 'Routes', 'Providers', 'Recent requests through the router'],
       '#mcp': ['MCP servers', 'Write to each tool'], '#skills': ['Skills', 'Installed'], '#prompts': ['System prompts', 'The file now'],
       '#apps': ['Apps', 'Installed', 'Harness Manager'],
-      '#settings': ['Settings', 'Appearance', 'Window and terminal', 'Updates', 'Usage and limits', 'Connections', 'Diagnostic log', 'Maintenance', 'Backups'],
+      '#settings':['Settings', 'Appearance'], '#settings?tab=limits': ['Settings', 'Limits'], '#settings?tab=backups': ['Settings', 'Backups'],
       '#cli': ['CLI reference', 'Accounts', 'Run', 'Usage and limits', 'Sessions and projects', 'Shared setup', 'Routing and setup'],
     };
     // the replies panel as the design opens it (an earlier test left the full log open)
@@ -723,11 +723,19 @@ try {
         return i === titles.length;
       }, `${h}: ${titles.join(' / ')}`);
     }
-    // Settings: as many rows in each section as the design counts
+    // Settings: the sections in the drawing's order, and as many rows in each as its head counts
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    const counts = await exec("return [...document.querySelectorAll('.b-section')].map((s) => s.querySelectorAll('.b-setting').length)");
-    assert.deepEqual(counts.slice(0, 7), [5, 3, 2, 2, 2, 3, 3], 'settings per section: Appearance has Text size too');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=set-nav] a')].map((a) => a.textContent.trim())"), ['Appearance', 'Window and terminal', 'Updates', 'Limits', 'Connections', 'Log', 'Maintenance', 'Backups']);
+    const counts = [];
+    for (const id of ['appearance', 'window', 'updates', 'limits', 'connections', 'log', 'maintenance', 'backups']) {
+      await nav('#settings?tab=' + id);
+      await $(`[data-testid=sec-${id}]`);
+      const [rows, says] = await exec("return [document.querySelectorAll('.set-pane .srow[data-key^=setting-]').length, document.querySelector('.set-pane .pane-head .muted').textContent]");
+      assert.equal(says, `${rows} settings`, `${id}: the head counts its rows`);
+      counts.push(rows);
+    }
+    assert.deepEqual(counts, [5, 3, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
@@ -994,7 +1002,7 @@ description: Bulk skill ${i}
   });
 
   await test('backups: back up, lose a skill folder, restore it; export to a file; the interval saves on change', async () => {
-    await nav('#settings');
+    await nav('#settings?tab=backups');
     await click('[data-testid=backup-now]');
     await $('[data-testid=backup-Manual]');
     const sk = path.join(home, '.agents', 'skills', 'my-skill');
@@ -1073,7 +1081,7 @@ description: Bulk skill ${i}
   if (!process.env.HRM_E2E_APP_DIR) await test('a new Harness Manager: found at launch, offered in Settings > Updates', async () => {
     // the check at launch found it: the dot on the Settings link, and the offer without a click
     await waitFor(async () => exec("return !document.getElementById('settings-upd').hidden"), 'the dot on the Settings link');
-    await nav('#settings');
+    await nav('#settings?tab=updates');
     await $('[data-testid=self-install]');
     await hasText('.sheet', 'Version 9.9.9 is available');
     await hasText('.sheet', 'Faster limits.');
@@ -1090,10 +1098,10 @@ description: Bulk skill ${i}
   });
 
   await test('settings: change the terminal', async () => {
-    await nav('#settings');
+    await nav('#settings?tab=window');
     await click('[data-testid=st-term] button[data-v=console]');
     await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).terminal === 'console', 'settings saved');
-    await waitFor(async () => (await exec("return document.querySelector('[data-testid=st-term] button.active')?.dataset.v")) === 'console', 'drawn with Console picked');
+    await waitFor(async () => (await exec("return document.querySelector('[data-testid=st-term] button.on')?.dataset.v")) === 'console', 'drawn with Console picked');
     await shot('14-settings');
     // switches save at once
     const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
@@ -1188,7 +1196,7 @@ description: Bulk skill ${i}
     await click('[data-testid=tour-start]');
     await waitFor(async () => (await tour()).includes('1 of'), 'the ? button replays it');
     await click('[data-testid=tour-skip]');
-    await nav('#settings');
+    await nav('#settings?tab=limits');
     await page.hover('[data-testid=tip-refresh]');
     await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-refresh')).display`)) === 'block', 'tooltip shown');
     await hasText('#tip-refresh', 'Default: 5');
@@ -1259,29 +1267,42 @@ description: Bulk skill ${i}
     await nav('#computers');
     await $('[data-testid=computers] [data-testid=sync-folder]');
     const d = await exec(`return {
-      name: document.getElementById('st-devname').value,
-      folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('active'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
-      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubLive: !document.querySelector('[data-testid=sync-hub] [data-testid=hub-join]').disabled && !document.querySelector('[data-testid=sync-hub]').classList.contains('active'),
-      direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
+      name: arguments[0],
+      folderOn: document.querySelector('[data-testid=sync-folder]').classList.contains('on'), folderText: document.querySelector('[data-testid=sync-folder-path]').textContent,
+      hub: document.querySelector('[data-testid=sync-hub]').innerText, hubLive: !document.querySelector('[data-testid=sync-hub] [data-testid=hub-join]').disabled && !document.querySelector('[data-testid=sync-hub]').classList.contains('on'),
+      direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair-head]').disabled,
       transcripts: document.querySelector('[data-testid=st-transcripts]').checked, presence: document.querySelector('[data-testid=st-presence]').checked,
-      pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()),
-      cards: [...document.querySelectorAll('[data-testid=computer-cards] .b-computer .b-name b')].map((b) => b.textContent.trim()),
-      syncNow: !!document.querySelector('[data-testid=computers-now]'), chip: document.getElementById('pcs').hidden, status: document.querySelector('[data-testid=page-status]').textContent }`);
+      pills: [...document.querySelectorAll('#sheet .pill')].map((p) => p.textContent.trim()),
+      cards: [...document.querySelectorAll('[data-testid=computer-cards] .pc h2')].map((b) => b.textContent.trim()),
+      facts: [...document.querySelectorAll('[data-testid=computer-cards] .pc dt')].map((b) => b.textContent.trim()), count: document.querySelector('[data-testid=computer-cards] .pc .count').innerText.replace(/\\s+/g, ' '),
+      syncNow: !!document.querySelector('[data-testid^=now-], [data-testid=last-round]'), chip: document.getElementById('pcs').hidden, status: document.querySelector('[data-testid=page-status]').textContent,
+      switches: [...document.querySelectorAll('[data-testid=computers] .srow .what .row > b')].map((b) => b.textContent) }`,
+    [await exec("return import('./core.js').then((c) => c.S.cache.computers.this.name)")]);
     assert.ok(d.name, 'this computer has a name');
-    assert.equal(d.folderOn, false, 'sync is off: the folder card is not chosen');
+    assert.equal(d.folderOn, false, 'sync is off: the folder is not the way in use');
     assert.ok(d.folderText.includes('No folder'), 'no folder yet');
-    assert.ok(d.hub.includes('A hub you host') && d.hubLive, 'the hub card is live, not chosen (phase 5)');
-    assert.ok(!d.direct && !d.pair, 'the direct connection and pairing are live (phase 2)');
-    assert.ok(!d.pills.includes('phase 5') && !d.pills.includes('phase 2') && d.pills.includes('This one'), d.pills.join(','));
+    assert.ok(d.hub.includes('A hub you host') && d.hub.includes('Not joined') && d.hubLive, 'the hub is offered, not in use');
+    assert.ok(!d.direct && !d.pair, 'the direct connection and pairing are live');
+    assert.deepEqual(d.pills, ['This computer'], 'one pill: this computer, and no way in use');
     assert.ok(d.transcripts && d.presence, 'transcripts and presence default to on');
     assert.deepEqual(d.cards, [d.name], 'only this computer');
-    assert.equal(d.syncNow, false, 'no Sync now while sync is off');
+    assert.deepEqual(d.facts, ['System', 'App version', 'Last seen', 'Connection'], 'the four facts of a card');
+    assert.match(d.count, /^\d+ sessions? running$/, 'and its one key number');
+    assert.deepEqual(d.switches, ['Carry transcripts', 'Share what runs here', 'Connect directly'], 'three rows of switches');
+    assert.equal(d.syncNow, false, 'no Sync now and no last round while sync is off');
     assert.equal(d.chip, true, 'no computers chip while sync is off');
-    assert.equal(d.status, 'Sync is off; only this computer is shown.', 'the status says the plain fact');
+    assert.equal(d.status, 'Sync is off: only this computer.', 'the status says the plain fact');
     await shot('19-computers');
-    // the tooltip of the page's first setting, like every row of Settings
-    await page.hover('[data-testid=tip-devname]');
-    await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-devname')).display`)) === 'block', 'tooltip shown');
+    // this computer's ⋯: Rename… and Details…, and no Sync now while sync is off
+    await click('[data-testid=computer-cards] .pc [data-act=pc-menu]');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent)"), ['Rename…', 'Details…']);
+    await click('.menu [data-testid=pc-details]');
+    await hasText('[data-testid=pc-details-body]', 'entries published');
+    await page.keyboard.press('Escape');
+    // a row's ⓘ says what its line of help leaves out, like every row of Settings
+    await page.hover('[data-testid=tip-transcripts]');
+    await waitFor(async () => (await exec(`return getComputedStyle(document.getElementById('tip-transcripts')).display`)) === 'block', 'tooltip shown');
+    await page.mouse.move(640, 700);
     // with sync off the other pages are as before: no scope switch, no Computer column, no dots
     await nav('#home');
     await $('[data-testid=activity]');
@@ -1303,13 +1324,17 @@ description: Bulk skill ${i}
     await $('[data-testid=computers] [data-testid=sync-folder]');
     assert.equal(await exec("return document.querySelector('[data-testid=nav-computers]').getAttribute('aria-current')"), 'page', 'its item is lit');
     assert.equal(await exec("return document.getElementById('pcs').getAttribute('href')"), '#computers', 'the computers chip in the top bar leads here');
-    // this computer's name: saved, shown on its card, and put back
-    const name = await exec("return document.getElementById('st-devname').value");
+    // this computer's name: Rename… in its ⋯ opens a dialog; saved, shown on its card, and put back
+    const name = (await text('[data-testid=computer-cards] .pc h2')).trim();
     for (const n of ['E2E-BOX', name]) {
+      await click('[data-testid=computer-cards] .pc [data-act=pc-menu]');
+      await click('.menu [data-testid=pc-rename]');
+      assert.equal(await exec("return document.getElementById('st-devname').value"), n === name ? 'E2E-BOX' : name, 'the dialog starts from the name now');
       await type('[data-testid=st-devname]', n);
       await click('[data-testid=st-devname-save]');
       await waitFor(() => saved().device_name === n, 'the name ' + n + ' saved');
-      await hasText('[data-testid=computer-cards]', n);
+      await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+      await hasText('[data-testid=computer-cards] .pc h2', n);
     }
     // a switch saves at once, and again
     for (const on of [false, true]) {
@@ -1332,7 +1357,7 @@ description: Bulk skill ${i}
     // Settings carries no Computers section and no jump to one; the old address opens the page
     await nav('#settings');
     await $('[data-testid=sec-appearance]');
-    const st = await exec("return { sec: !!document.querySelector('#sec-computers, #sheet [data-testid=computers]'), chips: [...document.querySelectorAll('.b-section-nav button')].map((b) => b.textContent.trim()) }");
+    const st = await exec("return { sec: !!document.querySelector('#sec-computers, #sheet [data-testid=computers]'), chips: [...document.querySelectorAll('[data-testid=set-nav] a')].map((b) => b.textContent.trim()) }");
     assert.ok(!st.sec && !st.chips.includes('Computers') && st.chips.includes('Backups'), JSON.stringify(st));
     await nav('#settings?tab=computers');
     await waitFor(async () => (await exec('return location.hash')) === '#computers', 'the old address opens the Computers page');
@@ -1344,6 +1369,8 @@ description: Bulk skill ${i}
     assert.deepEqual(r, ['all', 'here', 'here', 'all']);
   });
 
+  // Sync now is in this computer's ⋯ while sync is on (and on a paired computer's card)
+  const syncNow = async () => { await click('[data-testid=computer-cards] .pc [data-act=pc-menu]'); await click('.menu [data-testid=computers-now]'); };
   if (process.env.HRM_E2E_SYNC) await test('computers: a second computer in the sync folder reaches Settings, the chip, the Overview, Sessions and Projects', async () => {
     const { createHash } = await import('node:crypto');
     // the other computer's folder: its record, one journal chunk (two usage rows and a session), its manifest and presence
@@ -1362,20 +1389,30 @@ description: Bulk skill ${i}
     await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_set', args: { sync_mode: 'folder', sync_folder: arguments[0] } })", [sync]);
     assert.equal(JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).sync_mode, 'folder', 'saved in settings');
     await nav('#computers');
-    await $('[data-testid=sync-folder].active');
+    await $('[data-testid=sync-folder].on');
     await hasText('[data-testid=page-status]', 'through a folder');
-    // Stop syncing… asks first; Cancel leaves the folder on
-    await click('[data-testid=sync-off]');
+    assert.deepEqual(await exec("return [document.querySelector('[data-testid=sync-folder] .pill').textContent, document.querySelector('[data-testid=sync-folder-path]').textContent, document.querySelector('[data-testid=sync-folder-pick]').textContent]"), ['In use', sync, 'Change…'], 'the folder is the way in use, with its path');
+    // Stop syncing… sits in the folder's ⋯ and asks first; Cancel leaves the folder on
+    await click('[data-testid=sync-folder-menu]');
+    await click('.menu [data-testid=sync-off]');
     await hasText('.modal-card', 'Leave the folder?');
     await click('.modal-card .modal-foot [data-act=dialog-close]');
-    await $('[data-testid=sync-folder].active');
-    await click('[data-testid=computers-now]');
+    await $('[data-testid=sync-folder].on');
+    await syncNow();
     await waitFor(async () => (await text('[data-testid=computer-cards]')).includes('LAPTOP'), 'the other computer listed');
-    const cards = await exec(`return [...document.querySelectorAll('[data-testid=computer-cards] .b-computer')].map((d) => d.innerText.replace(/\\s+/g, ' '))`);
+    const cards = await exec(`return [...document.querySelectorAll('[data-testid=computer-cards] .pc')].map((d) => d.innerText.replace(/\\s+/g, ' '))`);
     assert.equal(cards.length, 2);
-    assert.ok(/LAPTOP.*(windows|Windows).*1\.3\.2.*(heard|writing)/.test(cards[1]), cards[1]);
+    assert.ok(/This computer.*Through the folder/.test(cards[0]), cards[0]);
+    assert.ok(/LAPTOP.*System Windows.*App version 1\.3\.2.*Last seen (Now|.* ago).*Connection Through the folder.*1 session running/.test(cards[1]), cards[1]);
     assert.ok(fs.existsSync(path.join(sync, 'devices')) && fs.readdirSync(path.join(sync, 'devices')).length === 2, 'this computer wrote its own record beside the other');
-    await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
+    // another computer's ⋯: Sync now and Forget…; no address to edit for one that is not paired
+    await click('[data-testid=pc-menu-' + dev + ']');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent + (b.classList.contains('danger') ? ' (danger)' : ''))"), ['Sync now', 'Details…', 'Forget… (danger)']);
+    await click('.menu [data-testid=pc-details]');
+    assert.match((await text('[data-testid=pc-details-body]')).replace(/\s+/g, ' '), /Reached folder · .*Not paired.*Last pull.*Journal 3 of 3 entries applied here/, 'Details…: how it is reached, that it is not paired, and how much of its journal is applied');
+    await page.keyboard.press('Escape');
+    await hasText('[data-testid=last-round]', 'Last round');
+    await page.mouse.move(640, 700);
     await shot('19b-two-computers');
     // the chip: a dot per computer, both heard from lately
     const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, dots: el.querySelectorAll('.cdot').length, on: el.querySelectorAll('.cdot.on').length, text: el.textContent, names: [...el.querySelectorAll('.cdot')].map((a) => a.title) }`);
@@ -1484,21 +1521,19 @@ description: Bulk skill ${i}
   // data folder through hrm computers pair, as the contract's Window test describes.
   await test('direct connection: the switch without its pill, the dialog with both tabs, the code input, and an unknown operation shown as the error text', async () => {
     await nav('#computers');
-    await $('[data-testid=computers] [data-testid=pair]');
-    const d = await exec(`return { direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair]').disabled,
-      pills: [...document.querySelectorAll('[data-testid=computers] .plan-pill')].map((p) => p.textContent.trim()), port: document.querySelector('[data-testid=listen-port]').textContent, change: !!document.querySelector('[data-testid=listen-port-change]') }`);
+    await $('[data-testid=computers] [data-testid=st-direct]');
+    const d = await exec(`return { direct: document.querySelector('[data-testid=st-direct]').disabled, pair: document.querySelector('[data-testid=pair-head]').disabled,
+      port: document.querySelector('[data-testid=listen-port]').textContent, change: document.querySelector('[data-testid=listen-port-change]').textContent, beside: document.querySelector('[data-testid=listen-port-change]').parentElement.contains(document.querySelector('[data-testid=st-direct]')) }`);
     assert.ok(!d.direct && !d.pair, 'the switch and Pair are live');
-    assert.ok(!d.pills.includes('phase 2'), d.pills.join(','));
-    assert.ok(d.port && d.change, 'the listen port and Change… sit in the popover');
-    // the port: Change… in the popover opens a small dialog; 0 means a free port
-    await page.hover('[data-testid=tip-direct]');
+    assert.ok(d.port && d.change.startsWith('Listen port') && d.beside, 'the listen port sits beside the switch: ' + JSON.stringify(d));
+    // the port: its button opens a small dialog; 0 means a free port
     await click('[data-testid=listen-port-change]');
     await $('[data-testid=lp-v]');
     await page.fill('[data-testid=lp-v]', '0');
     await click('[data-testid=lp-ok]');
     await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the port dialog closed');
-    await $('[data-testid=computers] [data-testid=pair]');
-    await click('[data-testid=pair]');
+    await $('[data-testid=computers] [data-testid=st-direct]');
+    await click('[data-testid=pair-head]');
     await $('[data-testid=pair-tabs]');
     assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=pair-tabs] button')].map((a) => a.textContent)"), ['Show a code', 'Enter a code']);
     // Show a code asks computers_pair_start: six digits, three and three
@@ -1557,8 +1592,7 @@ description: Bulk skill ${i}
         await click('[data-testid=st-direct]');
         await waitFor(() => exec("return document.querySelector('[data-testid=st-direct]')?.checked"), 'the direct connection on');
       }
-      await waitFor(async () => exec("return !!document.querySelector('[data-testid=pair]')"), 'the Pair button; the section reads: ' + (await exec("return (document.querySelector('[data-testid=computers]') || { innerText: '(no section)' }).innerText.slice(0, 1500)")), 15000);
-      await click('[data-testid=pair]');
+      await click('[data-testid=pair-head]');
       await click('[data-testid=pair-enter]');
       await page.type('[data-testid=pair-code-in]', code);
       await page.fill('[data-testid=pair-host]', host);
@@ -1571,13 +1605,21 @@ description: Bulk skill ${i}
       serve = spawn(path.join(appDir, 'hrm.exe'), ['computers', 'serve', '--seconds', '150'], { env: env2, stdio: 'ignore' });
       const card = `[data-testid=computer-${id2}]`;
       await $(card);
-      await waitFor(async () => /direct .* connected/.test(await text(card + ' [data-testid=transport]').catch(() => '')), 'the card shows direct and connected', 45000);
-      await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
+      await waitFor(async () => (await text(card + ' [data-testid=transport]').catch(() => '')).trim() === 'Direct connection', 'the card says Direct connection', 45000);
+      await click(`[data-testid="pc-menu-${id2}"]`);
+      await click('.menu [data-testid=pc-details]');
+      assert.match((await text('[data-testid=pc-details-body]')).replace(/\s+/g, ' '), /Reached direct · .* · connected Paired /, 'Details… says how it is reached and when it was paired');
+      await page.keyboard.press('Escape');
+      await hasText('[data-testid=page-status]', 'LAPTOP is connected directly');
+      await page.mouse.move(640, 700);
       await shot('42-paired-connected');
+      await exec("document.documentElement.dataset.theme = 'dark'");
+      await shot('42-dark-paired-connected');
+      await exec("document.documentElement.dataset.theme = 'light'");
       const chip = await exec(`const el = document.getElementById('pcs'); return { hidden: el.hidden, on: el.querySelectorAll('.cdot.on').length }`);
       assert.ok(!chip.hidden && chip.on >= 2, 'the chip: this computer and the paired one on (an earlier test may have left a folder peer): ' + JSON.stringify(chip));
-      // the second computer's session arrives after Sync now
-      await click('[data-testid=computers-now]');
+      // the second computer's session arrives after Sync now, the button on a paired computer's card
+      await click(`[data-testid=now-${id2}]`);
       await nav('#sessions?days=all');
       await waitFor(() => exec("return !!document.querySelector('[data-testid=session-laptop-s9]')"), 'the session from the second computer', 30000);
       await hasText('[data-testid=session-laptop-s9] .a-pc', 'LAPTOP');
@@ -1585,15 +1627,20 @@ description: Bulk skill ${i}
       // Forget: a confirm, then the pairing is gone, and with it the card's address field. The card goes too, unless
       // a sync folder still knows the computer (the folder test above leaves one on): then it stays as a folder computer
       await nav('#computers');
-      await $(`[data-testid="addr-${id2}"]`);
-      // its address (a VPN name with the port), saved from its card
+      // its address (a VPN name with the port): Edit address… in its ⋯ opens a dialog
+      await click(`[data-testid="pc-menu-${id2}"]`);
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent)"), ['Sync now', 'Edit address…', 'Details…', 'Forget…']);
+      await click(`.menu [data-testid="addr-edit-${id2}"]`);
       await type(`[data-testid="addr-${id2}"]`, 'laptop.example:4455');
-      await click(`[data-testid="addr-save-${id2}"]`);
+      await click(`[data-testid="addr-${id2}-save"]`);
       await waitFor(async () => ((await exec("return window.__TAURI__.core.invoke('call', { op: 'computers_status', args: {} })")).peers.find((x) => x.id === id2) || {}).address === 'laptop.example:4455', 'the address saved');
-      await click(`[data-testid=forget-${id2}]`);
+      await waitFor(async () => (await exec(`return document.querySelector('[data-testid="pc-menu-${id2}"]')?.dataset.address`)) === 'laptop.example:4455', 'the card drawn with it');
+      await click(`[data-testid="pc-menu-${id2}"]`);
+      await click(`.menu [data-testid="forget-${id2}"]`);
+      await hasText('.modal-card', 'drops its certificate');
       await click('#confirm-ok');
-      await waitFor(async () => !(await exec(`return !!document.querySelector('[data-testid="addr-${id2}"]')`)), 'no longer paired', 15000);
-      assert.ok(!/direct/.test(await exec(`return (document.querySelector('[data-testid=computer-${id2}] [data-testid=transport]') || { textContent: '' }).textContent`)), 'not reached directly any more');
+      await waitFor(async () => !(await exec(`return document.querySelector('[data-testid="pc-menu-${id2}"]')?.dataset.direct`)), 'no longer paired', 15000);
+      assert.ok(!/Direct/.test(await exec(`return (document.querySelector('[data-testid=computer-${id2}] [data-testid=transport]') || { textContent: '' }).textContent`)), 'not reached directly any more');
       await shot('42c-forgotten');
     } finally { if (serve) serve.kill(); if (pair.exitCode === null) pair.kill(); }
   });
@@ -1671,8 +1718,8 @@ description: Bulk skill ${i}
   await test('hub: the card is live, the Join dialog takes a code or the admin token, an unreachable hub is the error text, the first-run choice offers both cards', async () => {
     await nav('#computers');
     await $('[data-testid=computers] [data-testid=hub-join]');
-    const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('active'), url: document.querySelector('[data-testid=hub-url]').textContent,
-      pills: [...document.querySelectorAll('[data-testid=sync-hub] .plan-pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter]') }`);
+    const d = await exec(`return { on: document.querySelector('[data-testid=sync-hub]').classList.contains('on'), url: document.querySelector('[data-testid=hub-url]').textContent,
+      pills: [...document.querySelectorAll('[data-testid=sync-hub] .pill')].map((p) => p.textContent.trim()), ring: !!document.querySelector('[data-testid=ring-enter], [data-testid=sync-hub-menu]') }`);
     assert.ok(!d.on && d.url.includes('Not joined') && !d.pills.length && !d.ring, JSON.stringify(d));
     await click('[data-testid=hub-join]');
     await $('[data-testid=hub-url-in]');
@@ -1727,16 +1774,22 @@ description: Bulk skill ${i}
       await shot('53-recovery-key');
       await click('[data-testid=ring-saved]');
       await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the key dialog closed');
-      await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')"), 'the hub card chosen', 15000);
-      assert.ok((await text('[data-testid=hub-line]')).includes('Joined'), 'the status line says Joined');
+      await waitFor(() => exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')"), 'the hub is the way in use', 15000);
+      assert.equal((await text('[data-testid=sync-hub] .pill')).trim(), 'In use');
+      assert.match(await text('[data-testid=hub-line]'), /1 computer · (live|polling)/, 'its line counts the computers and says live or polling');
       assert.equal((await text('[data-testid=hub-url]')).trim(), hubUrl);
-      assert.ok(await exec("return !!document.querySelector('[data-testid=ring-show]') && !!document.querySelector('[data-testid=hub-invite]')"), 'Show again and Invite a computer… are there');
-      // Enter recovery key… opens its dialog (this computer already holds the key, so it is closed again)
-      await click('[data-testid=ring-enter]');
+      await hasText('[data-testid=page-status]', 'through a hub');
+      // the hub's ⋯: the recovery key, and Leave… in the danger colour; Invite a computer… is the button beside it
+      await $('[data-testid=sync-hub] [data-testid=hub-invite]');
+      await click('[data-testid=sync-hub-menu]');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent + (b.classList.contains('danger') ? ' (danger)' : ''))"), ['Show the recovery key…', 'Enter the recovery key…', 'Leave the hub… (danger)']);
+      // Enter the recovery key… opens its dialog (this computer already holds the key, so it is closed again)
+      await click('.menu [data-testid=ring-enter]');
       await $('[data-testid=ring-in]');
       await click('.modal-card .modal-foot [data-act=dialog-close]');
-      // Show again sits behind a confirm and shows the same key
-      await click('[data-testid=ring-show]');
+      // Show the recovery key… sits behind a confirm and shows the same key
+      await click('[data-testid=sync-hub-menu]');
+      await click('.menu [data-testid=ring-show]');
       await click('#confirm-ok');
       await hasText('[data-testid=ring-key]', key);
       await click('[data-testid=ring-saved]');
@@ -1768,11 +1821,11 @@ description: Bulk skill ${i}
       hrm3('computers', 'now');
       const id3 = JSON.parse(fs.readFileSync(path.join(data3, 'settings.json'), 'utf8')).device_id;
       // Sync now here: the second computer's card through the hub, and its session
-      await click('[data-testid=computers-now]');
+      await syncNow();
       await waitFor(() => exec(`return !!document.querySelector('[data-testid=computer-${id3}]')`), 'the second computer\'s card', 30000);
       await waitFor(async () => /hub/.test(await text(`[data-testid=computer-${id3}] [data-testid=transport]`).catch(() => '')), 'the card says hub');
       assert.ok((await text('[data-testid=hub-line]')).includes('2 computers'), await text('[data-testid=hub-line]'));
-      await exec("document.querySelector('[data-testid=computers]').scrollIntoView()");
+      await page.mouse.move(640, 700);
       await shot('55-hub-two-computers');
       await nav('#sessions?days=all');
       await waitFor(() => exec("return !!document.querySelector('[data-testid=session-hub-s5]')"), 'the session from the second computer', 30000);
@@ -1781,9 +1834,11 @@ description: Bulk skill ${i}
       // a used code is refused; Stop syncing leaves the hub
       assert.throws(() => hrm3('hub', 'join', hubUrl, '--code', code), /did not accept/);
       await nav('#computers');
-      await click('[data-testid=hub-leave]');
+      await click('[data-testid=sync-hub-menu]');
+      await click('.menu [data-testid=hub-leave]');
+      await hasText('.modal-card', 'Leave the hub?');
       await click('#confirm-ok');
-      await waitFor(async () => !(await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('active')")), 'the hub card off after leaving', 15000);
+      await waitFor(async () => (await exec("return document.querySelector('[data-testid=sync-hub]')?.classList.contains('on')")) === false, 'the hub is not in use after leaving', 15000);
     } finally { hub.kill(); }
   });
 
@@ -1792,17 +1847,17 @@ description: Bulk skill ${i}
   // listed and readable; a sync folder with history offers Welcome back when it is chosen.
   await test('backups and archive: the section, hrm archive now on an old session, Restore… from a backup, Welcome back', async () => {
     const { createHash } = await import('node:crypto');
-    await nav('#settings');
-    await $('[data-testid=sec-backups-and-archive] [data-testid=archive-now]');
-    const d = await exec(`return { title: document.querySelector('[data-testid=sec-backups-and-archive] summary .panel-title').textContent.trim(),
+    await nav('#settings?tab=backups');
+    await $('[data-testid=sec-backups] [data-testid=archive-now]');
+    const d = await exec(`return { title: document.querySelector('[data-testid=sec-backups] .pane-head h2').textContent.trim(),
       folder: document.querySelector('[data-testid=st-bk-folder]').checked, transcripts: document.querySelector('[data-testid=st-bk-transcripts]').checked,
-      days: document.querySelector('[data-testid=st-archive-days] button.active')?.textContent, sync: document.querySelector('[data-testid=st-archive-sync]').checked,
+      days: document.querySelector('[data-testid=st-archive-days] button.on')?.textContent, sync: document.querySelector('[data-testid=st-archive-sync]').checked,
       dir: document.querySelector('[data-testid=st-archive-dir]').textContent, restore: !!document.querySelector('[data-testid=restore-open]') }`);
-    assert.equal(d.title, 'Backups and archive');
+    assert.equal(d.title, 'Backups');
     assert.ok(d.folder && !d.transcripts, 'backups go to the sync folder; transcripts stay out by default');
     assert.equal(d.days, '30 days');
     assert.ok(d.sync && d.dir.includes('No folder') && d.restore, JSON.stringify(d));
-    await exec("document.querySelector('[data-testid=sec-backups-and-archive]').scrollIntoView()");
+    await exec("document.querySelector('[data-testid=sec-backups]').scrollIntoView()");
     await shot('44-settings-backups-archive');
     // an old session, three days old: a one-day age and hrm archive now move it into the chosen folder (and the sync folder)
     const oldAt = new Date(Date.now() - 3 * 86400000), old = oldAt.toISOString(), month = `${oldAt.getFullYear()}-${String(oldAt.getMonth() + 1).padStart(2, '0')}`;
@@ -1833,7 +1888,7 @@ description: Bulk skill ${i}
     await hasText('[data-testid=resume-reason]', 'archived');
     await shot('46-session-archived');
     // Restore… from a backup made now: the preview counts this computer's history and names it; merging adds nothing
-    await nav('#settings');
+    await nav('#settings?tab=backups');
     // the archived row is written by the CLI in its own process; on a busy computer the app's backup can be made
     // before it sees it, so the backup is tried up to three times
     let counts = '';
@@ -1957,6 +2012,147 @@ description: Bulk skill ${i}
     await nav(`#account?name=${other.name}&tab=settings`);
     await waitFor(async () => (await text('[data-testid=detail-name]')).includes(other.label), 'the other account');
     assert.equal(await exec("return document.getElementById('pf-label').value"), other.label, 'another page starts from its own values');
+  });
+
+  // ---- Settings and Computers as the 1.10 drawings draw them ----
+  await test('settings: choosing a section shows only it and sets the address, a link to a section opens it, and Back returns to the one before', async () => {
+    await nav('#settings');
+    await $('[data-testid=sec-appearance]');
+    const shown = () => exec("return { panes: [...document.querySelectorAll('#set-panes .set-pane')].map((p) => p.dataset.testid), on: [...document.querySelectorAll('[data-testid=set-nav] a.on')].map((a) => a.textContent.trim()), hash: location.hash }");
+    assert.deepEqual(await shown(), { panes: ['sec-appearance'], on: ['Appearance'], hash: '#settings' }, 'the first section, when the address names none');
+    await click('[data-testid=set-tab-connections]');
+    await $('[data-testid=sec-connections] #st-port');
+    assert.deepEqual(await shown(), { panes: ['sec-connections'], on: ['Connections'], hash: '#settings?tab=connections' });
+    assert.ok(!(await exec("return !!document.querySelector('[data-testid=st-theme]')")), 'the rows of the other sections are not on the page');
+    assert.deepEqual(await exec("return [document.querySelector('[data-testid=nav-settings]').getAttribute('aria-current'), document.querySelector('.set-pane .pane-head').innerText.replace(/\\s+/g, ' ').trim()]"), ['page', 'Connections 2 settings'], 'Settings stays lit in the sidebar; the card names the section and counts its rows');
+    // a link to a section opens it
+    await nav('#settings?tab=backups');
+    await $('[data-testid=sec-backups] [data-testid=backup-now]');
+    assert.deepEqual(await shown(), { panes: ['sec-backups'], on: ['Backups'], hash: '#settings?tab=backups' });
+    // Back returns to the section before; a section this system does not have opens the first
+    await exec('history.back()');
+    await $('[data-testid=sec-connections]');
+    assert.equal((await shown()).hash, '#settings?tab=connections');
+    await nav('#settings?tab=nothing');
+    await $('[data-testid=sec-appearance]');
+    // Apps › Harness Manager leads to Updates
+    await exec("return import('./core.js').then((c) => c.go('settings', { tab: 'updates' }))");
+    await $('[data-testid=sec-updates] [data-key=setting-self]');
+  });
+
+  await test('settings: Search settings finds rows in other sections by label and by help, says when nothing matches, survives a redraw, and gives the section back when cleared', async () => {
+    await nav('#settings');
+    await $('[data-testid=sec-appearance]');
+    const found = () => exec("return [...document.querySelectorAll('#set-panes .set-pane')].map((p) => (p.querySelector('h2')?.textContent || '') + ': ' + [...p.querySelectorAll('.srow .what .row > b')].map((b) => b.textContent).join(', '))");
+    const search = async (t) => { await page.fill('[data-testid=set-find]', t); await sleep(150); return found(); };
+    assert.deepEqual(await search('router'), ['Connections: Router port'], 'a row of another section, by its label');
+    assert.deepEqual(await search('127.0.0.1'), ['Connections: Router port'], 'and by its line of help');
+    assert.deepEqual(await search('TRAY'), ['Window and terminal: Close to the tray, Launch at sign-in'], 'in any case; the rows of one section under its name');
+    assert.deepEqual(await exec("return [document.querySelector('.set-pane .pane-head .muted').textContent, document.querySelectorAll('[data-testid=set-nav] a.on').length]"), ['2 found', 0], 'the head counts the rows found; no section is lit while rows of several may show');
+    const many = await search('log');
+    assert.ok(many.length >= 3 && many.some((s) => s.startsWith('Limits: Live Claude limits')) && many.some((s) => s.startsWith('Log: Keep a log')), 'rows of several sections, each under its section: ' + many.join(' | '));
+    // a found row works where it is, and the redraw after it keeps the words, the rows found and the focus
+    await search('tray');
+    await page.focus('[data-testid=set-find]');
+    const before = JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).close_to_tray;
+    await exec("document.querySelector('[data-testid=st-tray]').dataset.old = '1'; document.querySelector('[data-testid=st-tray]').click()");
+    await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).close_to_tray === !before, 'the switch in a found row saved');
+    await waitFor(() => exec("const e = document.querySelector('[data-testid=st-tray]'); return !!e && !e.dataset.old"), 'redrawn');
+    assert.deepEqual([await exec("return document.getElementById('set-find').value"), await exec('return document.activeElement.id'), await found()], ['tray', 'set-find', ['Window and terminal: Close to the tray, Launch at sign-in']]);
+    await exec("document.querySelector('[data-testid=st-tray]').click()");
+    await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).close_to_tray === before, 'and put back');
+    await exec("return import('./core.js').then((c) => c.render(true))");
+    assert.equal(await exec("return document.getElementById('set-find').value"), 'tray', 'a background redraw keeps the words too');
+    // nothing matches
+    assert.deepEqual(await search('zzzz-nothing'), [': ']);
+    assert.equal((await text('[data-testid=set-none]')).trim(), 'No setting matches.');
+    await shot('14d-settings-search-none');
+    await search('transcripts');
+    await shot('14e-settings-search');
+    // cleared, the chosen section is back; choosing a section from the list ends a search too
+    assert.deepEqual(await search(''), ['Appearance: Theme, Light and dark, Limits shown as, Moving routes, Text size']);
+    await search('router');
+    await click('[data-testid=set-tab-log]');
+    await $('[data-testid=sec-log] [data-testid=log-open]');
+    assert.deepEqual([await exec("return document.getElementById('set-find').value"), await found()], ['', ['Log: Keep a log, Level, Log file']]);
+  });
+
+  await test('computers: the page as drawn, and every action opens its dialog: Pair, Rename, Details, Forget, Change, Stop syncing, Join, the recovery key, Listen port, First-run choices', async () => {
+    // (the folder chosen by the Welcome back test is in use, with the computers found in it; Edit address… is in the
+    // pairing test, Invite a computer… and Leave the hub… in the hub test)
+    const dialog = async (title) => {
+      await waitFor(async () => (await exec("return document.querySelector('#dialog-root .modal-card')?.getAttribute('aria-label') || ''")).startsWith(title), 'the dialog ' + title);
+      await page.keyboard.press('Escape');
+      await waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), title + ' closed');
+    };
+    const menu = async (button) => {
+      await click(button);
+      return exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent + (b.classList.contains('danger') ? ' (danger)' : ''))");
+    };
+    await nav('#computers');
+    await $('[data-testid=sync-folder].on');
+    await $('[data-testid=computer-cards] .pc:nth-child(2)');
+    await page.mouse.move(640, 700);
+    const lay = await exec(`const r = (s) => document.querySelector(s).getBoundingClientRect(), c = [...document.querySelectorAll('.pc')].map((e) => e.getBoundingClientRect());
+      return { n: c.length, row: c.slice(0, 3).every((x) => x.top === c[0].top), widths: [...new Set(c.map((x) => Math.round(x.width)))], first: [document.querySelector('.pc h2').textContent === arguments[0], document.querySelector('.pc .pill')?.textContent],
+        heads: [...document.querySelectorAll('.pc')].every((e) => e.querySelector('.pc-dot') && e.querySelector('[data-act=pc-menu]') && e.querySelectorAll('dt').length === 4 && e.querySelector('.count .key')),
+        ways: [r('[data-testid=sync-folder]').top === r('[data-testid=sync-hub]').top, Math.round(r('[data-testid=sync-folder]').width) === Math.round(r('[data-testid=sync-hub]').width)],
+        order: r('[data-testid=computer-cards]').bottom <= r('[data-testid=computers]').top && r('.ways').bottom <= r('[data-key=setting-transcripts]').top,
+        ctl: [...document.querySelectorAll('[data-testid=computers] .srow .ctl')].map((e) => Math.round(e.getBoundingClientRect().left)), primary: [...document.querySelectorAll('#sheet .btn.primary')].map((b) => b.textContent),
+        low: [...document.querySelectorAll('#sheet button, #sheet .sw')].filter((e) => !e.closest('.b-tip') && e.getBoundingClientRect().height < 28).map((e) => e.textContent + ' ' + e.getBoundingClientRect().height),
+        wide: document.getElementById('sheet').scrollWidth <= document.getElementById('sheet').clientWidth,
+        sw: [...document.querySelectorAll('[data-testid=computers] .sw input')].map((i) => [i.getAttribute('aria-label'), i.getAttribute('role'), getComputedStyle(i.parentElement.querySelector('b'), '::after').content === (i.checked ? '"On"' : '"Off"')].join()) }`,
+    [await exec("return import('./core.js').then((c) => c.S.cache.computers.this.name)")]);
+    assert.deepEqual(lay.first, [true, 'This computer'], 'this computer first, marked');
+    assert.ok(lay.n >= 2 && lay.row && lay.widths.length === 1 && lay.heads, 'a card per computer, three to a row and equally wide, each with its dot, its ⋯, four facts and a key number: ' + JSON.stringify(lay));
+    assert.deepEqual(lay.ways, [true, true], 'the two ways side by side');
+    assert.ok(lay.order, 'the cards, then how the computers sync: the ways over the switches');
+    assert.ok(new Set(lay.ctl).size === 1 && lay.ctl.length === 3, 'three switches in one column: ' + lay.ctl);
+    assert.deepEqual(lay.sw, ['Carry transcripts,switch,true', 'Share what runs here,switch,true', 'Connect directly,switch,true'], 'each switch is named and says On or Off');
+    assert.deepEqual(lay.primary, ['Pair a computer…'], 'one primary button');
+    assert.deepEqual(lay.low, [], 'every control at least 28 px tall');
+    assert.ok(lay.wide, 'nothing wider than the page');
+    await shot('60-light-computers');
+    await exec("document.documentElement.dataset.theme = 'dark'");
+    await shot('60-dark-computers');
+    await exec("document.documentElement.dataset.theme = 'light'");
+    // the head, and the ⋯ of this computer and of another
+    await click('[data-testid=pair-head]');
+    await dialog('Pair a computer');
+    assert.deepEqual(await menu('[data-testid=computer-cards] .pc [data-act=pc-menu]'), ['Rename…', 'Sync now', 'Details…']);
+    await click('.menu [data-testid=pc-rename]');
+    await dialog('Rename this computer');
+    await click('[data-testid=computer-cards] .pc [data-act=pc-menu]');
+    await click('.menu [data-testid=pc-details]');
+    await dialog('Details of ');
+    const peer = await menu('[data-testid=computer-cards] .pc:nth-child(2) [data-act=pc-menu]');
+    assert.ok(peer[0] === 'Sync now' && peer.at(-1) === 'Forget… (danger)', 'another computer: Sync now first, Forget… last and in the danger colour: ' + peer);
+    await click('.menu [data-testid^=forget-]');
+    await dialog('Forget ');
+    // how the computers sync
+    assert.deepEqual(await menu('[data-testid=sync-folder-menu]'), ['Stop syncing… (danger)']);
+    await click('.menu [data-testid=sync-off]');
+    await dialog('Stop syncing');
+    await exec('window.__picked = 0; window.__open = window.__TAURI__.dialog.open; window.__TAURI__.dialog.open = async () => { window.__picked++; return null; }');
+    try {
+      await click('[data-testid=sync-folder-pick]');
+      await waitFor(() => exec('return window.__picked === 1'), 'Change… asks for a folder');
+    } finally { await exec('window.__TAURI__.dialog.open = window.__open'); }
+    await click('[data-testid=sync-hub] [data-testid=hub-join]');
+    await dialog('Join a hub');
+    // (a computer that was on a hub keeps its recovery key: the hub's ⋯ shows it, behind a confirm, and takes another)
+    if (await exec("return !!document.querySelector('[data-testid=sync-hub-menu]')")) {
+      assert.deepEqual(await menu('[data-testid=sync-hub-menu]'), ['Show the recovery key…', 'Enter the recovery key…']);
+      await click('.menu [data-testid=ring-show]');
+      await dialog('Show the recovery key');
+      await click('[data-testid=sync-hub-menu]');
+      await click('.menu [data-testid=ring-enter]');
+      await dialog('Enter the recovery key');
+    }
+    await click('[data-testid=listen-port-change]');
+    await dialog('Listen port');
+    await click('[data-testid=firstrun-open]');
+    await dialog('Add this computer to your others');
   });
 
   await test('Enter on a button inside a keyboard row presses the button, not the row', async () => {
