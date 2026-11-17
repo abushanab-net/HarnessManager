@@ -496,10 +496,14 @@ async function startLogin(name) {
   }
   const flow = await attempt(() => call('login_start', { name }));
   if (!flow) return;
-  let timer;
+  let timer, drawn;
   const draw = (st) => {
     const dlg = document.querySelector('.modal-card');
     if (!dlg) return;
+    // the poll answers every second: the dialog is built again only when what it shows has changed
+    const now = JSON.stringify([st.state, st.message, st.url, st.email_mismatch]);
+    if (now === drawn) return;
+    drawn = now;
     dlg.innerHTML = `${dlgHead('Sign in ' + acctName(name))}
       <div class="notice-bar ${st.state === 'failed' || (st.state === 'done' && st.email_mismatch) ? 'warn' : ''}" role="status" data-testid="login-status">${esc(st.message)}</div>
       ${st.url && st.state === 'waiting' ? `<div class="form-field"><label>Link</label><div><button class="btn-secondary" id="lg-open">Open the sign-in page</button></div><span class="url mono">${esc(st.url)}</span></div>
