@@ -190,11 +190,17 @@ async function renderNow(background) {
   keepEdits = background && sameHash;
   try {
     await fn(sheet, S.route.params);
+    S.drawn = location.hash; // the page the sheet shows now
+    // the notice of a read that failed goes when the page reads again
+    if (S.readFailed) { if ((document.getElementById('notice-text') || {}).textContent === S.readFailed) clearNotice(); S.readFailed = null; }
     const top = S.sheetTop; // what the reader had before fn replaced the content; the replacement's own scroll event has not fired yet
     if (sameHash && top) { sheet.scrollTop = top; requestAnimationFrame(() => { if (S.lastHash === location.hash) sheet.scrollTop = top; }); }
     // pages can add to a freshly drawn sheet (the tour in guide.js)
     document.dispatchEvent(new CustomEvent('rendered', { detail: { sheet, view: routes[S.route.view] ? S.route.view : 'home' } }));
   } catch (e) {
+    // a read that fails while its page is on screen leaves the page as it was, and says so
+    if (sameHash && S.drawn === location.hash) return notice(S.readFailed = String(e).replace(/^Error: /, ''));
+    S.drawn = null;
     sheet.className = 'sheet';
     sheet.innerHTML = `<div class="page-body"><section class="panel-card empty-state"><h1>Something went wrong</h1><span class="negT">${esc(String(e))}</span><div><button class="btn-secondary" data-act="reload">Try again</button></div></section></div>`;
   } finally { keepEdits = false; }
@@ -377,7 +383,7 @@ export function openMenu(anchor, items) {
   m.style.left = left + 'px';
   // near the bottom of the window the menu opens upward, so every item stays reachable
   m.style.top = (r.bottom + 4 + m.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - 4 - m.offsetHeight) : r.bottom + 4) + 'px';
-  m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); items[+b.dataset.i].run(); } };
+  m.onclick = (e) => { const b = e.target.closest('button[data-i]'); if (b) { closeMenu(); run(items[+b.dataset.i].run); } };
   m.onkeydown = (e) => {
     const bs = [...m.querySelectorAll('button')], i = bs.indexOf(document.activeElement);
     if (e.key === 'ArrowDown') { e.preventDefault(); bs[(i + 1) % bs.length].focus(); }
@@ -400,6 +406,13 @@ const actions = {
   reload: () => render(),
 };
 export function action(name, fn) { actions[name] = fn; }
+/** Run an action or a menu item; what it throws, now or later, is said in the notice bar instead of nowhere. */
+const failed = (e) => notice(String(e).replace(/^Error: /, ''));
+function run(fn, ...args) {
+  try { const r = fn(...args); if (r && typeof r.catch === 'function') r.catch(failed); } catch (e) { failed(e); }
+}
+// and a failure no one waited for
+window.addEventListener('unhandledrejection', (e) => failed(e.reason));
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -410,11 +423,11 @@ document.addEventListener('click', (e) => {
   // a dropdown acts when its choice changes (below), not when it is clicked open
   if (el.tagName === 'SELECT') return;
   // checkboxes keep their default (toggling); everything else is handled here
-  if (fn) { if (!(el.tagName === 'INPUT' && el.type === 'checkbox')) e.preventDefault(); fn(el, e); }
+  if (fn) { if (!(el.tagName === 'INPUT' && el.type === 'checkbox')) e.preventDefault(); run(fn, el, e); }
 });
 document.addEventListener('change', (e) => {
   const el = e.target.closest && e.target.closest('select[data-act]');
-  if (el && actions[el.dataset.act]) actions[el.dataset.act](el, e);
+  if (el && actions[el.dataset.act]) run(actions[el.dataset.act], el, e);
 });
 
 /** The open modal or tray, whose Tab order is trapped. */
