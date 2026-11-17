@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use crate::sync::folder;
 use crate::sync::peer::store;
-use crate::util::now_ms;
+use crate::util::{body_capped, now_ms};
 use crate::{journal, secrets, Ctx};
 
 // ---------- the ring key ----------
@@ -154,7 +154,7 @@ impl Hub {
     fn checked(r: reqwest::blocking::Response, path: &str) -> Result<reqwest::blocking::Response> {
         let st = r.status();
         if st.is_success() { return Ok(r); }
-        let body = r.text().unwrap_or_default();
+        let body = body_capped(r, 65_536, path).map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
         let msg = serde_json::from_str::<Value>(&body).ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or(body);
         match st.as_u16() {
             401 | 403 => bail!("the hub refused this computer ({msg}); join it again"),
@@ -166,12 +166,13 @@ impl Hub {
     pub fn get_json(&self, path: &str) -> Result<Option<Value>> {
         let r = self.req(reqwest::Method::GET, path).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
         if r.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
-        Ok(Some(Self::checked(r, path)?.json()?))
+        Ok(Some(serde_json::from_slice(&body_capped(Self::checked(r, path)?, journal::MAX_JSON_BYTES, path)?)?))
     }
 
-    pub fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
+    /// An answer's bytes, when they are no more than `max`.
+    pub fn get_bytes(&self, path: &str, max: u64) -> Result<Vec<u8>> {
         let r = self.req(reqwest::Method::GET, path).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
-        Ok(Self::checked(r, path)?.bytes()?.to_vec())
+        body_capped(Self::checked(r, path)?, max, path)
     }
 
     pub fn put(&self, path: &str, body: Vec<u8>, headers: &[(&str, String)]) -> Result<()> {
@@ -182,7 +183,7 @@ impl Hub {
 
     pub fn post_json(&self, path: &str, body: &Value) -> Result<Value> {
         let r = self.req(reqwest::Method::POST, path).json(body).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
-        Ok(Self::checked(r, path)?.json()?)
+        Ok(serde_json::from_slice(&body_capped(Self::checked(r, path)?, journal::MAX_JSON_BYTES, path)?)?)
     }
 
     pub fn delete(&self, path: &str) -> Result<()> {
@@ -269,7 +270,7 @@ fn pull_origin(ctx: &Ctx, hub: &Hub, key: &[u8; 32], origin: &str) -> Result<boo
     let Some(r) = chunk_list(ctx, hub, origin, &known)? else { return Ok(false) };
     if journal::pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
     let inc = r["incarnation"].as_str().unwrap_or("").to_string();
-    let applied = journal::apply_manifest(ctx, origin, &r, &|file| decrypt(key, &hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"))?))?;
+    let applied = journal::apply_manifest(ctx, origin, &r, &|file| decrypt(key, &hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ)?))?;
     let last = r["last_seq"].as_i64().or_else(|| r["chunks"].as_array().and_then(|c| c.last()).and_then(|c| c["to"].as_i64())).unwrap_or(0);
     ctx.db.with(|c| {
         c.execute("update peers set incarnation=case when ?1 <> '' then ?1 else incarnation end, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
@@ -405,7 +406,7 @@ pub fn carry(ctx: &Ctx) -> Result<()> {
 
 /// A transcript of another computer from the hub, opened with the ring key (still compressed).
 pub fn fetch_transcript(ctx: &Ctx, origin: &str, key: &str) -> Result<Vec<u8>> {
-    decrypt(&ring_key(ctx)?, &Hub::open(ctx)?.get_bytes(&transcript_path(origin, key))?)
+    decrypt(&ring_key(ctx)?, &Hub::open(ctx)?.get_bytes(&transcript_path(origin, key), crate::transcripts::MAX_FETCH_BYTES)?)
 }
 
 // ---------- status ----------

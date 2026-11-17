@@ -205,19 +205,21 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
     };
     let base = format!("http://{}:{port}", if addr.contains(':') { format!("[{addr}]") } else { addr.clone() });
     let http = reqwest::blocking::Client::builder().no_proxy().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build()?;
-    let hello: Value = http.get(format!("{base}/pair/hello")).send().with_context(|| format!("could not reach {addr}:{port}"))?.error_for_status()?.json()?;
+    // the host is not known yet: its answers are a few kilobytes, and no more than this is read of one
+    let json = |r: reqwest::blocking::Response| -> Result<Value> { Ok(serde_json::from_slice(&crate::util::body_capped(r, 1024 * 1024, "the other computer's answer")?)?) };
+    let hello = json(http.get(format!("{base}/pair/hello")).send().with_context(|| format!("could not reach {addr}:{port}"))?.error_for_status()?)?;
     let their_id = hello["id"].as_str().filter(|s| !s.is_empty()).context("the other computer did not say who it is")?.to_string();
     let me = ctx.settings.device_id.as_str();
     let (st, outbound) = Spake2::<Ed25519Group>::start_a(&Password::new(code.as_bytes()), &Identity::new(me.as_bytes()), &Identity::new(their_id.as_bytes()));
-    let r: Value = http.post(format!("{base}/pair/start")).json(&json!({"id": me, "msg": b64(&outbound)})).send()?.error_for_status().context("the other computer refused the pairing")?.json()?;
+    let r = json(http.post(format!("{base}/pair/start")).json(&json!({"id": me, "msg": b64(&outbound)})).send()?.error_for_status().context("the other computer refused the pairing")?)?;
     let key = st.finish(&unb64(r["msg"].as_str().unwrap_or(""))?).map_err(|_| anyhow!("the pairing exchange failed"))?;
     let mine = payload(ctx)?;
     // the other side learns of a wrong code only from a payload it cannot open
     let address = if via_host { mine["address_hint"].as_str().unwrap_or("").to_string() } else { String::new() };
     let f = http.post(format!("{base}/pair/finish")).json(&json!({"id": me, "payload": seal(&key, &mine)?, "address": address})).send()?;
     if f.status() == reqwest::StatusCode::FORBIDDEN { bail!("the code did not match; check it and try again"); }
-    if !f.status().is_success() { bail!("the other computer did not accept the pairing: {}", f.json::<Value>().ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_default()); }
-    let answer: Value = f.json()?;
+    if !f.status().is_success() { bail!("the other computer did not accept the pairing: {}", json(f).ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_default()); }
+    let answer = json(f)?;
     // a computer from before 1.9.7 sent its payload with its first answer
     let theirs = open(&key, answer["payload"].as_str().or(r["payload"].as_str()).unwrap_or("")).map_err(|_| anyhow!("the code did not match; check it and try again"))?;
     let their_port = theirs["address_hint"].as_str().and_then(|a| a.rsplit_once(':')).map(|(_, p)| p).unwrap_or("0");

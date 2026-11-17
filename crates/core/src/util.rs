@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 
 /// Write via a temp file in the same folder and rename, so readers never see half a file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -24,6 +24,21 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         return Err(e);
     }
     Ok(())
+}
+
+/// What a reader gives, when it is no more than `max` bytes: what another computer sends is refused by the length
+/// it declares (when it declares one), and never read past the cap, so nothing larger than this app sends is held.
+pub fn read_capped(r: impl std::io::Read, declared: Option<u64>, max: u64, what: &str) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut b = vec![];
+    if declared.is_some_and(|n| n > max) || r.take(max + 1).read_to_end(&mut b)? as u64 > max { bail!("{what} is over {} MB; not taken", max >> 20); }
+    Ok(b)
+}
+
+/// An HTTP answer's body through `read_capped`.
+pub fn body_capped(r: reqwest::blocking::Response, max: u64, what: &str) -> Result<Vec<u8>> {
+    let declared = r.content_length();
+    read_capped(r, declared, max, what)
 }
 
 /// A file's text, or "" when it does not exist. Any other failure (locked, not yet downloaded by OneDrive)
@@ -246,6 +261,14 @@ mod unix_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capped_read_stops_at_the_cap() {
+        assert_eq!(read_capped(&b"12345"[..], Some(5), 5, "it").unwrap(), b"12345");
+        assert!(read_capped(&b"123456"[..], None, 5, "it").is_err(), "one byte over, with no length declared");
+        assert!(read_capped(std::io::empty(), Some(6), 5, "it").is_err(), "refused by the length it declares alone");
+        assert!(read_capped(std::io::repeat(0), None, 1_000, "it").is_err(), "an endless answer is left after the cap");
+    }
 
     #[test]
     fn a_safe_name_is_one_plain_path_part_on_any_system() {

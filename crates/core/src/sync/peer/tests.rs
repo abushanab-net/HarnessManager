@@ -327,7 +327,24 @@ fn a_transcript_comes_from_a_connected_peer_before_the_folder() {
     let c = computer(t.path(), "C");
     pair(&b, &c);
     let b_cert: String = c.ctx.db.with(|x| Ok(x.query_row("select cert_pem from peers where device_id=?", [&b.ctx.settings.device_id], |r| r.get(0))?)).unwrap();
-    let bytes = Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes(&format!("/v1/transcript/{}/claude/claude-main/s1", a.ctx.settings.device_id)).unwrap();
+    let bytes = Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes(&format!("/v1/transcript/{}/claude/claude-main/s1", a.ctx.settings.device_id), crate::transcripts::MAX_FETCH_BYTES).unwrap();
     assert_eq!(zstd::decode_all(&bytes[..]).unwrap(), std::fs::read(&f).unwrap());
-    assert!(Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes("/v1/transcript/nobody/claude/claude-main/s1").is_err());
+    assert!(Client::connect(&identity::load(&c.ctx).unwrap(), &b_cert, "127.0.0.1", port(&b)).unwrap().bytes("/v1/transcript/nobody/claude/claude-main/s1", crate::transcripts::MAX_FETCH_BYTES).is_err());
+}
+
+#[test]
+fn an_answer_longer_than_the_asker_allows_is_not_read() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    a.ctx.db.insert_usage(&[row("claude:1", 1_000)], &Prices::new()).unwrap();
+    journal::publish(&a.ctx).unwrap();
+    let me = &a.ctx.settings.device_id;
+    let man = store::manifest(&a.ctx, me).unwrap();
+    let (path, len) = (format!("/v1/chunk/{me}/{}", man["chunks"][0]["file"].as_str().unwrap()), man["chunks"][0]["bytes"].as_u64().unwrap());
+    let a_cert: String = b.ctx.db.with(|c| Ok(c.query_row("select cert_pem from peers where device_id=?", [me], |r| r.get(0))?)).unwrap();
+    let c = Client::connect(&identity::load(&b.ctx).unwrap(), &a_cert, "127.0.0.1", port(&a)).unwrap();
+    assert_eq!(c.bytes(&path, len).unwrap().len() as u64, len);
+    let e = c.bytes(&path, len - 1).unwrap_err();
+    assert!(format!("{e:#}").contains("not taken"), "one byte over: {e:#}");
 }

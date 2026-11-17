@@ -21,6 +21,11 @@ use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
 const CHUNK_BYTES: usize = 1_000_000;
+/// No more than this is read of a chunk another computer sends: four times the size they are cut at, as one long
+/// entry may run over it.
+pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
+/// And of a JSON answer (a chunk list, presence, the hub's devices).
+pub const MAX_JSON_BYTES: u64 = 32 * 1024 * 1024;
 /// A peer whose `hello` answered within this long is connected.
 pub const CONNECTED_MS: i64 = 30_000;
 
@@ -292,7 +297,7 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
         let presence = std::fs::read_to_string(dir.join("presence.json")).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
         let man = folder::read_manifest(&dir);
         let applied = match &man {
-            Some(m) => match apply_manifest(ctx, &id, m, &|file| Ok(std::fs::read(dir.join("journal").join(file))?)) {
+            Some(m) => match apply_manifest(ctx, &id, m, &|file| crate::util::read_capped(std::fs::File::open(dir.join("journal").join(file))?, None, MAX_CHUNK_READ, file)) {
                 Ok(seq) => Some(seq),
                 Err(e) => { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None }
             },
