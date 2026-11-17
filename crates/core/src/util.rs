@@ -72,8 +72,12 @@ pub fn read_or_empty(path: &Path) -> Result<String> {
 }
 
 /// A system-wide named mutex shared by every Harness Manager process (and thread); released on drop.
-/// Re-taking it on a thread that already holds it does not block.
-pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE);
+/// Re-taking it on a thread that already holds it does not block. Off Windows it is a locked file.
+pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE, #[cfg(not(windows))] Option<(std::fs::File, String)>);
+
+// the names this thread holds: a file lock taken twice through two handles would wait for itself
+#[cfg(not(windows))]
+thread_local! { static HELD: std::cell::RefCell<std::collections::HashSet<String>> = Default::default(); }
 
 impl NamedLock {
     pub fn take(name: &str) -> NamedLock {
@@ -86,8 +90,29 @@ impl NamedLock {
             if !h.is_null() { unsafe { WaitForSingleObject(h, 10_000) }; }
             NamedLock(h)
         }
+        // an advisory lock on a file in the temp folder, which every process of this user shares; closing the file
+        // (the drop) releases it, and so does the end of a process that held it
         #[cfg(not(windows))]
-        { let _ = name; NamedLock() }
+        {
+            if !HELD.with(|h| h.borrow_mut().insert(name.to_string())) { return NamedLock(None); }
+            let path = std::env::temp_dir().join(format!("HarnessManager-{name}.lock"));
+            // shortcut: on a shared /tmp every user locks the same file (another user's opens for reading, which is
+            // enough), so two users wait for each other, 10 s at most; a folder per user if that ever shows
+            let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).or_else(|_| std::fs::File::open(&path)).ok();
+            if let Some(f) = &file {
+                // the same 10 s as on Windows, then on without the lock
+                let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                while matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)) && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(20)); }
+            }
+            NamedLock(file.map(|f| (f, name.to_string())).or_else(|| { HELD.with(|h| h.borrow_mut().remove(name)); None }))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+impl Drop for NamedLock {
+    fn drop(&mut self) {
+        if let Some((_, name)) = &self.0 { HELD.with(|h| h.borrow_mut().remove(name)); }
     }
 }
 
@@ -281,6 +306,21 @@ mod unix_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unix_a_named_lock_lets_one_thread_in_at_a_time_and_the_same_one_again() {
+        let name = format!("test-{}", std::process::id());
+        let (held, again) = (NamedLock::take(&name), NamedLock::take(&name));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let other = { let name = name.clone(); std::thread::spawn(move || { let _l = NamedLock::take(&name); tx.send(()).unwrap(); }) };
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(400)).is_err(), "another thread waits while it is held");
+        drop(again);
+        drop(held);
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "and gets it once it is released");
+        other.join().unwrap();
+        #[cfg(not(windows))]
+        let _ = std::fs::remove_file(std::env::temp_dir().join(format!("HarnessManager-{name}.lock")));
+    }
 
     #[test]
     fn unix_a_key_kept_as_a_file_is_its_owners_alone() {
