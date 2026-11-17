@@ -15,9 +15,12 @@
 .b-apps .b-name img { width: 16px; height: 16px; }
 .b-apps .page-actions { flex-wrap: nowrap; }
 
-/* cli: a command column as wide as its longest command, the meaning 24 px after it; the page at most 1180 px */
+/* cli: in a card the commands are one column, as wide as the longest of them, and every meaning starts 24 px after it
+   (the rows share the card's two columns); the page at most 1180 px */
 .b-page[data-b-page="cli"] { max-width: 1180px; }
-.b-cli-row, .b-cli-examples > div { grid-template-columns: max-content minmax(0, 1fr); gap: 24px; align-items: baseline; }
+.b-cli-grid > section, .b-cli-examples { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 24px; }
+.b-cli-grid > section > .panel-head { grid-column: 1 / -1; }
+.b-cli-row, .b-cli-examples > div { grid-column: 1 / -1; grid-template-columns: subgrid; column-gap: 24px; align-items: baseline; }
 .b-cli-row code, .b-cli-examples code { overflow-wrap: anywhere; white-space: normal; }
 
 /* settings: the description column stops at 46ch; controls are sized to their content */

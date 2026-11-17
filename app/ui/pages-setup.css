@@ -35,11 +35,36 @@
 .b-page[data-b-page=prompts] .page-tabs .filter-chip { min-height: 28px; }
 /* a status pill in a card keeps its natural width; the live file sizes to its text, with a floor */
 .b-editor > .plan-pill, .b-prompt-choice > .plan-pill { align-self: flex-start; }
+.b-editor .b-toolbar > .muted { flex: 1; min-width: 0; }
 .b-live-prompt { min-height: 160px; }
 .b-live-prompt:focus-visible { outline: 2px solid var(--line-focus); outline-offset: 2px; }
 .b-prompt-choice { width: 100%; cursor: pointer; }
 .b-prompt-choice:hover { background: var(--bg-card-hover); }
-/* the dialogs (the Add / Edit server form is the wide one) */
+
+/* ---------- API keys & routing: the cards hold rows as the lists of the other pages do (44 px, a hairline between) ---------- */
+.b-page[data-b-page=routing] .b-route { gap: 6px; padding: 0 0 10px; }
+.b-page[data-b-page=routing] .b-route:last-child { padding-bottom: 0; }
+.b-route-head { display: flex; align-items: center; gap: 8px; min-height: 44px; min-width: 0; }
+.b-page[data-b-page=routing] .b-route details summary { padding: 6px 0; }
+.b-page[data-b-page=routing] .b-chain .candidate-pill { min-height: 44px; justify-content: center; }
+.b-page[data-b-page=routing] .replies-table th { padding: 8px 12px 8px 0; }
+.b-page[data-b-page=routing] .replies-table td { height: 44px; padding: 4px 12px 4px 0; }
+.b-page[data-b-page=routing] .replies-table tr:last-child td { border-bottom: 0; }
+.b-page[data-b-page=routing] .replies-table :is(th, td):last-child { padding-right: 0; }
+.b-providers th:last-child { width: 96px; }
+.b-providers .b-actions-cell { text-align: right; }
+.b-page[data-b-page=routing] .panel-card > .b-toolbar { min-height: 30px; }
+
+/* ---------- Apps ---------- */
+.b-page[data-b-page=apps] .b-apps td { height: 52px; }
+.b-page[data-b-page=apps] .b-copy-row td { height: 40px; }
+/* at 1280 the path gets the room the action does not need */
+@container sheet (max-width: 1168px) {
+  .b-page[data-b-page=apps] .b-apps th:first-child { width: 31%; }
+  .b-page[data-b-page=apps] .b-apps th:nth-child(5) { width: 24%; }
+}
+
+/* ---------- the dialogs (the Add / Edit server form is the wide one) ---------- */
 .modal-card.mcp-dlg { max-width: 760px; }
 .mcp-dlg .filter-chip { min-height: 28px; }
 .dlg .b-kv { display: flex; gap: 8px; align-items: flex-end; }

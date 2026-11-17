@@ -1142,6 +1142,39 @@ description: Bulk skill ${i}
     await shot('13-prompts');
   });
 
+  await test('the list and setup pages keep the 1.10 rules: controls at least 28 px tall, one primary a screen, the head\'s actions on one row at 1280', async () => {
+    // a prompt chosen in its editor, so System prompts is measured in the state with the most buttons
+    await nav('#prompts');
+    await drawn('prompts');
+    if (await exec("return !!document.querySelector('[data-act=prompt-sel][data-testid]')")) { await click('[data-act=prompt-sel][data-testid]'); await $('#pr-body'); }
+    for (const h of ['#sessions?days=all', '#session?profile=claude-main&id=s-main-1', '#projects?days=all', '#mcp', '#skills', '#prompts', '#routing', '#apps', '#cli']) {
+      if (h !== '#prompts') { await nav(h); await drawn(h); }
+      const d = await exec(`const sheet = document.getElementById('sheet'), box = (e) => e.getBoundingClientRect(), seen = (e) => box(e).width > 0 && box(e).height > 0;
+        // what a pointer presses: a segmented choice counts as its frame; a tick box, a tag chip (20 px, in a line of text),
+        // the tag button (drawn at 24, pressed over 30) and the shared "← Back" line are not measured here
+        const low = [...sheet.querySelectorAll('button, select, summary, a[href], input:not([type=checkbox]):not([type=radio]), textarea')].filter(seen)
+          .filter((e) => !e.matches('a.a-tag, .a-tagbtn, .back-chip')).map((e) => [e, box(e.closest('.seg') || e).height]).filter(([, hgt]) => hgt < 28)
+          .map(([e, hgt]) => (e.dataset.testid || e.dataset.act || e.className || e.tagName) + ' ' + hgt.toFixed(1));
+        const primary = new Set([...sheet.querySelectorAll('.btn.primary, .btn-primary')].filter(seen).map((b) => b.closest('.a-split') || b));
+        const acts = [...sheet.querySelectorAll('.page-head .actions button')].filter(seen);
+        return { low: [...new Set(low)], primary: primary.size, rows: new Set(acts.map((b) => Math.round(box(b).top + box(b).height / 2))).size, acts: acts.length, wide: sheet.scrollWidth - sheet.clientWidth, w: window.innerWidth };`);
+      assert.equal(d.w, 1280);
+      assert.deepEqual(d.low, [], `${h}: controls under 28 px`);
+      assert.ok(d.primary <= 1, `${h}: at most one primary button on the page, not ${d.primary}`);
+      assert.ok(d.rows <= 1, `${h}: the head's ${d.acts} actions on one row`);
+      assert.ok(d.wide <= 0, `${h}: nothing wider than the page (${d.wide} px)`);
+      // the same page in the VektraGrid theme, dark and light, for review (only the attributes the stylesheet reads
+      // are changed, and put back: no setting is written)
+      const name = h.slice(1).split('?')[0];
+      for (const theme of ['dark', 'light']) {
+        await exec("document.documentElement.dataset.brand = 'vg'; document.documentElement.dataset.theme = arguments[0]; return document.fonts.ready.then(() => 1)", [theme]);
+        await sleep(150);
+        await shot(`30-vg-${theme}-${name}`);
+      }
+      await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
+    }
+  });
+
   await test('refresh says what it did, and why Claude limits stay old while Live is off', async () => {
     await nav('#accounts');
     await click('[data-act=refresh-now]');
