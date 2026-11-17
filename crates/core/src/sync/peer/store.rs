@@ -7,14 +7,18 @@ use std::path::PathBuf;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
-use crate::util::{read_json, write_atomic};
+use crate::util::{read_json, safe_name, write_atomic};
 use crate::Ctx;
 
 const KEEP_BYTES: i64 = 50_000_000;
 
 /// A computer's id, as it names a folder here: another computer can send any text as one, and `..\` must not
 /// climb out of the store.
-pub fn safe_origin(s: &str) -> bool { !s.is_empty() && !s.starts_with('.') && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_') }
+pub fn safe_origin(s: &str) -> bool { safe_name(s) }
+
+/// A file name another computer sent (a chunk's, a transcript's): a plain name. A check for slashes alone lets a
+/// drive or a stream through on Windows.
+pub fn safe_file(s: &str) -> bool { safe_name(s) }
 
 pub fn dir(ctx: &Ctx, origin: &str) -> PathBuf { ctx.data.join("journal-cache").join(if safe_origin(origin) { origin } else { ".invalid" }) }
 
@@ -26,7 +30,7 @@ pub fn put_device(ctx: &Ctx, origin: &str, v: &Value) -> Result<()> { write_atom
 
 /// A chunk file's bytes; the name is checked to be a plain file name first.
 pub fn chunk(ctx: &Ctx, origin: &str, file: &str) -> Result<Vec<u8>> {
-    if file.is_empty() || file.contains(['/', '\\']) || origin.contains(['/', '\\']) { bail!("not a chunk name"); }
+    if !safe_file(file) || !safe_origin(origin) { bail!("not a chunk name"); }
     Ok(std::fs::read(dir(ctx, origin).join("journal").join(file))?)
 }
 
@@ -45,12 +49,13 @@ pub fn put_manifest_empty(ctx: &Ctx, origin: &str, incarnation: &str) -> Result<
 
 /// Keep one chunk and list it in the origin's manifest (a new incarnation starts the list over).
 pub fn put_chunk(ctx: &Ctx, origin: &str, incarnation: &str, entry: &Value, bytes: &[u8]) -> Result<()> {
+    let file = entry["file"].as_str().unwrap_or("");
+    if !safe_file(file) || !safe_origin(origin) { bail!("not a chunk name"); }
     let d = dir(ctx, origin);
     let mut man = manifest(ctx, origin).filter(|m| m["incarnation"].as_str() == Some(incarnation)).unwrap_or_else(|| {
         let _ = std::fs::remove_dir_all(d.join("journal"));
         json!({"incarnation": incarnation, "last_seq": 0, "chunks": []})
     });
-    let file = entry["file"].as_str().unwrap_or("");
     write_atomic(&d.join("journal").join(file), bytes)?;
     let list = man["chunks"].as_array_mut().unwrap();
     list.retain(|c| c["file"] != entry["file"]);

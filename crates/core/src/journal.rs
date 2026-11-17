@@ -225,7 +225,7 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
     for ch in man["chunks"].as_array().into_iter().flatten() {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
-        if to <= cur || file.is_empty() || file.contains(['/', '\\']) { continue; }
+        if to <= cur || !store::safe_file(file) { continue; }
         let bytes = match read(file) {
             Ok(b) => b,
             Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
@@ -810,6 +810,32 @@ mod tests {
         ];
         assert_eq!(merge_from(&ctx, "peer-1", &entries), 19);
         assert_eq!(keys_of(&ctx, "sessions"), ["claude/work/0b1c2d3e-aaaa-bbbb-cccc-1234567890ab", "opencode/oc_main/ses_5f3a.1"]);
+        assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
+    }
+
+    #[test]
+    fn a_file_name_from_another_computer_that_is_not_a_plain_name_is_never_opened() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        // most of them without a slash: a hidden file, an option, a parent folder, a drive, a stream, a device, a name too long
+        let long = "a".repeat(200);
+        let asked = std::cell::RefCell::new(Vec::<String>::new());
+        for name in [".i-1-1.jsonl", "-i-1-1.jsonl", "..", "../up.jsonl", "C:evil.jsonl", "i-1-1.jsonl:stream", "NUL", "nul.jsonl", long.as_str()] {
+            let man = json!({"incarnation": "i", "chunks": [{"file": name, "from": 1, "to": 1, "sha256": sha256_hex(b""), "bytes": 0}]});
+            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }).unwrap(), 0, "{name}");
+            assert!(store::chunk(&ctx, "peer-1", name).is_err(), "{name}");
+            assert!(store::put_chunk(&ctx, "peer-1", "i", &json!({"file": name, "from": 1, "to": 1, "bytes": 0}), b"").is_err(), "{name}");
+        }
+        assert_eq!(*asked.borrow(), Vec::<String>::new(), "none was asked for");
+        assert!(!store::dir(&ctx, "peer-1").join("up.jsonl").exists() && store::manifest(&ctx, "peer-1").is_none(), "and none was kept");
+        // a transcript's place in its computer's folder is transcripts/<tool>/<account>/<file>, each a plain name
+        let tr = |file: &str| entry(1, "transcript", "claude/work/s1", json!({"file": file, "bytes": 1, "sha256": "x", "mtime": 1, "source_rel": "projects/p/s1.jsonl"}));
+        for (i, file) in ["C:evil.zst", "transcripts/claude/work/C:evil.zst", "transcripts/claude/work/s1.jsonl.zst:stream", "transcripts\\claude\\work\\s1.jsonl.zst",
+            "transcripts/claude/work/sub/s1.jsonl.zst", "elsewhere/claude/work/s1.jsonl.zst", "transcripts/claude/-work/s1.jsonl.zst"].into_iter().enumerate() {
+            assert_eq!(merge_from(&ctx, &format!("peer-{}", i + 2), &[tr(file)]), 1);
+        }
+        assert_eq!(keys_of(&ctx, "transcripts"), Vec::<String>::new());
+        merge_from(&ctx, "peer-9", &[tr("transcripts/claude/work/s1.jsonl.zst")]);
         assert_eq!(keys_of(&ctx, "transcripts"), ["claude/work/s1"]);
     }
 }

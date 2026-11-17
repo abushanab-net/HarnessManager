@@ -66,7 +66,7 @@ pub(crate) fn local_path(ctx: &Ctx, device: &str, harness: &str, profile: &str, 
 pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) -> Result<FetchedTranscript> {
     let key = format!("{harness}/{profile}/{id}");
     // they go on into paths, requests and the tool's arguments
-    if !crate::journal::session_key_ok(&key) { bail!("this session's names cannot be used on this computer"); }
+    if !crate::journal::session_key_ok(&key) || !crate::sync::peer::store::safe_origin(device) { bail!("this session's names cannot be used on this computer"); }
     let row: Option<(String, i64, String, String, Option<i64>)> = ctx.db.with(|c| {
         tables(c)?;
         Ok(c.query_row("select file, bytes, sha256, source_rel, fetched_at from transcripts where device=? and key=?", [device, &key],
@@ -74,9 +74,9 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
     })?;
     let name = crate::journal::device_names(ctx).get(device).cloned().unwrap_or_else(|| device.to_string());
     let Some((file, _, sha, source_rel, fetched_at)) = row else { return fetch_direct(ctx, device, &name, harness, profile, id) };
+    if !crate::sync::transcripts::safe_rel(&file) { bail!("transcript entry names a path outside the folder"); }
     let path = local_path(ctx, device, harness, profile, &file)?;
     if fetched_at.is_none() || !path.exists() {
-        if file.contains("..") || Path::new(&file).is_absolute() { bail!("transcript entry names a path outside the folder"); }
         // a connected computer first (phase 2's route), then the hub or the folder
         let raw = match crate::sync::peer::client::transcript_from_peers(ctx, device, harness, profile, id, Some(&sha)) {
             Some(b) => b,
