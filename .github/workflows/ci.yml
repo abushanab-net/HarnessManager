@@ -71,7 +71,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --workspace --lib --bins
       # the tests of the desktop app and of hrm (crates/cli) drive Windows consoles, so they stay in the Windows job
-      - run: cargo test -p hrm-core -p hrm-hub
+      - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast
 
   linux:
     # hrm-core and the hub pass their tests on Linux. The self-hosted Linux runners (variable RUNNER_LINUX), or a
@@ -88,4 +88,4 @@ jobs:
       # runner image: this step does nothing once it is there
       - run: command -v cc || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config; }
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p hrm-core -p hrm-hub
+      - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast

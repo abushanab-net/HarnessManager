@@ -104,11 +104,9 @@ mod tests {
         claude_file(&ctx, "s1", "written while watched", "2026-11-05T10:00:00.000Z");
         let t0 = Instant::now();
         while t0.elapsed() < Duration::from_secs(2) {
-            // the callback runs once the refresh has written the row, so it is the thing to wait for
-            if seen.load(std::sync::atomic::Ordering::SeqCst) >= 1 {
-                assert_eq!(sessions(&ctx, &SessionFilter { id: Some("s1".into()), ..Default::default() }).unwrap().len(), 1, "the new file is in the index");
-                return;
-            }
+            // the callback runs once the refresh has written the row, so it is the thing to wait for; macOS also
+            // reports the file written just before the watch began, so a first callback can come without this one
+            if seen.load(std::sync::atomic::Ordering::SeqCst) >= 1 && sessions(&ctx, &SessionFilter { id: Some("s1".into()), ..Default::default() }).unwrap().len() == 1 { return; }
             std::thread::sleep(Duration::from_millis(100));
         }
         // a CI runner's file notifications can lag or be dropped; the periodic walk covers that in use
