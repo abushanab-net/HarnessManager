@@ -1313,8 +1313,8 @@ try {
     await click('[data-testid=remove-confirm]');
     await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=row-side-route]')")), 'removed');
     assert.ok(!JSON.parse(hrm('list', '--json')).some((x) => x.name === 'side-route'), 'gone from the list of accounts');
-    // a click on the row itself (not on a button) still opens the account's page
-    await click('[data-testid=row-team-ci] .who');
+    // a double click on the row itself (not on a button) still opens the account's page (a click selects it for the pane)
+    await dbl('[data-testid=row-team-ci] .who');
     await waitFor(async () => (await exec('return location.hash')) === '#account?name=team-ci', 'the row opens its account');
   });
 
@@ -1652,6 +1652,158 @@ try {
         assert.equal((await paneFacts()).current[0], 'claude-main/s-pane-live', 'the selection stayed');
       }, "if (op === 'sessions') for (const g of r.groups) for (const s of g.sessions) if (s.id === 's-pane-live') s.open = true;");
     } finally { fs.rmSync(file, { force: true }); await nav('#home'); }
+  });
+
+  await test('detail pane, accounts: a click selects the account and puts sel in the address; the pane has ONE primary per state (Start; Log in, with Start disabled and the reason), the row\'s whole menu, its tabs and Remove at the foot; Esc gives the 1.10 rows back; Enter and Open go to the account\'s page', async () => {
+    await exec("localStorage.removeItem('hm.pane.accounts')");
+    await reopenAccounts();
+    const rowOf = () => exec(`const r = document.querySelector('[data-testid=row-codex-main]'), z = document.documentElement.currentCSSZoom || 1;
+      return { cells: r.children.length, acts: [...r.querySelectorAll('.acts button')].map((b) => b.textContent.trim()), spark: !!r.querySelector('.spark'), height: Math.round(r.getBoundingClientRect().height / z),
+        head: [...document.querySelectorAll('.page-head .actions .btn')].map((b) => b.textContent.trim() + (b.classList.contains('primary') ? ' (primary)' : '')), cols: [...document.querySelectorAll('.acct-cols .label')].map((l) => l.textContent) };`);
+    const before = await rowOf();
+    assert.deepEqual([before.cells, before.acts, before.spark, before.height, before.cols], [7, ['Start', '⋯'], true, 56, []], 'the 1.10 row: ' + JSON.stringify(before));
+    assert.equal(before.head.at(-1), 'Add account (primary)');
+    // the row's menu, to compare with the pane's
+    await click('[data-testid=menu-codex-main]');
+    await $('.menu.acct-menu');
+    const rowMenu = await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent.trim())");
+    await page.keyboard.press('Escape');
+    let f;
+    await withOps(async () => {
+      assert.deepEqual(await selectAsks('[data-testid=row-codex-main] .who'), ['detail:codex-main'], 'selecting a row reads the account for the pane, and not the list again');
+      await $('#pane');
+      await $('[data-testid=pane-recent] .pane-mini');
+      f = await paneFacts();
+      await shot('22-accounts-pane-light');
+      // in a low window the pane scrolls on its own, and its head (the name, with its pills under it when they have
+      // no room beside it) stays whole inside it
+      await page.setViewportSize({ width: 1280, height: 600 });
+      await waitFor(async () => (await exec("const p = document.getElementById('pane'); return p.scrollHeight > p.clientHeight")), 'the pane scrolls on its own in a low window');
+      assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'in a low window nothing of the pane is cut');
+      await page.setViewportSize({ width: 1280, height: 800 });
+      // a tab of the pane is drawn from what was read
+      assert.deepEqual(await asks('[data-testid=pane-tab-sessions]'), [], 'the Sessions tab asks the backend nothing');
+      await $('[data-testid=pane-tabbody] [data-testid=session-cx-1]');
+      assert.deepEqual(await asks('[data-testid=pane-tab-projects]'), [], 'nor does the Projects tab');
+      await hasText('[data-testid=pane-tabbody]', 'platform-gitops');
+      assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'the Projects tab fits the pane');
+      const tabs = await exec(`return [...document.querySelectorAll('#pane .pane-tabs > *')].map((t) => [t.tagName, t.textContent.trim(), t.getAttribute('aria-current'), getComputedStyle(t).textDecorationLine, t.getAttribute('href')])`);
+      assert.deepEqual(tabs, [['BUTTON', 'Overview', null, 'none', null], ['BUTTON', 'Sessions', null, 'none', null], ['BUTTON', 'Projects', 'true', 'none', null], ['A', 'Settings', null, 'underline', '#account?name=codex-main&tab=settings']],
+        'Overview, Sessions and Projects are tabs of the pane; Settings is a link to the account\'s page, drawn as a link');
+      await click('[data-testid=pane-tab-overview]');
+      await $('[data-testid=pane-limits]');
+    });
+    assert.deepEqual([f.hash, f.role, f.label, f.width, f.position, f.list], ['#accounts?sel=codex-main', 'complementary', 'codex-main', 380, 'static', f.sheet - 380], 'the selection in the address, the pane a region named by the account, beside the list');
+    assert.deepEqual([f.current, f.focus, f.primaries], [['codex-main'], 'codex-main', ['pane:Start']], 'the row current and focused; one primary on the screen, the pane\'s Start');
+    const open = await rowOf();
+    assert.deepEqual([open.cells, open.acts, open.spark, open.height, open.cols, open.head], [5, [], false, 44, ['Account', 'Limits left', '7 days', 'State'], ['Export CSV', 'Add account']],
+      'beside the pane: the drawn columns on 44 px rows, no action of its own, Add account a secondary');
+    assert.ok((await text('[data-testid=state-codex-main]')).trim().length > 3, 'the state in words');
+    const facts = await rowFacts();
+    assert.deepEqual([[...new Set(facts.heights)], facts.wrapped, facts.overlap], [[44], [], []], 'every row 44 px, nothing wrapped, no column into the next');
+    const p = await exec(`const q = (t) => document.querySelector('#pane [data-testid=' + t + ']'), tx = (t) => (q(t) ? q(t).innerText.replace(/\\s+/g, ' ').trim() : null);
+      return { who: tx('pane-who'), limits: tx('pane-limits'), runway: q('pane-runway').textContent.replace(/\\s+/g, ' ').trim(), cli: tx('pane-cli'), folder: tx('pane-folder-path'), remove: [tx('pane-remove'), getComputedStyle(q('pane-remove')).color], why: tx('pane-why'), next: !!q('pane-next'),
+        icon: !!document.querySelector('#pane .pane-top img[src*=codex]'), acts: [...document.querySelectorAll('#pane .pane-acts > *')].map((b) => b.textContent.trim()), tiles: [...document.querySelectorAll('#pane .pane-tile')].map((t) => t.innerText.replace(/\\s+/g, ' ').trim()),
+        subs: [...document.querySelectorAll('#pane .pane-sub > :first-child')].map((s) => s.textContent), pills: [...document.querySelectorAll('#pane .pane-top .pill')].map((x) => x.textContent) };`);
+    assert.ok(p.icon && p.who.startsWith('alex@example.org · ChatGPT'), 'the tool\'s icon, the login and the plan: ' + p.who);
+    assert.ok(/^79% week Limits left resets in Week 79% /.test(p.limits), 'the ring with the limit windows, what is left and when each resets: ' + p.limits);
+    assert.ok(p.runway.startsWith('Reset runway') && p.runway.includes('week window, now to +7 d') && p.runway.includes('resets ') && p.runway.includes('Now+2 d+4 d+6 d+7 d'), 'the runway lane, from now to +7 d with its reset: ' + p.runway);
+    assert.deepEqual(p.subs, ['Reset runway', 'Last 7 days', 'Recent sessions'], 'the sections, in the drawing\'s order');
+    assert.ok(/ tokens$/.test(p.tiles[0]) && /^(≈ \$[\d.,]+|—) at API list prices$/.test(p.tiles[1]), 'the range\'s tokens and ≈ cost: ' + p.tiles);
+    assert.deepEqual([p.cli, p.acts], ['hrm run codex-main', ['Start', 'Start in folder…', '⋯']], 'the command line, and Start, Start in folder… and ⋯');
+    assert.ok(p.folder.endsWith('.codex'), 'its folder: ' + p.folder);
+    assert.deepEqual(p.remove, ['Hide main profile…', 'rgb(180, 40, 24)'], 'at the foot, in the danger colour (a main profile is hidden, not removed)');
+    assert.ok(p.pills.includes('main') && p.next === p.pills.includes('Use next') && (!p.next || p.why.startsWith('Why this one:')), 'main, and Use next with its reason when it is the recommendation: ' + p.pills + ' / ' + p.why);
+    assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'nothing under 12 px, no control under 28 px, nothing wider than the pane');
+    // the pane's ⋯ is the row's whole menu
+    await click('[data-testid=pane-menu]');
+    await $('.menu.acct-menu');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu button')].map((b) => b.textContent.trim())"), rowMenu, 'the same menu as the row\'s');
+    await page.keyboard.press('Escape');
+    for (const [brand, theme] of [['hm', 'dark'], ['vg', 'dark']]) {
+      await exec('document.documentElement.dataset.brand = arguments[0]; document.documentElement.dataset.theme = arguments[1]', [brand, theme]);
+      await sleep(300);
+      await shot(`22-accounts-pane-${brand === 'vg' ? 'vektragrid-' : ''}${theme}`);
+    }
+    await exec("document.documentElement.dataset.brand = 'hm'; document.documentElement.dataset.theme = 'light'");
+    // a logged-out account (the sandbox's claude-main): Log in is the primary, Start is disabled and says why
+    await click('[data-testid=row-claude-main] .who');
+    await waitFor(async () => (await paneFacts()).label === 'claude-main', 'claude-main in the pane');
+    const out = await exec(`const q = (t) => document.querySelector('#pane [data-testid=' + t + ']'), s = q('pane-start');
+      return { primary: q('pane-primary').textContent.trim(), act: q('pane-primary').dataset.act, start: [s.textContent.trim(), s.disabled, s.title], pill: q('pane-out').textContent, why: q('pane-why').textContent.trim(), cli: q('pane-cli').textContent, limits: q('pane-limits').innerText.replace(/\\s+/g, ' ').trim(), runway: !!q('pane-runway') };`);
+    assert.deepEqual([out.primary, out.act, out.start, out.pill], ['Log in', 'login', ['Start', true, 'Not logged in: log in first'], 'Logged out'], 'Log in is the primary; Start is disabled with the reason in its title');
+    assert.deepEqual([out.why, out.cli, out.runway], ['Not logged in. Plan and limits are read after the first login.', 'hrm login claude-main', false], 'the banner says why, the command line is the one that works');
+    assert.ok(out.limits.includes('5-hour — log in') && out.limits.includes('Week — log in'), 'unread limits are —, with the reason: ' + out.limits);
+    assert.deepEqual((await paneFacts()).primaries, ['pane:Log in'], 'one primary');
+    await page.keyboard.press('Escape');
+    await gone('Esc closes the pane');
+    assert.deepEqual([(await paneFacts()).hash, (await paneFacts()).current], ['#accounts?sel=claude-main', ['claude-main']], 'the selection stays in the address');
+    assert.deepEqual(await rowOf(), before, 'and the rows are the 1.10 rows again');
+    // Back clears the selection (the second selection replaced the first in the history)
+    await exec('history.back()');
+    await hashIs('#accounts', 'Back clears the selection');
+    // an expired login and a limit used up say so in the banner
+    await withOps(async () => {
+      await nav('#home');
+      await nav('#accounts?sel=codex-main');
+      await drawn('accounts');
+      await click('[data-testid=row-codex-main] .who');
+      await hasText('[data-testid=pane-why]', 'Week used up. Back ');
+      assert.equal((await text('[data-testid=state-codex-main]')).replace(/\s+/g, ' ').split(' back ')[0], 'Used up', 'and the row\'s state does');
+      // three limit windows beside the pane: each on the row with its short name whole, each on its own line in the pane
+      const lims = await exec("return [...document.querySelectorAll('[data-testid=row-codex-main] .lim .t')].map((t) => [t.textContent, t.firstElementChild.scrollWidth > t.firstElementChild.clientWidth])");
+      assert.deepEqual(lims, [['5h100%', false], ['Wk0%', false], ['Fable88%', false]], 'the row\'s three limits, no name cut');
+      assert.ok(/5-hour 100% .* Week 0% .* Week · Fable 88% /.test((await text('[data-testid=pane-limits]')).replace(/\s+/g, ' ')), 'the pane\'s three windows: ' + (await text('[data-testid=pane-limits]')).replace(/\s+/g, ' '));
+      const facts = await rowFacts();
+      assert.deepEqual([[...new Set(facts.heights)], facts.wrapped, facts.overlap], [[44], [], []], 'and the rows still hold: 44 px, nothing wrapped, no column into the next');
+    }, `if (op === 'state') { const soon = Date.now() + 3600e3, q = r.profiles.find((x) => x.name === 'codex-main').quota, t = q.tiers.find((x) => x.id === 'week'); t.used = 100; t.resets_at = soon;
+      q.tiers.unshift({ id: 'session', label: '5-hour session', used: 0, resets_at: soon }); q.tiers.push({ id: 'week:fable', label: 'Week · Fable', used: 12, resets_at: soon }); }`);
+    await withOps(async () => {
+      await nav('#home');
+      await nav('#accounts?sel=codex-main');
+      await drawn('accounts');
+      await hasText('[data-testid=pane-why]', 'Login expired. Plan and limits not read since ');
+      await hasText('[data-testid=pane-primary]', 'Log in');
+      assert.equal(await exec("return document.querySelector('[data-testid=pane-start]').title"), 'Its login has expired: log in first');
+    }, "if (op === 'state') r.profiles.find((x) => x.name === 'codex-main').identity.needs_login = true;");
+    // Enter on the selected row and the pane's Open go to the account's page
+    await reopenAccounts();
+    await click('[data-testid=row-codex-main] .who');
+    await $('#pane');
+    await page.keyboard.press('Enter');
+    await hashIs('#account?name=codex-main', 'Enter on the selected row opens the account');
+    await exec('history.back()');
+    await click('[data-testid=pane-open]');
+    await hashIs('#account?name=codex-main', 'Open opens the account');
+    await hasText('[data-testid=detail-name]', 'codex-main');
+  });
+
+  await test('detail pane: at Large text the pane lies over the list instead of squeezing it, on Sessions and on Accounts', async () => {
+    const size = (v) => exec("return window.__TAURI__.core.invoke('call', { op: 'settings_set', args: { key: 'text_size', value: arguments[0] } }).then(() => import('./core.js')).then((c) => c.loadState())", [v]);
+    await exec("localStorage.removeItem('hm.pane.sessions'); localStorage.removeItem('hm.pane.accounts')");
+    try {
+      await nav('#home');
+      await nav(SES_HASH);
+      await drawn('sessions');
+      await $('#pane');
+      const usual = await paneFacts();
+      assert.deepEqual([usual.position, usual.list], ['static', usual.sheet - 380], 'at the usual size: beside the list');
+      await size('large');
+      await waitFor(async () => (await exec("return +getComputedStyle(document.documentElement).zoom")) === 1.12, 'Large');
+      for (const [hash, name] of [[SES_HASH, 'sessions'], ['#accounts?sel=codex-main', 'accounts']]) {
+        await nav(hash);
+        await drawn(name);
+        await $('#pane');
+        const big = await paneFacts();
+        assert.ok(big.sheet - 380 < 560, name + ': too narrow for both: ' + big.sheet);
+        assert.deepEqual([big.position, big.list, big.width, big.edges], ['absolute', big.sheet, 380, [0, 0, 0]], name + ': the pane lies over the list from the right, and the list keeps its width');
+        assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, name + ': the pane holds at this size');
+        await shot(`23-${name}-pane-large`);
+        await page.keyboard.press('Escape');
+        await gone(name + ': Esc closes it');
+        await exec('localStorage.removeItem(arguments[0])', ['hm.pane.' + name]);
+      }
+    } finally { await size('comfortable'); await nav('#home'); }
   });
 
   await test('the tray popup loads the limits alone: none of the Sessions, Projects, Computers, resume or restore modules; Accounts still exports the shared names', async () => {
@@ -3179,10 +3331,13 @@ description: Bulk skill ${i}
     await waitFor(async () => launches() === before + 1 || (await exec('return location.hash')) !== '#accounts', 'Enter did something');
     assert.equal(await exec('return location.hash'), '#accounts', 'the page did not move to the account');
     assert.equal(launches(), before + 1, 'the terminal log got the launch');
-    // the row itself still answers Enter
+    // the row itself still answers Enter: it selects the row (as a click does), and Enter on the selected row opens the account
     await page.focus(`[data-testid="row-${name}"]`);
     await page.keyboard.press('Enter');
-    await waitFor(async () => (await exec('return location.hash')).startsWith('#account?name='), 'Enter on the row opens the account');
+    await waitFor(async () => (await exec('return location.hash')) === '#accounts?sel=' + name, 'Enter on the row selects it');
+    await waitFor(async () => (await exec("const a = document.activeElement; return a.getAttribute('aria-current') && a.dataset.sel")) === name, 'the row is drawn as the selected one, with the focus on it');
+    await page.keyboard.press('Enter');
+    await waitFor(async () => (await exec('return location.hash')).startsWith('#account?name='), 'Enter on the selected row opens the account');
   });
 
   await test('Enter opens a Needs attention item, and a chosen filter chip says it is pressed', async () => {

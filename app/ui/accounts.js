@@ -1,13 +1,16 @@
 // Accounts: one card per tool with a 56 px row per account, the charts folded under them; Account detail with its four tabs;
-// Add account with sign-in; Start in a folder; the account menu. The account adapter, the one eligibility rule, the ring
-// renderer and the tray popup's rings are limits.js's (the Overview and the popup share them); their names are still exported here.
+// Add account with sign-in; Start in a folder; the account menu. A click on a row selects the account and shows it in the
+// pane at the right (pane.js; zone 3 of docs/project-review-2026-11/mockups/b-accounts.html). The account adapter, the one
+// eligibility rule, the ring renderer and the tray popup's rings are limits.js's (the Overview and the popup share them);
+// their names are still exported here.
 
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize } from './core.js';
-import { esc, fmt, hm, when, dur, toolIcon } from './lib.js';
+import { esc, fmt, hm, when, dur, toolIcon, ic } from './lib.js';
 import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack } from './limits.js';
 import './sessions.js'; // nothing of it is used here: kept so the window's modules still load in the order they did
 import { syncOn, nameOf } from './computers.js';
 import { pageHead, detailHead, seg, needsAttention, plural } from './parts.js';
+import { paneOf, selected, paneOpen, rowAttrs, paneHtml, patchPane, drawWithPane } from './pane.js';
 
 // the names other modules import from here, as before limits.js held them
 export { TOOL, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, renderRingSvg, winTrack, trayHtml, drawTray } from './limits.js';
@@ -34,12 +37,13 @@ function sparkLine(vals) {
 
 /** The 44 px ring of a row: the week (or the daily cap) left, or used by the setting, with the number inside at 12 px;
  * dashed with "—" when there is nothing read, in the failed colour when the login is the reason. `note` ends its title. */
-function rowRing(a, used, note) {
-  const r = 19, c = 2 * Math.PI * r, circle = (cls, extra) => `<circle class="${cls}" cx="22" cy="22" r="${r}" fill="none" stroke-width="3" ${extra}/>`;
-  const draw = (title, pct, tone) => `<span class="a-ring ${tone}" title="${esc(title + note)}"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">${circle('track', pct == null ? 'stroke-dasharray="3 3"' : '')}${pct == null ? '' : circle('val', `stroke-linecap="round" stroke-dasharray="${((c * pct) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 22 22)"`)}</svg><b>${pct == null ? '—' : pct + '%'}</b></span>`;
+function rowRing(a, used, note, px = 44) {
+  // (the pane draws the same ring at 72 px, with what it measures under the number)
+  const big = px > 44, h = px / 2, sw = big ? 5 : 3, r = h - sw, c = 2 * Math.PI * r, circle = (cls, extra) => `<circle class="${cls}" cx="${h}" cy="${h}" r="${r}" fill="none" stroke-width="${sw}" ${extra}/>`;
+  const draw = (title, pct, tone, what = 'week') => `<span class="a-ring ${tone}${big ? ' big' : ''}" title="${esc(title + note)}"><svg width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" aria-hidden="true">${circle('track', pct == null ? 'stroke-dasharray="3 3"' : '')}${pct == null ? '' : circle('val', `stroke-linecap="round" stroke-dasharray="${((c * pct) / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${h} ${h})"`)}</svg><b>${pct == null ? '—' : pct + '%'}${big ? `<small>${what}</small>` : ''}</b></span>`;
   if (a.cap) {
     const left = Math.max(0, Math.round(100 - (a.cap.spentUsd / a.cap.limitUsd) * 100));
-    return draw(`${a.name}: daily cap ${money(a.cap.limitUsd - a.cap.spentUsd)} left of ${money(a.cap.limitUsd)}`, used ? 100 - left : left, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2');
+    return draw(`${a.name}: daily cap ${money(a.cap.limitUsd - a.cap.spentUsd)} left of ${money(a.cap.limitUsd)}`, used ? 100 - left : left, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2', 'cap');
   }
   if (a.needsLogin) return draw('Log in to read its limits', null, 'none');
   if (!a.measured) return draw(a.kind === 'api_key' ? 'API key: no plan limits' : a.noPlan ? 'No plan limits' : 'Limits not read', null, '');
@@ -47,9 +51,32 @@ function rowRing(a, used, note) {
   return draw(`${a.name}: ${wk.label.toLowerCase()} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + fmtAbsoluteReset(wk.resetsAt) : ''}`, used ? wk.used : wk.left, wk.left === 0 ? 'neg' : wk.left <= 30 || wk.outMs != null ? 'warn' : '');
 }
 
+/** Why an account has no limit to draw: [the words, the reason said in full, whether it is a login to renew]. */
+const noLimits = (a) => (a.needsLogin ? [a.p.identity.logged_in ? 'Login expired' : 'Not logged in', 'Log in to read its plan and limits.', true]
+  : a.kind === 'api_key' ? ['No plan limits · pay per use', 'An API key is billed per token and has no plan limits.']
+  : a.kind === 'routed' ? ['No plan limits · no daily cap', 'A routed account has no plan limits. Daily spend cap… in the ⋯ menu sets the most it may spend in a day.']
+  : a.noPlan ? ['No plan limits', `${TOOL[a.tool] || a.tool} has no plan limits to read: usage only.`]
+  : ['Limits not read', 'Limits show up after this account runs on this computer. Refresh limits in the ⋯ menu reads them now.']);
+
+/** An account's state in one short phrase, as the drawing's State column says it beside the pane: [tone, the phrase,
+ * the line under it, what a hover adds]. Estimates carry ≈. */
+function stateOf(a, now) {
+  const open = a.openSessions ? plural(a.openSessions, 'session') + ' open' : '';
+  if (a.needsLogin) return ['negT', a.p.identity.logged_in ? 'Login expired' : 'Not logged in', open, 'Log in to read its plan and limits'];
+  if (a.cap) return ['', `≈ ${money(a.cap.spentUsd)} of ${money(a.cap.limitUsd)}`, 'today · daily cap', `The daily spend cap resets in ${fmtDuration(a.cap.resetMs)}`];
+  if (a.kind !== 'subscription') return ['', a.kind === 'routed' ? 'Routed' : 'Pay per use', open || (a.kind === 'routed' ? a.route || '' : ''), noLimits(a)[1]];
+  if (!a.measured) return ['muted', a.noPlan ? 'Usage only' : 'Limits not read', open, noLimits(a)[1]];
+  const spent = a.windows.filter((w) => w.open && w.left === 0).sort((x, y) => y.resetMs - x.resetMs)[0];
+  if (spent) return ['negT', spent.kind === 'model' ? spent.label.split(' · ').pop() + ' used up' : 'Used up', 'back ' + fmtAbsoluteReset(spent.resetsAt, now), `${spent.label}: nothing left until its reset`];
+  const out = a.windows.filter((w) => w.outAt).sort((x, y) => x.outAt - y.outAt)[0];
+  if (out) return ['warnT', '≈ Out ' + fmtAbsoluteReset(out.outAt, now), open, `${out.label}: at this pace it runs out ${fmtDuration(out.resetMs - out.outMs)} before its reset (an estimate)`];
+  if (!a.windows.some((w) => w.open)) return ['muted', 'Idle', open, 'No limit window is open; the next one starts with the next request'];
+  return ['acT', 'Lasts until reset', open, 'At this pace every limit lasts until its reset'];
+}
+
 /** A row's limits in ONE line: a short label and the % over a bar, three at most (the rest behind "+N"); a long label is
  * cut with … and every bar says the whole of it in its title. An account with nothing to draw says why in their place. */
-function limsLine(a, best, used, now) {
+function limsLine(a, best, used, now, brief = false) {
   const out = a.windows.find((w) => w.outAt);
   const advice = best && a.id === best.id ? 'Most room of any account: start here next.' : out ? `${out.label} runs out ≈ ${fmtAbsoluteReset(out.outAt, now)} at this pace.` : '';
   const lim = (label, title, pct, tone, zero, cls = '') => `<div class="lim ${cls}" title="${esc(title)}"><div class="t"><span>${esc(label)}</span><b class="${zero ? 'neg' : ''}">${pct}%</b></div>${winTrack(pct, tone)}</div>`;
@@ -58,11 +85,9 @@ function limsLine(a, best, used, now) {
     return `<div class="lims">${lim(`${money(a.cap.limitUsd)} daily cap`, `Daily spend cap: ${money(a.cap.limitUsd - a.cap.spentUsd)} left of ${money(a.cap.limitUsd)} (${money(a.cap.spentUsd)} spent today), resets in ${fmtDuration(a.cap.resetMs)}`, used ? 100 - left : left, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2', left === 0, 'cap')}</div>`;
   }
   if (a.needsLogin || !a.windows.length) {
-    const [text, why, bad] = a.needsLogin ? [a.p.identity.logged_in ? 'Login expired' : 'Not logged in', 'Log in to read its plan and limits.', true]
-      : a.kind === 'api_key' ? ['No plan limits · pay per use', 'An API key is billed per token and has no plan limits.']
-      : a.kind === 'routed' ? ['No plan limits · no daily cap', 'A routed account has no plan limits. Daily spend cap… in the ⋯ menu sets the most it may spend in a day.']
-      : a.noPlan ? ['No plan limits', `${TOOL[a.tool] || a.tool} has no plan limits to read: usage only.`]
-      : ['Limits not read', 'Limits show up after this account runs on this computer. Refresh limits in the ⋯ menu reads them now.'];
+    const [text, why, bad] = noLimits(a);
+    // beside the pane the State column says the state: here, only what to do about the missing limits
+    if (brief) return `<div class="unread trunc" title="${esc(why)}">— ${a.needsLogin ? 'log in to read' : a.noPlan ? 'no plan limits' : 'not read yet'}</div>`;
     return `<div class="unread trunc" title="${esc(why)}"><span class="${bad ? 'neg' : ''}">— ${esc(text)}</span></div>`;
   }
   const title = (w) => `${w.label}: ${w.left}% left (${w.used}% used)${w.open ? ', resets ' + fmtAbsoluteReset(w.resetsAt, now) + ' (in ' + fmtDuration(w.resetMs) + ')' : w.resetsAt ? ', window has reset' : ''}`;
@@ -70,20 +95,31 @@ function limsLine(a, best, used, now) {
   return `<div class="lims ${rest.length ? 'more' : ''}" ${best && a.id === best.id ? 'data-testid="best-note"' : ''} title="${esc(advice)}">${a.windows.slice(0, 3).map((w) => lim(w.kind === '5h' ? '5h' : w.kind === 'week' ? 'Wk' : w.label.split(' · ').pop(), title(w) + (advice ? '\n' + advice : ''), used ? w.used : w.left, w.left === 0 ? 'neg' : w.left <= 30 || w.outMs != null ? 'warn' : '', w.left === 0)).join('')}${rest.length ? `<span class="lim-more" title="${esc(rest.map(title).join('\n'))}">+${rest.length}</span>` : ''}</div>`;
 }
 
-/** One account, 56 px: ring, name and login, plan, limits, the range's sparkline, tokens and ≈ cost, ONE button for its state, ⋯. */
-function accountRow(a, best, now, used, pcs) {
+/** One account, 56 px: ring, name and login, plan, limits, the range's sparkline, tokens and ≈ cost, ONE button for its state, ⋯.
+ * A click selects the row (pane.js); `sel` is the selected account. `paned`: the pane is open beside the list, so the
+ * row is the drawn columns only (ring, who, limits, the range's usage, state) and its actions are the pane's. */
+function accountRow(a, best, now, used, pcs, sel = '', paned = false) {
   const p = a.p, b = au.by[a.id], vals = au.series[a.id] || [];
   // under the name: the login; without one, what kind of account it is (a missing login is said once, in the limits' place)
   const under = a.email || p.identity.name || p.base_url || (a.kind === 'api_key' ? 'Pay per use' : a.kind === 'routed' ? `Through route ${a.route || ''}` : a.noPlan ? 'Usage only' : p.identity.logged_in ? 'Logged in' : '');
   const plan = a.kind !== 'subscription' ? a.plan : a.needsLogin ? '' : p.identity.plan || '';
   const openNow = a.openSessions ? plural(a.openSessions, 'session') + ' open' + (a.far.length ? ' · ' + [...new Set(a.far.map((r) => nameOf(pcs, r.device)))].join(', ') : '') : '';
-  return `<div class="acct-row" tabindex="0" role="button" data-act="open-account" data-name="${esc(a.id)}" data-key="${esc(a.id)}" data-testid="row-${esc(a.id)}">
-    ${rowRing(a, used, ` · limits read ${agoText(a.readAt, now)}`)}
+  const row = `<div class="acct-row ${paned ? 'paned' : ''}" tabindex="0" role="button" ${rowAttrs(a.id, '#account?name=' + encodeURIComponent(a.id), a.id === sel)} data-name="${esc(a.id)}" data-key="${esc(a.id)}" data-testid="row-${esc(a.id)}">
+    ${rowRing(a, used, ` · limits read ${agoText(a.readAt, now)}`)}`;
+  const use = `<div class="use" title="${b ? esc(`input ${fmt(b.input)} · output ${fmt(b.output)} · cache read ${fmt(b.cache_read)} · ${b.requests.toLocaleString()} requests · ${Math.round(b.cache_hit_rate * 100)}% from cache · cost at API list prices`) : 'no usage in this range'}"><div><b>${fmtTrim(b ? b.tokens : 0)}</b>${paned ? '' : ' <span class="small muted">tokens</span>'}</div><div class="small muted" data-testid="cost-${esc(a.id)}">${b && b.cost != null ? '≈ ' + usd(b.cost) : '—'}</div></div>`;
+  if (paned) {
+    const [tone, state, sub, why] = stateOf(a, now);
+    return `${row}
+    <div class="who" title="${esc([a.folder, a.added ? 'added ' + a.added : ''].filter(Boolean).join(' · '))}"><div class="row"><b class="trunc">${esc(a.name)}</b>${openNow ? `<span class="dot live" role="img" title="${esc(openNow)}" aria-label="${esc(openNow)}"></span>` : ''}${a.isMain ? '<span class="pill quiet">main</span>' : ''}</div>${plan || under ? `<div class="small muted trunc" title="${esc(plan || under)}">${esc(plan || under)}</div>` : ''}</div>
+    ${limsLine(a, best, used, now, true)}${use}
+    <div class="state" title="${esc(why)}" data-testid="state-${esc(a.id)}"><div class="v trunc ${tone}">${esc(state)}</div>${sub ? `<div class="small muted trunc">${esc(sub)}</div>` : ''}</div></div>`;
+  }
+  return `${row}
     <div class="who" title="${esc([a.folder, a.added ? 'added ' + a.added : ''].filter(Boolean).join(' · '))}"><div class="row"><b class="trunc">${esc(a.name)}</b>${openNow ? `<span class="dot live" role="img" title="${esc(openNow)}" aria-label="${esc(openNow)}"></span>` : ''}${a.isMain ? `<span class="pill quiet" title="Main tool profile (${esc(a.folder)}): can be hidden, not deleted">main</span>` : ''}${a.mismatch ? '<span class="pill bad" title="Logged in as a different email than you entered">email differs</span>' : ''}</div>${under ? `<div class="small muted trunc">${esc(under)}</div>` : ''}</div>
     <div>${plan ? `<span class="pill plan" title="${esc(plan)}">${esc(plan)}</span>` : `<span class="unread" title="${a.needsLogin ? 'Log in to read its plan' : 'No plan'}">—</span>`}</div>
     ${limsLine(a, best, used, now)}
     <div class="spark" title="${esc(au.days + ' days: ' + (vals.some(Boolean) ? vals.map((v) => fmt(v)).join(' · ') : 'no usage'))}">${sparkLine(vals)}<span>${au.days} days</span></div>
-    <div class="use" title="${b ? esc(`input ${fmt(b.input)} · output ${fmt(b.output)} · cache read ${fmt(b.cache_read)} · ${b.requests.toLocaleString()} requests · ${Math.round(b.cache_hit_rate * 100)}% from cache · cost at API list prices`) : 'no usage in this range'}"><div><b>${fmtTrim(b ? b.tokens : 0)}</b> <span class="small muted">tokens</span></div><div class="small muted" data-testid="cost-${esc(a.id)}">${b && b.cost != null ? '≈ ' + usd(b.cost) : '—'}</div></div>
+    ${use}
     <div class="acts">${a.needsLogin ? `<button class="btn sm login" data-act="login" data-name="${esc(a.id)}" title="${p.identity.logged_in ? 'Its login has expired' : 'Not logged in yet'}: sign in to start it" data-testid="login-${esc(a.id)}">Log in</button>` : `<button class="btn sm" data-act="start" data-name="${esc(a.id)}" data-testid="start-${esc(a.id)}">Start</button>`}<button class="btn sm icon" data-act="account-menu" data-name="${esc(a.id)}" data-home="${esc(a.folder)}" data-main="${a.isMain ? 1 : ''}" title="More actions" aria-label="More actions for ${esc(a.name)}" data-testid="menu-${esc(a.id)}">⋯</button></div></div>`;
 }
 
@@ -100,8 +136,10 @@ function stackedChart(days, series, short) {
 // what the list last read: a choice that only changes what is shown (a group folded, the charts opened, a tool chosen)
 // draws from it again, without asking the backend
 let last = null;
-view('accounts', async (sheet) => {
+view('accounts', async (sheet, params) => {
   sheet.className = 'sheet';
+  // the list on screen, and only the selection moved: it is drawn from what was last read
+  if (last && last.sel !== (params.sel || '') && sheet.querySelector('[data-testid=accounts-table]')) { last.sel = params.sel || ''; return draw(sheet); }
   const [st, u, x] = await Promise.all([loadState(), call('usage', { days: au.days }).catch(() => null), call('limits_extra').catch(() => ({}))]); S.cache.extra = x;
   if (u) {
     au.by = Object.fromEntries(u.accounts.map((b) => [b.key, b]));
@@ -110,7 +148,8 @@ view('accounts', async (sheet) => {
     au.color = Object.fromEntries(u.accounts.map((b, i) => [b.key, i % SERIES]));
     au.days_list = u.summary.days;
   }
-  last = { st, x };
+  last = { st, x, sel: params.sel || '' };
+  pa.stale = true; // the pane's own read follows the list's
   draw(sheet);
 });
 /** Draw the list again from what was last read: after a choice that only changes what is shown. */
@@ -125,6 +164,8 @@ function draw(sheet) {
   if (st.first_run && !st.first_run.told && (st.first_run.main_profiles.length || st.first_run.accounts.length)) { st.first_run.told = true; toast(`Found ${st.first_run.main_profiles.length} installed tools and imported ${st.first_run.accounts.length} accounts from your PowerShell launcher.`); }
   // Start in a folder… opens on the account with the most room; with no limits read, on the first that can start
   const best = metricsOf(accts).bestRoomAcct, first = best || accts.find((a) => !a.needsLogin);
+  // the selected account, and whether the pane shows it (one primary on the screen: then it is the pane's)
+  const sel = last.sel, picked = sel ? accts.find((a) => a.id === sel) : null, paned = !!picked && paneOpen('accounts');
   const q = (document.getElementById('find').value || '').toLowerCase();
   const shown = accts.filter((a) => !q || a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q));
   const tools = shownTools(st), groups = tools.filter((h) => !acctTool || h.id === acctTool);
@@ -132,12 +173,14 @@ function draw(sheet) {
   const topModel = au.models[0] ? au.models[0].tokens : 1;
   const nTools = new Set(accts.map((a) => a.tool)).size, nAtt = accts.filter((a) => needsAttention(a.p, now)).length;
   const status = accts.length ? `${plural(accts.length, 'account')} on ${plural(nTools, 'tool')}; ${nAtt ? `${nAtt} ${nAtt === 1 ? 'needs' : 'need'} attention` : 'none needs attention'}.` : 'No account yet.';
-  const chip = (v, label, n, testid) => `<button type="button" class="${acctTool === v ? 'on' : ''}" aria-pressed="${acctTool === v}" data-act="acct-tool" data-v="${v}" data-testid="${testid}">${label} <span class="${v ? 'dim' : 'muted'}">${n}</span></button>`;
-  patch(sheet, `<div class="page-body">
-    ${pageHead('accounts', status, `<button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${first ? `<button class="btn" data-act="start-in-folder" data-name="${esc(first.id)}" data-testid="start-best">Start in a folder…</button>` : ''}<button class="btn primary" data-act="add-account" data-testid="add-account">Add account</button>`)}
-    <div class="a-filters"><div class="seg" role="group" aria-label="Tool">${chip('', 'All', accts.length, 'chip-all')}${tools.map((h) => chip(h.id, toolIcon(h.id, 14) + esc(h.label), accts.filter((a) => a.tool === h.id).length, 'chip-' + h.id)).join('')}</div>
+  const chip = (v, label, n, testid, name = '') => `<button type="button" class="${acctTool === v ? 'on' : ''}" aria-pressed="${acctTool === v}" data-act="acct-tool" data-v="${v}" ${name ? `title="${esc(name)}" aria-label="${esc(name)}: ${n}"` : ''} data-testid="${testid}">${label} <span class="${v ? 'dim' : 'muted'}">${n}</span></button>`;
+  // beside the pane the tools' chips keep one line: more than four tools go by their icon and count, named on hover
+  const brief = paned && tools.length > 4;
+  drawWithPane(sheet, `<div class="page-body">
+    ${pageHead('accounts', status, `<button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${first && !paned ? `<button class="btn" data-act="start-in-folder" data-name="${esc(first.id)}" data-testid="start-best">Start in a folder…</button>` : ''}<button class="btn ${paned ? '' : 'primary'}" data-act="add-account" data-testid="add-account">Add account</button>`)}
+    <div class="a-filters"><div class="seg" role="group" aria-label="Tool">${chip('', 'All', accts.length, 'chip-all')}${tools.map((h) => chip(h.id, toolIcon(h.id, 14) + (brief ? '' : esc(h.label)), accts.filter((a) => a.tool === h.id).length, 'chip-' + h.id, brief ? h.label : '')).join('')}</div>
       ${used ? '<span class="small muted" data-testid="used-note">Rings and bars show % used</span>' : ''}${seg('Range', [[7, '7 d'], [14, '14 d'], [30, '30 d']], au.days, (d) => `data-act="acct-days" data-v="${d}" data-testid="u-days-${d}"`)}</div>
-    <div class="a-groups" data-testid="accounts-table">${groups.map((h) => {
+    <div class="a-groups" data-testid="accounts-table">${paned ? `<div class="acct-cols"><span></span><span class="label">Account</span><span class="label">Limits ${used ? 'used' : 'left'}</span><span class="label num">${au.days} days</span><span class="label">State</span></div>` : ''}${groups.map((h) => {
       const list = shown.filter((a) => a.tool === h.id).sort((a, b) => (eligible(b) - eligible(a)) || (b.measured - a.measured) || ((b.measured && a.measured) ? (wkof(b).left - wkof(a).left) : 0));
       const open = !folded.has(h.id), on = list.filter((a) => a.p.identity.logged_in).length, consoles = list.reduce((s, a) => s + a.openSessions, 0);
       const next = Math.min(...list.flatMap((a) => a.windows.filter((w) => w.open).map((w) => w.resetMs)).concat([Infinity]));
@@ -145,12 +188,101 @@ function draw(sheet) {
       return `<section class="card tool-group-card" data-key="g-${h.id}" data-testid="group-${h.id}"><button class="tool-group-header" data-act="acct-fold" data-h="${h.id}" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the ${esc(h.label)} accounts">
         ${toolIcon(h.id, 18)}<h2>${esc(h.label)}</h2>${list.length ? `<span class="muted" title="${esc(`${on} logged in · ${plural(consoles, 'console')} open`)}">${list.length}</span>` : ''}<span class="chev" aria-hidden="true"></span>
         ${list.length ? `<span class="sum"><span ${isFinite(next) ? '' : 'title="No limit window is open"'}>${isFinite(next) ? 'Next reset in ' + fmtDuration(next) : list.some((a) => !a.noPlan) ? 'Next reset —' : 'No plan limits'}</span><span><b>${fmtTrim(tok)}</b> tokens · ${cst == null ? '—' : '≈ ' + usd(cst)} in ${au.days} days</span></span>` : ''}</button>
-        ${!open ? '' : list.length ? list.map((a) => accountRow(a, best, now, used, pcs)).join('') : `<div class="group-empty">${h.installed ? (q ? 'No account matches the search.' : `No ${esc(h.label)} account yet.`) : `${esc(h.label)} is not installed on this computer.`}</div>`}</section>`;
+        ${!open ? '' : list.length ? list.map((a) => accountRow(a, best, now, used, pcs, sel, paned)).join('') : `<div class="group-empty">${h.installed ? (q ? 'No account matches the search.' : `No ${esc(h.label)} account yet.`) : `${esc(h.label)} is not installed on this computer.`}</div>`}</section>`;
     }).join('')}</div>
     <section class="panel-card a-usage" data-testid="usage-panel"><div class="panel-head"><button class="panel-title fold" data-act="acct-fold" data-h="charts" aria-expanded="${chartsOpen}">Tokens per day, by account, and by model · ${au.days} days</button><span class="panel-note">Cost at API list prices ≈</span></div>
       ${chartsOpen ? `<div class="a-charts"><div>${series.length && au.days_list ? `<div class="chart-legend">${series.map((s) => `<span><i class="pc-dot c${s.ci}"></i>${esc(s.name)}</span>`).join('')}</div><div data-testid="usage-ledger">${stackedChart(au.days_list, series, true)}</div>` : '<span class="muted" data-testid="usage-ledger">No usage in this range.</span>'}</div>
-        <div data-testid="models-panel"><h3 class="label">By model</h3><div class="model-rows">${au.models.map((m) => `<div class="win-bar-line"><span class="mono trunc" title="${esc(m.key)}">${esc(m.key)}</span>${winTrack(Math.max(4, Math.round((m.tokens / topModel) * 100)))}<span>${fmt(m.tokens)}</span><span class="r">${m.cost == null ? '—' : '≈ ' + money(m.cost)}</span></div>`).join('') || '<span class="muted">No usage yet.</span>'}</div></div></div>` : ''}</section></div>`);
+        <div data-testid="models-panel"><h3 class="label">By model</h3><div class="model-rows">${au.models.map((m) => `<div class="win-bar-line"><span class="mono trunc" title="${esc(m.key)}">${esc(m.key)}</span>${winTrack(Math.max(4, Math.round((m.tokens / topModel) * 100)))}<span>${fmt(m.tokens)}</span><span class="r">${m.cost == null ? '—' : '≈ ' + money(m.cost)}</span></div>`).join('') || '<span class="muted">No usage yet.</span>'}</div></div></div>` : ''}</section></div>${
+    paned ? paneHtml(...(last.pane = () => acctPane(picked, { st, now, used, pcs, accts }))()) : (last.pane = null, '')}`, 'accounts');
+  if (paned) { readDetail(sel, pa.stale); pa.stale = false; }
 }
+paneOf('accounts', show);
+
+// ---------- the pane: the selected account beside the list (zone 3 of b-accounts.html and b-now.html) ----------
+// what the pane last read of the selected account (`detail`: its sessions, its projects), and the tab it shows
+const pa = { name: '', d: null, busy: false, stale: false, tab: 'overview' };
+const lineIcon = (d, s = 15) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const icCopy = lineIcon('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'), icOpen = lineIcon('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 14);
+async function readDetail(name, again = false) {
+  if (pa.name === name && (pa.busy || (pa.d && !again))) return;
+  if (pa.name !== name) Object.assign(pa, { name, d: null });
+  pa.busy = true;
+  const d = await call('detail', { name }).catch(() => null);
+  if (pa.name !== name) return; // another account was selected while this one was read
+  pa.busy = false; pa.d = d || pa.d;
+  if (S.route.view === 'accounts' && selected() === name && last && last.pane) patchPane(...last.pane());
+}
+/** A line to copy: its label, the text in mono, and the button that copies it. */
+const copyLine = (label, text, testid) => `<div class="pane-cli" title="${esc(text)}"><span class="small muted">${label}</span><span class="mono grow trunc" data-testid="${testid}">${esc(text)}</span><button class="btn icon" data-act="pane-copy" data-text="${esc(text)}" aria-label="Copy ${esc(text)}" title="Copy">${icCopy}</button></div>`;
+/** The week from now to +7 d as one lane: filled to the reset's tick, striped from the estimated run-out to the reset;
+ * under it, the verdict in words. Nothing for an account without an open weekly window. */
+function runway(a, now) {
+  const w = wkof(a);
+  if (!a.measured || !w || !w.open) return '';
+  const at = (ms) => Math.min(100, Math.max(0, (ms / (7 * 86400e3)) * 100)), gate = at(w.resetMs), out = w.left === 0 ? 0 : w.outMs != null ? at(w.outMs) : null;
+  const label = 'resets ' + fmtAbsoluteReset(w.resetsAt, now);
+  const [tone, verdict, rest] = w.left === 0 ? ['negT', 'Used up', `back ${fmtAbsoluteReset(w.resetsAt, now)}`]
+    : w.outAt ? ['warnT', `≈ Runs out ${fmtAbsoluteReset(w.outAt, now)}`, `${fmtDuration(w.resetMs - w.outMs)} before the reset, at this pace`]
+    : ['acT', 'Lasts until the reset', w.forecastAtReset != null ? `≈ ${100 - w.forecastAtReset}% left by then at this pace` : ''];
+  const axis = [['Now', 0, 'start'], ['+2 d', 28.57, 'middle'], ['+4 d', 57.14, 'middle'], ['+6 d', 85.71, 'middle'], ['+7 d', 100, 'end']];
+  return `<div class="pane-sec" data-testid="pane-runway"><div class="pane-sub"><span>Reset runway</span><span>${esc(w.label.toLowerCase())} window, now to +7 d</span></div>
+    <svg class="pn-run" role="img" aria-label="${esc(`${w.label}: ${label}. ${verdict}${rest ? ', ' + rest : ''}`)}"><text class="lbl" x="${gate.toFixed(1)}%" y="12" text-anchor="${gate > 50 ? 'end' : 'start'}">${esc(label)}</text><rect class="trk" y="20" width="100%" height="8" rx="4"/>
+      ${out === null ? `<rect class="fill" y="20" width="${gate.toFixed(1)}%" height="8" rx="4"/>` : `<rect class="fill warn" y="20" width="${out.toFixed(1)}%" height="8" rx="4"/><rect class="starve" x="${out.toFixed(1)}%" y="20" width="${Math.max(0, gate - out).toFixed(1)}%" height="8"/>`}
+      <rect class="tick" x="${gate.toFixed(1)}%" y="15" width="2" height="18" rx="1" transform="translate(-1 0)"/>${axis.map(([t, x, anchor]) => `<text x="${x}%" y="50" text-anchor="${anchor}">${t}</text>`).join('')}</svg>
+    <div class="small pn-verdict"><b class="${tone}">${esc(verdict)}</b>${rest ? `<span class="muted"> · ${esc(rest)}</span>` : ''}</div></div>`;
+}
+/** The pane of an account, as [its name, the head, the sections]. `c`: the state, the time, the setting for % used,
+ * the computers and every account (for the recommendation among its tool's). */
+function acctPane(a, c) {
+  const p = a.p, { st, now, used, pcs, accts } = c, d = pa.name === a.id ? pa.d : null, b = au.by[a.id], tab = ['sessions', 'projects'].includes(pa.tab) ? pa.tab : 'overview';
+  const toolName = TOOL[a.tool] || a.tool, mates = accts.filter((x) => x.tool === a.tool), next = metricsOf(mates).bestRoomAcct, isNext = !!next && next.id === a.id;
+  const plan = a.kind !== 'subscription' ? a.plan : a.needsLogin ? toolName : p.identity.plan || toolName;
+  const page = '#account?name=' + encodeURIComponent(a.id);
+  const head = `${toolIcon(a.tool, 28)}<div class="grow"><div class="row pane-name"><span class="name trunc" title="${esc(a.name)}" data-testid="pane-name">${esc(a.name)}</span>${a.isMain ? `<span class="pill quiet" title="Main tool profile (${esc(a.folder)}): can be hidden, not deleted">main</span>` : ''}${isNext ? '<span class="pill ok" data-testid="pane-next">Use next</span>' : ''}${a.needsLogin ? '<span class="pill bad" data-testid="pane-out">Logged out</span>' : ''}${a.mismatch ? '<span class="pill bad" title="Logged in as a different email than you entered">email differs</span>' : ''}</div>
+    <div class="small muted trunc" data-testid="pane-who">${esc([a.email, plan].filter(Boolean).join(' · '))}</div></div><a class="btn sm quiet" href="${page}" data-testid="pane-open">Open${icOpen}</a>`;
+  // ONE banner line: a login to renew, a limit used up and when it is back, why this one is the one to use next, or
+  // a limit on pace to run out; nothing when there is nothing to say
+  const since = a.readAt ? new Date(a.readAt).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '';
+  const spent = a.windows.filter((w) => w.open && w.left === 0).sort((x, y) => y.resetMs - x.resetMs)[0], out = a.windows.filter((w) => w.outAt).sort((x, y) => x.outAt - y.outAt)[0];
+  const why = a.needsLogin ? ['bad', p.identity.logged_in ? `<b class="negT">Login expired.</b> ${since ? `Plan and limits not read since ${esc(since)}.` : 'Plan and limits are not read until it is logged in.'}` : '<b class="negT">Not logged in.</b> Plan and limits are read after the first login.']
+    : spent ? ['bad', `<b class="negT">${esc(spent.label)} used up.</b> Back ${esc(fmtAbsoluteReset(spent.resetsAt, now))}, in ${esc(fmtDuration(spent.resetMs))}.`]
+    : isNext ? ['', `<b>Why this one:</b> ${mates.length > 1 ? `most room among your ${esc(toolName)} accounts` : 'it has room'}${out ? '' : ', and it lasts until its reset'}.`]
+    : out ? ['warn', `<b class="warnT">≈ ${esc(out.label)} runs out ${esc(fmtAbsoluteReset(out.outAt, now))}</b> at this pace, ${esc(fmtDuration(out.resetMs - out.outMs))} before its reset.`] : null;
+  // ONE primary for the state: Log in for a login that is missing or expired (Start stays, disabled, with the reason), Start otherwise
+  const tool = st.harnesses.find((h) => h.id === a.tool) || { installed: true };
+  const blocked = a.needsLogin ? (p.identity.logged_in ? 'Its login has expired: log in first' : 'Not logged in: log in first') : !tool.installed ? `${toolName} is not installed on this computer` : '';
+  const menu = `<button class="btn icon" data-act="account-menu" data-name="${esc(a.id)}" data-home="${esc(a.folder)}" data-main="${a.isMain ? 1 : ''}" title="More actions" aria-label="More actions for ${esc(a.name)}" aria-haspopup="menu" data-testid="pane-menu">⋯</button>`;
+  const acts = a.needsLogin ? `<button class="btn primary grow" data-act="login" data-name="${esc(a.id)}" data-testid="pane-primary">Log in</button><button class="btn" disabled title="${esc(blocked)}" data-testid="pane-start">Start</button>${menu}`
+    : `<button class="btn ${blocked ? '' : 'primary'} grow" data-act="start" data-name="${esc(a.id)}" ${blocked ? `disabled title="${esc(blocked)}"` : ''} data-testid="${blocked ? 'pane-start' : 'pane-primary'}">${ic.play}Start</button><button class="btn" data-act="start-in-folder" data-name="${esc(a.id)}" data-testid="pane-folder">Start in folder…</button>${menu}`;
+  // the tabs: Overview, Sessions and Projects are drawn here; Settings is a form that needs the page's width, so it
+  // is a link to its place on the account's page
+  const tabs = `<nav class="pane-tabs" aria-label="Sections of ${esc(a.name)}">${[['overview', 'Overview'], ['sessions', 'Sessions'], ['projects', 'Projects']].map(([k, l]) => `<button type="button" class="${k === tab ? 'on' : ''}" ${k === tab ? 'aria-current="true"' : ''} data-act="pane-tab" data-v="${k}" data-testid="pane-tab-${k}">${l}</button>`).join('')}<a href="${page}&tab=settings" data-testid="pane-tab-settings">Settings${icOpen}</a></nav>`;
+  let body;
+  if (tab !== 'overview') body = `<div class="pane-tab" data-testid="pane-tabbody">${d ? (tab === 'sessions' ? tabSessions(d, pcs) : tabProjects(d)) : `<div class="pane-sec"><p class="pane-note">${pa.busy ? 'Reading…' : 'Could not be read.'}</p></div>`}</div>`;
+  else {
+    // the ring with every limit window: what is left (or used, by the setting) and when it resets
+    const wins = a.windows.length ? a.windows.map((w) => { const pct = used ? w.used : w.left;
+      return `<span class="trunc" title="${esc(w.label)}">${esc(w.kind === '5h' ? '5-hour' : w.label)}</span>${winTrack(pct, w.left === 0 ? 'neg' : w.left <= 30 || w.outMs != null ? 'warn' : '')}<b class="${w.left === 0 ? 'negT' : ''}">${pct}%</b><span class="muted">${w.open ? esc(fmtDuration(w.resetMs)) : w.resetsAt ? 'has reset' : 'not started'}</span>`; }).join('')
+      : a.cap ? (() => { const left = Math.max(0, Math.round(100 - (a.cap.spentUsd / a.cap.limitUsd) * 100)), pct = used ? 100 - left : left; return `<span>Daily cap</span>${winTrack(pct, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2')}<b>${pct}%</b><span class="muted">${esc(fmtDuration(a.cap.resetMs))}</span>`; })()
+      : a.needsLogin ? ['5-hour', 'Week', 'Plan'].map((l) => `<span>${l}</span>${l === 'Plan' ? '<span></span>' : winTrack(0)}<b class="dim">—</b><span class="muted">log in</span>`).join('')
+      : `<span class="wide muted" title="${esc(noLimits(a)[1])}">— ${esc(noLimits(a)[0])}</span>`;
+    const latest = d && d.sessions[0], recent = d ? d.sessions.slice(0, 3) : [];
+    const mini = (s) => `<a class="pane-mini" href="#session?profile=${encodeURIComponent(s.profile)}&id=${encodeURIComponent(s.id)}" data-key="ps-${esc(s.id)}"><i class="dot ${s.open ? 'live' : s.failed ? 'bad' : ''}"></i><div><b class="trunc">${esc(s.title || 'Untitled session')}</b><div class="small muted trunc">${esc([s.project_name || (s.cwd || '').split(/[\\/]/).pop(), syncOn(pcs) && s.device ? s.device_name || nameOf(pcs, s.device) : '', fmt(s.tokens) + ' tokens', s.failed ? s.failed + ' failed' : ''].filter(Boolean).join(' · '))}</div></div><span class="small ${s.open ? 'acT strong' : 'muted'}">${s.open ? 'live · ' + esc(dur(now - s.started_at)) : esc(when(s.last_active_at))}</span></a>`;
+    body = `<div class="pane-sec"><div class="pn-limits" data-testid="pane-limits">${rowRing(a, used, ` · limits read ${agoText(a.readAt, now)}`, 72)}
+        <div class="pn-wins"><span class="h">Limits</span><span class="h num">${used ? 'used' : 'left'}</span><span class="h">resets in</span>${wins}</div></div></div>
+      ${runway(a, now)}
+      <div class="pane-sec"><div class="pane-sub"><span>Last ${au.days} days</span>${latest && !latest.open ? `<span>last session ${esc(when(latest.last_active_at))}</span>` : ''}</div>
+        <div class="pane-tiles"><div class="pane-tile"><b>${fmtTrim(b ? b.tokens : 0)}</b><span class="label">tokens</span></div><div class="pane-tile"><b>${b && b.cost != null ? '≈ ' + usd(b.cost) : '—'}</b><span class="label">at API list prices</span></div></div></div>
+      <div class="pane-sec" data-testid="pane-recent"><div class="pane-sub"><span>Recent sessions</span>${d && d.sessions.length ? '<button type="button" class="pane-more" data-act="pane-tab" data-v="sessions" data-testid="pane-all">All sessions</button>' : ''}</div>
+        ${recent.map(mini).join('') || `<p class="pane-note">${d ? 'No sessions in the last 30 days.' : pa.busy ? 'Reading…' : 'Could not be read.'}</p>`}</div>
+      <div class="pane-sec">${copyLine('Folder', a.folder, 'pane-folder-path')}${copyLine('CLI', (a.needsLogin ? 'hrm login ' : 'hrm run ') + a.id, 'pane-cli')}</div>`;
+  }
+  return [a.name, head, `<div class="pane-sec">${why ? `<div class="pane-why ${why[0]}" data-testid="pane-why"><span>${why[1]}</span></div>` : ''}<div class="pane-acts">${acts}</div></div>${tabs}${body}
+    <div class="pane-sec foot"><button class="btn sm quiet neg" data-act="remove-account" data-name="${esc(a.id)}" data-main="${p.main ? 1 : ''}" data-testid="pane-remove">${p.main ? 'Hide main profile…' : 'Remove account…'}</button></div>`];
+}
+// a tab of the pane only changes what is shown: the pane is drawn again from what was read
+action('pane-tab', (el) => { pa.tab = el.dataset.v; if (last && last.pane) patchPane(...last.pane()); });
+action('pane-copy', async (el) => { await navigator.clipboard.writeText(el.dataset.text); toast('Copied'); });
 action('acct-days', (el) => { au.days = +el.dataset.v; render(); });
 action('acct-csv', async () => {
   const to = await saveFile(`Harness Manager usage ${new Date().toISOString().slice(0, 10)}.csv`, { name: 'CSV', extensions: ['csv'] });
@@ -167,6 +299,10 @@ action('acct-fold', (el) => {
 const STARTED_WITH = { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', opencode: 'XDG_CONFIG_HOME', agy: 'its own login', pi: 'PI_CODING_AGENT_DIR', omp: 'PI_CODING_AGENT_DIR' };
 const sessionLine = (s, pcs) => `<div class="account-session" data-key="s-${esc(s.id)}" data-testid="session-${esc(s.id)}"><div><b><i class="session-dot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : ''}></i>${esc(s.title || 'Untitled session')}</b><div class="session-meta"><span>${esc(s.project_name || (s.cwd || '').split(/[\\/]/).pop() || '')}</span>${syncOn(pcs) && s.device ? `<span>${esc(s.device_name || nameOf(pcs, s.device))}</span>` : ''}<span class="when ${s.open ? 'live' : ''}">${s.open ? 'live' : esc(when(s.last_active_at))}</span>${s.archived ? '<span class="plan-pill">archived</span>' : ''}</div></div>
   ${s.open ? `<button class="btn-follow" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>` : `<button class="filter-chip" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Open</button>`}</div>`;
+
+/** The Sessions and Projects tabs of an account, from its `detail`: the account's page and the Accounts pane draw the same. */
+const tabSessions = (d, pcs) => `<section class="panel-card"><h2 class="panel-title">Sessions · ${d.sessions.length}</h2>${d.sessions.map((s) => sessionLine(s, pcs)).join('') || '<span class="muted">No sessions in the last 30 days.</span>'}</section>`;
+const tabProjects = (d) => `<section class="panel-card"><h2 class="panel-title">Projects · 7 days</h2>${d.projects.length ? `<table class="replies-table"><thead><tr><th>Project</th><th>Key</th><th class="num">Tokens</th></tr></thead><tbody>${d.projects.map(([k, n, t]) => `<tr><td><a class="filter-chip" href="#sessions?project=${encodeURIComponent(k)}">${esc(n)}</a></td><td class="mono muted">${esc(k)}</td><td class="num">${fmt(t)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">No usage this week.</span>'}</section>`;
 
 view('account', async (sheet, params) => {
   const name = params.name, tab = params.tab || 'overview';
@@ -217,9 +353,9 @@ view('account', async (sheet, params) => {
       ${p.running.length ? `<section class="panel-card"><h2 class="panel-title">Open now</h2>${p.running.map((r) => `<div class="account-session"><div><span class="mono">${esc(r.cwd || '— Folder not read')}</span><div class="muted">PID ${r.pid}${r.started_at ? ' · since ' + hm(r.started_at) : ''}</div></div><button class="btn-secondary" data-act="show-window" data-pid="${r.pid}">Show window</button></div>`).join('')}</section>` : ''}
       <section class="panel-card"><div class="panel-head"><h2 class="panel-title">Recent sessions</h2><a class="filter-chip" href="#account?name=${encodeURIComponent(name)}&tab=sessions">All ${d.sessions.length}</a></div>${d.sessions.slice(0, 5).map((s) => sessionLine(s, pcs)).join('') || '<span class="muted">No sessions in the last 30 days.</span>'}</section>`;
   } else if (tab === 'sessions') {
-    body = `<section class="panel-card"><h2 class="panel-title">Sessions · ${d.sessions.length}</h2>${d.sessions.map((s) => sessionLine(s, pcs)).join('') || '<span class="muted">No sessions in the last 30 days.</span>'}</section>`;
+    body = tabSessions(d, pcs);
   } else if (tab === 'projects') {
-    body = `<section class="panel-card"><h2 class="panel-title">Projects · 7 days</h2>${d.projects.length ? `<table class="replies-table"><thead><tr><th>Project</th><th>Key</th><th class="num">Tokens</th></tr></thead><tbody>${d.projects.map(([k, n, t]) => `<tr><td><a class="filter-chip" href="#sessions?project=${encodeURIComponent(k)}">${esc(n)}</a></td><td class="mono muted">${esc(k)}</td><td class="num">${fmt(t)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">No usage this week.</span>'}</section>`;
+    body = tabProjects(d);
   } else {
     const field = (id, label, value, type = 'text', extra = '') => `<div class="form-field"><label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value ?? '')}" ${extra}></div>`;
     const row = (fields, act, title = 'Save', testid = '') => `<div class="settings-row">${fields}<button class="btn-secondary" data-act="${act}" data-name="${esc(name)}" ${testid ? `data-testid="${testid}"` : ''}>${title}</button></div>`;
@@ -246,7 +382,6 @@ view('account', async (sheet, params) => {
 });
 
 // ---------- actions ----------
-action('open-account', (el, e) => { if (!e.target.closest('button, a')) go('account', { name: el.dataset.name }); });
 action('start', (el) => attempt(() => call('start', { name: el.dataset.name }), `Opened a terminal for ${acctName(el.dataset.name)}`));
 // the tool's own flag for running without asking before each step, where it has one
 const SKIP = { claude: '--dangerously-skip-permissions', codex: '--dangerously-bypass-approvals-and-sandbox' };
