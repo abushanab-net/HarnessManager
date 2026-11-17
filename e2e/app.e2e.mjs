@@ -3506,7 +3506,7 @@ description: Bulk skill ${i}
   const palRows = () => exec("return [...document.querySelectorAll('[data-testid=pal-row]')].map((r) => r.querySelector('.trunc > b').textContent)");
   const palChosen = () => exec("return [...document.querySelectorAll('[data-testid=pal-row]')].findIndex((r) => r.classList.contains('on'))");
   const palType = (t) => page.fill('[data-testid=pal-q]', t);
-  const hashIs = (h) => waitFor(async () => (await exec('return location.hash')) === h, 'the address ' + h);
+  const addressIs = (h) => waitFor(async () => (await exec('return location.hash')) === h, 'the address ' + h);
   /** The top bar's search emptied: what an earlier test typed into it stays in it from page to page. */
   const clearFind = () => exec("const f = document.getElementById('find'); if (f.value) { f.value = ''; f.dispatchEvent(new Event('input')); }");
 
@@ -3598,7 +3598,7 @@ description: Bulk skill ${i}
     assert.deepEqual(await exec("const r = document.querySelector('.pal-r.on'); return [r.closest('[role=group]').querySelector('.pal-g').textContent, [...r.querySelectorAll('b mark')].map((m) => m.textContent).join('|'), getComputedStyle(r.querySelector('mark')).textDecorationLine, r.querySelector('.sub').textContent]"),
       ['Go to', 'Launch|at', 'underline', ' · Starts hidden in the tray.'], 'under Go to, each typed word underlined whatever its case, the row\'s help line beside it');
     await page.keyboard.press('Enter');
-    await hashIs('#settings?tab=window');
+    await addressIs('#settings?tab=window');
     await $('[data-testid=sec-window] [data-testid=st-autostart]');
     await palGone();
     // the palette's rows are the ones Search settings looks through: the same labels, section by section
@@ -3630,7 +3630,7 @@ description: Bulk skill ${i}
     await waitFor(async () => (await palRows())[2] === 'Settings › Limits shown as', 'the third row');
     assert.deepEqual((await palRows()).slice(0, 2), ['Refresh limits', 'Settings › Limits'], 'a title that starts with the word comes before one that has it later');
     await page.keyboard.press('Control+3');
-    await hashIs('#settings?tab=appearance');
+    await addressIs('#settings?tab=appearance');
     await palGone();
   });
 
@@ -3670,7 +3670,7 @@ description: Bulk skill ${i}
       assert.ok(s.sub.includes('platform-gitops') && s.sub.includes('Today'), 'its project and when: ' + s.sub);
       // Enter opens the session's page
       await page.keyboard.press('Enter');
-      await hashIs('#session?profile=claude-main&id=s-palette-1');
+      await addressIs('#session?profile=claude-main&id=s-palette-1');
       await palGone();
       // newest first, five at most, and the running one says so
       await palOpen();
