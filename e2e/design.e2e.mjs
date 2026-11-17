@@ -25,6 +25,10 @@ const SMALL_TEXT_ALLOWED = [
 ];
 /** Each page's own parts, as its page worker drew them: [selector, computed property, value]. */
 const PARTS = {
+  '#home': [['.ov-deck', 'columnGap', '10px'], ['.ov-deck .card-head', 'height', '40px'], ['.ov-readouts b', 'fontSize', '15px'], ['.ov-table', 'tableLayout', 'fixed'], ['.ov-table td', 'height', '48px'], ['.ov-table th', 'fontSize', '12px']],
+  '#accounts': [['.a-filters .seg > *', 'height', '24px'], ['.tool-group-header', 'height', '36px'], ['.acct-row', 'height', '56px'], ['.acct-row', 'columnGap', '14px'], ['.a-ring', 'width', '44px'], ['.a-ring b', 'fontSize', '12px'],
+    ['.acct-row .lim', 'width', '72px'], ['.acct-row .acts .btn', 'height', '28px'], ['.acct-row .acts .btn.icon', 'width', '30px']],
+  '#account?name=claude-main': [['.account-columns', 'display', 'grid'], ['.page-head .btn.primary', 'height', '30px']],
   // Sessions: one filter line; the groups in one card, a 36 px band a group, rows 44 px (b-sessions.html's middle zone)
   '#sessions': [['.a-fbar', 'display', 'flex'], ['.a-fbar .seg', 'height', '30px'], ['.a-lh', 'minHeight', '36px'], ['.a-gh', 'height', '36px'], ['.a-srow', 'minHeight', '44px'], ['.a-srow', 'padding', '0px 12px'], ['.a-gname', 'fontSize', '13px'], ['.a-title b', 'fontWeight', '600']],
   // Projects: one list in one card, a project a 52 px row
@@ -37,7 +41,8 @@ const PARTS = {
   '#skills': [['.b-one', 'display', 'flex'], ['.b-one', 'flexWrap', 'nowrap'], ['.b-one', 'position', 'sticky']],
   '#prompts': [['.b-prompt-grid', 'display', 'grid']],
   '#cli': [['.b-cli-grid', 'display', 'grid'], ['.b-cli-row', 'display', 'grid']],
-  '#settings': [['.b-section', 'padding', '11px 13px'], ['.b-section-nav', 'position', 'sticky']],
+  '#settings': [['.set', 'gridTemplateColumns', '200px 832px'], ['.set-find', 'height', '32px'], ['.set-nav a', 'height', '32px'], ['.set-pane', 'padding', '0px'], ['.pane-head', 'height', '48px'], ['.srow', 'minHeight', '60px'], ['.srow', 'gridTemplateColumns', '380px 402px'], ['.srow .what p', 'fontSize', '12px']],
+  '#computers': [['.pc-head', 'height', '48px'], ['.kv dt', 'fontSize', '12px'],['.count .key', 'fontSize', '22px'], ['.ways', 'display', 'grid'], ['.way', 'minHeight', '68px'], ['.pane-head', 'height', '48px'], ['.srow', 'minHeight', '60px'], ['.sw > i', 'width', '36px']],
 };
 
 export async function designTests({ test, exec, nav, $, click, waitFor, assert, page, shot }) {
