@@ -49,6 +49,17 @@ pub fn parse_rate_limits(rl: &Value, at: i64) -> Quota {
     Quota { tiers, fetched_at: Some(at), source: "codex".into() }
 }
 
+/// The limits a rollout line carries (a token_count event with `rate_limits`), dated by the line.
+fn limits_of(line: &str) -> Option<Quota> {
+    if !line.contains("\"rate_limits\"") { return None; }
+    let v: Value = serde_json::from_str(line).ok()?;
+    let rl = &v["payload"]["rate_limits"];
+    (rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object())).then(|| parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or(""))))
+}
+
+/// Set once an account's rollouts were read for a reading the import had not kept (`quota`).
+pub(crate) fn limits_mark(profile: &str) -> String { format!("codex:limits:{profile}") }
+
 /// Public claims of the id_token Codex saved, for showing which ChatGPT account and plan a profile is.
 /// The token itself is never sent anywhere.
 fn id_claims(auth: &Value) -> Option<Value> {
@@ -141,24 +152,24 @@ impl Harness for Codex {
         Identity { logged_in: api, plan: api.then(|| "API key".into()), ..Default::default() }
     }
 
+    /// The reading the usage import kept (it reads those lines anyway): one row, no file.
     fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> {
+        if let Ok(Some(q)) = ctx.db.get_quota(&p.name) { return Some(q); }
+        // an account imported before readings were kept has none until its next turn: its newest rollouts are read for it, once
+        let mark = limits_mark(&p.name);
+        if ctx.db.kv_get(&mark).ok().flatten().is_some() { return None; }
         let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).collect();
         files.sort_by(|a, b| b.0.cmp(&a.0));
         // the newest reading by when Codex took it: Codex rewrites old rollouts, so the newest file can hold an old one
         let mut best: Option<Quota> = None;
         for (_, f) in files.into_iter().take(5) {
             let Ok(text) = read_text(&f) else { continue };
-            for line in text.lines().rev() {
-                if !line.contains("\"rate_limits\"") { continue; }
-                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-                let rl = &v["payload"]["rate_limits"];
-                if rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object()) {
-                    let q = parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or("")));
-                    if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
-                    break;
-                }
+            if let Some(q) = text.lines().rev().find_map(limits_of) {
+                if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
             }
         }
+        if let Some(q) = &best { let _ = ctx.db.put_quota(&p.name, q); }
+        let _ = ctx.db.kv_set(&mark, "1");
         best
     }
 
@@ -168,7 +179,7 @@ impl Harness for Codex {
         let prices = crate::pricing::load(ctx);
         let files = self.rollouts(ctx, p);
         let cursors = ctx.db.cursors_for(&p.name)?;
-        type Read = Option<(Vec<UsageRow>, Option<crate::harness::parse::NewCursor>, (String, i64, u64))>;
+        type Read = Option<(Vec<UsageRow>, Option<Quota>, Option<crate::harness::parse::NewCursor>, (String, i64, u64))>;
         each_file_parallel_sig(&files, |f, mtime, len| -> Result<Read> {
             let key = f.display().to_string();
             let compressed = f.extension().map(|e| e == "zst").unwrap_or(false);
@@ -194,7 +205,10 @@ impl Harness for Codex {
             let (mut model, mut cwd, mut sid) = (String::new(), String::new(), String::new());
             // reply timing: a request starts at the user's message or a tool's output; its first item done is the first reply
             let (mut start, mut first): (Option<i64>, Option<i64>) = (None, None);
+            let mut limits: Option<Quota> = None;
             for line in text.lines() {
+                // the last reading of these lines, as the limits read took the last of a file
+                if let Some(q) = limits_of(line) { limits = Some(q); }
                 if line.contains("\"type\":\"response_item\"") && (line.contains("\"role\":\"user\"") || line.contains("\"type\":\"function_call_output\"")) {
                     start = line_ts(line);
                     first = None;
@@ -248,12 +262,14 @@ impl Harness for Codex {
                 let last: Option<String> = ctx.db.with(|c| Ok(c.query_row("select model from usage where session_id = ? order by ts desc limit 1", [&sid], |r| r.get(0)).optional()?))?;
                 if let Some(m) = last { for r in rows.iter_mut().filter(|r| r.model == "codex") { r.model = m.clone(); } }
             }
-            Ok(Some((rows, cursor, (key, mtime, len))))
+            Ok(Some((rows, limits, cursor, (key, mtime, len))))
         }, |r| {
             match r {
                 // rows first, then the cursor: an interrupted import reads this file again
-                Ok(Some((rows, cursor, (key, mtime, len)))) => {
+                Ok(Some((rows, limits, cursor, (key, mtime, len)))) => {
                     stored += ctx.db.insert_usage(&rows, &prices)?;
+                    // the account's reading is the newest by Codex's own time, whichever file it came from
+                    if let Some(q) = limits { if ctx.db.get_quota(&p.name)?.is_none_or(|kept| q.fetched_at > kept.fetched_at) { ctx.db.put_quota(&p.name, &q)?; } }
                     match cursor { Some(c) => c.save(ctx)?, None => ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")? }
                 }
                 Ok(None) => {}
@@ -504,6 +520,55 @@ fn exit_code(raw: &str) -> Option<i64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod limits_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn reading(at: &str, week: f64) -> String {
+        format!("{}\n", json!({"type": "event_msg", "timestamp": at, "payload": {"type": "token_count", "rate_limits": {"secondary": {"used_percent": week, "window_minutes": 10080, "resets_at": 4102444800i64}}}}))
+    }
+
+    #[test]
+    fn the_limits_are_the_newest_reading_whether_the_import_or_the_files_gave_it() {
+        let t = tempfile::tempdir().unwrap();
+        // the import prices rows from a catalog: a local one, so the test never reaches the network
+        std::fs::write(t.path().join("pricing.json"), "{}").unwrap();
+        std::env::set_var("HRM_PRICING_FILE", t.path().join("pricing.json"));
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let (main, other, none) = (p("codex-main", true), p("other", false), p("none", false));
+        let week = |q: Option<Quota>| q.map(|q| (q.tier("week").unwrap().used, q.fetched_at.unwrap()));
+        let file = |p: &Profile, name: &str, text: &str| { let f = Codex.home(&ctx, p).join("sessions").join(name); std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, text).unwrap(); f };
+        // an old rollout Codex rewrote later holds an old reading in the newest file
+        let new = file(&main, "rollout-2026-11-01T10-00-00-a.jsonl", &reading("2026-11-01T10:00:00.000Z", 21.0));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        file(&main, "rollout-2026-10-01T10-00-00-b.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));
+        let at = ts_ms("2026-11-01T10:00:00.000Z");
+        // read before any import (an account from an earlier version): the files give it, once, and the row answers after
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
+        assert_eq!(week(ctx.db.get_quota("codex-main").unwrap()), Some((21.0, at)));
+        // the import keeps the newest reading it reads, and an older one never replaces it
+        Codex.import_usage(&ctx, &main).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
+        std::fs::write(&new, format!("{}{}{}", reading("2026-11-01T10:00:00.000Z", 21.0), reading("2026-11-02T08:00:00.000Z", 30.0), reading("2026-11-02T09:00:00.000Z", 34.0))).unwrap();
+        Codex.import_usage(&ctx, &main).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((34.0, ts_ms("2026-11-02T09:00:00.000Z"))));
+        // an account whose first read is its import has the same reading
+        file(&other, "rollout-2026-11-01T10-00-00-c.jsonl", &reading("2026-11-01T10:00:00.000Z", 21.0));
+        file(&other, "rollout-2026-10-01T10-00-00-d.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));
+        Codex.import_usage(&ctx, &other).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &other)), Some((21.0, at)));
+        // rollouts without a reading (an API key) are read for one once, not at every look
+        let f = file(&none, "rollout-2026-11-01T10-00-00-e.jsonl", "{\"type\":\"session_meta\",\"payload\":{\"id\":\"e\"}}\n");
+        assert!(Codex.quota(&ctx, &none).is_none() && ctx.db.kv_get(&limits_mark("none")).unwrap().is_some());
+        std::fs::write(&f, reading("2026-11-03T10:00:00.000Z", 5.0)).unwrap();
+        assert!(Codex.quota(&ctx, &none).is_none(), "the files are not read again");
+        Codex.import_usage(&ctx, &none).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &none)), Some((5.0, ts_ms("2026-11-03T10:00:00.000Z"))), "the import brings its first reading");
+    }
 }
 
 #[cfg(test)]

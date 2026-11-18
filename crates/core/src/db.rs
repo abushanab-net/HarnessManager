@@ -648,7 +648,7 @@ impl Db {
             for t in ["cursors", "quota"] { tx.execute(&format!("delete from {t} where profile=?"), [profile])?; }
             for t in ["usage", "sessions"] { tx.execute(&format!("delete from {t} where profile=? and device=?"), [profile, &self.device])?; }
             // its marks too: an account added again under this name reads its tool's history from the start (OpenCode's mark is how far its usage was read)
-            tx.execute("delete from kv where k in ('opencode:usage:' || ?1, 'login:' || ?1, 'login:refused:' || ?1)", [profile])?;
+            tx.execute("delete from kv where k in ('opencode:usage:' || ?1, 'login:' || ?1, 'login:refused:' || ?1, 'codex:limits:' || ?1)", [profile])?;
             tx.commit()?;
             Ok(())
         })
