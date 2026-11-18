@@ -14,7 +14,8 @@ records (names, ids, public keys, project roots), sizes and times.
 5. `docker compose up -d`. Caddy gets a Let's Encrypt certificate on first use.
 6. `curl https://hub.example.com/health` answers `ok`.
 7. On the first computer: Settings › Computers › A hub you host: the address and the admin token (or
-   `hrm hub join https://hub.example.com --admin <token>`). Save the recovery key it shows.
+   `hrm hub join https://hub.example.com --admin`, which asks for the token; a script can pass it as
+   `--admin <token>`, which a shell keeps in its history when typed by hand). Save the recovery key it shows.
 8. On every other computer: Invite a computer… on a joined one gives a six-digit code good for ten minutes;
    join with it (`hrm hub join https://hub.example.com --code 123456`).
 9. Updates: `docker compose pull && docker compose up -d`.
