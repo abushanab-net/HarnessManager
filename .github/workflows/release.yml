@@ -1,6 +1,6 @@
 name: release
 # Push a tag vX.Y.Z: the tests run first (ci.yml); only when they pass is the app built for Windows, macOS and
-# Linux at the same time, signed for the updater and published as release X.Y.Z with latest.json (what installed
+# Linux one after the other, signed for the updater and published as release X.Y.Z with latest.json (what installed
 # copies check). Only the newest 2 releases are kept. Every job runs on the self-hosted runners named by the
 # RUNNER_* variables: a missing variable fails the job, it never falls back to a GitHub-hosted runner.
 on:
@@ -32,6 +32,9 @@ jobs:
     needs: draft
     strategy:
       fail-fast: true
+      # one build at a time: each one reads latest.json from the draft, deletes it and uploads its own. Two that
+      # finish in the same seconds fail with "Not Found" (1.11.0's first run), or one silently drops the other's platform
+      max-parallel: 1
       matrix:
         include:
           - { os: windows, runner: "${{ vars.RUNNER_WIN_RELEASE }}", bundles: nsis, ext: .exe }
