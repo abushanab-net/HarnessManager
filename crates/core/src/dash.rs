@@ -220,7 +220,7 @@ fn forecast(pts: &[(i64, f64, Option<i64>)], now: i64) -> Option<Value> {
 /// router provider, the circuit breakers, and what runs on the other computers.
 pub fn live(ctx: &Ctx, now: i64) -> Result<Value> {
     let peers: Vec<crate::journal::Peer> = crate::journal::peers(ctx).unwrap_or_default().into_iter()
-        .filter(|p| p.presence["at"].as_i64().map(|t| now - t < LIVE_MS).unwrap_or(false)).collect();
+        .filter(|p| crate::journal::fresh(p, now)).collect();
     let running: Vec<Value> = peers.iter().flat_map(|p| p.presence["running"].as_array().cloned().unwrap_or_default().into_iter().map(|mut r| {
         r["device"] = json!(p.id);
         r["device_name"] = json!(p.name);

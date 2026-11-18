@@ -55,6 +55,8 @@ pub struct Peer {
     pub applied_seq: i64,
     pub transport: String,
     pub presence: Value,
+    /// When that presence was written, by this computer's clock; `presence.at` is by the other computer's.
+    pub presence_seen: Option<i64>,
     pub address: String,
     pub port: u16,
     pub cert_pem: String,
@@ -368,12 +370,16 @@ pub fn pull_noted(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// What a source says runs on the other computers, kept on their rows.
+/// What a source says runs on the other computers, kept on their rows. A presence not held yet is stamped with
+/// when it was written by this computer's clock: the other computer's own time when that lies between the last
+/// look and now, else the nearer of the two. The clocks of two computers are never compared after that.
 pub fn take_presence(ctx: &Ctx, src: &dyn Source) -> Result<()> {
     for (id, p) in src.presence()? {
         ctx.db.with(|c| {
-            c.execute("update peers set presence=case when ?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then ?1 else presence end,
-                last_seen=max(coalesce(last_seen, 0), coalesce(json_extract(?1, '$.at'), 0)) where device_id=?2", params![p.to_string(), id, src.live()])?;
+            c.execute("update peers set presence_seen=case when (?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0)) and json_extract(?1, '$.at') is not json_extract(presence, '$.at')
+                    then min(?4, max(coalesce(json_extract(?1, '$.at'), 0), coalesce(presence_checked, 0))) else presence_seen end,
+                presence=case when ?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then ?1 else presence end, presence_checked=?4,
+                last_seen=max(coalesce(last_seen, 0), coalesce(json_extract(?1, '$.at'), 0)) where device_id=?2", params![p.to_string(), id, src.live(), now_ms()])?;
             Ok(())
         })?;
     }
@@ -471,12 +477,12 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
     ctx.db.read(|c| {
-        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error, gap
+        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error, gap, presence_seen
             from peers order by name, device_id")?;
         let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
         let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: s(r, 1)?, os: s(r, 2)?, app_version: s(r, 3)?, last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
             applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: s(r, 7)?,
-            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), incarnation: s(r, 9)?,
+            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), presence_seen: r.get(21)?, incarnation: s(r, 9)?,
             address: s(r, 10)?, port: r.get::<_, Option<i64>>(11)?.unwrap_or(0) as u16, cert_pem: s(r, 12)?, pubkey: s(r, 13)?, paired_at: r.get(14)?, last_pull: r.get(15)?,
             path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)?,
             gap: r.get::<_, Option<String>>(20)?.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
@@ -491,8 +497,9 @@ pub fn device_names(ctx: &Ctx) -> HashMap<String, String> {
     m
 }
 
-/// A peer's presence seen in the last five minutes: what it says runs there still counts.
-fn fresh(p: &Peer, now: i64) -> bool { p.presence["at"].as_i64().map(|t| now - t < 300_000).unwrap_or(false) }
+/// A peer's presence written in the last five minutes by this computer's clock: what it says runs there still
+/// counts. One kept by a version that did not stamp it goes by its own time until the next arrives.
+pub(crate) fn fresh(p: &Peer, now: i64) -> bool { p.presence_seen.or_else(|| p.presence["at"].as_i64()).map(|t| now - t < 300_000).unwrap_or(false) }
 
 /// A session id a peer's presence says is open there, by presence seen in the last five minutes.
 pub fn open_elsewhere(peers: &[Peer], now: i64) -> std::collections::HashSet<String> {
@@ -657,6 +664,34 @@ mod tests {
         b.db.tag_set("session", "work/s1", &["after".into()]).unwrap();
         sync();
         assert_eq!((tags(&a, "session", "work/s1"), tags(&b, "session", "work/s1")), (vec!["after".to_string()], vec!["after".to_string()]));
+    }
+
+    #[test]
+    fn what_runs_on_another_computer_goes_by_when_its_presence_came_not_by_its_clock() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (mut a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        // A's presence is written below, as its own clock would stamp it: `off` away from B's
+        a.settings.sync_presence = false;
+        let _k = keys(&[&a, &b]);
+        round(&a).unwrap();
+        let says = |off: i64, session: &str| std::fs::write(shared.join("devices").join(&a.settings.device_id).join("presence.json"), json!({"at": now_ms() + off, "running": [{"session_id": session}]}).to_string()).unwrap();
+        let running = |at: i64| open_elsewhere(&peers(&b).unwrap(), at).into_iter().collect::<Vec<_>>();
+        // written an hour before B first looks: not news
+        says(-3_600_000, "s1");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), Vec::<String>::new());
+        // ten minutes behind, and heard a moment after B last looked: busy
+        says(-600_000, "s2");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), ["s2"]);
+        // an hour ahead: busy now, and no longer six minutes after its last word, however often B looks
+        says(3_600_000, "s3");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), ["s3"]);
+        round(&b).unwrap();
+        assert_eq!(running(now_ms() + 360_000), Vec::<String>::new(), "it stopped: its clock does not keep it busy");
     }
 
     #[test]
@@ -902,7 +937,7 @@ mod tests {
         assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(1));
         // presence older than five minutes: A's console no longer counts anywhere
         let p = json!({"at": crate::util::now_ms() - 600_000, "running": [{"session_id": "abc"}]}).to_string();
-        b.db.with(|c| Ok(c.execute("update peers set presence = ?1 where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
+        b.db.with(|c| Ok(c.execute("update peers set presence = ?1, presence_seen = json_extract(?1, '$.at') where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
         assert!(crate::service::sessions(&b, &live).unwrap().is_empty());
         assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(0));
         assert!(crate::service::sessions(&b, &crate::service::SessionFilter { scope: Some("here".into()), ..Default::default() }).unwrap().is_empty());
