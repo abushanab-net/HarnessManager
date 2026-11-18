@@ -72,8 +72,9 @@ pub fn read_or_empty(path: &Path) -> Result<String> {
 }
 
 /// A system-wide named mutex shared by every Harness Manager process (and thread); released on drop.
-/// Re-taking it on a thread that already holds it does not block. Off Windows it is a locked file.
-pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE, #[cfg(not(windows))] Option<(std::fs::File, String)>);
+/// Re-taking it on a thread that already holds it does not block. Off Windows it is a locked file. The second
+/// field: whether this thread holds it, which it does not after the 10 s wait ran out.
+pub struct NamedLock(#[cfg(windows)] windows_sys::Win32::Foundation::HANDLE, #[cfg(not(windows))] Option<(std::fs::File, String)>, bool);
 
 // the names this thread holds: a file lock taken twice through two handles would wait for itself
 #[cfg(not(windows))]
@@ -87,26 +88,38 @@ impl NamedLock {
             let w: Vec<u16> = format!(r"Local\HarnessManager-{name}").encode_utf16().chain(std::iter::once(0)).collect();
             let h = unsafe { CreateMutexW(std::ptr::null(), 0, w.as_ptr()) };
             // shortcut: after 10 s we go on without the lock rather than hang; a holder that slow is stuck
-            if !h.is_null() { unsafe { WaitForSingleObject(h, 10_000) }; }
-            NamedLock(h)
+            // held when the wait ended with the mutex (0), also one its last holder left without releasing (0x80)
+            let held = !h.is_null() && matches!(unsafe { WaitForSingleObject(h, 10_000) }, 0 | 0x80);
+            NamedLock(h, held)
         }
         // an advisory lock on a file in the temp folder, which every process of this user shares; closing the file
         // (the drop) releases it, and so does the end of a process that held it
         #[cfg(not(windows))]
         {
-            if !HELD.with(|h| h.borrow_mut().insert(name.to_string())) { return NamedLock(None); }
+            if !HELD.with(|h| h.borrow_mut().insert(name.to_string())) { return NamedLock(None, true); }
             let path = std::env::temp_dir().join(format!("HarnessManager-{name}.lock"));
             // shortcut: on a shared /tmp every user locks the same file (another user's opens for reading, which is
             // enough), so two users wait for each other, 10 s at most; a folder per user if that ever shows
             let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).or_else(|_| std::fs::File::open(&path)).ok();
+            let mut held = false;
             if let Some(f) = &file {
                 // the same 10 s as on Windows, then on without the lock
                 let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
-                while matches!(f.try_lock(), Err(std::fs::TryLockError::WouldBlock)) && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(20)); }
+                loop {
+                    match f.try_lock() {
+                        Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(20)),
+                        r => { held = r.is_ok(); break; }
+                    }
+                }
             }
-            NamedLock(file.map(|f| (f, name.to_string())).or_else(|| { HELD.with(|h| h.borrow_mut().remove(name)); None }))
+            NamedLock(file.map(|f| (f, name.to_string())).or_else(|| { HELD.with(|h| h.borrow_mut().remove(name)); None }), held)
         }
     }
+}
+
+impl NamedLock {
+    /// Whether the lock was taken: what must not run beside another holder asks, the rest goes on as before.
+    pub fn held(&self) -> bool { self.1 }
 }
 
 #[cfg(not(windows))]
@@ -121,7 +134,7 @@ impl Drop for NamedLock {
     fn drop(&mut self) {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::ReleaseMutex;
-        if !self.0.is_null() { unsafe { ReleaseMutex(self.0); CloseHandle(self.0); } }
+        if !self.0.is_null() { unsafe { if self.1 { ReleaseMutex(self.0); } CloseHandle(self.0); } }
     }
 }
 

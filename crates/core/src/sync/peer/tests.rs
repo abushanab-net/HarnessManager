@@ -391,3 +391,81 @@ fn presence_and_transcripts_switched_off_are_not_served_to_a_paired_computer_eit
     assert_eq!(c.json("/v1/presence").unwrap(), None);
     assert_eq!(c.json(&transcript).unwrap(), None);
 }
+
+/// B's copy of C's journal without its first chunk, as after its cache was pruned.
+fn prune_first(b: &Computer, c: &Computer) {
+    let dir = store::dir(&b.ctx, &c.ctx.settings.device_id);
+    let mut man = store::manifest(&b.ctx, &c.ctx.settings.device_id).unwrap();
+    let first = man["chunks"].as_array_mut().unwrap().remove(0);
+    std::fs::remove_file(dir.join("journal").join(first["file"].as_str().unwrap())).unwrap();
+    crate::util::write_atomic(&dir.join("manifest.json"), man.to_string().as_bytes()).unwrap();
+}
+
+#[test]
+fn a_journal_whose_start_a_relay_no_longer_holds_is_taken_at_once_and_what_was_passed_stays_on_its_card() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b, c) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"));
+    pair(&a, &b);
+    pair(&b, &c);
+    for r in ["claude:c1", "claude:c2"] {
+        c.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        c.rt.tick(&c.ctx);
+        b.rt.tick(&b.ctx);
+    }
+    prune_first(&b, &c);
+    let c_id = c.ctx.settings.device_id.clone();
+    let card = || { let st = journal::status(&a.ctx).unwrap(); let p = peer(&st, &c_id); (count(&a.ctx, "select count(*) from usage"), p["applied_seq"].as_i64(), p["gap"].clone()) };
+    // A hears of C through B alone: what B holds is taken in the same pull, as before, and the card says what was passed
+    a.rt.tick(&a.ctx);
+    assert_eq!(card(), (1, Some(2), json!({"from": 1, "to": 1})));
+    // a list of another incarnation that brings nothing leaves the record
+    assert_eq!(journal::apply_manifest(&a.ctx, &c_id, &json!({"incarnation": "another", "chunks": []}), &|_| anyhow::bail!("not read")).unwrap(), 0);
+    assert_eq!(card().2, json!({"from": 1, "to": 1}));
+    // C itself, paired later, lists its whole journal: A's cursor is past the entry, so it is not read again, and the card goes on saying so
+    pair(&c, &a);
+    a.rt.tick(&a.ctx);
+    assert_eq!(peer(&journal::status(&a.ctx).unwrap(), &c_id)["connected"], true);
+    assert_eq!(card(), (1, Some(2), json!({"from": 1, "to": 1})));
+    // only forgetting the computer takes it off
+    super::forget(&a.ctx, &c_id).unwrap();
+    assert!(journal::status(&a.ctx).unwrap()["peers"].as_array().unwrap().iter().all(|p| p["id"] != c_id.as_str()));
+}
+
+#[test]
+fn polls_within_half_a_minute_get_one_making_of_the_record_and_presence_and_the_key_is_not_written_again() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    journal::publish(&a.ctx).unwrap();
+    a.ctx.db.with(|c| Ok(c.execute_batch("create table writes(n); create trigger key_writes after insert on kv when new.k = 'device:pubkey' begin insert into writes values(1); end;")?)).unwrap();
+    let a_cert: String = b.ctx.db.with(|c| Ok(c.query_row("select cert_pem from peers where device_id=?", [&a.ctx.settings.device_id], |r| r.get(0))?)).unwrap();
+    let c = Client::connect(&identity::load(&b.ctx).unwrap(), &a_cert, "127.0.0.1", port(&a)).unwrap();
+    let poll = || (c.json(&format!("/v1/chunks/{}", a.ctx.settings.device_id)).unwrap().unwrap()["device"].clone(), c.json("/v1/presence").unwrap().unwrap());
+    let first = poll();
+    assert!(identity::record_ok(&first.0) && first.1["at"].is_i64(), "{first:?}");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    assert_eq!(poll(), first, "the same signed record and presence, not made again");
+    for _ in 0..3 { identity::load(&a.ctx).unwrap(); }
+    assert_eq!(count(&a.ctx, "select count(*) from writes"), 0, "the key was there already");
+    // and what is kept is made again once it is half a minute old
+    let (slot, made) = (super::listener::Kept::default(), std::cell::Cell::new(0));
+    let ask = || super::listener::kept(&slot, || { made.set(made.get() + 1); Ok(json!(made.get())) }).unwrap();
+    assert_eq!((ask(), ask()), (json!(1), json!(1)));
+    slot.lock().unwrap().as_mut().unwrap().0 = std::time::Instant::now().checked_sub(super::listener::KEPT).expect("the clock has run for half a minute");
+    assert_eq!((ask(), ask()), (json!(2), json!(2)), "made once more, then kept again");
+}
+
+#[test]
+fn the_address_a_paired_computer_last_answered_at_is_tried_first() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    a.rt.tick(&a.ctx);
+    let b_id = b.ctx.settings.device_id.clone();
+    // the hub names another place for B, and its places come before the address the owner gave
+    a.ctx.db.kv_set("hub:rendezvous", &json!({b_id.as_str(): {"addresses": ["127.0.0.1:1"]}}).to_string()).unwrap();
+    let p = journal::peers(&a.ctx).unwrap().into_iter().find(|p| p.id == b_id).unwrap();
+    assert_eq!(p.last_good, format!("127.0.0.1:{}", port(&b)));
+    let order: Vec<(String, u16)> = super::client::candidates(&a.ctx, &p).into_iter().map(|(h, port, _)| (h, port)).collect();
+    assert_eq!(order, [("127.0.0.1".to_string(), port(&b)), ("127.0.0.1".to_string(), 1)]);
+}

@@ -2478,6 +2478,29 @@ description: Bulk skill ${i}
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pcard-pcs]')")), 'Projects as before');
   });
 
+  await test("computers: a card says when part of another computer's history is missing here", async () => {
+    // the status as the backend gives it for two other computers: one whose journal was passed in part, one whole
+    await exec(`const t = window.__TAURI__, real = t.core; window.__gapReal = real;
+      const peers = [{ id: 'pc-laptop', name: 'LAPTOP', gap: { from: 1, to: 40 } }, { id: 'pc-tablet', name: 'TABLET', gap: null }];
+      t.core = { ...real, invoke: (cmd, a, o) => real.invoke(cmd, a, o).then((r) => (a && a.op === 'computers_status' ? { ...r, peers } : r)) };`);
+    try {
+      await nav('#home');
+      await nav('#computers');
+      await $('[data-testid=gap-pc-laptop]');
+      const d = await exec(`const q = (id) => document.querySelector('[data-testid=gap-' + id + ']'), ink = (e) => getComputedStyle(e).color;
+        return { laptop: q('pc-laptop').textContent, warns: ink(q('pc-laptop')) !== ink(document.querySelector('[data-testid=computer-pc-laptop] dt')), tablet: !!q('pc-tablet'), lines: document.querySelectorAll('[data-testid=computer-cards] .pc-note').length,
+          inCard: !!q('pc-laptop').closest('[data-testid=computer-pc-laptop]'), px: parseFloat(getComputedStyle(q('pc-laptop')).fontSize) }`);
+      assert.equal(d.laptop, "Part of this computer's history is missing here.", 'said as a fact, with no numbers');
+      assert.ok(d.warns && d.inCard, 'on that computer\'s own card, in the warning tone');
+      assert.ok(!d.tablet && d.lines === 1, 'a computer whose history is whole has no such line, nor has this one');
+      assert.ok(d.px >= 12, 'nothing under 12 px');
+      await shot('19b-computers-gap');
+    } finally {
+      await exec('window.__TAURI__.core = window.__gapReal; window.__gapReal = null;');
+      await nav('#home');
+    }
+  });
+
   await test('computers: a page of its own in the sidebar, which the chip opens; its name, a switch, Pair and the first-run choice work from it; Settings has no Computers section', async () => {
     const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
     await nav('#home');

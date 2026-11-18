@@ -14,6 +14,8 @@ const ago = (t) => (Date.now() - t < 60000 ? 'just now' : dur(Date.now() - t) + 
 /** When a computer was last seen, in its largest unit: "1 m ago", "3 h ago", "2 d ago". */
 const since = (ms) => { const m = Math.max(1, Math.round(ms / 60000)); return (m >= 1440 ? `${Math.floor(m / 1440)} d` : m >= 60 ? `${Math.floor(m / 60)} h` : `${m} m`) + ' ago'; };
 const OS = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+/** The one line of a card whose computer's journal did not arrive whole (`gap` of the status). */
+const GAP = "Part of this computer's history is missing here.";
 const dots = (label, act, data, testid) => `<button class="btn sm icon" data-act="${act}" ${data} aria-haspopup="menu" aria-label="${esc(label)}" title="${esc(label)}" data-testid="${testid}">⋯</button>`;
 
 view('computers', async (sheet) => {
@@ -53,7 +55,7 @@ function card(c, d, st) {
       <dl class="kv"><dt>System</dt><dd>${esc(OS[me ? st.os : d.os] || (me ? st.os : d.os) || '—')}</dd><dt>App version</dt><dd>${esc((me ? st.version : d.app_version) || '—')}</dd><dt>Last seen</dt><dd>${esc(seen)}</dd>
         <dt>Connection</dt><dd class="trunc ${tone}" title="${esc(conn)}" data-testid="transport">${esc(conn)}</dd></dl>
       <div class="count"><b class="key ${running ? '' : 'dim'}">${running}</b><span>${running === 1 ? 'session' : 'sessions'}<br>running</span></div>
-    </div></section>`;
+    </div>${!me && d.gap ? `<p class="pc-note warnT" data-testid="gap-${esc(id)}">${esc(GAP)}</p>` : ''}</section>`;
 }
 // the ⋯ of a card: Rename… for this computer; Sync now, Edit address… (a paired one) and Forget… for another; Details… for both
 action('pc-menu', (el) => {

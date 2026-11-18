@@ -21,6 +21,8 @@ use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
 const CHUNK_BYTES: usize = 1_000_000;
+/// This computer's newest chunks stay as they were cut, one whenever a tick finds news; the older ones are joined.
+const SMALL_KEPT: usize = 100;
 /// No more than this is read of a chunk another computer sends: four times the size they are cut at, as one long
 /// entry may run over it.
 pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
@@ -52,6 +54,8 @@ pub struct Peer {
     pub applied_seq: i64,
     pub transport: String,
     pub presence: Value,
+    /// When that presence was written, by this computer's clock; `presence.at` is by the other computer's.
+    pub presence_seen: Option<i64>,
     pub address: String,
     pub port: u16,
     pub cert_pem: String,
@@ -64,11 +68,19 @@ pub struct Peer {
     pub relayed_by: String,
     /// Why the last attempt to reach it failed; empty once one succeeds.
     pub last_error: String,
+    /// The `host:port` it last answered at.
+    pub last_good: String,
+    /// Entries of its journal that were passed because the list read did not hold them, `{incarnation, from, to}`,
+    /// or null: one range, so after several holes it may name more than is missing.
+    pub gap: Value,
 }
 
 /// Append one change to the outbox, inside the writer's own transaction.
-pub fn record(c: &Connection, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> {
-    c.execute("insert into outbox(ts, op, key, data) values(?,?,?,?)", params![now_ms(), op, key, data.to_string()])?;
+pub fn record(c: &Connection, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> { record_at(c, now_ms(), op, key, data) }
+
+/// `record` for a change whose time the merge compares (a tag list): the entry carries the time kept here.
+pub fn record_at(c: &Connection, ts: i64, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> {
+    c.execute("insert into outbox(ts, op, key, data) values(?,?,?,?)", params![ts, op, key, data.to_string()])?;
     Ok(())
 }
 
@@ -78,16 +90,23 @@ pub fn backfill(ctx: &Ctx) -> Result<usize> { record_missing(ctx, true) }
 
 /// The backfill's work. The limit readings only when asked: `quota_point` journals each with its row, so later
 /// the only rows without an entry are other computers' merged ones, which are not this computer's to publish.
+/// Usage rows are only ever added, so the catch-up (not the backfill) looks at those added since the last look:
+/// `journal:usage_mark` is the row it reached. A row below the mark becomes this computer's in two places only:
+/// the stamp at the start, which removes the mark with it, and a restore that adopts a computer, which asks for
+/// the backfill.
 fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
     let n = ctx.db.with(|c| {
         let tx = c.transaction()?;
         let now = now_ms();
         let dev = &ctx.db.device;
+        let top: i64 = tx.query_row("select coalesce(max(rowid), 0) from usage", [], |r| r.get(0))?;
+        let mark: i64 = if quota { 0 } else { tx.query_row("select v from kv where k = 'journal:usage_mark'", [], |r| r.get::<_, String>(0)).optional()?.and_then(|v| v.parse().ok()).filter(|m| *m <= top).unwrap_or(0) };
         let mut n = tx.execute("insert into outbox(ts, op, key, data) select ?1, 'usage', request_id,
             json_object('request_id', request_id, 'profile', profile, 'harness', harness, 'ts', ts, 'model', model, 'project', project,
                 'session_id', session_id, 'input', input, 'output', output, 'cache_read', cache_read, 'cache_write', cache_write,
                 'ttft_ms', ttft_ms, 'gen_ms', gen_ms, 'cost_usd', cost_usd, 'price_rev', price_rev)
-            from usage u where device = ?2 and not exists (select 1 from outbox o where o.op = 'usage' and o.key = u.request_id)", params![now, dev])?;
+            from usage u where u.rowid > ?3 and device = ?2 and not exists (select 1 from outbox o where o.op = 'usage' and o.key = u.request_id)", params![now, dev, mark])?;
+        tx.execute("insert or replace into kv values('journal:usage_mark', ?)", [top.to_string()])?;
         // sessions as the journal knows them (resolved, keyed harness/profile/id); the per-file cache rows have a '|' key
         n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'session', key, json from sessions s
             where device = ?2 and instr(key, '|') = 0 and not exists (select 1 from outbox o where o.op = 'session' and o.key = s.key)", params![now, dev])?;
@@ -97,8 +116,11 @@ fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
                 from (select distinct profile, tier, used, resets_at, ts, account from quota_hist where coalesce(device, ?2) = ?2)
                 where (profile || '/' || tier, ts) not in (select key, coalesce(json_extract(data, '$.at'), 0) from outbox where op = 'quota')", params![now, dev])?;
         }
-        n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
-            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", [now])?;
+        // a tag list journaled late carries the time of its change, so it never passes for a newer one
+        tx.execute("insert or ignore into tag_times select kind, key, ?1, ?2 from tags t
+            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", params![now, dev])?;
+        n += tx.execute("insert into outbox(ts, op, key, data) select (select ts from tag_times x where x.kind = t.kind and x.key = t.key), 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
+            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", [])?;
         tx.execute("insert or replace into kv values('journal:backfilled', '1')", [])?;
         tx.commit()?;
         Ok(n)
@@ -115,20 +137,30 @@ fn backfill_if_needed(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
+/// The outbox's entries after `after` up to `upto`, in order.
+fn outbox(ctx: &Ctx, after: i64, upto: i64) -> Result<Vec<Entry>> {
+    ctx.db.with(|c| {
+        let mut st = c.prepare("select seq, ts, op, key, data from outbox where seq > ? and seq <= ? order by seq")?;
+        let v = st.query_map([after, upto], |r| Ok(Entry { seq: r.get(0)?, ts: r.get(1)?, op: r.get(2)?, key: r.get(3)?,
+            data: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    })
+}
+
+/// An entry as its line of a chunk file.
+fn line(e: &Entry) -> String { format!("{}\n", serde_json::to_string(e).unwrap_or_default()) }
+
 /// Unpublished entries as signed chunk files in the local store, then its manifest: readers only ever see whole
 /// chunks. The store's manifest is the water line; a store lost with the data folder is simply made again.
 pub fn publish(ctx: &Ctx) -> Result<()> {
     // the refresh round, the 10 s tick and the hub's events thread all publish: one at a time
-    let _one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
+    let one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
     let me = &ctx.settings.device_id;
     let inc = &ctx.settings.incarnation;
-    let published = store::manifest(ctx, me).filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
-    let entries: Vec<Entry> = ctx.db.with(|c| {
-        let mut st = c.prepare("select seq, ts, op, key, data from outbox where seq > ? order by seq")?;
-        let v = st.query_map([published], |r| Ok(Entry { seq: r.get(0)?, ts: r.get(1)?, op: r.get(2)?, key: r.get(3)?,
-            data: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
-        Ok(v)
-    })?;
+    // a list that could not be read is not an empty one: publishing from it would start the journal over
+    let published = store::read_list(ctx, me).context("this computer's chunk list could not be read; nothing is published this time")?
+        .filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
+    let entries = outbox(ctx, published, i64::MAX)?;
     if entries.is_empty() {
         if store::manifest(ctx, me).is_none() { store::put_manifest_empty(ctx, me, inc)?; }
         ctx.db.kv_set("journal:published_seq", &published.to_string())?;
@@ -137,7 +169,7 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
     let id = identity::load(ctx)?;
     let mut chunks: Vec<(i64, i64, Vec<u8>)> = vec![];
     for e in &entries {
-        let line = format!("{}\n", serde_json::to_string(e)?);
+        let line = line(e);
         match chunks.last_mut() {
             Some((_, to, bytes)) if bytes.len() + line.len() <= CHUNK_BYTES => { *to = e.seq; bytes.extend_from_slice(line.as_bytes()); }
             _ => chunks.push((e.seq, e.seq, line.into_bytes())),
@@ -147,6 +179,12 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
         let (file, sha) = (format!("{inc}-{from}-{to}.jsonl"), sha256_hex(bytes));
         let sig = id.sign(identity::chunk_message(inc, *from, *to, &sha).as_bytes());
         store::put_chunk(ctx, me, inc, &json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sig, "bytes": bytes.len()}), bytes)?;
+    }
+    // not beside another publisher: after its 10 s wait this one goes on without the lock, and then only adds its chunks
+    if one.held() {
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes());
+        let cut = |from: i64, to: i64| outbox(ctx, from - 1, to).ok().filter(|es| es.len() as i64 == to - from + 1).map(|es| es.iter().map(line).collect::<String>().into_bytes());
+        if let Err(e) = store::mend(ctx, &cut, &sign).and_then(|_| store::join_old(ctx, SMALL_KEPT, CHUNK_BYTES, &sign)) { crate::log::warn(&format!("journal: joining old chunks: {e:#}")); }
     }
     let last = entries.last().map(|e| e.seq).unwrap_or(published);
     ctx.db.kv_set("journal:published_seq", &last.to_string())?;
@@ -166,7 +204,13 @@ fn mirror(ctx: &Ctx, root: &Path) -> Result<()> {
         if dir.join("journal").join(file).is_file() { continue; }
         folder::write_chunk(&dir, file, &store::chunk(ctx, me, file)?)?;
     }
-    folder::write_manifest(&dir, &man)
+    folder::write_manifest(&dir, &man)?;
+    // what the folder's list named and this one no longer does: chunks joined since, or of an earlier incarnation
+    let listed = |m: &Value, f: &Value| m["chunks"].as_array().into_iter().flatten().any(|c| c["file"] == *f);
+    for f in there.iter().flat_map(|t| t["chunks"].as_array().into_iter().flatten()).map(|c| &c["file"]).filter(|f| !listed(&man, f)) {
+        if let Some(f) = f.as_str().filter(|f| store::safe_file(f)) { let _ = std::fs::remove_file(dir.join("journal").join(f)); }
+    }
+    Ok(())
 }
 
 /// A session's journal key, `<tool>/<account>/<id>`, as another computer may send it: the three become path parts
@@ -178,6 +222,13 @@ pub(crate) fn session_key_ok(key: &str) -> bool {
 
 /// On a computer's card while an entry of a kind this version does not know holds its journal back.
 const UPDATE_HERE: &str = "it sent a kind of entry this version does not know: update Harness Manager on this computer to take the rest of its journal";
+
+/// Whether a change to an item's tags made at `ts` on `device` is later than the last one kept for it, and then it
+/// is the one kept. Two computers that changed the same item apart both end with the later change; the
+/// computer's id decides between equal times.
+fn tag_newer(tx: &Connection, kind: &str, key: &str, ts: i64, device: &str) -> Result<bool> {
+    Ok(tx.execute("insert into tag_times values(?1, ?2, ?3, ?4) on conflict(kind, key) do update set ts = ?3, device = ?4 where ?3 > ts or (?3 = ts and ?4 > device)", params![kind, key, ts, device])? > 0)
+}
 
 /// One entry of another computer's (`device`) journal into this database, on the computer `here`. `Ok(false)`:
 /// its kind is one this version does not know (a newer version wrote it), and nothing was done.
@@ -201,6 +252,7 @@ fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
         "tag" => {
             let (kind, key) = e.key.split_once('/').context("tag key")?;
             if !matches!(kind, "session" | "project") { bail!("tag kind {kind}"); }
+            if !tag_newer(tx, kind, key, e.ts, device)? { return Ok(true); }
             tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
             for t in e.data["tags"].as_array().into_iter().flatten().filter_map(|t| t.as_str()) {
                 tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t])?;
@@ -209,7 +261,7 @@ fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
         // never a usage row: what was spent was spent; and of the sessions, only that computer's own
         "tombstone" => match e.key.split_once('/').context("tombstone key")? {
             ("session", k) => { tx.execute("delete from sessions where key=? and device=?", [k, device])?; }
-            ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
+            ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; if tag_newer(tx, kind, key, e.ts, device)? { tx.execute("delete from tags where kind=? and key=?", [kind, key])?; } }
             ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
             _ => return Ok(false),
         },
@@ -225,11 +277,26 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
     ctx.db.with(|c| Ok(c.query_row("select coalesce(pubkey, '') from peers where device_id=?", [id], |r| r.get(0)).optional()?.unwrap_or_default()))
 }
 
+/// Entries passed because the list read did not hold them, kept on the computer's row for its card: one range,
+/// widened by each hole passed in the same incarnation; one passed in another incarnation starts it anew.
+/// Nothing takes it off but forgetting the computer: what was passed is not read again.
+fn note_gap(ctx: &Ctx, id: &str, inc: &str, from: i64, to: i64) -> Result<()> {
+    ctx.db.with(|c| {
+        let kept: Option<String> = c.query_row("select gap from peers where device_id=?", [id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten();
+        let kept = kept.and_then(|g| serde_json::from_str::<Value>(&g).ok()).filter(|g| g["incarnation"] == inc);
+        let (from, to) = (kept.as_ref().and_then(|g| g["from"].as_i64()).unwrap_or(from).min(from), kept.as_ref().and_then(|g| g["to"].as_i64()).unwrap_or(to).max(to));
+        c.execute("update peers set gap=?1 where device_id=?2", params![json!({"incarnation": inc, "from": from, "to": to}).to_string(), id])?;
+        Ok(())
+    })
+}
+
 /// One computer's new chunks, in manifest order, each read through `read`, checked against its sha256 and (when
 /// the origin's key is known) its signature, kept in the local store for relay, and applied in one transaction
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
 /// tries again. Stops too at the first entry of a kind this version does not know, with the cursor just before
 /// it, and says so on that computer's row: the entry and all after it are taken once this computer is updated.
+/// A list that starts beyond the cursor has lost entries (a relay and the hub drop their oldest chunks): what it
+/// holds is taken all the same, as every version did, and the entries passed are kept on that computer's row.
 /// Returns the sequence applied up to.
 pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
     if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
@@ -237,9 +304,14 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
     let (mut newer, mut through) = (false, false);
-    for ch in man["chunks"].as_array().into_iter().flatten() {
+    // by where each starts, the longest first: a relay lists the small chunks it took beside a joined one that
+    // covers them, and entries are missing only when no chunk left in the list reaches back to the cursor
+    let mut chunks: Vec<&Value> = man["chunks"].as_array().into_iter().flatten().collect();
+    chunks.sort_by_key(|c| (c["from"].as_i64().unwrap_or(0), std::cmp::Reverse(c["to"].as_i64().unwrap_or(0))));
+    for ch in chunks {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || !store::safe_file(file) { continue; }
+        let missing = (from > cur + 1).then_some((cur + 1, from - 1));
         let bytes = match read(file) {
             Ok(b) => b,
             Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
@@ -272,6 +344,10 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
             Ok(())
         })?;
         if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
+        if let Some((a, b)) = missing {
+            crate::log::warn(&format!("journal: entries {a} to {b} of {id} were not in the list read; its journal goes on after them"));
+            if let Err(e) = note_gap(ctx, id, inc, a, b) { crate::log::warn(&format!("journal: noting the entries of {id} that were passed: {e:#}")); }
+        }
         cur = upto;
         if newer {
             crate::log::warn(&format!("journal: entry {} of {file} from {id} is of a kind this version does not know; it and what follows wait until Harness Manager is updated on this computer", upto + 1));
@@ -285,6 +361,66 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     Ok(cur)
 }
 
+/// Where another computer's journal and presence are read: the sync folder, a paired computer or the hub.
+pub trait Source {
+    /// The origin's chunk list after `since`, of `incarnation` where the source tells them apart; `None` when it
+    /// holds nothing of the origin.
+    fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>>;
+    /// One chunk's bytes, as the origin published them.
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>>;
+    /// What runs on the computers this source speaks for, each as `(id, presence)`.
+    fn presence(&self) -> Result<Vec<(String, Value)>>;
+    /// The origin's key must be known before anything of it is taken; not in the folder, which is the owner's.
+    fn needs_key(&self) -> bool { true }
+    /// Its presence is made as it is asked for, so it replaces what is held; a stored copy only when no older.
+    fn live(&self) -> bool { false }
+}
+
+/// One origin's journal from a source: its chunk list since this computer's cursor (asked again when the source
+/// names another incarnation than the one known here), its device record learned when the list carries one, and
+/// every chunk checked and applied. `None` when the source holds nothing of the origin; else the list and the
+/// sequence applied up to.
+pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<Option<(Value, i64)>> {
+    let known: String = ctx.db.with(|c| Ok(c.query_row("select coalesce(incarnation, '') from peers where device_id=?", [origin], |r| r.get(0)).unwrap_or_default()))?;
+    let cursor = |inc: &str| -> i64 { ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [origin, inc], |r| r.get(0)).unwrap_or(0))).unwrap_or(0) };
+    let Some(mut man) = src.manifest(origin, &known, cursor(&known))? else { return Ok(None) };
+    let inc = man["incarnation"].as_str().unwrap_or("").to_string();
+    if inc != known && !inc.is_empty() { man = src.manifest(origin, &inc, cursor(&inc))?.context("the origin vanished")?; }
+    if man["device"].is_object() { learn_device(ctx, origin, &man["device"])?; }
+    if src.needs_key() && pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
+    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file))?;
+    Ok(Some((man, applied)))
+}
+
+/// `pull` through a paired computer or the hub, and what it brought kept on the origin's row. `Ok(false)` when
+/// the source holds nothing of the origin.
+pub fn pull_noted(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<bool> {
+    let Some((man, applied)) = pull(ctx, src, origin)? else { return Ok(false) };
+    let last = man["last_seq"].as_i64().or_else(|| man["chunks"].as_array().and_then(|c| c.last()).and_then(|c| c["to"].as_i64())).unwrap_or(0);
+    ctx.db.with(|c| {
+        c.execute("update peers set incarnation=case when ?1 <> '' then ?1 else incarnation end, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
+            params![man["incarnation"].as_str().unwrap_or(""), last, applied, now_ms(), origin])?;
+        Ok(())
+    })?;
+    Ok(true)
+}
+
+/// What a source says runs on the other computers, kept on their rows. A presence not held yet is stamped with
+/// when it was written by this computer's clock: the other computer's own time when that lies between the last
+/// look and now, else the nearer of the two. The clocks of two computers are never compared after that.
+pub fn take_presence(ctx: &Ctx, src: &dyn Source) -> Result<()> {
+    for (id, p) in src.presence()? {
+        ctx.db.with(|c| {
+            c.execute("update peers set presence_seen=case when (?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0)) and json_extract(?1, '$.at') is not json_extract(presence, '$.at')
+                    then min(?4, max(coalesce(json_extract(?1, '$.at'), 0), coalesce(presence_checked, 0))) else presence_seen end,
+                presence=case when ?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then ?1 else presence end, presence_checked=?4,
+                last_seen=max(coalesce(last_seen, 0), coalesce(json_extract(?1, '$.at'), 0)) where device_id=?2", params![p.to_string(), id, src.live(), now_ms()])?;
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
 /// What another computer says about itself (a `device.json`, from the folder or a peer), when it is signed by
 /// the key it carries: its name, incarnation, roots and key are kept, the record is cached for relay. The key
 /// is learned once and never replaced by a record.
@@ -295,6 +431,9 @@ pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
         crate::log::warn(&format!("computers: {id} presents another key than the one paired; its record is ignored"));
         return Ok(false);
     }
+    // that computer's own record too, from before the one kept (a relay's copy from before a rename or a restore):
+    // it says nothing new, and taking it would set the name and the incarnation back
+    if !known.is_empty() && store::device(ctx, id).is_some_and(|kept| kept["updated_at"].as_i64().unwrap_or(0) > dev["updated_at"].as_i64().unwrap_or(0)) { return Ok(true); }
     ctx.db.with(|c| {
         c.execute("insert into peers(device_id, name, os, app_version, incarnation, roots, pubkey, transport) values(?1,?2,?3,?4,?5,?6,?7,'relay')
             on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
@@ -309,30 +448,22 @@ pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
 /// Every other computer's journal, and what each says about itself, into this database. Per computer: an
 /// error is logged and the next one is tried.
 fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
+    let src = folder::Folder { ctx, root };
     for (id, dir) in folder::others(ctx, root) {
         let dev = crate::util::read_json(&dir.join("device.json")).unwrap_or(Value::Null);
         if dev.is_object() { learn_device(ctx, &id, &dev)?; }
-        let presence = std::fs::read_to_string(dir.join("presence.json")).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
-        let man = folder::read_manifest(&dir);
-        let applied = match &man {
-            Some(m) => match apply_manifest(ctx, &id, m, &|file| crate::util::read_capped(std::fs::File::open(dir.join("journal").join(file))?, None, MAX_CHUNK_READ, file)) {
-                Ok(seq) => Some(seq),
-                Err(e) => { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None }
-            },
-            None => None,
-        };
-        let seen = [dev["updated_at"].as_i64(), presence.as_deref().and_then(|p| serde_json::from_str::<Value>(p).ok()).and_then(|p| p["at"].as_i64())].into_iter().flatten().max();
+        let pulled = pull(ctx, &src, &id).unwrap_or_else(|e| { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None });
+        let (man, applied) = (pulled.as_ref().map(|p| &p.0), pulled.as_ref().map(|p| p.1));
         ctx.db.with(|c| {
-            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport, presence) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder',?10)
+            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder')
                 on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
-                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder',
-                presence=case when coalesce(json_extract(?10, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then coalesce(?10, presence) else presence end",
-                params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.as_ref().and_then(|m| m["incarnation"].as_str())),
-                    seen, man.as_ref().and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string()), presence])?;
+                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder'",
+                params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.and_then(|m| m["incarnation"].as_str())),
+                    dev["updated_at"].as_i64(), man.and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string())])?;
             Ok(())
         })?;
     }
-    Ok(())
+    take_presence(ctx, &src)
 }
 
 /// Sync in any form: through the folder or straight to paired computers.
@@ -384,14 +515,15 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
     ctx.db.read(|c| {
-        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error
+        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error, gap, presence_seen, last_good
             from peers order by name, device_id")?;
         let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
         let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: s(r, 1)?, os: s(r, 2)?, app_version: s(r, 3)?, last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
             applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: s(r, 7)?,
-            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), incarnation: s(r, 9)?,
+            presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), presence_seen: r.get(21)?, incarnation: s(r, 9)?,
             address: s(r, 10)?, port: r.get::<_, Option<i64>>(11)?.unwrap_or(0) as u16, cert_pem: s(r, 12)?, pubkey: s(r, 13)?, paired_at: r.get(14)?, last_pull: r.get(15)?,
-            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)? }))?.collect::<rusqlite::Result<_>>()?;
+            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)?, last_good: s(r, 22)?,
+            gap: r.get::<_, Option<String>>(20)?.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })
 }
@@ -403,8 +535,9 @@ pub fn device_names(ctx: &Ctx) -> HashMap<String, String> {
     m
 }
 
-/// A peer's presence seen in the last five minutes: what it says runs there still counts.
-fn fresh(p: &Peer, now: i64) -> bool { p.presence["at"].as_i64().map(|t| now - t < 300_000).unwrap_or(false) }
+/// A peer's presence written in the last five minutes by this computer's clock: what it says runs there still
+/// counts. One kept by a version that did not stamp it goes by its own time until the next arrives.
+pub(crate) fn fresh(p: &Peer, now: i64) -> bool { p.presence_seen.or_else(|| p.presence["at"].as_i64()).map(|t| now - t < 300_000).unwrap_or(false) }
 
 /// A session id a peer's presence says is open there, by presence seen in the last five minutes.
 pub fn open_elsewhere(peers: &[Peer], now: i64) -> std::collections::HashSet<String> {
@@ -423,7 +556,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
         "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": if fresh(&p, now) { p.presence["running"].as_array().cloned().unwrap_or_default() } else { vec![] },
         "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
-        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error})).collect();
+        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error, "gap": if p.gap.is_object() { json!({"from": p.gap["from"], "to": p.gap["to"]}) } else { Value::Null }})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
         "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
         "last_run": last["at"], "error": last["error"], "peers": peers, "hub": crate::sync::hub::status(ctx)}))
@@ -468,6 +601,8 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::pricing::Prices;
 
@@ -490,6 +625,19 @@ mod tests {
     }
 
     fn count(ctx: &Ctx, sql: &str) -> i64 { ctx.db.with(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() }
+
+    /// A row for each of `seqs`, the next entries of this computer's journal, each cut as its own chunk the way
+    /// the ten-second tick cuts them. The key is loaded once by the caller: a publish per chunk reads the
+    /// credential store hundreds of times, beside every other test that reads it.
+    fn cut_each(a: &Ctx, id: &identity::Identity, seqs: std::ops::RangeInclusive<i64>) {
+        let (me, inc) = (&a.settings.device_id, &a.settings.incarnation);
+        for i in seqs {
+            a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i)], &Prices::new()).unwrap();
+            let bytes = line(&outbox(a, i - 1, i).unwrap()[0]).into_bytes();
+            let sha = sha256_hex(&bytes);
+            store::put_chunk(a, me, inc, &json!({"file": format!("{inc}-{i}-{i}.jsonl"), "from": i, "to": i, "sha256": sha, "sig": id.sign(identity::chunk_message(inc, i, i, &sha).as_bytes()), "bytes": bytes.len()}), &bytes).unwrap();
+        }
+    }
 
     /// Deletes the computers' device keys from the credential store when the test ends.
     struct Keys(Vec<String>);
@@ -538,6 +686,362 @@ mod tests {
         assert_eq!(count(&b, "select count(*) from usage"), 2);
         assert_eq!(count(&b, "select count(*) from quota_hist"), 1);
         assert_eq!(count(&b, "select count(*) from cursors2"), 1);
+    }
+
+    #[test]
+    fn two_computers_that_tag_the_same_item_before_syncing_end_with_the_same_tags() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let sync = || for c in [&a, &b, &a, &b] { round(c).unwrap(); };
+        let tags = |c: &Ctx, kind: &str, key: &str| c.db.tags_of(kind).unwrap().remove(key).unwrap_or_default();
+        // B's change is the later one: it stays on both, whichever entry each applies last
+        a.db.tag_set("session", "work/s1", &["from-a".into()]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        b.db.tag_set("session", "work/s1", &["from-b".into()]).unwrap();
+        sync();
+        assert_eq!((tags(&a, "session", "work/s1"), tags(&b, "session", "work/s1")), (vec!["from-b".to_string()], vec!["from-b".to_string()]));
+        // made in the same millisecond: the computer's id decides, the same way on both
+        a.db.tag_set("project", "k", &["from-a".into()]).unwrap();
+        b.db.tag_set("project", "k", &["from-b".into()]).unwrap();
+        for c in [&a, &b] { c.db.with(|x| Ok(x.execute_batch("update outbox set ts = 5000 where key = 'project/k'; update tag_times set ts = 5000 where key = 'k';")?)).unwrap(); }
+        sync();
+        let winner = if a.settings.device_id > b.settings.device_id { "from-a" } else { "from-b" };
+        assert_eq!((tags(&a, "project", "k"), tags(&b, "project", "k")), (vec![winner.to_string()], vec![winner.to_string()]));
+        // a change made here after one from a computer whose clock runs ahead is still the later one everywhere
+        a.db.with(|x| Ok(x.execute_batch("update outbox set ts = ts + 3600000 where key = 'session/work/s1'; update tag_times set ts = ts + 3600000 where key = 'work/s1';")?)).unwrap();
+        a.db.tag_set("session", "work/s1", &["ahead".into()]).unwrap();
+        sync();
+        b.db.tag_set("session", "work/s1", &["after".into()]).unwrap();
+        sync();
+        assert_eq!((tags(&a, "session", "work/s1"), tags(&b, "session", "work/s1")), (vec!["after".to_string()], vec!["after".to_string()]));
+    }
+
+    #[test]
+    fn what_runs_on_another_computer_goes_by_when_its_presence_came_not_by_its_clock() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (mut a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        // A's presence is written below, as its own clock would stamp it: `off` away from B's
+        a.settings.sync_presence = false;
+        let _k = keys(&[&a, &b]);
+        round(&a).unwrap();
+        let says = |off: i64, session: &str| std::fs::write(shared.join("devices").join(&a.settings.device_id).join("presence.json"), json!({"at": now_ms() + off, "running": [{"session_id": session}]}).to_string()).unwrap();
+        let running = |at: i64| open_elsewhere(&peers(&b).unwrap(), at).into_iter().collect::<Vec<_>>();
+        // written an hour before B first looks: not news
+        says(-3_600_000, "s1");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), Vec::<String>::new());
+        // ten minutes behind, and heard a moment after B last looked: busy
+        says(-600_000, "s2");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), ["s2"]);
+        // an hour ahead: busy now, and no longer six minutes after its last word, however often B looks
+        says(3_600_000, "s3");
+        round(&b).unwrap();
+        assert_eq!(running(now_ms()), ["s3"]);
+        round(&b).unwrap();
+        assert_eq!(running(now_ms() + 360_000), Vec::<String>::new(), "it stopped: its clock does not keep it busy");
+    }
+
+    #[test]
+    fn this_computers_old_chunks_are_joined_and_a_reader_that_holds_some_takes_the_rest() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let me = &a.settings.device_id;
+        let id = identity::load(&a).unwrap();
+        let chunks = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().clone();
+        cut_each(&a, &id, 1..=5);
+        round(&a).unwrap();
+        round(&b).unwrap();
+        assert_eq!((chunks().len(), count(&b, "select count(*) from usage")), (5, 5), "B holds the first five small chunks");
+        let all = 2 * SMALL_KEPT + 5;
+        cut_each(&a, &id, 6..=all as i64 - 1);
+        assert_eq!(chunks().len(), all - 1);
+        // the publish of one more row joins the old ones
+        a.db.insert_usage(&[row("claude:last", 9_000)], &Prices::new()).unwrap();
+        publish(&a).unwrap();
+        let list = chunks();
+        assert!(list.len() <= SMALL_KEPT + 5, "{} files for {all} chunks", list.len());
+        assert_eq!((list[0]["from"].as_i64(), list[0]["file"].as_str()), (Some(1), Some(format!("{}-1-{}.jsonl", a.settings.incarnation, list[0]["to"]).as_str())));
+        assert!(list[0]["to"].as_i64().unwrap() > 5 && list[0]["bytes"].as_u64().unwrap() <= CHUNK_BYTES as u64, "the joined file starts before B's cursor and ends after it: {}", list[0]);
+        assert_eq!(list.last().unwrap()["to"], all as i64);
+        let files = |dir: PathBuf| std::fs::read_dir(dir.join("journal")).unwrap().count();
+        assert_eq!(files(store::dir(&a, me)), list.len(), "the small files it replaced are gone");
+        // the folder follows; B takes what it lacks of the joined file, signed by A like any chunk; C reads it whole
+        round(&a).unwrap();
+        assert_eq!(files(shared.join("devices").join(me)), list.len());
+        let c = computer(t.path(), "C", &shared);
+        let _kc = keys(&[&c]);
+        for x in [&b, &c] {
+            let st = round(x).unwrap();
+            assert_eq!(count(x, "select count(*) from usage"), all as i64, "{st}");
+            assert_eq!(st["peers"].as_array().unwrap().iter().find(|p| p["id"] == me.as_str()).map(|p| (p["applied_seq"].as_i64(), &p["gap"])), Some((Some(all as i64), &Value::Null)));
+        }
+    }
+
+    #[test]
+    fn a_join_gives_way_to_a_publisher_that_changed_the_list_meanwhile_and_a_listed_file_that_is_gone_is_cut_again() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let (me, id) = (&a.settings.device_id, identity::load(&a).unwrap());
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(&a.settings.incarnation, from, to, sha).as_bytes());
+        let list = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().map(|c| (c["from"].as_i64().unwrap(), c["to"].as_i64().unwrap())).collect::<Vec<_>>();
+        let whole = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().all(|c| store::chunk(&a, me, c["file"].as_str().unwrap()).map(|b| sha256_hex(&b) == c["sha256"].as_str().unwrap()).unwrap_or(false));
+        (1..=6).for_each(tick);
+        let one = store::manifest(&a, me).unwrap()["chunks"][0]["bytes"].as_u64().unwrap() as usize;
+        // one run a call, however many could be joined: the lock a publisher holds meanwhile stays short
+        store::join_old(&a, 2, 2 * one, &sign).unwrap();
+        assert_eq!(list(), [(1, 2), (3, 3), (4, 4), (5, 5), (6, 6)]);
+        // T1 has read the list and the files of its run when T2 publishes a chunk and joins a run of its own
+        let met = std::cell::Cell::new(false);
+        store::join_old(&a, 2, CHUNK_BYTES, &|from, to, sha| {
+            if !met.replace(true) {
+                tick(7);
+                store::join_old(&a, 2, CHUNK_BYTES, &sign).unwrap();
+                assert_eq!(list(), [(1, 5), (6, 6), (7, 7)], "T2's join");
+            }
+            sign(from, to, sha)
+        }).unwrap();
+        assert!(met.get());
+        assert_eq!(list(), [(1, 5), (6, 6), (7, 7)], "T1 wrote nothing from the list it read before: T2's chunk is listed");
+        assert!(whole(), "and every listed file is there");
+        assert_eq!(std::fs::read_dir(store::dir(&a, me).join("journal")).unwrap().count(), 3, "no file but the listed ones");
+        // a listed file that is gone is cut again from the outbox at the next publish, with the same bytes
+        let first = store::manifest(&a, me).unwrap()["chunks"][0].clone();
+        std::fs::remove_file(store::dir(&a, me).join("journal").join(first["file"].as_str().unwrap())).unwrap();
+        tick(8);
+        assert!(whole());
+        assert_eq!(store::manifest(&a, me).unwrap()["chunks"][0], first, "the same entries, so the same hash and signature");
+        // and when the outbox no longer holds its entries it leaves the list: a reader says what is missing and goes on
+        std::fs::remove_file(store::dir(&a, me).join("journal").join(first["file"].as_str().unwrap())).unwrap();
+        a.db.with(|c| Ok(c.execute("delete from outbox where seq = 3", [])?)).unwrap();
+        tick(9);
+        assert_eq!(list(), [(6, 6), (7, 7), (8, 8), (9, 9)]);
+        round(&a).unwrap();
+        let st = round(&b).unwrap();
+        // the row whose entry left the outbox is journaled again by A's backfill, as entry 10
+        assert_eq!(count(&b, "select count(*) from usage"), 5, "{st}");
+        assert_eq!((st["peers"][0]["applied_seq"].as_i64(), st["peers"][0]["gap"]["from"].as_i64(), st["peers"][0]["gap"]["to"].as_i64()), (Some(10), Some(1), Some(5)), "{st}");
+    }
+
+    #[test]
+    fn threads_that_add_join_and_mend_at_once_leave_a_whole_list() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        const N: i64 = 120;
+        a.db.insert_usage(&(1..=N).map(|i| row(&format!("claude:{i}"), 1_000 + i)).collect::<Vec<_>>(), &Prices::new()).unwrap();
+        let (me, inc, id) = (&a.settings.device_id, &a.settings.incarnation, identity::load(&a).unwrap());
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes());
+        let cut = |from: i64, to: i64| outbox(&a, from - 1, to).ok().filter(|es| es.len() as i64 == to - from + 1).map(|es| es.iter().map(line).collect::<String>().into_bytes());
+        let (one, done) = (cut(1, 1).unwrap().len(), std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|s| {
+            // two publishers, each cutting a chunk per entry of its half, with a breath between two: a join gives
+            // way whenever the list changed under it
+            for half in 0..2 {
+                let (a, cut, sign, done) = (&a, &cut, &sign, &done);
+                s.spawn(move || {
+                    for i in (1..=N).filter(|i| i % 2 == half) {
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                        let bytes = cut(i, i).unwrap();
+                        let sha = sha256_hex(&bytes);
+                        store::put_chunk(a, me, inc, &json!({"file": format!("{inc}-{i}-{i}.jsonl"), "from": i, "to": i, "sha256": sha, "sig": sign(i, i, &sha), "bytes": bytes.len()}), &bytes).unwrap();
+                    }
+                    done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
+            // a third joins and mends all the while, as the publish of another process does
+            s.spawn(|| {
+                while done.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+                    store::join_old(&a, 2, 6 * one, &sign).unwrap();
+                    store::mend(&a, &cut, &sign).unwrap();
+                }
+            });
+        });
+        let man = store::manifest(&a, me).unwrap();
+        let (mut cur, mut lines) = (0, vec![]);
+        for c in man["chunks"].as_array().unwrap() {
+            assert_eq!(c["from"], cur + 1, "the list goes on without a hole or a chunk twice: {}", man["chunks"]);
+            let bytes = store::chunk(&a, me, c["file"].as_str().unwrap()).expect("every listed file is there");
+            assert_eq!(sha256_hex(&bytes), c["sha256"].as_str().unwrap(), "with the listed hash");
+            lines.extend(String::from_utf8(bytes).unwrap().lines().map(String::from));
+            cur = c["to"].as_i64().unwrap();
+        }
+        assert_eq!((cur, man["last_seq"].as_i64()), (N, Some(N)));
+        assert!(man["chunks"].as_array().unwrap().len() < N as usize, "and a join did happen meanwhile: {}", man["chunks"].as_array().unwrap().len());
+        assert_eq!(lines, outbox(&a, 0, i64::MAX).unwrap().iter().map(|e| line(e).trim_end().to_string()).collect::<Vec<_>>(), "no entry lost against the outbox");
+    }
+
+    #[test]
+    fn this_computers_list_is_not_started_over_when_it_cannot_be_read() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a) };
+        let me = &a.settings.device_id;
+        tick(1).unwrap();
+        tick(2).unwrap();
+        let (list, files) = (store::dir(&a, me).join("manifest.json"), || std::fs::read_dir(store::dir(&a, me).join("journal")).unwrap().count());
+        // the list cannot be read (a folder stands where it was, as a lock or a disk error would answer)
+        let kept = std::fs::read(&list).unwrap();
+        std::fs::remove_file(&list).unwrap();
+        std::fs::create_dir(&list).unwrap();
+        let e = tick(3).unwrap_err();
+        assert!(format!("{e:#}").contains("could not be read"), "{e:#}");
+        assert_eq!(files(), 2, "nothing was written, and no chunk was removed");
+        // readable again: the entry that waited in the outbox goes out, after the two that were there
+        std::fs::remove_dir(&list).unwrap();
+        std::fs::write(&list, &kept).unwrap();
+        publish(&a).unwrap();
+        let chunks: Vec<(i64, i64)> = store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().map(|c| (c["from"].as_i64().unwrap(), c["to"].as_i64().unwrap())).collect();
+        assert_eq!(chunks, [(1, 1), (2, 2), (3, 3)]);
+        // a list that reads but is not one starts over, and the same publish cuts the whole outbox again
+        std::fs::write(&list, b"not a list").unwrap();
+        tick(4).unwrap();
+        let man = store::manifest(&a, me).unwrap();
+        assert_eq!((man["chunks"][0]["from"].as_i64(), man["last_seq"].as_i64(), files()), (Some(1), Some(4), 1), "{man}");
+    }
+
+    #[test]
+    fn a_publisher_that_could_not_take_the_lock_adds_its_chunk_and_joins_nothing() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:t{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let chunks = || store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().len();
+        cut_each(&a, &identity::load(&a).unwrap(), 1..=2 * SMALL_KEPT as i64);
+        assert_eq!(chunks(), 2 * SMALL_KEPT, "one more and the old ones are joined");
+        // another publisher holds the lock for longer than this one waits
+        let (names, (taken, told), (done, wait)) = ([format!("journal-{}", a.settings.device_id), format!("journal-list-{}", a.settings.device_id)], std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
+        let holder = std::thread::spawn(move || {
+            let _publishing = crate::util::NamedLock::take(&names[0]);
+            taken.send(()).unwrap();
+            let _ = wait.recv();
+            let _list = crate::util::NamedLock::take(&names[1]);
+            taken.send(()).unwrap();
+            let _ = wait.recv();
+        });
+        told.recv().unwrap();
+        tick(2 * SMALL_KEPT);
+        assert_eq!(chunks(), 2 * SMALL_KEPT + 1, "its chunk is listed, nothing was joined beside the holder");
+        // and while the other is at the list itself, this one writes nothing: the entry waits in the outbox
+        done.send(()).unwrap();
+        told.recv().unwrap();
+        a.db.insert_usage(&[row("claude:waits", 1_000)], &Prices::new()).unwrap();
+        let e = publish(&a).unwrap_err();
+        assert!(format!("{e:#}").contains("held by another publisher"), "{e:#}");
+        assert_eq!(chunks(), 2 * SMALL_KEPT + 1);
+        done.send(()).unwrap();
+        holder.join().unwrap();
+        tick(2 * SMALL_KEPT + 1);
+        let list = store::manifest(&a, &a.settings.device_id).unwrap();
+        assert!(chunks() <= SMALL_KEPT + 3, "with the locks, the join: {}", chunks());
+        assert_eq!(list["last_seq"].as_i64(), Some(2 * SMALL_KEPT as i64 + 3), "and the entry that waited went out with the next");
+    }
+
+    #[test]
+    fn the_catch_up_looks_at_the_usage_rows_added_since_its_last_look() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        a.db.insert_usage(&[row("claude:1", 1_000), row("claude:2", 2_000)], &Prices::new()).unwrap();
+        round(&a).unwrap();
+        let mark = || a.db.kv_get("journal:usage_mark").unwrap();
+        assert_eq!(mark().as_deref(), Some("2"));
+        // rows that reach the database without an entry: a process that still had sync off wrote them
+        let quiet = crate::db::Db::open(&a.data.join("hm.db"), &a.settings.device_id, false).unwrap();
+        quiet.insert_usage(&[row("claude:3", 3_000)], &Prices::new()).unwrap();
+        let journaled = |id: &str| count(&a, &format!("select count(*) from outbox where op = 'usage' and key = '{id}'"));
+        let catch_up = || { a.db.kv_set("journal:catchup_at", "0").unwrap(); round(&a).unwrap(); };
+        catch_up();
+        assert_eq!((journaled("claude:3"), mark().as_deref()), (1, Some("3")), "the new row is caught up, and the mark moves past it");
+        // a row before the mark is not looked at again by the catch-up; the backfill still looks at all
+        a.db.with(|c| Ok(c.execute("delete from outbox where key in ('claude:1', 'claude:2')", [])?)).unwrap();
+        catch_up();
+        assert_eq!((journaled("claude:1"), journaled("claude:2")), (0, 0));
+        assert_eq!((backfill(&a).unwrap(), journaled("claude:1"), journaled("claude:2")), (2, 1, 1));
+        // a row before the mark that becomes this computer's when the database is next opened takes the mark away with its stamp
+        a.db.with(|c| Ok(c.execute_batch("delete from outbox where key = 'claude:1'; update usage set device = '' where request_id = 'claude:1';")?)).unwrap();
+        let again = Ctx::open_at(&a.data, &a.home).unwrap();
+        assert_eq!((count(&again, "select count(*) from usage where device = ''"), again.db.kv_get("journal:usage_mark").unwrap()), (0, None));
+        again.db.kv_set("journal:catchup_at", "0").unwrap();
+        round(&again).unwrap();
+        assert_eq!(journaled("claude:1"), 1, "so the catch-up looks at it");
+    }
+
+    #[test]
+    fn a_chunk_file_the_list_no_longer_names_is_removed_at_the_next_publish() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        (1..=2).for_each(tick);
+        // as a join leaves them when it is stopped after its list was written and before the small files went
+        let dir = store::dir(&a, &a.settings.device_id).join("journal");
+        let (left, young) = (dir.join(format!("{}-0-0.jsonl", a.settings.incarnation)), dir.join(format!("{}-9-9.jsonl", a.settings.incarnation)));
+        std::fs::write(&left, b"{}\n").unwrap();
+        std::fs::File::options().write(true).open(&left).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(600)).unwrap();
+        // one written a moment ago may be another publisher's, whose list is not written yet
+        std::fs::write(&young, b"{}\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"not a chunk").unwrap();
+        tick(3);
+        assert!(!left.exists() && young.exists(), "the chunk file no list names is gone once it is old, and not before");
+        std::fs::remove_file(&young).unwrap();
+        let names: Vec<String> = { let mut v: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(); v.sort(); v };
+        let listed: Vec<String> = store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().iter().map(|c| c["file"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names.iter().filter(|n| n.ends_with(".jsonl")).cloned().collect::<Vec<_>>(), { let mut l = listed.clone(); l.sort(); l }, "the listed ones stay");
+        assert!(names.contains(&"notes.txt".to_string()), "and what is not a chunk file is left alone");
+    }
+
+    /// A source that only says what runs on one computer: `(id, presence, live)`.
+    struct Says(&'static str, Value, bool);
+    impl Source for Says {
+        fn manifest(&self, _: &str, _: &str, _: i64) -> Result<Option<Value>> { Ok(None) }
+        fn read(&self, _: &str, _: &str) -> Result<Vec<u8>> { bail!("no chunks") }
+        fn presence(&self) -> Result<Vec<(String, Value)>> { Ok(vec![(self.0.to_string(), self.1.clone())]) }
+        fn live(&self) -> bool { self.2 }
+    }
+
+    #[test]
+    fn a_presence_asked_for_live_is_taken_after_the_other_clock_was_set_back_and_an_older_stored_copy_is_not() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let says = |off: i64, session: &str, live: bool| take_presence(&ctx, &Says("peer-1", json!({"at": now_ms() + off, "running": [{"session_id": session}]}), live)).unwrap();
+        let running = |at: i64| open_elsewhere(&peers(&ctx).unwrap(), at).into_iter().collect::<Vec<_>>();
+        // asked of the computer itself, whose clock is an hour ahead
+        says(3_600_000, "s1", true);
+        assert_eq!(running(now_ms()), ["s1"]);
+        // its clock is set right, an hour back: what it says now replaces what is held, and counts from now
+        says(0, "s2", true);
+        assert_eq!((running(now_ms()), running(now_ms() + 360_000)), (vec!["s2".to_string()], vec![]));
+        // the folder's or the hub's copy from before that is older by the computer's own clock: not taken
+        says(-60_000, "s3", false);
+        assert_eq!(running(now_ms()), ["s2"]);
+        // a later one is
+        says(1_000, "s4", false);
+        assert_eq!(running(now_ms()), ["s4"]);
     }
 
     #[test]
@@ -755,6 +1259,29 @@ mod tests {
     }
 
     #[test]
+    fn two_processes_that_add_the_same_columns_at_once_both_open_the_database() {
+        let t = tempfile::tempdir().unwrap();
+        let data = t.path().join("A");
+        std::fs::create_dir_all(&data).unwrap();
+        // the peers table as 1.11 left it, seen by two processes before either changed it
+        let old = "create table peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer, last_seq integer, applied_seq integer, roots text, transport text, presence text,
+            address text, last_error text, port integer, cert_pem text, pubkey text, paired_at integer, last_pull integer, path text, connected integer, relayed_by text);";
+        let (first, second) = (Connection::open(data.join("hm.db")).unwrap(), Connection::open(data.join("hm.db")).unwrap());
+        first.execute_batch(old).unwrap();
+        let missing = |c: &Connection, col: &str| !c.prepare("select 1 from pragma_table_info('peers') where name = ?").unwrap().exists([col]).unwrap();
+        let new = ["gap", "presence_seen", "presence_checked", "last_good"];
+        assert!(new.iter().all(|col| missing(&first, col) && missing(&second, col)), "both looked, and both found them missing");
+        for c in [&first, &second] {
+            for col in new { crate::db::add_column(c, "peers", col, "text").unwrap(); }
+        }
+        assert!(new.iter().all(|col| !missing(&second, col)));
+        assert!(crate::db::add_column(&first, "nowhere", "gap", "text").is_err(), "any other failure is still one");
+        drop((first, second));
+        let ctx = Ctx::open_at(&data, &t.path().join("home")).unwrap();
+        assert!(peers(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
     fn a_merged_session_and_its_tombstone() {
         let t = tempfile::tempdir().unwrap();
         let shared = t.path().join("shared");
@@ -783,7 +1310,7 @@ mod tests {
         assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(1));
         // presence older than five minutes: A's console no longer counts anywhere
         let p = json!({"at": crate::util::now_ms() - 600_000, "running": [{"session_id": "abc"}]}).to_string();
-        b.db.with(|c| Ok(c.execute("update peers set presence = ?1 where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
+        b.db.with(|c| Ok(c.execute("update peers set presence = ?1, presence_seen = json_extract(?1, '$.at') where device_id = ?2", rusqlite::params![p, a.settings.device_id])?)).unwrap();
         assert!(crate::service::sessions(&b, &live).unwrap().is_empty());
         assert_eq!(status(&b).unwrap()["peers"][0]["running"].as_array().map(|r| r.len()), Some(0));
         assert!(crate::service::sessions(&b, &crate::service::SessionFilter { scope: Some("here".into()), ..Default::default() }).unwrap().is_empty());
@@ -805,6 +1332,41 @@ mod tests {
     }
 
     fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
+
+    #[test]
+    fn a_record_older_than_the_one_kept_does_not_set_a_computers_name_and_incarnation_back() {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let id = identity::load(&ctx).unwrap();
+        let record = |name: &str, inc: &str, at: i64| { let mut r = json!({"id": "peer-1", "name": name, "incarnation": inc, "updated_at": at}); id.sign_record(&mut r); r };
+        let kept = || -> (String, String) { ctx.db.with(|c| Ok(c.query_row("select name, incarnation from peers where device_id='peer-1'", [], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() };
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP", "i1", 1_000)).unwrap());
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP-2", "i2", 2_000)).unwrap());
+        // a relay still hands out the first one: it is that computer's, and it changes nothing
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP", "i1", 1_000)).unwrap());
+        assert_eq!(kept(), ("LAPTOP-2".to_string(), "i2".to_string()));
+        assert_eq!(store::device(&ctx, "peer-1").unwrap()["updated_at"], 2_000);
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP-3", "i2", 3_000)).unwrap());
+        assert_eq!(kept().0, "LAPTOP-3");
+        let _ = crate::secrets::delete(&identity::target(&ctx.settings.device_id));
+    }
+
+    #[test]
+    fn a_list_that_names_a_small_chunk_before_the_joined_one_that_covers_it_has_no_gap() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let usage = |seq: i64| entry(seq, "usage", &format!("claude:{seq}"), serde_json::to_value(row(&format!("claude:{seq}"), 1_000)).unwrap());
+        let bytes = |seqs: std::ops::RangeInclusive<i64>| seqs.map(|s| format!("{}\n", usage(s))).collect::<String>().into_bytes();
+        let chunk = |from: i64, to: i64| json!({"file": format!("i-{from}-{to}.jsonl"), "from": from, "to": to, "sha256": sha256_hex(&bytes(from..=to)), "bytes": bytes(from..=to).len()});
+        // as a relay's store keeps them, by where each ends: the small chunk it took first, then the joined one
+        let man = json!({"incarnation": "i", "chunks": [chunk(4, 4), chunk(1, 5)]});
+        let read = |file: &str| -> Result<Vec<u8>> { let mut p = file.trim_end_matches(".jsonl").split('-').skip(1).map(|n| n.parse::<i64>().unwrap()); Ok(bytes(p.next().unwrap()..=p.next().unwrap())) };
+        assert_eq!(apply_manifest(&ctx, "peer-1", &man, &read).unwrap(), 5);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 5, "the joined chunk held what the small one seemed to skip");
+        assert_eq!(count(&ctx, "select count(*) from peers where gap is not null"), 0);
+    }
 
     fn session(harness: &str, profile: &str, id: &str, title: &str, at: i64) -> Value {
         serde_json::to_value(SessionMeta { harness: harness.into(), profile: profile.into(), id: id.into(), title: title.into(), last_active_at: at, ..Default::default() }).unwrap()

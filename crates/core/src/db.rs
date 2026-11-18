@@ -41,6 +41,7 @@ create index if not exists events_ts on events(ts);
 create table if not exists quota_hist(ts integer not null, profile text not null, tier text not null, used real not null, resets_at integer);
 create index if not exists quota_hist_p on quota_hist(profile, tier, ts);
 create table if not exists tags(kind text not null, key text not null, tag text not null, primary key(kind, key, tag));
+create table if not exists tag_times(kind text not null, key text not null, ts integer not null, device text not null, primary key(kind, key));
 create table if not exists outbox(seq integer primary key autoincrement, ts integer not null, op text not null, key text not null, data text not null);
 create index if not exists outbox_key on outbox(op, key);
 create table if not exists peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer,
@@ -216,6 +217,15 @@ create trigger if not exists sessions_fts_au after update of title, cwd, profile
   insert into sessions_fts(rowid, title, cwd, profile) values (new.rowid, new.title, new.cwd, new.profile); end;
 "#;
 
+/// A column for a table of an earlier version. The app and `hrm` can open the database at the same moment after
+/// an update and both find it missing: the one that comes second is told it is there, which is all it wanted.
+pub(crate) fn add_column(conn: &Connection, table: &str, col: &str, ty: &str) -> rusqlite::Result<()> {
+    match conn.execute_batch(&format!("alter table {table} add column {col} {ty};")) {
+        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
+        r => r,
+    }
+}
+
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
         let mut conn = Connection::open(path)?;
@@ -267,9 +277,9 @@ impl Db {
         }
         conn.execute_batch("create index if not exists usage_unpriced on usage(model) where cost_usd is null;")?;
         // the direct connection: how a peer is reached and what it signs with
-        for (col, ty) in [("address", "text"), ("last_error", "text"), ("port", "integer"), ("cert_pem", "text"), ("pubkey", "text"), ("paired_at", "integer"), ("last_pull", "integer"), ("path", "text"), ("connected", "integer"), ("relayed_by", "text")] {
+        for (col, ty) in [("address", "text"), ("last_error", "text"), ("port", "integer"), ("cert_pem", "text"), ("pubkey", "text"), ("paired_at", "integer"), ("last_pull", "integer"), ("path", "text"), ("connected", "integer"), ("relayed_by", "text"), ("gap", "text"), ("presence_seen", "integer"), ("presence_checked", "integer"), ("last_good", "text")] {
             let has: bool = conn.prepare("select 1 from pragma_table_info('peers') where name = ?")?.exists([col])?;
-            if !has { conn.execute_batch(&format!("alter table peers add column {col} {ty};"))?; }
+            if !has { add_column(&conn, "peers", col, ty)?; }
         }
         let done: bool = conn.prepare("select 1 from kv where k = 'migrated:device'")?.exists([])?;
         if !done {
@@ -279,8 +289,12 @@ impl Db {
         }
         // a row written without a computer (seen once after an update) belongs to this one
         if !device.is_empty() {
-            conn.execute("update usage set device=?1 where device=''", [device])?;
-            conn.execute("update sessions set device=?1 where device=''", [device])?;
+            // rows that became this computer's after the journal's catch-up passed them: it looks at all again. One
+            // transaction: a stamp kept without the mark's removal would leave those rows unjournaled for good
+            let tx = conn.transaction()?;
+            if tx.execute("update usage set device=?1 where device=''", [device])? > 0 { tx.execute("delete from kv where k = 'journal:usage_mark'", [])?; }
+            tx.execute("update sessions set device=?1 where device=''", [device])?;
+            tx.commit()?;
         }
         // the index (WP-10): the pages read the sessions table, so its filter and sort columns leave the JSON
         for (col, ty) in [("id", "text not null default ''"), ("title", "text not null default ''"), ("cwd", "text not null default ''"), ("started_at", "integer not null default 0"),
@@ -295,6 +309,11 @@ impl Db {
         if !done {
             promote_columns(&conn)?;
             conn.execute_batch("insert into sessions_fts(sessions_fts) values('rebuild'); insert or replace into kv values('migrated:index', '1');")?;
+        }
+        // tags learned when they were last changed: for those this computer changed, its journal knows
+        if !conn.prepare("select 1 from kv where k = 'migrated:tag-times'")?.exists([])? {
+            conn.execute("insert or ignore into tag_times select substr(key, 1, instr(key, '/') - 1), substr(key, instr(key, '/') + 1), max(ts), ?1 from outbox where op = 'tag' and instr(key, '/') > 1 group by key", [device])?;
+            conn.execute("insert or replace into kv values('migrated:tag-times', '1')", [])?;
         }
         conn.execute_batch(INDEX_TRIGGERS)?;
         conn.execute_batch(USAGE_DAY)?;
@@ -520,7 +539,10 @@ impl Db {
             let tx = c.transaction()?;
             tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
             for t in tags { tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t.as_str()])?; }
-            if self.journal { crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?; }
+            // later than the change it replaces even when this computer's clock is behind: every computer must take it
+            let at: i64 = tx.query_row("select max(?1, coalesce((select ts + 1 from tag_times where kind=?2 and key=?3), 0))", params![crate::util::now_ms(), kind, key], |r| r.get(0))?;
+            tx.execute("insert or replace into tag_times values(?,?,?,?)", params![kind, key, at, self.device])?;
+            if self.journal { crate::journal::record_at(&tx, at, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?; }
             tx.commit()?;
             Ok(())
         })

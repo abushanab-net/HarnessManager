@@ -64,6 +64,8 @@
 .pc-head { height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-subtle); min-width: 0; }
 .pc-head .pc-dot { width: 9px; height: 9px; flex: none; }
 .pc-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 14px 12px; }
+.pc-note { margin: 0; padding: 8px 14px 10px; border-top: 1px solid var(--line-subtle); font-size: var(--fs-small); line-height: 18px; color: var(--ink-muted); }
+.pc-note.warnT { color: var(--warn); }
 .kv { display: grid; grid-template-columns: 84px minmax(0, 1fr); row-gap: 4px; line-height: 18px; }
 .kv dt { font-size: var(--fs-small); color: var(--ink-muted); }
 .count { text-align: center; min-width: 76px; padding-left: 12px; border-left: 1px solid var(--line-subtle); }

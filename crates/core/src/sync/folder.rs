@@ -33,6 +33,26 @@ pub fn others(ctx: &Ctx, root: &Path) -> Vec<(String, PathBuf)> {
     v
 }
 
+/// The folder as a source: each computer's own manifest, chunk files and `presence.json`, as it wrote them.
+pub struct Folder<'a> {
+    pub ctx: &'a Ctx,
+    pub root: &'a Path,
+}
+
+impl crate::journal::Source for Folder<'_> {
+    fn manifest(&self, origin: &str, _incarnation: &str, _since: i64) -> Result<Option<Value>> { Ok(read_manifest(&self.root.join("devices").join(origin))) }
+
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> {
+        crate::util::read_capped(std::fs::File::open(self.root.join("devices").join(origin).join("journal").join(file))?, None, crate::journal::MAX_CHUNK_READ, file)
+    }
+
+    fn presence(&self) -> Result<Vec<(String, Value)>> {
+        Ok(others(self.ctx, self.root).into_iter().filter_map(|(id, dir)| Some((id, read_json(&dir.join("presence.json"))?))).collect())
+    }
+
+    fn needs_key(&self) -> bool { false }
+}
+
 pub fn write_chunk(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> { write_atomic(&dir.join("journal").join(name), bytes) }
 
 pub fn read_manifest(dir: &Path) -> Option<Value> { read_json(&dir.join("manifest.json")) }

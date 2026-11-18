@@ -260,13 +260,13 @@ fn the_ring_key_has_a_recovery_form_that_round_trips_and_seals_blobs() {
     ring_enter(&b.ctx, &shown.to_lowercase().replace(' ', "-").replace('o', "0")).unwrap();
     assert_eq!(ring_key(&b.ctx).unwrap(), ring_key(&a.ctx).unwrap());
     assert!(ring_enter(&b.ctx, "ABCD").unwrap_err().to_string().contains("8 groups of 4"));
-    let sealed = encrypt(&ring_key(&a.ctx).unwrap(), b"hello").unwrap();
-    assert_eq!(decrypt(&ring_key(&b.ctx).unwrap(), &sealed).unwrap(), b"hello");
+    let sealed = encrypt(&ring_key(&a.ctx).unwrap(), b"hello", b"").unwrap();
+    assert_eq!(decrypt(&ring_key(&b.ctx).unwrap(), &sealed, b"").unwrap(), b"hello");
     let other = ring_key(&computer(t.path(), "C").ctx).err();
     assert!(other.is_some());
     let mut bad = sealed.clone();
     bad[20] ^= 1;
-    assert!(decrypt(&ring_key(&a.ctx).unwrap(), &bad).is_err());
+    assert!(decrypt(&ring_key(&a.ctx).unwrap(), &bad, b"").is_err());
     // the pairing payload carries it, and a computer without one takes it
     let c = computer(t.path(), "C");
     ring_adopt(&c.ctx, &ring_for_pairing(&a.ctx));
@@ -554,4 +554,42 @@ fn the_sockets_state_is_written_when_it_changes_and_not_while_it_stays() {
     for _ in 0..2 { set_ws(&ctx, "1"); }
     set_ws(&ctx, "0");
     assert_eq!((count(&ctx, "select count(*) from writes"), ctx.db.kv_get("hub:ws").unwrap().as_deref()), (3, Some("0")));
+}
+
+#[test]
+fn a_blob_sealed_for_one_computer_opens_under_no_other_name_and_one_sealed_before_still_opens() {
+    let key = [7u8; 32];
+    let mine = bound("WORKSTATION", "chunk", "i-1-5.jsonl");
+    let sealed = seal(&key, b"entries", &mine).unwrap();
+    assert_eq!(decrypt(&key, &sealed, &mine).unwrap(), b"entries");
+    // another computer, another kind, another name, or no name at all: it does not open
+    for other in [bound("LAPTOP", "chunk", "i-1-5.jsonl"), bound("WORKSTATION", "presence", "i-1-5.jsonl"), bound("WORKSTATION", "chunk", "i-6-9.jsonl"), vec![]] {
+        assert!(decrypt(&key, &sealed, &other).is_err(), "{}", String::from_utf8_lossy(&other));
+    }
+    // what 1.11 wrote, with no name sealed in, is still read
+    let before = seal(&key, b"entries", b"").unwrap();
+    assert_eq!(decrypt(&key, &before, &mine).unwrap(), b"entries");
+    // and this version still writes that form: opened the way 1.11 opens a blob, with no name given
+    assert_eq!(decrypt(&key, &encrypt(&key, b"entries", &mine).unwrap(), b"").unwrap(), b"entries", "1.11 cannot open a bound blob: the writer changes in the version after this one");
+}
+
+#[test]
+fn entries_the_hub_dropped_are_passed_at_once_and_stay_on_the_card() {
+    let rt = runtime();
+    let (url, hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = joined(t.path(), &url);
+    let id = a.ctx.settings.device_id.clone();
+    for r in ["claude:1", "claude:2"] {
+        a.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        journal::round(&a.ctx).unwrap();
+    }
+    // its retention dropped the first chunk before B first asked
+    hub.chunks.lock().unwrap().get_mut(&id).unwrap().remove(0);
+    let st = journal::round(&b.ctx).unwrap();
+    assert_eq!(st["error"], Value::Null, "{st}");
+    let pa = peer(&st, &id);
+    assert_eq!((count(&b.ctx, "select count(*) from usage"), pa["applied_seq"].as_i64()), (1, Some(2)), "what the hub holds is taken in the same round: {st}");
+    assert_eq!(pa["gap"], json!({"from": 1, "to": 1}), "{st}");
+    assert_eq!(peer(&journal::round(&b.ctx).unwrap(), &id)["gap"], json!({"from": 1, "to": 1}), "and the card goes on saying so");
 }
