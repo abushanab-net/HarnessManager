@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
-use chacha20poly1305::aead::Aead;
+use chacha20poly1305::aead::{Aead, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 use rusqlite::params;
 use serde_json::{json, Value};
@@ -100,18 +100,30 @@ pub fn ring_adopt(ctx: &Ctx, seed: &Value) {
     }
 }
 
-/// `nonce ++ ciphertext`.
-pub fn encrypt(key: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>> {
+/// What a sealed blob belongs to: the computer, the kind (`chunk`, `presence`, `transcript`) and the name it is
+/// kept under. Sealed in as associated data, a blob opens only as that: the hub cannot hand one computer's out
+/// under another's name.
+fn bound(origin: &str, kind: &str, name: &str) -> Vec<u8> { format!("{origin}\n{kind}\n{name}").into_bytes() }
+
+/// Off in this version: 1.11 opens only a blob sealed without associated data, and would wait for good on every
+/// chunk sealed the bound way. This version opens both; the next one turns this on.
+const SEAL_BOUND: bool = false;
+
+fn seal(key: &[u8; 32], plain: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).map_err(|e| anyhow!("random bytes: {e}"))?;
-    let ct = ChaCha20Poly1305::new_from_slice(key)?.encrypt(&Nonce::from(nonce), plain).map_err(|_| anyhow!("seal"))?;
+    let ct = ChaCha20Poly1305::new_from_slice(key)?.encrypt(&Nonce::from(nonce), Payload { msg: plain, aad }).map_err(|_| anyhow!("seal"))?;
     Ok([nonce.as_slice(), &ct].concat())
 }
 
-pub fn decrypt(key: &[u8; 32], bytes: &[u8]) -> Result<Vec<u8>> {
+/// `nonce ++ ciphertext`, bound to what it belongs to (`bound`) once `SEAL_BOUND` is on.
+pub fn encrypt(key: &[u8; 32], plain: &[u8], aad: &[u8]) -> Result<Vec<u8>> { seal(key, plain, if SEAL_BOUND { aad } else { &[] }) }
+
+/// A blob bound to `aad`, or one sealed before blobs were bound, which is read for one more version.
+pub fn decrypt(key: &[u8; 32], bytes: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     if bytes.len() < 12 { bail!("short blob"); }
-    let nonce = Nonce::from(<[u8; 12]>::try_from(&bytes[..12])?);
-    ChaCha20Poly1305::new_from_slice(key)?.decrypt(&nonce, &bytes[12..]).map_err(|_| anyhow!("the blob does not open with this ring key"))
+    let (nonce, cipher) = (Nonce::from(<[u8; 12]>::try_from(&bytes[..12])?), ChaCha20Poly1305::new_from_slice(key)?);
+    cipher.decrypt(&nonce, Payload { msg: &bytes[12..], aad }).or_else(|_| cipher.decrypt(&nonce, &bytes[12..])).map_err(|_| anyhow!("the blob does not open with this ring key"))
 }
 
 // ---------- the client ----------
@@ -240,14 +252,14 @@ struct Sealed<'a> {
 impl journal::Source for Sealed<'_> {
     fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>> { self.hub.get_json(&format!("/v1/chunks/{origin}?since={since}&incarnation={incarnation}")) }
 
-    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { decrypt(self.key, &self.hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ)?) }
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { decrypt(self.key, &self.hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ)?, &bound(origin, "chunk", file)) }
 
     /// `{<id>: {at, blob}}`, each blob sealed by its computer with the same ring.
     fn presence(&self) -> Result<Vec<(String, Value)>> {
         let Some(p) = self.hub.get_json("/v1/presence")? else { return Ok(vec![]) };
         Ok(p.as_object().into_iter().flatten().filter(|(id, _)| *id != self.me).filter_map(|(id, v)| {
             let blob = v["blob"].as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())?;
-            let Ok(plain) = decrypt(self.key, &blob) else { crate::log::warn(&format!("hub: the presence of {id} does not open with this ring key")); return None };
+            let Ok(plain) = decrypt(self.key, &blob, &bound(id, "presence", "")) else { crate::log::warn(&format!("hub: the presence of {id} does not open with this ring key")); return None };
             Some((id.clone(), serde_json::from_slice(&plain).ok()?))
         }).collect())
     }
@@ -267,7 +279,7 @@ fn push_chunks(ctx: &Ctx, hub: &Hub, key: &[u8; 32]) -> Result<usize> {
         let file = ch["file"].as_str().unwrap_or("");
         if file.is_empty() || ch["to"].as_i64().unwrap_or(0) <= top { continue; }
         let bytes = store::chunk(ctx, me, file)?;
-        hub.put(&format!("/v1/chunks/{me}/{file}"), encrypt(key, &bytes)?, &[("X-From", ch["from"].to_string()), ("X-To", ch["to"].to_string()),
+        hub.put(&format!("/v1/chunks/{me}/{file}"), encrypt(key, &bytes, &bound(me, "chunk", file))?, &[("X-From", ch["from"].to_string()), ("X-To", ch["to"].to_string()),
             ("X-Sha256", ch["sha256"].as_str().unwrap_or("").into()), ("X-Sig", ch["sig"].as_str().unwrap_or("").into())])?;
         n += 1;
     }
@@ -288,7 +300,7 @@ fn split_device(d: &Value) -> (Value, Option<i64>, Option<i64>) {
 pub fn push_presence(ctx: &Ctx) -> Result<()> {
     if !ctx.settings.sync_presence { return Ok(()); }
     let hub = Hub::open(ctx)?;
-    hub.put("/v1/presence", encrypt(&ring_key(ctx)?, folder::presence(ctx)?.to_string().as_bytes())?, &[])?;
+    hub.put("/v1/presence", encrypt(&ring_key(ctx)?, folder::presence(ctx)?.to_string().as_bytes(), &bound(&ctx.settings.device_id, "presence", ""))?, &[])?;
     note(ctx, "hub:presence_at");
     Ok(())
 }
@@ -337,7 +349,7 @@ pub fn round(ctx: &Ctx) -> Result<()> {
     let n = push_chunks(ctx, &hub, &key)?;
     push_device(ctx, &hub)?;
     if ctx.settings.sync_presence && presence_due(ctx) {
-        hub.put("/v1/presence", encrypt(&key, folder::presence(ctx)?.to_string().as_bytes())?, &[])?;
+        hub.put("/v1/presence", encrypt(&key, folder::presence(ctx)?.to_string().as_bytes(), &bound(&me, "presence", ""))?, &[])?;
         note(ctx, "hub:presence_at");
     }
     note(ctx, "hub:last_push");
@@ -380,13 +392,13 @@ pub fn carry(ctx: &Ctx) -> Result<()> {
     let key = ring_key(ctx)?;
     let me = ctx.settings.device_id.clone();
     super::transcripts::carry_to(ctx, crate::transcripts::CAP_BYTES,
-        &|k, _, bytes| hub.put(&transcript_path(&me, k), encrypt(&key, bytes)?, &[("X-Sha256", crate::util::sha256_hex(bytes)), ("X-Bytes", bytes.len().to_string())]),
+        &|k, _, bytes| hub.put(&transcript_path(&me, k), encrypt(&key, bytes, &bound(&me, "transcript", k))?, &[("X-Sha256", crate::util::sha256_hex(bytes)), ("X-Bytes", bytes.len().to_string())]),
         &|k, _| hub.delete(&transcript_path(&me, k)))
 }
 
 /// A transcript of another computer from the hub, opened with the ring key (still compressed).
 pub fn fetch_transcript(ctx: &Ctx, origin: &str, key: &str) -> Result<Vec<u8>> {
-    decrypt(&ring_key(ctx)?, &Hub::open(ctx)?.get_bytes(&transcript_path(origin, key), crate::transcripts::MAX_FETCH_BYTES)?)
+    decrypt(&ring_key(ctx)?, &Hub::open(ctx)?.get_bytes(&transcript_path(origin, key), crate::transcripts::MAX_FETCH_BYTES)?, &bound(origin, "transcript", key))
 }
 
 // ---------- status ----------
