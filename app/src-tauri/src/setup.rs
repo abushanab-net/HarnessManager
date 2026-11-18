@@ -45,19 +45,9 @@ pub fn target_bulk(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 
 // add (refused when the name exists) or edit a server, and set the tools it is written to
 pub fn mcp_save(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
     let server: McpServer = serde_json::from_value(a["server"].clone())?;
-    if a["replace"] != true && reg.mcp.iter().any(|m| m.name == server.name) { bail!("a server named '{}' already exists", server.name); }
-    let name = server.name.clone();
-    items::add_mcp(&mut reg, server)?;
-    if let Some(on) = a["targets"].as_array() {
-        let on: Vec<&str> = on.iter().filter_map(|v| v.as_str()).collect();
-        for h in service::harnesses().iter().filter(|h| h.caps.mcp) {
-            items::set_target(&mut reg, "mcp", &name, &h.id, None, on.contains(&h.id.as_str()))?;
-        }
-    }
-    ctx.save_registry(&reg)?;
-    sync_items(ctx)
+    let tools: Option<Vec<String>> = a["targets"].as_array().map(|on| on.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+    Ok(json!(service::mcp_save(ctx, server, a["replace"] == true, tools.as_deref())?))
 }
 
 pub fn mcp_import_all(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(import_mcp_now(ctx)?)) }

@@ -868,9 +868,10 @@ fn mcp(ctx: &Ctx, cmd: McpCmd) -> Result<i32> {
             return Ok(0);
         }
         McpCmd::Add { name, command, args, url, transport, env, headers } => {
-            let transport = if transport.is_empty() { if url.is_some() { "http".into() } else { "stdio".into() } } else { transport };
-            items::add_mcp(&mut reg, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() })?;
+            // a name the list has is replaced, where the window refuses it and offers Edit: a script gives a server again to change it
+            let rep = service::mcp_save(ctx, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() }, true, None)?;
             println!("Added {name}. Enable it with `hrm mcp enable {name} <tool>`.");
+            return Ok(sync_notes(rep));
         }
         McpCmd::Remove { name } => { let rep = service::item_remove(ctx, "mcp", &name)?; println!("Removed {name}"); return Ok(sync_notes(rep)); }
         McpCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), true)?; }

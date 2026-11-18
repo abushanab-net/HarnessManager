@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::harness::{self, Harness};
 use crate::model::*;
 use crate::projects::Resolver;
-use crate::registry::{Kind, Profile, Provider, Registry, Route};
+use crate::registry::{Kind, McpServer, Profile, Provider, Registry, Route};
 use crate::util::{now_ms, valid_name};
 use crate::Ctx;
 
@@ -864,6 +864,25 @@ pub fn item_remove(ctx: &Ctx, kind: &str, name: &str) -> Result<crate::items::Sy
     Ok(rep)
 }
 
+/// An MCP server into the list, or in the place of the one with its name, and every tool brought in step. Without
+/// `replace` a name the list has is refused. A transport left empty is "http" with a URL, else "stdio". `tools`:
+/// the tools it is on for, every other tool off; None leaves its ticks as they are.
+pub fn mcp_save(ctx: &Ctx, mut server: McpServer, replace: bool, tools: Option<&[String]>) -> Result<crate::items::SyncReport> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    if !replace && reg.mcp.iter().any(|m| m.name == server.name) { bail!("a server named '{}' already exists", server.name); }
+    if server.transport.is_empty() { server.transport = if server.url.is_some() { "http" } else { "stdio" }.into(); }
+    let name = server.name.clone();
+    crate::items::add_mcp(&mut reg, server)?;
+    if let Some(on) = tools {
+        for h in harness::all().iter().filter(|h| h.caps().mcp) {
+            crate::items::set_target(&mut reg, "mcp", &name, h.id(), None, on.iter().any(|t| t == h.id()))?;
+        }
+    }
+    ctx.save_registry(&reg)?;
+    crate::items::sync(ctx, &reg)
+}
+
 // ---------- in-app login ----------
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1443,6 +1462,31 @@ mod tests {
         assert_eq!(ctx.db.tag_list().unwrap(), vec![("release".to_string(), 0, 1)]);
         tag_set(&ctx, "project", "p", &[]).unwrap();
         assert!(ctx.db.tag_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_mcp_server_is_saved_by_one_rule_for_the_window_and_the_command_line() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let server = |name: &str, transport: &str, command: Option<&str>, url: Option<&str>| McpServer { name: name.into(), transport: transport.into(), command: command.map(String::from), url: url.map(String::from), ..Default::default() };
+        let on_for = |name: &str| ctx.registry().unwrap().targets.iter().filter(|t| t.kind == "mcp" && t.item == name).map(|t| t.harness.clone()).collect::<Vec<_>>();
+        // no transport named: by what was given (the command line's rule)
+        mcp_save(&ctx, server("fs", "", Some("npx"), None), false, None).unwrap();
+        mcp_save(&ctx, server("docs", "", None, Some("https://mcp.example.com/mcp")), false, Some(&["codex".into(), "claude".into()])).unwrap();
+        assert_eq!(ctx.registry().unwrap().mcp.iter().map(|m| (m.name.clone(), m.transport.clone())).collect::<Vec<_>>(), vec![("fs".to_string(), "stdio".to_string()), ("docs".to_string(), "http".to_string())]);
+        assert_eq!((on_for("fs"), on_for("docs")), (vec![], vec!["claude".to_string(), "codex".to_string()]), "the tools named, and no tick without them");
+        // a name the list has is refused unless it is an edit (the window's check)
+        assert!(refused(mcp_save(&ctx, server("fs", "stdio", Some("node"), None), false, None)).contains("a server named 'fs' already exists"));
+        assert_eq!(ctx.registry().unwrap().mcp[0].command.as_deref(), Some("npx"));
+        // an edit without tools keeps its ticks (the command line's replace); with them, every other tool goes off
+        mcp_save(&ctx, server("docs", "http", None, Some("https://mcp.example.com/v2")), true, None).unwrap();
+        assert_eq!((ctx.registry().unwrap().mcp[1].url.as_deref(), on_for("docs").len()), (Some("https://mcp.example.com/v2"), 2));
+        mcp_save(&ctx, server("docs", "http", None, Some("https://mcp.example.com/v2")), true, Some(&["codex".into()])).unwrap();
+        assert_eq!(on_for("docs"), vec!["codex".to_string()]);
+        // what the list refuses is not saved
+        assert!(refused(mcp_save(&ctx, server("no name", "", Some("npx"), None), false, None)).contains("not a valid name"));
+        assert!(refused(mcp_save(&ctx, server("web", "http", None, None), false, None)).contains("needs a URL"));
+        assert_eq!(ctx.registry().unwrap().mcp.len(), 2);
     }
 
     #[test]
