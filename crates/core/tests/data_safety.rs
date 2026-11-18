@@ -28,6 +28,19 @@ fn an_unreadable_registry_is_an_error_not_an_empty_list() {
 }
 
 #[test]
+fn an_account_list_from_a_newer_version_is_read_but_not_saved_over() {
+    let (dir, _ctx) = ctx();
+    let path = dir.path().join("profiles.json");
+    let newer = r#"{"version": 3, "profiles": [], "groups": [{"name": "team"}]}"#;
+    std::fs::write(&path, newer).unwrap();
+    let mut reg = Registry::load(&path).unwrap();
+    reg.projects.push(ProjectAlias { key: "k".into(), name: Some("n".into()), merge_into: None });
+    let err = reg.save(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("newer Harness Manager"), "{err:#}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), newer, "the fields this version does not know are still there");
+}
+
+#[test]
 fn parallel_registry_writers_lose_nothing() {
     let (_dir, ctx) = ctx();
     std::thread::scope(|s| {
