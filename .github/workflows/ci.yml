@@ -21,6 +21,9 @@ jobs:
     # moving to a hosted runner. The one exception: a pull request from a fork runs on GitHub's runner, because
     # code from outside must never run on our machines
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'windows-latest') || vars.RUNNER_WIN }}
+    # one at a time on the Windows computer: the push to develop and the release tag arrive together, and two
+    # suites side by side made the timed checks (the watcher's two seconds, the first page) run out of time
+    concurrency: { group: ci-windows-suite, cancel-in-progress: false }
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
