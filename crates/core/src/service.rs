@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::harness::{self, Harness};
 use crate::model::*;
 use crate::projects::Resolver;
-use crate::registry::{Kind, Profile, Provider, Registry, Route};
+use crate::registry::{Kind, McpServer, Profile, Provider, Registry, Route};
 use crate::util::{now_ms, valid_name};
 use crate::Ctx;
 
@@ -375,13 +375,25 @@ pub fn start(ctx: &Ctx, name: &str, cwd: Option<PathBuf>, extra: &[String]) -> R
     crate::launch::open_terminal(&ctx.settings.terminal, &title, &args, cwd.as_deref())
 }
 
+/// Reopen a session in a new terminal, in its own account, in the folder `resume_cwd` gives.
 pub fn resume(ctx: &Ctx, profile: &str, session_id: &str, cwd: Option<PathBuf>) -> Result<()> {
     let reg = ctx.registry()?;
     let p = reg.get(profile)?;
     let args = harness::of(p).resume_args(session_id);
     if args.is_empty() { bail!("{} cannot resume sessions", harness::of(p).label()); }
     if crate::archive::is_archived(ctx, profile, session_id) { bail!("{}", crate::archive::REFUSAL); }
+    let cwd = resume_cwd(ctx, &reg, profile, session_id, cwd)?;
     start(ctx, profile, cwd, &args)
+}
+
+/// Where a resumed session's terminal opens: `cwd`, which must be a folder here; without one, the folder the
+/// session ran in on this computer while that is still there (else wherever a terminal opens).
+fn resume_cwd(ctx: &Ctx, reg: &Registry, profile: &str, session_id: &str, cwd: Option<PathBuf>) -> Result<Option<PathBuf>> {
+    Ok(match cwd {
+        Some(c) if c.is_dir() => Some(c),
+        Some(c) => bail!("{} is not a folder on this computer", c.display()),
+        None => session_row(ctx, reg, profile, session_id).ok().filter(|s| s.device == ctx.db.device).map(|s| PathBuf::from(s.cwd)).filter(|c| c.is_dir()),
+    })
 }
 
 // ---------- usage ----------
@@ -776,17 +788,22 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
     Ok(out)
 }
 
-pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {
-    let reg = ctx.registry()?;
-    let p = reg.get(profile)?;
+/// One session's row in the index.
+fn session_row(ctx: &Ctx, reg: &Registry, profile: &str, session_id: &str) -> Result<SessionMeta> {
     let f = SessionFilter { profile: Some(profile.into()), id: Some(session_id.into()), ..Default::default() };
     // this computer's own copy first: a session continued from another computer shares its id with the row from there
     let find = || -> Result<Option<SessionMeta>> { let list = sessions(ctx, &f)?; Ok(list.iter().find(|s| s.device == ctx.db.device).or_else(|| list.first()).cloned()) };
-    let s = match find()? {
-        Some(s) => s,
+    match find()? {
+        Some(s) => Ok(s),
         // a session the index has not seen yet (its file was just written): its account's folders are read now
-        None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false)?; find()?.context("session not found")? }
-    };
+        None => { crate::index::refresh_profiles(ctx, reg, &[profile.to_string()], false)?; find()?.context("session not found") }
+    }
+}
+
+pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {
+    let reg = ctx.registry()?;
+    let p = reg.get(profile)?;
+    let s = session_row(ctx, &reg, profile, session_id)?;
     if s.archived { return crate::archive::transcript(&s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
@@ -862,6 +879,50 @@ pub fn item_remove(ctx: &Ctx, kind: &str, name: &str) -> Result<crate::items::Sy
     let rep = crate::items::sync(ctx, &reg)?;
     if kind == "skill" { crate::items::delete_skill_files(ctx, name)?; }
     Ok(rep)
+}
+
+/// An MCP server into the list, or in the place of the one with its name, and every tool brought in step. Without
+/// `replace` a name the list has is refused. A transport left empty is "http" with a URL, else "stdio". `tools`:
+/// the tools it is on for, every other tool off; None leaves its ticks as they are.
+pub fn mcp_save(ctx: &Ctx, mut server: McpServer, replace: bool, tools: Option<&[String]>) -> Result<crate::items::SyncReport> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    if !replace && reg.mcp.iter().any(|m| m.name == server.name) { bail!("a server named '{}' already exists", server.name); }
+    if server.transport.is_empty() { server.transport = if server.url.is_some() { "http" } else { "stdio" }.into(); }
+    let name = server.name.clone();
+    crate::items::add_mcp(&mut reg, server)?;
+    if let Some(on) = tools {
+        for h in harness::all().iter().filter(|h| h.caps().mcp) {
+            crate::items::set_target(&mut reg, "mcp", &name, h.id(), None, on.iter().any(|t| t == h.id()))?;
+        }
+    }
+    ctx.save_registry(&reg)?;
+    crate::items::sync(ctx, &reg)
+}
+
+/// A tool's own skill folders (its main profile's) moved into the store and linked back, then every tool brought
+/// in step, so the tool's other accounts have them at once: the names imported, the names left alone because the
+/// store has a different skill by that name, and what the sync did.
+pub fn skill_import(ctx: &Ctx, harness_id: &str) -> Result<(Vec<String>, Vec<String>, crate::items::SyncReport)> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let (added, kept) = crate::items::import_skills(ctx, &mut reg, harness_id)?;
+    ctx.save_registry(&reg)?;
+    Ok((added, kept, crate::items::sync(ctx, &reg)?))
+}
+
+/// A skill installed into the store from a folder or a GitHub link, ticked for the tools in `enable`, saved, and
+/// every tool brought in step. The sync's own result comes back beside the skill: the skill is installed and
+/// saved by then, whatever a link did.
+pub fn skill_install(ctx: &Ctx, source: &str, name: Option<&str>, enable: &[String]) -> Result<(crate::registry::Skill, Result<crate::items::SyncReport>)> {
+    // before anything is copied: refused at its tick, the skill was in the store and not in the list
+    if let Some(h) = enable.iter().find(|h| harness::by_id(h).is_none()) { bail!("unknown harness '{h}'"); }
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let skill = crate::items::install_skill(ctx, &mut reg, source, name)?;
+    for h in enable { crate::items::set_target(&mut reg, "skill", &skill.name, h, None, true)?; }
+    ctx.save_registry(&reg)?;
+    Ok((skill, crate::items::sync(ctx, &reg)))
 }
 
 // ---------- in-app login ----------
@@ -1172,6 +1233,29 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
     Ok(fresh)
 }
 
+/// The Computers settings changed and saved, for `hrm computers set` and the window: `{device_name?, sync_mode?,
+/// sync_folder?, sync_transcripts?, sync_presence?, direct_connection?, listen_port?}`; the context comes back with
+/// them. Any other key (a hub's address is set by joining it) and a value of the wrong type are refused: the
+/// journal passes over both, and the change would be reported as saved.
+pub fn computers_set(ctx: &Ctx, a: &serde_json::Value) -> Result<Ctx> {
+    for (k, v) in a.as_object().into_iter().flatten().filter(|(_, v)| !v.is_null()) {
+        let fits = match k.as_str() {
+            "device_name" | "sync_mode" | "sync_folder" => v.is_string(),
+            "sync_transcripts" | "sync_presence" | "direct_connection" => v.is_boolean(),
+            "listen_port" => v.is_i64(),
+            _ => bail!("{k} is not one of the Computers settings"),
+        };
+        if !fits { bail!("that value does not fit {k}"); }
+    }
+    crate::journal::configure(&ctx.data, &ctx.home, a)
+}
+
+/// What a change of the Computers settings ends with and answers: a round now while anything syncs (a folder, a
+/// hub, the direct connection), else the status alone.
+pub fn computers_round(ctx: &Ctx) -> Result<serde_json::Value> {
+    if crate::journal::on(ctx) { crate::journal::round(ctx) } else { crate::journal::status(ctx) }
+}
+
 // ---------- home: totals, heatmap, request log ----------
 
 #[derive(Debug, Clone, Serialize)]
@@ -1420,5 +1504,135 @@ mod tests {
         assert_eq!(ctx.db.tag_list().unwrap(), vec![("release".to_string(), 0, 1)]);
         tag_set(&ctx, "project", "p", &[]).unwrap();
         assert!(ctx.db.tag_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_mcp_server_is_saved_by_one_rule_for_the_window_and_the_command_line() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let server = |name: &str, transport: &str, command: Option<&str>, url: Option<&str>| McpServer { name: name.into(), transport: transport.into(), command: command.map(String::from), url: url.map(String::from), ..Default::default() };
+        let on_for = |name: &str| ctx.registry().unwrap().targets.iter().filter(|t| t.kind == "mcp" && t.item == name).map(|t| t.harness.clone()).collect::<Vec<_>>();
+        // no transport named: by what was given (the command line's rule)
+        mcp_save(&ctx, server("fs", "", Some("npx"), None), false, None).unwrap();
+        mcp_save(&ctx, server("docs", "", None, Some("https://mcp.example.com/mcp")), false, Some(&["codex".into(), "claude".into()])).unwrap();
+        assert_eq!(ctx.registry().unwrap().mcp.iter().map(|m| (m.name.clone(), m.transport.clone())).collect::<Vec<_>>(), vec![("fs".to_string(), "stdio".to_string()), ("docs".to_string(), "http".to_string())]);
+        assert_eq!((on_for("fs"), on_for("docs")), (vec![], vec!["claude".to_string(), "codex".to_string()]), "the tools named, and no tick without them");
+        // a name the list has is refused unless it is an edit (the window's check)
+        assert!(refused(mcp_save(&ctx, server("fs", "stdio", Some("node"), None), false, None)).contains("a server named 'fs' already exists"));
+        assert_eq!(ctx.registry().unwrap().mcp[0].command.as_deref(), Some("npx"));
+        // an edit without tools keeps its ticks (the command line's replace); with them, every other tool goes off
+        mcp_save(&ctx, server("docs", "http", None, Some("https://mcp.example.com/v2")), true, None).unwrap();
+        assert_eq!((ctx.registry().unwrap().mcp[1].url.as_deref(), on_for("docs").len()), (Some("https://mcp.example.com/v2"), 2));
+        mcp_save(&ctx, server("docs", "http", None, Some("https://mcp.example.com/v2")), true, Some(&["codex".into()])).unwrap();
+        assert_eq!(on_for("docs"), vec!["codex".to_string()]);
+        // what the list refuses is not saved
+        assert!(refused(mcp_save(&ctx, server("no name", "", Some("npx"), None), false, None)).contains("not a valid name"));
+        assert!(refused(mcp_save(&ctx, server("web", "http", None, None), false, None)).contains("needs a URL"));
+        assert_eq!(ctx.registry().unwrap().mcp.len(), 2);
+    }
+
+    /// A Codex main profile and a second account, saved; their skills folders.
+    fn two_codex_accounts(ctx: &Ctx) -> (PathBuf, PathBuf) {
+        let mut reg = ctx.registry().unwrap();
+        for (name, main) in [("codex-main", true), ("codex-work", false)] {
+            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+        }
+        ctx.save_registry(&reg).unwrap();
+        let skills = |name: &str| { let p = reg.get(name).unwrap(); harness::of(p).item_paths(ctx, p).skills.unwrap() };
+        (skills("codex-main"), skills("codex-work"))
+    }
+
+    #[test]
+    fn imported_skills_reach_the_tools_other_accounts_at_once() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let (main, work) = two_codex_accounts(&ctx);
+        std::fs::create_dir_all(main.join("notes")).unwrap();
+        std::fs::write(main.join("notes").join("SKILL.md"), "---\nname: notes\n---\n").unwrap();
+        let (added, kept, sync) = skill_import(&ctx, "codex").unwrap();
+        assert_eq!((added, kept), (vec!["notes".to_string()], vec![]));
+        assert!(crate::shared::is_link(&main.join("notes")) && crate::items::skill_store(&ctx).join("notes").join("SKILL.md").is_file(), "moved to the store and linked back");
+        // the command line synced after its import; the window left the other accounts for the next sync
+        assert!(crate::shared::is_link(&work.join("notes")) && work.join("notes").join("SKILL.md").is_file(), "{sync:?}");
+        assert!(refused(skill_import(&ctx, "opencode")).contains("no main opencode profile"));
+    }
+
+    #[test]
+    fn a_skill_is_installed_ticked_and_linked_in_one_step_and_an_unknown_tool_is_refused_first() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let (main, work) = two_codex_accounts(&ctx);
+        let src = t.path().join("notes");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "---\nname: notes\n---\n").unwrap();
+        let (src, store) = (src.display().to_string(), crate::items::skill_store(&ctx));
+        // the window refused it at the tick, with the skill's files already in the store
+        assert!(refused(skill_install(&ctx, &src, None, &["codex".into(), "nope".into()])).contains("unknown harness 'nope'"));
+        assert!(!store.join("notes").exists(), "nothing was copied");
+        // no tools (the command line): installed and listed, ticked nowhere
+        let (sk, sync) = skill_install(&ctx, &src, None, &[]).unwrap();
+        assert!(sync.is_ok() && sk.name == "notes" && store.join("notes").join("SKILL.md").is_file() && !main.join("notes").exists());
+        // with tools (the window's Install into): every account of the tool has it now
+        skill_install(&ctx, &src, Some("notes-2"), &["codex".into()]).unwrap().1.unwrap();
+        assert!(crate::shared::is_link(&main.join("notes-2")) && crate::shared::is_link(&work.join("notes-2")));
+        let reg = ctx.registry().unwrap();
+        assert_eq!(reg.skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["notes", "notes-2"]);
+        assert_eq!(reg.targets.iter().map(|t| (t.item.as_str(), t.harness.as_str())).collect::<Vec<_>>(), [("notes-2", "codex")]);
+    }
+
+    #[test]
+    fn a_session_resumes_in_the_folder_given_or_its_own_and_a_folder_that_is_not_there_is_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        two_codex_accounts(&ctx);
+        let (own, other, gone) = (t.path().join("own"), t.path().join("other"), t.path().join("gone"));
+        for d in [&own, &other] { std::fs::create_dir_all(d).unwrap(); }
+        let row = |id: &str, cwd: &std::path::Path| {
+            let m = SessionMeta { harness: "codex".into(), profile: "codex-main".into(), id: id.into(), cwd: cwd.display().to_string(), last_active_at: 5, ..Default::default() };
+            ctx.db.put_session(&format!("codex|codex-main|{id}.jsonl"), &m, 5, 10).unwrap();
+        };
+        // an index already walked: the first walk would drop rows that have no file
+        ctx.db.kv_set("index:refreshed_at", "1").unwrap();
+        row("c1", &own);
+        row("c2", &gone);
+        let reg = ctx.registry().unwrap();
+        let at = |id: &str, cwd: Option<&PathBuf>| resume_cwd(&ctx, &reg, "codex-main", id, cwd.cloned());
+        // the window left such a folder out; the command line handed it to the terminal as it was
+        assert!(refused(at("c1", Some(&gone))).ends_with("is not a folder on this computer"));
+        assert_eq!(at("c1", Some(&other)).unwrap(), Some(other.clone()));
+        // none given: the session's own (the command line's rule, which the window left to its page)
+        assert_eq!(at("c1", None).unwrap(), Some(own.clone()));
+        assert_eq!(at("c2", None).unwrap(), None, "its folder is gone: wherever a terminal opens");
+        assert_eq!(at("c9", None).unwrap(), None, "a session the index does not have");
+    }
+
+    #[test]
+    fn the_computers_settings_take_their_own_keys_only_and_values_of_the_right_type() {
+        use serde_json::json;
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        // the command line has no flag for a hub's address; the window passed any key on
+        assert!(refused(computers_set(&ctx, &json!({"sync_presence": false, "hub_url": "https://hub.example"}))).contains("hub_url is not one of the Computers settings"));
+        // its flags are typed; the window's values were passed over when they were not, and the change reported as saved
+        for a in [json!({"sync_presence": "off"}), json!({"listen_port": "4100"}), json!({"listen_port": 4100.5}), json!({"device_name": 7, "sync_transcripts": false})] {
+            assert!(refused(computers_set(&ctx, &a)).contains("that value does not fit"), "{a}");
+        }
+        let s = self::ctx(&t).settings;
+        assert_eq!((s.hub_url.as_str(), s.sync_presence, s.sync_transcripts, s.listen_port), ("", true, true, 0), "a refused change saves nothing");
+        let fresh = computers_set(&ctx, &json!({"device_name": " desk ", "sync_presence": false, "listen_port": 4100, "sync_folder": null})).unwrap();
+        assert_eq!((fresh.settings.device_name.as_str(), fresh.settings.sync_presence, fresh.settings.listen_port), ("desk", false, 4100));
+    }
+
+    #[test]
+    fn a_change_of_the_computers_settings_ends_with_a_round_whenever_anything_syncs() {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        assert!(computers_round(&ctx).unwrap()["last_run"].is_null(), "nothing syncs: the status alone");
+        // the command line ran a round for the folder only
+        let fresh = computers_set(&ctx, &serde_json::json!({"direct_connection": true})).unwrap();
+        let st = computers_round(&fresh).unwrap();
+        let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&fresh.settings.device_id));
+        assert!(st["last_run"].is_i64() && st["error"].is_null(), "{st}");
     }
 }

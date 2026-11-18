@@ -247,7 +247,8 @@ Computers
   hrm computers status|now|set|pair|join|peers|forget|serve
   hrm transcripts                            transcripts carried and known from the other computers
   hrm resume-here <computer>/<tool>/<account>/<id> [--cwd <folder>]
-  hrm hub join <url> --code <c> | --admin <token>;  hrm hub invite|status|leave
+  hrm hub join <url> --code <c> | --admin    --admin asks for the token (in a script: --admin <token>)
+  hrm hub invite|status|leave
   hrm ring show|enter [<key>]                the recovery key
 
 Upkeep

@@ -33,7 +33,7 @@ pub fn backups(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {
 }
 
 pub fn backup_create(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    Ok(json!(hrm_core::backup::create_with(ctx, a["label"].as_str().unwrap_or("Manual"), a["transcripts"].as_bool().unwrap_or(ctx.settings.backup_transcripts))?))
+    Ok(json!(hrm_core::backup::create_now(ctx, a["label"].as_str(), a["transcripts"].as_bool())?.0))
 }
 
 pub fn backup_delete(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::backup::delete(ctx, &s(a, "name")?)?; Ok(json!(true)) }
@@ -74,7 +74,6 @@ pub fn restore_preview(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hr
 
 pub fn restore_run(state: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     let r = hrm_core::restore::run(ctx, &hrm_core::restore::Source::parse(a)?, a["adopt"] == true)?;
-    hrm_core::restore::welcome_done(ctx)?;
     // with adopt the settings changed: the identity follows now
     let fresh = Arc::new(Ctx::open_at(&ctx.data, &ctx.home)?);
     *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh;

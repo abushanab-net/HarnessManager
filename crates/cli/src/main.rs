@@ -134,7 +134,7 @@ enum Cmd {
     },
     /// Make a backup now (the account list, settings, the history; never keys or logins)
     Backup {
-        /// Also this computer's session transcripts, compressed
+        /// Also this computer's session transcripts, compressed (without it, the backup_transcripts setting decides)
         #[arg(long)] with_transcripts: bool,
         #[command(flatten)] j: Json,
     },
@@ -528,7 +528,6 @@ fn real_main(cli: Cli) -> Result<i32> {
             for (t, s, p) in list { println!("{t:<24} {s:>4} sessions  {p:>3} projects"); }
         }
         Cmd::Resume { profile, id, cwd } => {
-            let cwd = cwd.or_else(|| service::transcript(&ctx, &profile, &id).ok().map(|t| PathBuf::from(t.meta.cwd)).filter(|p| p.is_dir()));
             service::resume(&ctx, &profile, &id, cwd)?;
             println!("Resumed {id} in a new terminal");
         }
@@ -642,8 +641,7 @@ fn real_main(cli: Cli) -> Result<i32> {
                 ComputersCmd::Set { name, mode, folder, transcripts, presence, direct, port, j } => {
                     let args = serde_json::json!({"device_name": name, "sync_mode": mode, "sync_folder": folder.map(|f| f.display().to_string()),
                         "sync_transcripts": on_off(&transcripts)?, "sync_presence": on_off(&presence)?, "direct_connection": on_off(&direct)?, "listen_port": port});
-                    let fresh = hrm_core::journal::configure(&ctx.data, &ctx.home, &args)?;
-                    (if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }, j)
+                    (service::computers_round(&service::computers_set(&ctx, &args)?)?, j)
                 }
                 ComputersCmd::Forget { id } => (hrm_core::sync::peer::forget(&ctx, &id)?, Json { json: false }),
                 ComputersCmd::Peers { j } => {
@@ -777,9 +775,10 @@ fn real_main(cli: Cli) -> Result<i32> {
             println!("{} {} leftovers of interrupted operations ({:.1} MB).", if dry_run { "Would remove" } else { "Removed" }, s.files, s.bytes as f64 / 1_048_576.0);
         }
         Cmd::Backup { with_transcripts, j } => {
-            let b = hrm_core::backup::create_with(&ctx, "Manual", with_transcripts)?;
+            // the flag asks for them; without it the Include transcripts setting decides, as for the window's button
+            let (b, with) = hrm_core::backup::create_now(&ctx, None, with_transcripts.then_some(true))?;
             if j.json { return print_json(&b).map(|_| 0); }
-            println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with_transcripts { ", with transcripts" } else { "" });
+            println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with { ", with transcripts" } else { "" });
         }
         Cmd::Restore { source, adopt, preview, j } => {
             let src = hrm_core::restore::Source::of_path(&source)?;
@@ -868,9 +867,10 @@ fn mcp(ctx: &Ctx, cmd: McpCmd) -> Result<i32> {
             return Ok(0);
         }
         McpCmd::Add { name, command, args, url, transport, env, headers } => {
-            let transport = if transport.is_empty() { if url.is_some() { "http".into() } else { "stdio".into() } } else { transport };
-            items::add_mcp(&mut reg, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() })?;
+            // a name the list has is replaced, where the window refuses it and offers Edit: a script gives a server again to change it
+            let rep = service::mcp_save(ctx, McpServer { name: name.clone(), transport, command, args, env: parse_pairs(&env, '=')?, url, headers: parse_pairs(&headers, ':')?, ..Default::default() }, true, None)?;
             println!("Added {name}. Enable it with `hrm mcp enable {name} <tool>`.");
+            return Ok(sync_notes(rep));
         }
         McpCmd::Remove { name } => { let rep = service::item_remove(ctx, "mcp", &name)?; println!("Removed {name}"); return Ok(sync_notes(rep)); }
         McpCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "mcp", &name, &h, profile.as_deref(), true)?; }
@@ -900,7 +900,8 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
             for s in &reg.skills { println!("{:<24} {:<50} {}", s.name, hrm_core::util::truncate(&s.source, 50), targets_for(&reg, "skill", &s.name)); }
             return Ok(0);
         }
-        SkillCmd::Install { source, name } => { let s = items::install_skill(ctx, &mut reg, &source, name.as_deref())?; println!("Installed {}", s.name); }
+        // no tool is ticked here, where the window's Install into ticks them: `hrm skills enable` does that
+        SkillCmd::Install { source, name } => { let (s, rep) = service::skill_install(ctx, &source, name.as_deref(), &[])?; println!("Installed {}", s.name); return Ok(skill_notes(rep?)); }
         SkillCmd::Remove { name } => {
             service::item_remove(ctx, "skill", &name)?;
             println!("Removed {name}");
@@ -909,9 +910,10 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
         SkillCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), true)?; }
         SkillCmd::Disable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), false)?; }
         SkillCmd::Import { harness: h } => {
-            let (a, kept) = items::import_skills(ctx, &mut reg, &h)?;
+            let (a, kept, rep) = service::skill_import(ctx, &h)?;
             println!("Imported {} skill(s): {}", a.len(), a.join(", "));
             if !kept.is_empty() { println!("Left alone, a different skill with that name is already installed: {}", kept.join(", ")); }
+            return Ok(skill_notes(rep));
         }
         SkillCmd::Check => {
             for (n, upd) in items::check_skill_updates(ctx, &reg) { println!("{n:<24} {}", match upd { Some(true) => "update available", Some(false) => "up to date", None => "could not check (source not reachable)" }); }
@@ -919,9 +921,13 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
         }
     }
     ctx.save_registry(&reg)?;
-    let rep = items::sync(ctx, &reg)?;
+    Ok(skill_notes(items::sync(ctx, &reg)?))
+}
+
+/// What a sync after a skill change left alone, on stderr.
+fn skill_notes(rep: items::SyncReport) -> i32 {
     for c in rep.conflicts { eprintln!("conflict: {c}"); }
-    Ok(0)
+    0
 }
 
 fn prompts(ctx: &Ctx, cmd: PromptCmd) -> Result<i32> {

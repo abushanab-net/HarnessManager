@@ -14,12 +14,12 @@ pub fn computers_status(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { h
 pub fn computers_now(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { hrm_core::journal::round(ctx) }
 
 pub fn computers_set(state: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut fresh = Arc::new(hrm_core::journal::configure(&ctx.data, &ctx.home, a)?);
+    let mut fresh = Arc::new(hrm_core::service::computers_set(ctx, a)?);
     // the listener follows the setting at once (and may pick and save its port)
     if let Some(p) = state.peers.get() { fresh = p.ensure(&fresh)?; }
     *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh.clone();
     *state.settings_mtime.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    Ok(if hrm_core::journal::on(&fresh) { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? })
+    hrm_core::service::computers_round(&fresh)
 }
 
 // the direct connection: pairing with a six-digit code, the computers paired

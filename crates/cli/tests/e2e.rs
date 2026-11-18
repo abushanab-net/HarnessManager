@@ -389,6 +389,12 @@ fn sessions_group_by_repository_across_claude_and_codex() {
     // resume opens a terminal in the session's own account
     e.ok(&["resume", "codex-main", "c1"]);
     assert_eq!(e.terminals().pop().unwrap()["args"], json!(["run", "codex-main", "--", "resume", "c1"]));
+    assert_eq!(e.terminals().pop().unwrap()["cwd"], json!(repo.join("apps").display().to_string()), "in the folder the session ran in");
+    // a --cwd that is not a folder is refused before a terminal opens; one that is a folder is where it opens
+    assert!(e.fail(&["resume", "codex-main", "c1", "--cwd", &e.home.join("not-here").display().to_string()]).contains("is not a folder on this computer"));
+    assert_eq!(e.terminals().len(), 1);
+    e.ok(&["resume", "codex-main", "c1", "--cwd", &repo.display().to_string()]);
+    assert_eq!(e.terminals().pop().unwrap()["cwd"], json!(repo.display().to_string()));
 
     // projects can be renamed
     e.ok(&["projects", "rename", "github.com/example/platform-gitops", "Platform"]);

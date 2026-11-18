@@ -45,19 +45,9 @@ pub fn target_bulk(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 
 // add (refused when the name exists) or edit a server, and set the tools it is written to
 pub fn mcp_save(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
     let server: McpServer = serde_json::from_value(a["server"].clone())?;
-    if a["replace"] != true && reg.mcp.iter().any(|m| m.name == server.name) { bail!("a server named '{}' already exists", server.name); }
-    let name = server.name.clone();
-    items::add_mcp(&mut reg, server)?;
-    if let Some(on) = a["targets"].as_array() {
-        let on: Vec<&str> = on.iter().filter_map(|v| v.as_str()).collect();
-        for h in service::harnesses().iter().filter(|h| h.caps.mcp) {
-            items::set_target(&mut reg, "mcp", &name, &h.id, None, on.contains(&h.id.as_str()))?;
-        }
-    }
-    ctx.save_registry(&reg)?;
-    sync_items(ctx)
+    let tools: Option<Vec<String>> = a["targets"].as_array().map(|on| on.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+    Ok(json!(service::mcp_save(ctx, server, a["replace"] == true, tools.as_deref())?))
 }
 
 pub fn mcp_import_all(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(import_mcp_now(ctx)?)) }
@@ -74,14 +64,11 @@ pub fn sync(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 pub fn sync_last(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(ctx.db.kv_get("sync:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null)) }
 
 pub fn skill_install(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
-    let sk = items::install_skill(ctx, &mut reg, &s(a, "source")?, opt(a, "name").as_deref())?;
-    for h in a["enable"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
-        items::set_target(&mut reg, "skill", &sk.name, h, None, true)?;
-    }
-    ctx.save_registry(&reg)?;
+    let enable: Vec<String> = a["enable"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+    let (sk, sync) = service::skill_install(ctx, &s(a, "source")?, opt(a, "name").as_deref(), &enable)?;
     let mut v = serde_json::to_value(&sk)?;
-    v["sync"] = sync_soft(ctx);
+    // the sync report, or `{"error": ...}`: a link that fails must not undo the answer
+    v["sync"] = sync.map_or_else(|e| json!({"error": format!("{e:#}")}), |rep| json!(rep));
     Ok(v)
 }
 
@@ -167,10 +154,8 @@ pub fn skill_takeover(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 }
 
 pub fn skill_import(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
-    let (added, kept) = items::import_skills(ctx, &mut reg, &s(a, "harness")?)?;
-    ctx.save_registry(&reg)?;
-    Ok(json!({"added": added, "kept": kept}))
+    let (added, kept, sync) = service::skill_import(ctx, &s(a, "harness")?)?;
+    Ok(json!({"added": added, "kept": kept, "sync": sync}))
 }
 
 pub fn skill_check(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {
