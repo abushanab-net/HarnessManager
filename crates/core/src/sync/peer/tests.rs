@@ -107,6 +107,27 @@ fn a_stranger_gets_nothing_to_try_codes_on_and_the_real_join_still_works() {
 }
 
 #[test]
+fn the_host_stores_the_joiners_address_from_the_sealed_payload() {
+    use base64::Engine;
+    use spake2::{Ed25519Group, Identity, Password, Spake2};
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    let v = a.rt.pair_start(&a.ctx, Some("127.0.0.1")).unwrap();
+    let (base, me, b64) = (format!("http://127.0.0.1:{}/pair", v["port"]), b.ctx.settings.device_id.as_str(), base64::engine::general_purpose::STANDARD);
+    let http = reqwest::blocking::Client::builder().no_proxy().build().unwrap();
+    let (st, msg) = Spake2::<Ed25519Group>::start_a(&Password::new(v["code"].as_str().unwrap().as_bytes()), &Identity::new(me.as_bytes()), &Identity::new(a.ctx.settings.device_id.as_bytes()));
+    let r: Value = http.post(format!("{base}/start")).json(&json!({"id": me, "msg": b64.encode(msg)})).send().unwrap().json().unwrap();
+    let key = st.finish(&b64.decode(r["msg"].as_str().unwrap()).unwrap()).unwrap();
+    let mut mine = super::pairing::payload(&b.ctx).unwrap();
+    mine["address"] = json!("sealed.example:1");
+    // what travels beside the sealed payload can be rewritten on the way
+    let f = http.post(format!("{base}/finish")).json(&json!({"id": me, "payload": super::pairing::seal(&key, &mine).unwrap(), "address": "rewritten.example:2"})).send().unwrap();
+    assert!(f.status().is_success(), "{}", f.status());
+    let stored: String = a.ctx.db.with(|c| Ok(c.query_row("select address from peers where device_id=?", [me], |r| r.get(0))?)).unwrap();
+    assert_eq!(stored, "sealed.example:1");
+}
+
+#[test]
 fn a_wrong_code_fails_and_stores_nothing() {
     let t = tempfile::tempdir().unwrap();
     let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));

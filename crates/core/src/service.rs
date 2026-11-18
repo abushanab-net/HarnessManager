@@ -986,20 +986,17 @@ pub fn router_token(ctx: &Ctx) -> Result<String> {
     Ok(t)
 }
 
+/// 64 hex characters from the system's random source.
 pub fn random_token() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let mut out = String::new();
-    for i in 0..4u64 {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u64(now_ms() as u64 ^ (std::process::id() as u64) << 16 ^ i);
-        out.push_str(&format!("{:016x}", h.finish()));
-    }
-    out
+    let mut b = [0u8; 32];
+    getrandom::fill(&mut b).expect("the system's random source");
+    hex::encode(b)
 }
 
 pub fn router_running(ctx: &Ctx) -> bool { router_answer(ctx).and_then(|r| health(&r).map(|_| ())).is_some() }
 
-/// A router's `/health` answer: `Some(program file)` when it is a router ("" from one before 1.9.6), None otherwise.
+/// A router's `/health` answer: `Some(program file)` when it is a router ("" from one before 1.9.6, and from any
+/// router asked without its token), None otherwise.
 fn health(answer: &str) -> Option<String> {
     let body = answer.split_once("\r\n\r\n")?.1;
     let rest = body.strip_prefix("ok")?;
@@ -1019,13 +1016,21 @@ fn router_answer(ctx: &Ctx) -> Option<String> {
     let addr: std::net::SocketAddr = format!("127.0.0.1:{}", ctx.settings.router_port).parse().ok()?;
     // nothing listens when the port is free; asking a closed port on Windows waits out the whole timeout
     if std::net::TcpListener::bind(addr).is_ok() { return None; }
-    let t = std::time::Duration::from_millis(500);
-    let mut s = std::net::TcpStream::connect_timeout(&addr, t).ok()?;
-    s.set_read_timeout(Some(t)).ok()?;
-    s.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
-    let mut out = String::new();
-    let _ = s.take(4096).read_to_string(&mut out);
-    Some(out)
+    let ask = |auth: &str| {
+        let t = std::time::Duration::from_millis(500);
+        let mut s = std::net::TcpStream::connect_timeout(&addr, t).ok()?;
+        s.set_read_timeout(Some(t)).ok()?;
+        s.write_all(format!("GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n{auth}\r\n").as_bytes()).ok()?;
+        let mut out = String::new();
+        let _ = s.take(4096).read_to_string(&mut out);
+        Some(out)
+    };
+    let plain = ask("")?;
+    // a router names its program only to the token's holder. The token goes out after a bare "ok" alone, so a
+    // program that does not answer as a router is never sent it
+    if health(&plain).as_deref() != Some("") { return Some(plain); }
+    let Ok(token) = router_token(ctx) else { return Some(plain) };
+    ask(&format!("Authorization: Bearer {token}\r\n")).or(Some(plain))
 }
 
 /// Stop the background router. Returns false when it was not running. The saved process id is checked to

@@ -139,7 +139,7 @@ pub fn since_hours(hours: i64) -> i64 {
 }
 
 
-/// A random id in the UUID v4 form, from the OS-seeded hasher (no extra dependency needed for an id).
+/// A random id in the UUID v4 form, from the system's random source.
 pub fn uuid4() -> String {
     let h = crate::service::random_token();
     let mut b: Vec<u8> = hex::decode(&h[..32]).unwrap_or_default();

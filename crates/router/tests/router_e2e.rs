@@ -245,6 +245,16 @@ async fn a_providers_error_keeps_its_status_its_type_and_its_retry_after() {
     assert!(!log.iter().any(|r| r["provider"] == "p-oaierr" && r["status"] == 200), "a failure is not logged as an answer: {log:?}");
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn health_names_the_program_only_to_the_tokens_holder() {
+    let s = setup().await;
+    let get = |token: Option<&str>| { let mut r = reqwest::Client::new().get(format!("{}/health", s.base)); if let Some(t) = token { r = r.bearer_auth(t); } r.send() };
+    assert_eq!(get(None).await.unwrap().text().await.unwrap(), "ok");
+    assert_eq!(get(Some("wrong")).await.unwrap().text().await.unwrap(), "ok");
+    let named = get(Some(&s.token)).await.unwrap().text().await.unwrap();
+    assert!(named.strip_prefix("ok\n").is_some_and(|exe| !exe.is_empty()), "the program file follows for the caller with the token");
+}
+
 /// A provider that answers with a chunked stream cut exactly where the test says, by request path:
 /// `/split/...` and `/usage/...` split a line (and a character) across two chunks, `/drop/...` closes mid-answer.
 async fn raw_provider() -> String {

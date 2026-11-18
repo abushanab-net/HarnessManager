@@ -164,8 +164,10 @@ enum IndexCmd {
 
 #[derive(Subcommand)]
 enum HubCmd {
-    /// Join the hub at <url>: --code from a computer already on it, or --admin <token> for the first computer
-    Join { url: String, #[arg(long)] code: Option<String>, #[arg(long)] admin: Option<String> },
+    /// Join the hub at <url>: --code from a computer already on it, or --admin for the first computer
+    Join { url: String, #[arg(long)] code: Option<String>,
+        #[arg(long, value_name = "TOKEN", num_args = 0..=1, default_missing_value = "", help = "The hub's admin token. Give --admin alone to be asked for it (or to pipe it in): safer, since a token typed as an argument stays in the shell history")]
+        admin: Option<String> },
     /// A one-time six-digit code for another computer, good for ten minutes
     Invite,
     /// Joined, computers, the last push and pull, the events socket
@@ -178,8 +180,8 @@ enum HubCmd {
 enum RingCmd {
     /// Print the recovery key: keep it in your password manager
     Show,
-    /// Enter the recovery key shown on another computer (asked for when not given)
-    Enter { key: Option<String> },
+    /// Enter the recovery key shown on another computer
+    Enter { #[arg(help = "The recovery key. Leave it out to be asked for it (or to pipe it in): safer, since a key typed as an argument stays in the shell history")] key: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -353,6 +355,15 @@ fn secret_input(prompt: &str) -> Result<String> {
     let k = rpassword::prompt_password(prompt)?;
     if k.trim().is_empty() { bail!("no key entered"); }
     Ok(k)
+}
+
+/// A secret that was not given as an argument: typed at a prompt that does not show it, or one line of piped input.
+fn secret_line(prompt: &str) -> Result<String> {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() { return Ok(rpassword::prompt_password(prompt)?); }
+    let mut l = String::new();
+    std::io::stdin().read_line(&mut l)?;
+    Ok(l)
 }
 
 fn parse_pairs(items: &[String], sep: char) -> Result<std::collections::BTreeMap<String, String>> {
@@ -718,6 +729,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
         Cmd::Hub { cmd } => match cmd {
             HubCmd::Join { url, code, admin } => {
+                let admin = match admin { Some(a) if a.is_empty() => Some(secret_line("admin token: ")?), a => a };
                 let fresh = hrm_core::sync::hub::join(&ctx, &url, code.as_deref(), admin.as_deref())?;
                 let st = hrm_core::journal::round(&fresh)?;
                 let n = st["hub"]["devices"].as_i64().unwrap_or(1);
@@ -745,7 +757,7 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Ring { cmd } => match cmd {
             RingCmd::Show => println!("{}", hrm_core::sync::hub::ring_show(&ctx)?),
             RingCmd::Enter { key } => {
-                let key = match key { Some(k) => k, None => { eprint!("recovery key: "); let mut l = String::new(); std::io::stdin().read_line(&mut l)?; l } };
+                let key = match key { Some(k) => k, None => secret_line("recovery key: ")? };
                 hrm_core::sync::hub::ring_enter(&ctx, &key)?;
                 println!("the ring key is set{}", if ctx.settings.sync_mode == "hub" { "; the next round reads the hub" } else { "" });
             }

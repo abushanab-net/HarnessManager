@@ -81,8 +81,7 @@ impl AppState {
 pub fn router(ctx: Arc<Ctx>) -> Router {
     let state = Arc::new(AppState { ctx, client: reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).read_timeout(Duration::from_secs(300)).build().unwrap(), breakers: Mutex::new(HashMap::new()) });
     Router::new()
-        // and which program serves, so Harness Manager can replace a router from another build
-        .route("/health", get(|| async { format!("ok\n{}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default()) }))
+        .route("/health", get(health))
         .route("/r/{route}/{profile}/v1/messages", post(messages))
         .route("/r/{route}/{profile}/v1/messages/count_tokens", post(count_tokens))
         .route("/r/{route}/{profile}/v1/models", get(models))
@@ -129,6 +128,13 @@ fn authorized(st: &AppState, headers: &HeaderMap) -> bool {
     let bearer = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).map(str::trim);
     let key = headers.get("x-api-key").and_then(|v| v.to_str().ok());
     bearer == Some(token.as_str()) || key == Some(token.as_str())
+}
+
+/// "ok" for anyone; for the token's holder also which program serves, so Harness Manager can replace a router
+/// from another build. The path names the user's folder, so a caller without the token does not get it.
+async fn health(State(st): State<Arc<AppState>>, headers: HeaderMap) -> String {
+    if !authorized(&st, &headers) { return "ok".into(); }
+    format!("ok\n{}", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())
 }
 
 /// Model a provider should receive: the requested one if it serves it, else its first model.
