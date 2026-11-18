@@ -277,7 +277,11 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     let pubkey = pubkey_of(ctx, id)?;
     let mut cur: i64 = ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [id, inc], |r| r.get(0)).optional()?))?.unwrap_or(0);
     let (mut newer, mut through) = (false, false);
-    for ch in man["chunks"].as_array().into_iter().flatten() {
+    // by where each starts, the longest first: a relay lists the small chunks it took beside a joined one that
+    // covers them, and entries are missing only when no chunk left in the list reaches back to the cursor
+    let mut chunks: Vec<&Value> = man["chunks"].as_array().into_iter().flatten().collect();
+    chunks.sort_by_key(|c| (c["from"].as_i64().unwrap_or(0), std::cmp::Reverse(c["to"].as_i64().unwrap_or(0))));
+    for ch in chunks {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || !store::safe_file(file) { continue; }
         let gap = (from > cur + 1).then(|| -> Result<Value> {
@@ -1038,6 +1042,22 @@ mod tests {
     }
 
     fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
+
+    #[test]
+    fn a_list_that_names_a_small_chunk_before_the_joined_one_that_covers_it_has_no_gap() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let usage = |seq: i64| entry(seq, "usage", &format!("claude:{seq}"), serde_json::to_value(row(&format!("claude:{seq}"), 1_000)).unwrap());
+        let bytes = |seqs: std::ops::RangeInclusive<i64>| seqs.map(|s| format!("{}\n", usage(s))).collect::<String>().into_bytes();
+        let chunk = |from: i64, to: i64| json!({"file": format!("i-{from}-{to}.jsonl"), "from": from, "to": to, "sha256": sha256_hex(&bytes(from..=to)), "bytes": bytes(from..=to).len()});
+        // as a relay's store keeps them, by where each ends: the small chunk it took first, then the joined one
+        let man = json!({"incarnation": "i", "chunks": [chunk(4, 4), chunk(1, 5)]});
+        let read = |file: &str| -> Result<Vec<u8>> { let mut p = file.trim_end_matches(".jsonl").split('-').skip(1).map(|n| n.parse::<i64>().unwrap()); Ok(bytes(p.next().unwrap()..=p.next().unwrap())) };
+        assert_eq!(apply_manifest(&ctx, "peer-1", &man, &read, false).unwrap(), 5);
+        assert_eq!(count(&ctx, "select count(*) from usage"), 5, "the joined chunk held what the small one seemed to skip");
+        assert_eq!(count(&ctx, "select count(*) from peers where gap is not null"), 0);
+    }
 
     fn session(harness: &str, profile: &str, id: &str, title: &str, at: i64) -> Value {
         serde_json::to_value(SessionMeta { harness: harness.into(), profile: profile.into(), id: id.into(), title: title.into(), last_active_at: at, ..Default::default() }).unwrap()
