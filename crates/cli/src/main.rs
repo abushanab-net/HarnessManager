@@ -136,6 +136,8 @@ enum Cmd {
     Backup {
         /// Also this computer's session transcripts, compressed (without it, the backup_transcripts setting decides)
         #[arg(long)] with_transcripts: bool,
+        /// Never the transcripts, whatever the setting says (a script that wants the small backup)
+        #[arg(long, conflicts_with = "with_transcripts")] no_transcripts: bool,
         #[command(flatten)] j: Json,
     },
     /// Merge the history in a backup zip or a sync folder into this computer; nothing is counted twice
@@ -774,9 +776,9 @@ fn real_main(cli: Cli) -> Result<i32> {
             for r in &s.repaired { println!("  put right: the skill {r}"); }
             println!("{} {} leftovers of interrupted operations ({:.1} MB).", if dry_run { "Would remove" } else { "Removed" }, s.files, s.bytes as f64 / 1_048_576.0);
         }
-        Cmd::Backup { with_transcripts, j } => {
+        Cmd::Backup { with_transcripts, no_transcripts, j } => {
             // the flag asks for them; without it the Include transcripts setting decides, as for the window's button
-            let (b, with) = hrm_core::backup::create_now(&ctx, None, with_transcripts.then_some(true))?;
+            let (b, with) = hrm_core::backup::create_now(&ctx, None, if no_transcripts { Some(false) } else { with_transcripts.then_some(true) })?;
             if j.json { return print_json(&b).map(|_| 0); }
             println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with { ", with transcripts" } else { "" });
         }

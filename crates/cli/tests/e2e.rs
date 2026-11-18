@@ -1051,3 +1051,13 @@ fn computers_status_says_when_part_of_a_computers_history_did_not_arrive() {
     assert_eq!(after("LAPTOP"), "Part of this computer's history is missing here.", "{out}");
     assert!(!after("TABLET").starts_with("Part of"), "{out}");
 }
+
+#[test]
+fn a_backup_leaves_the_transcripts_out_when_told_to_whatever_the_setting_says() {
+    let e = Env::new();
+    std::fs::create_dir_all(&e.data).unwrap();
+    std::fs::write(e.data.join("settings.json"), r#"{"backup_transcripts": true}"#).unwrap();
+    assert!(e.ok(&["backup"]).contains(", with transcripts"), "the setting decides without a flag");
+    assert!(!e.ok(&["backup", "--no-transcripts"]).contains("with transcripts"), "the flag wins over the setting");
+    e.fail(&["backup", "--no-transcripts", "--with-transcripts"]);
+}

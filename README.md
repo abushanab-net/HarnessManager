@@ -255,7 +255,7 @@ Upkeep
   hrm settings [<key> [<value>]]             read or change a setting
   hrm secrets check                          which credential store this computer uses, and whether it works
   hrm cleanup [--dry-run]                    remove temporary files failed operations left (the app does it hourly)
-  hrm backup [--with-transcripts]            a backup now
+  hrm backup [--with-transcripts|--no-transcripts]   a backup now; without a flag the setting decides
   hrm restore <zip|folder> [--adopt] [--preview]
   hrm archive status|now                     old transcripts into the archive
 ```
