@@ -23,13 +23,11 @@ pub struct Backup {
 
 pub fn dir(ctx: &Ctx) -> PathBuf { ctx.data.join("backups") }
 
-/// State worth keeping; caches (discover, pricing, version checks), a running router's pid and its token are not:
-/// the token is a secret, and a new one is made when the router starts without one. The journal's marks describe
-/// the outbox, which is not in a backup either.
-fn keep_kv(k: &str) -> bool {
-    !(k.starts_with("discover:") || k.starts_with("pricing:") || k.starts_with("apps:") || k.starts_with("self:")
-        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:") || k.starts_with("journal:") || k.starts_with("computers:") || k.starts_with("backup:"))
-}
+/// State a backup carries and a restore puts back: the live-limits choice, what was written into each prompt file
+/// and the last MCP import. Everything else describes this computer as it is now (which account owns the Antigravity
+/// login, the router's token, its identity, caches, marks of what was read) and is neither kept nor put back: a
+/// restored owner would have the next start save the login in the slot under the wrong account.
+fn keep_kv(k: &str) -> bool { k == "live_quota" || k == "mcp:last_import" || k.starts_with("prompt:") }
 
 #[cfg(test)]
 mod keep_tests {
@@ -37,8 +35,22 @@ mod keep_tests {
 
     #[test]
     fn the_router_token_and_caches_stay_out_of_backups() {
-        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models", "journal:published_seq", "journal:backfilled", "computers:last"] { assert!(!keep_kv(k), "{k}"); }
-        for k in ["live_quota", "migrated:codex-timing", "mcp:last_import", "migrated:device"] { assert!(keep_kv(k), "{k}"); }
+        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models", "journal:published_seq", "journal:backfilled", "computers:last",
+            "agy:active", "device:pubkey", "pairing:current", "migrated:device", "opencode:usage:work"] { assert!(!keep_kv(k), "{k}"); }
+        for k in ["live_quota", "mcp:last_import", "prompt:C:\\p\\AGENTS.md"] { assert!(keep_kv(k), "{k}"); }
+    }
+
+    #[test]
+    fn a_restore_does_not_say_who_owns_the_antigravity_login() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        ctx.db.kv_set("agy:active", "agy-main").unwrap();
+        // a backup made by a version that kept the owner, from a time another account had the login
+        let zip = t.path().join("b.zip");
+        zip_of(&zip, &[("profiles.json", "{}"), ("state.json", r#"{"kv": {"agy:active": "agy-work", "live_quota": "1"}}"#)]);
+        restore_file(&ctx, &zip).unwrap();
+        assert_eq!(ctx.db.kv_get("agy:active").unwrap().as_deref(), Some("agy-main"), "the owner is the one this computer recorded");
+        assert_eq!(ctx.db.kv_get("live_quota").unwrap().as_deref(), Some("1"), "a choice is put back");
     }
 
     /// A zip with these entries, named as given: what a backup made by another program can hold.
