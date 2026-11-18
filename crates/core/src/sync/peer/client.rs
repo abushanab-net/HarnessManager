@@ -136,12 +136,12 @@ pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &s
 }
 
 /// A connected paired computer (`id`) as a source: what it holds of any origin, and its own presence.
-struct Via<'a> {
-    c: &'a Client,
-    id: &'a str,
+struct Via {
+    c: Client,
+    id: String,
 }
 
-impl journal::Source for Via<'_> {
+impl journal::Source for Via {
     fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>> { self.c.json(&format!("/v1/chunks/{origin}?since={since}&incarnation={incarnation}")) }
 
     fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { self.c.bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ) }
@@ -155,11 +155,12 @@ impl journal::Source for Via<'_> {
 
 /// Every paired computer, now: found by mDNS or its address, greeted, its journal and presence taken, then
 /// whatever it holds of computers this one cannot reach (relay). Nothing here fails the caller: each is logged.
-pub fn pull_all(ctx: &Ctx) {
-    let id = match identity::load(ctx) { Ok(i) => i, Err(e) => { crate::log::warn(&format!("computers: no identity: {e:#}")); return } };
+/// Returns the computers that answered, as sources: the round asks them once more for what none of them held whole.
+pub fn pull_all(ctx: &Ctx) -> Vec<Box<dyn journal::Source>> {
+    let id = match identity::load(ctx) { Ok(i) => i, Err(e) => { crate::log::warn(&format!("computers: no identity: {e:#}")); return vec![] } };
     let peers = journal::peers(ctx).unwrap_or_default();
     let me = ctx.settings.device_id.as_str();
-    let mut via: Vec<(&Peer, Client, Value)> = vec![];
+    let mut via: Vec<(&Peer, Via, Value)> = vec![];
     for p in peers.iter().filter(|p| !p.cert_pem.is_empty()) {
         let Some((c, h, path)) = reach(ctx, &id, p) else { continue };
         let _ = ctx.db.with(|db| {
@@ -167,26 +168,27 @@ pub fn pull_all(ctx: &Ctx) {
                 params![now_ms(), path, h["name"].as_str(), h["incarnation"].as_str(), h["last_seq"].as_i64(), h["app_version"].as_str(), p.id])?;
             Ok(())
         });
-        via.push((p, c, h));
+        via.push((p, Via { c, id: p.id.clone() }, h));
     }
-    for (p, c, _) in &via {
-        let src = Via { c, id: &p.id };
-        if let Err(e) = journal::pull_noted(ctx, &src, &p.id) { crate::log::warn(&format!("computers: pulling {}: {e:#}", p.name)); }
-        if let Err(e) = journal::take_presence(ctx, &src) { crate::log::info(&format!("computers: presence of {}: {e:#}", p.name)); }
+    for (p, src, _) in &via {
+        if let Err(e) = journal::pull_noted(ctx, src, &p.id, false) { crate::log::warn(&format!("computers: pulling {}: {e:#}", p.name)); }
+        if let Err(e) = journal::take_presence(ctx, src) { crate::log::info(&format!("computers: presence of {}: {e:#}", p.name)); }
     }
     let connected: HashSet<&str> = via.iter().map(|v| v.0.id.as_str()).collect();
     let mut known: BTreeSet<String> = peers.iter().map(|p| p.id.clone()).collect();
     for (_, _, h) in &via { known.extend(h["origins"].as_array().into_iter().flatten().filter_map(|o| o.as_str().filter(|o| store::safe_origin(o)).map(String::from))); }
     for origin in known.iter().filter(|o| o.as_str() != me && !connected.contains(o.as_str())) {
-        for (p, c, _) in &via {
-            match journal::pull_noted(ctx, &Via { c, id: &p.id }, origin) {
+        for (p, src, _) in &via {
+            match journal::pull_noted(ctx, src, origin, false) {
                 Ok(true) => {
                     let _ = ctx.db.with(|db| { db.execute("update peers set path='relay', relayed_by=?1 where device_id=?2", params![p.id, origin])?; Ok(()) });
-                    break;
+                    // this one lacked entries the next may hold
+                    if !journal::waits(ctx, origin) { break; }
                 }
                 Ok(false) => {}
                 Err(e) => crate::log::info(&format!("computers: {origin} through {}: {e:#}", p.name)),
             }
         }
     }
+    via.into_iter().map(|(_, src, _)| Box::new(src) as Box<dyn journal::Source>).collect()
 }

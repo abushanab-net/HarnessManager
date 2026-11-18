@@ -572,3 +572,23 @@ fn a_blob_sealed_for_one_computer_opens_under_no_other_name_and_one_sealed_befor
     // and this version still writes that form: opened the way 1.11 opens a blob, with no name given
     assert_eq!(decrypt(&key, &encrypt(&key, b"entries", &mine).unwrap(), b"").unwrap(), b"entries", "1.11 cannot open a bound blob: the writer changes in the version after this one");
 }
+
+#[test]
+fn entries_the_hub_dropped_are_passed_at_the_rounds_end_and_stay_on_the_card() {
+    let rt = runtime();
+    let (url, hub) = start_hub(rt.handle(), "admin-secret");
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = joined(t.path(), &url);
+    let id = a.ctx.settings.device_id.clone();
+    for r in ["claude:1", "claude:2"] {
+        a.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        journal::round(&a.ctx).unwrap();
+    }
+    // its retention dropped the first chunk before B first asked; B is not paired with A, and no relay knows it
+    hub.chunks.lock().unwrap().get_mut(&id).unwrap().remove(0);
+    let st = journal::round(&b.ctx).unwrap();
+    assert_eq!(st["error"], Value::Null, "{st}");
+    let pa = peer(&st, &id);
+    assert_eq!((count(&b.ctx, "select count(*) from usage"), pa["applied_seq"].as_i64()), (1, Some(2)), "the rest is taken: {st}");
+    assert_eq!((pa["gap"]["from"].as_i64(), pa["gap"]["to"].as_i64(), pa["gap"]["waiting"].as_bool()), (Some(1), Some(1), Some(false)), "{st}");
+}
