@@ -41,6 +41,31 @@ mod keep_tests {
         for k in ["live_quota", "migrated:codex-timing", "mcp:last_import", "migrated:device"] { assert!(keep_kv(k), "{k}"); }
     }
 
+    /// A zip with these entries, named as given: what a backup made by another program can hold.
+    fn zip_of(path: &Path, entries: &[(&str, &str)]) {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, text) in entries {
+            z.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(text.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn a_skill_file_named_outside_its_folder_is_not_restored() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let (zip, elsewhere) = (t.path().join("b.zip"), t.path().join("elsewhere.txt"));
+        zip_of(&zip, &[("profiles.json", "{}"), ("skills/demo/SKILL.md", "ok"), ("skills/demo/..\\..\\up.txt", "x"), ("skills/demo/sub/..\\..\\..\\up.txt", "x"),
+            (&format!("skills/demo/{}", elsewhere.display()), "x")]);
+        restore_file(&ctx, &zip).unwrap();
+        let demo = crate::items::skill_store(&ctx).join("demo");
+        assert_eq!(std::fs::read_to_string(demo.join("SKILL.md")).unwrap(), "ok", "a plain name is restored");
+        let mut written = vec![];
+        crate::util::walk_files(t.path(), &|f| !f.starts_with(&ctx.data) && f != zip, &mut written);
+        assert!(written.iter().all(|f| f.starts_with(&demo)), "every restored file is in the skill's folder: {written:?}");
+    }
+
     #[test]
     fn another_computers_backup_brings_its_preferences_but_not_its_identity() {
         let t = tempfile::tempdir().unwrap();
@@ -463,11 +488,16 @@ pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
     for i in 0..z.len() {
         let mut f = z.by_index(i)?;
-        let Some(rest) = f.name().ok().and_then(|n| n.strip_prefix("skills/").map(String::from)) else { continue };
-        let Some((skill, rel)) = rest.split_once('/') else { continue };
-        if !valid_name(skill) || rel.is_empty() || rel.split('/').any(|p| p == ".." || p.is_empty()) { continue; }
+        // the name as the zip library confines it: no part is `..`, a drive, or holds a separator or a stream
+        let Some(path) = f.enclosed_name() else { continue };
+        let Ok(rest) = path.strip_prefix("skills") else { continue };
+        let mut parts = rest.components();
+        let Some(skill) = parts.next().and_then(|c| c.as_os_str().to_str()) else { continue };
+        let rel = parts.as_path();
+        // and checked here too: every part is a plain name, so the file stays under the skill's folder
+        if !valid_name(skill) || rel.as_os_str().is_empty() || !rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) { continue; }
         if store.join(skill).exists() && !skills.contains(skill) { continue; }
-        let out = store.join(skill).join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let out = store.join(skill).join(rel);
         if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
         let mut b = vec![];
         f.read_to_end(&mut b)?;
