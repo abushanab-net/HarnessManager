@@ -246,8 +246,11 @@ fn rows_jsonl(c: &Connection, sql: &str) -> rusqlite::Result<String> {
 fn history(ctx: &Ctx) -> Result<Vec<(&'static str, String)>> {
     // read before the database is held below: the key is kept in it
     let device = json!({"id": ctx.settings.device_id, "name": ctx.settings.device_name, "incarnation": ctx.settings.incarnation, "pubkey": crate::sync::peer::identity::pubkey(ctx)});
-    ctx.db.with(|c| {
-        crate::archive::tables(c)?;
+    ctx.db.with(|c| Ok(crate::archive::tables(c)?))?;
+    // on a read connection, in one transaction: every table as of the same moment, and no write waits while the
+    // whole usage table is put into text
+    ctx.db.read(|c| {
+        let c = &c.transaction()?;
         let peers: Vec<Value> = rows_jsonl(c, "select device_id, name, os, app_version, incarnation, address, port, cert_pem, pubkey, roots from peers")?
             .lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         Ok(vec![
@@ -265,7 +268,7 @@ fn history(ctx: &Ctx) -> Result<Vec<(&'static str, String)>> {
 /// This computer's transcripts as the folder carries them: `transcripts/<harness>/<profile>/<id>.jsonl.zst`
 /// for every session whose file is still in the tool's folder (archived ones are already compressed, in the archive).
 fn transcripts(ctx: &Ctx) -> Result<Vec<(String, Vec<u8>)>> {
-    let rows: Vec<String> = ctx.db.with(|c| {
+    let rows: Vec<String> = ctx.db.read(|c| {
         let mut st = c.prepare("select json from sessions where device = ? and instr(key, '|') > 0 and harness in ('claude', 'codex', 'pi', 'omp') order by mtime desc")?;
         let v = st.query_map([&ctx.db.device], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
@@ -291,7 +294,7 @@ fn write_zip(ctx: &Ctx, out: &Path, with_transcripts: bool) -> Result<()> {
     let reg = ctx.registry()?;
     // keys only (each `null`): no env or header value is in a backup, also where the list file still holds one
     let reg_text = if reg_text.trim().is_empty() { reg_text } else { reg.without_mcp_values().file_text()? };
-    let state = ctx.db.with(|c| {
+    let state = ctx.db.read(|c| {
         let ledger: Vec<Value> = c.prepare("select target, kind, item from ledger")?
             .query_map([], |r| Ok(json!([r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?])))?.collect::<rusqlite::Result<_>>()?;
         let kv: serde_json::Map<String, Value> = c.prepare("select k, v from kv")?

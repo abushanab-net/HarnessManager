@@ -167,6 +167,8 @@ pub fn list_views(ctx: &Ctx) -> Result<Vec<ProfileView>> {
 
 /// Import new usage for every profile. Returns the number of new rows.
 pub fn import_usage(ctx: &Ctx) -> Result<usize> {
+    // the day's price list first, here in the round: the reads that price something take what is stored
+    crate::pricing::refresh(ctx);
     let reg = ctx.registry()?;
     // accounts side by side (each also reads its files on all cores): a first run reads gigabytes of logs
     let results: Vec<(String, Result<usize>)> = std::thread::scope(|s| {

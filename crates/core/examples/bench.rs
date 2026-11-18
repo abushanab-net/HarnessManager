@@ -486,6 +486,9 @@ fn main() -> anyhow::Result<()> {
         let t = Instant::now();
         let n = hrm_core::pricing::load(&ctx).len();
         println!("{:<66} {:>9.1} ms   ({n} prices)", "first read of the price list, none stored", t.elapsed().as_secs_f64() * 1000.0);
+        let t = Instant::now();
+        service::import_usage(&ctx)?;
+        println!("{:<66} {:>9.1} ms   ({} prices after it)", "the round's usage import, no account", t.elapsed().as_secs_f64() * 1000.0, hrm_core::pricing::load(&ctx).len());
         return Ok(());
     }
     // a local price list: no measurement waits on the network

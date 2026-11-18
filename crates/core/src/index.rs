@@ -112,18 +112,19 @@ fn open_ids(h: &dyn Harness, ctx: &Ctx, p: &Profile, list: &[SessionMeta]) -> Ha
 #[allow(clippy::too_many_arguments)]
 fn reconcile(ctx: &Ctx, h: &dyn Harness, p: &Profile, list: Vec<SessionMeta>, open: &HashSet<String>, res: &mut Resolver, infos: &mut HashMap<String, ProjectInfo>, to_journal: &mut Vec<SessionMeta>, rep: &mut Report) -> Result<()> {
     let prefix = format!("{}|{}|", h.id(), p.name);
-    let existing: HashMap<String, (String, String, String, bool)> = ctx.db.with(|c| {
+    let existing: HashMap<String, (String, String, String, bool)> = ctx.db.read(|c| {
         let mut st = c.prepare("select key, json, project_key, project_name, open from sessions where key >= ?1 and key < ?2 and device = ?3")?;
         let rows = st.query_map(params![prefix, crate::db::prefix_end(&prefix), ctx.db.device], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0))))?;
         Ok(rows.flatten().collect())
     })?;
     let mut seen: HashSet<String> = HashSet::new();
     let (device, device_name) = (ctx.db.device.clone(), ctx.settings.device_name.clone());
+    // each session's project before the write transaction: a folder not looked up yet is read from the disk, and no other write should wait on that
+    let list: Vec<(SessionMeta, ProjectInfo)> = list.into_iter().map(|m| { let info = res.resolve(&m.cwd); (m, info) }).collect();
     ctx.db.with(|c| {
         let tx = c.transaction()?;
-        for m in list {
+        for (m, info) in list {
             let key = local_key(&m);
-            let info = res.resolve(&m.cwd);
             infos.entry(info.key.clone()).or_insert_with(|| info.clone());
             let is_open = open.contains(&m.id);
             let json = serde_json::to_string(&m)?;

@@ -421,7 +421,7 @@ impl Db {
 
     /// Sessions merged from the other computers, with the computer each ran on.
     pub fn remote_sessions(&self) -> Result<Vec<(String, SessionMeta)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select device, json from sessions where device <> '' and device <> ?")?;
             let v = st.query_map([&self.device], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten()
                 .filter_map(|(d, j)| serde_json::from_str(&j).ok().map(|m| (d, m))).collect();
@@ -431,7 +431,7 @@ impl Db {
 
     /// Every cursor of one account, by file path: one query per import instead of one per file.
     pub fn cursors_for(&self, profile: &str) -> Result<std::collections::HashMap<String, (i64, i64, i64, String)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select path, offset, mtime, len, tail from cursors where profile = ?")?;
             let rows = st.query_map([profile], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))))?;
             Ok(rows.flatten().collect())
@@ -439,7 +439,7 @@ impl Db {
     }
 
     pub fn cursor(&self, path: &str) -> Result<Option<(i64, i64, i64, String)>> {
-        self.with(|c| {
+        self.read(|c| {
             Ok(c.query_row("select offset, mtime, len, tail from cursors where path=?", [path], |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             }).optional()?)
@@ -469,7 +469,7 @@ impl Db {
 
     /// The cached records of one account's session files, by key: one query instead of one per file.
     pub fn sessions_cached_for(&self, prefix: &str) -> Result<std::collections::HashMap<String, (i64, i64, SessionMeta)>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select key, mtime, len, json from sessions where key >= ?1 and key < ?2")?;
             let rows = st.query_map([prefix, &prefix_end(prefix)], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
             let mut out = std::collections::HashMap::new();
@@ -512,7 +512,7 @@ impl Db {
     }
 
     pub fn ledger(&self, target: &str, kind: &str) -> Result<Vec<String>> {
-        self.with(|c| {
+        self.read(|c| {
             let mut st = c.prepare("select item from ledger where target=? and kind=? order by item")?;
             let v = st.query_map([target, kind], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
             Ok(v)
