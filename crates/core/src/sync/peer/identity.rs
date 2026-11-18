@@ -51,7 +51,17 @@ fn make_cert(key_der: &[u8], device_id: &str) -> Result<(String, Vec<u8>)> {
 pub fn load(ctx: &Ctx) -> Result<Identity> {
     let t = target(&ctx.settings.device_id);
     // `device.key`: where a version before the credential store on macOS and Linux kept the seed
-    let stored = secrets::read_moving(&t, &ctx.data.join("device.key"));
+    let mut stored = secrets::read_moving(&t, &ctx.data.join("device.key"));
+    // a computer that already has a key and reads none just now asks again before it makes another: one failed
+    // read must not replace the key every pairing and every signed chunk depends on
+    if stored.is_none() && ctx.db.kv_get("device:pubkey").ok().flatten().is_some() {
+        for _ in 0..5 {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stored = secrets::read_moving(&t, &ctx.data.join("device.key"));
+            if stored.is_some() { break; }
+        }
+        if stored.is_none() { crate::log::warn("computers: this computer's device key is gone from the credential store; a new one is made and its pairings must be made again"); }
+    }
     let seed: [u8; 32] = match stored.and_then(|b| hex::decode(String::from_utf8_lossy(&b).trim()).ok()).and_then(|v| v.try_into().ok()) {
         Some(s) => s,
         None => {
