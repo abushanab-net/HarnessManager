@@ -894,6 +894,20 @@ pub fn skill_import(ctx: &Ctx, harness_id: &str) -> Result<(Vec<String>, Vec<Str
     Ok((added, kept, crate::items::sync(ctx, &reg)?))
 }
 
+/// A skill installed into the store from a folder or a GitHub link, ticked for the tools in `enable`, saved, and
+/// every tool brought in step. The sync's own result comes back beside the skill: the skill is installed and
+/// saved by then, whatever a link did.
+pub fn skill_install(ctx: &Ctx, source: &str, name: Option<&str>, enable: &[String]) -> Result<(crate::registry::Skill, Result<crate::items::SyncReport>)> {
+    // before anything is copied: refused at its tick, the skill was in the store and not in the list
+    if let Some(h) = enable.iter().find(|h| harness::by_id(h).is_none()) { bail!("unknown harness '{h}'"); }
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let skill = crate::items::install_skill(ctx, &mut reg, source, name)?;
+    for h in enable { crate::items::set_target(&mut reg, "skill", &skill.name, h, None, true)?; }
+    ctx.save_registry(&reg)?;
+    Ok((skill, crate::items::sync(ctx, &reg)))
+}
+
 // ---------- in-app login ----------
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1524,6 +1538,29 @@ mod tests {
         // the command line synced after its import; the window left the other accounts for the next sync
         assert!(crate::shared::is_link(&work.join("notes")) && work.join("notes").join("SKILL.md").is_file(), "{sync:?}");
         assert!(refused(skill_import(&ctx, "opencode")).contains("no main opencode profile"));
+    }
+
+    #[test]
+    fn a_skill_is_installed_ticked_and_linked_in_one_step_and_an_unknown_tool_is_refused_first() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let (main, work) = two_codex_accounts(&ctx);
+        let src = t.path().join("notes");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "---\nname: notes\n---\n").unwrap();
+        let (src, store) = (src.display().to_string(), crate::items::skill_store(&ctx));
+        // the window refused it at the tick, with the skill's files already in the store
+        assert!(refused(skill_install(&ctx, &src, None, &["codex".into(), "nope".into()])).contains("unknown harness 'nope'"));
+        assert!(!store.join("notes").exists(), "nothing was copied");
+        // no tools (the command line): installed and listed, ticked nowhere
+        let (sk, sync) = skill_install(&ctx, &src, None, &[]).unwrap();
+        assert!(sync.is_ok() && sk.name == "notes" && store.join("notes").join("SKILL.md").is_file() && !main.join("notes").exists());
+        // with tools (the window's Install into): every account of the tool has it now
+        skill_install(&ctx, &src, Some("notes-2"), &["codex".into()]).unwrap().1.unwrap();
+        assert!(crate::shared::is_link(&main.join("notes-2")) && crate::shared::is_link(&work.join("notes-2")));
+        let reg = ctx.registry().unwrap();
+        assert_eq!(reg.skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["notes", "notes-2"]);
+        assert_eq!(reg.targets.iter().map(|t| (t.item.as_str(), t.harness.as_str())).collect::<Vec<_>>(), [("notes-2", "codex")]);
     }
 
     #[test]

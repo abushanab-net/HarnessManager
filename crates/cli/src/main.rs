@@ -901,7 +901,8 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
             for s in &reg.skills { println!("{:<24} {:<50} {}", s.name, hrm_core::util::truncate(&s.source, 50), targets_for(&reg, "skill", &s.name)); }
             return Ok(0);
         }
-        SkillCmd::Install { source, name } => { let s = items::install_skill(ctx, &mut reg, &source, name.as_deref())?; println!("Installed {}", s.name); }
+        // no tool is ticked here, where the window's Install into ticks them: `hrm skills enable` does that
+        SkillCmd::Install { source, name } => { let (s, rep) = service::skill_install(ctx, &source, name.as_deref(), &[])?; println!("Installed {}", s.name); return Ok(skill_notes(rep?)); }
         SkillCmd::Remove { name } => {
             service::item_remove(ctx, "skill", &name)?;
             println!("Removed {name}");

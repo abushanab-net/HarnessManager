@@ -64,14 +64,11 @@ pub fn sync(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 pub fn sync_last(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(ctx.db.kv_get("sync:last")?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null)) }
 
 pub fn skill_install(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
-    let sk = items::install_skill(ctx, &mut reg, &s(a, "source")?, opt(a, "name").as_deref())?;
-    for h in a["enable"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
-        items::set_target(&mut reg, "skill", &sk.name, h, None, true)?;
-    }
-    ctx.save_registry(&reg)?;
+    let enable: Vec<String> = a["enable"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+    let (sk, sync) = service::skill_install(ctx, &s(a, "source")?, opt(a, "name").as_deref(), &enable)?;
     let mut v = serde_json::to_value(&sk)?;
-    v["sync"] = sync_soft(ctx);
+    // the sync report, or `{"error": ...}`: a link that fails must not undo the answer
+    v["sync"] = sync.map_or_else(|e| json!({"error": format!("{e:#}")}), |rep| json!(rep));
     Ok(v)
 }
 
