@@ -39,14 +39,13 @@ impl Codex {
                 Some((_, _, meta)) if !parse_now() => {
                     out.push(stale(meta, mtime));
                     let name = p.name.clone();
-                    refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| parse_rollout_file(f, &name, false).ok().map(|t| t.meta));
                 }
                 _ => todo.push((f, mtime, len)),
             }
         }
         each_file_parallel_sig(&todo, |f, mtime, len| {
-            let text = read_text(f).ok()?;
-            Some((mtime, len, parse_rollout(&text, &p.name, f, false).meta))
+            Some((mtime, len, parse_rollout_file(f, &p.name, false).ok()?.meta))
         }, |r| {
             let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
             ctx.db.put_session(&format!("codex|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
@@ -329,7 +328,7 @@ impl Harness for Codex {
 
     fn transcript(&self, _ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {
         let path = PathBuf::from(&s.source_path);
-        Ok(parse_rollout(&read_text(&path)?, &p.name, &path, true))
+        parse_rollout_file(&path, &p.name, true)
     }
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec!["resume".into(), id.into()] }
@@ -398,19 +397,38 @@ fn real_prompt(text: &str) -> Option<String> {
     Some(t.to_string())
 }
 
-/// Parse a Codex rollout. `full` also builds the turns.
+/// A line that says what the user typed as an event (`event_msg` `user_message`).
+fn user_message(line: &str) -> bool {
+    line.contains("\"user_message\"") && serde_json::from_str::<Value>(line).is_ok_and(|v| v["payload"]["type"] == "user_message")
+}
+
+/// Parse a Codex rollout from its file, a line at a time: one can be over a hundred megabytes, and neither its text
+/// nor its parsed lines are held. `full` also builds the turns.
+pub fn parse_rollout_file(path: &Path, profile: &str, full: bool) -> Result<Transcript> {
+    // whether it carries what the user typed as events is known before the lines are counted: a first look, as far as the first one
+    let mut has_events = false;
+    for line in lines(path)? { if user_message(&line?) { has_events = true; break; } }
+    let mut failed = None;
+    let t = parse_lines(lines(path)?.map_while(|l| l.map_err(|e| failed = Some(e)).ok()), has_events, profile, path, full);
+    match failed { Some(e) => Err(e.into()), None => Ok(t) }
+}
+
+/// Parse a Codex rollout held as text. `full` also builds the turns.
 pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Transcript {
+    parse_lines(text.lines(), text.lines().any(user_message), profile, path, full)
+}
+
+/// `has_events`: newer rollouts carry what the user typed as event_msg user_message; older ones only as messages.
+fn parse_lines<S: AsRef<str>>(lines: impl Iterator<Item = S>, has_events: bool, profile: &str, path: &Path, full: bool) -> Transcript {
     let mut meta = SessionMeta { harness: "codex".into(), profile: profile.into(), source_path: path.display().to_string(), ..Default::default() };
-    let lines: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
-    // newer rollouts carry what the user typed as event_msg user_message; older ones only as messages
-    let has_events = lines.iter().any(|v| v["payload"]["type"] == "user_message");
     let mut turns: Vec<Turn> = vec![];
     let mut calls: HashMap<String, (usize, usize, i64)> = HashMap::new();
     let mut first_prompt = String::new();
     let mut first_answer = String::new();
     let mut agent = String::new();
     let mut last_total = 0i64;
-    for v in &lines {
+    for line in lines {
+        let Ok(v) = serde_json::from_str::<Value>(line.as_ref()) else { continue };
         let ts = v["timestamp"].as_str().map(ts_ms).unwrap_or(0);
         if ts > 0 {
             if meta.started_at == 0 { meta.started_at = ts; }
@@ -532,6 +550,51 @@ fn exit_code(raw: &str) -> Option<i64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod rollout_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_rollout_read_a_line_at_a_time_is_what_its_text_parses_to() {
+        let t = tempfile::tempdir().unwrap();
+        let at = "2026-11-01T10:00:00.000Z";
+        let line = |kind: &str, payload: Value| json!({"type": kind, "timestamp": at, "payload": payload}).to_string();
+        let message = |role: &str, text: &str| line("response_item", json!({"type": "message", "role": role, "content": [{"type": "text", "text": text}]}));
+        let newer = [
+            line("session_meta", json!({"id": "c1", "cwd": "C:\\work"})), line("turn_context", json!({"model": "gpt-6"})),
+            line("event_msg", json!({"type": "user_message", "message": "Bump ArgoCD"})), message("user", "Bump ArgoCD"),
+            line("response_item", json!({"type": "function_call", "name": "exec_command", "call_id": "k1", "arguments": "{\"cmd\":\"helm upgrade\"}"})),
+            line("response_item", json!({"type": "function_call_output", "call_id": "k1", "output": "Exit code: 1\nno such release"})),
+            message("assistant", "The release is missing."), line("event_msg", json!({"type": "token_count", "info": {"total_token_usage": {"total_tokens": 520}}})),
+        ];
+        // an older rollout says what the user typed only as messages, among the ones Codex injects
+        let older = [line("session_meta", json!({"id": "c0", "cwd": "C:\\work"})), message("user", "<environment_context>cwd</environment_context>"), message("user", "Rotate the certificates"), message("assistant", "Done.")];
+        let mut seen = vec![];
+        for (name, lines) in [("rollout-new.jsonl", &newer[..]), ("rollout-old.jsonl", &older[..])] {
+            // as Codex leaves a rollout it is writing: Windows line ends, a byte that is no UTF-8 inside an answer, half a last line
+            let mut bytes = lines.join("\r\n").into_bytes();
+            bytes.extend_from_slice(b"\r\n");
+            bytes.extend_from_slice(message("assistant", "caf#").as_bytes());
+            let mark = bytes.iter().rposition(|b| *b == b'#').unwrap();
+            bytes[mark] = 0xff;
+            bytes.extend_from_slice(b"\n{\"type\":\"respon");
+            for (file, bytes) in [(t.path().join(name), bytes.clone()), (t.path().join(format!("{name}.zst")), zstd::encode_all(&bytes[..], 3).unwrap())] {
+                std::fs::write(&file, bytes).unwrap();
+                for full in [false, true] {
+                    let read = parse_rollout_file(&file, "codex-main", full).unwrap();
+                    assert_eq!(serde_json::to_value(&read).unwrap(), serde_json::to_value(parse_rollout(&read_text(&file).unwrap(), "codex-main", &file, full)).unwrap(), "{name} full={full}");
+                    seen.push((read.meta.id.clone(), read.meta.title.clone(), read.meta.prompts, read.meta.messages, read.meta.tool_calls, read.meta.failed, read.meta.tokens, read.turns.len()));
+                }
+            }
+        }
+        let new = |turns| ("c1".to_string(), "Bump ArgoCD".to_string(), 1, 3, 1, 1, 520, turns);
+        let old = |turns| ("c0".to_string(), "Rotate the certificates".to_string(), 1, 4, 0, 0, 0, turns);
+        assert_eq!(seen, [new(0), new(1), new(0), new(1), old(0), old(1), old(0), old(1)]);
+        assert!(parse_rollout_file(&t.path().join("rollout-none.jsonl"), "codex-main", false).is_err(), "a file that cannot be read is no empty session");
+    }
 }
 
 #[cfg(test)]
