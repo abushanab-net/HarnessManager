@@ -1032,3 +1032,18 @@ fn a_secret_left_out_of_the_arguments_is_read_from_piped_input() {
     assert!(!ok && se2 == se, "{se2}");
     for args in [["hub", "join", "--help"], ["ring", "enter", "--help"]] { assert!(e.ok(&args).contains("shell history")); }
 }
+
+#[test]
+fn computers_status_says_when_part_of_a_computers_history_did_not_arrive() {
+    let e = Env::new();
+    e.ok(&["computers", "status"]);
+    let db = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
+    db.execute_batch(r#"insert into peers(device_id, name, gap) values('pc-laptop', 'LAPTOP', '{"incarnation":"i","wait":{"from":1,"to":40,"since":1}}'),
+        ('pc-old', 'OLD-PC', '{"incarnation":"i","lost":{"from":1,"to":9}}'), ('pc-tablet', 'TABLET', null);"#).unwrap();
+    drop(db);
+    let out = e.ok(&["computers", "status"]);
+    let after = |name: &str| out.lines().skip_while(|l| !l.trim_start().starts_with(name)).nth(1).unwrap_or("").trim().to_string();
+    assert_eq!(after("LAPTOP"), "Part of this computer's history has not arrived yet. Waiting for it to come online.", "{out}");
+    assert_eq!(after("OLD-PC"), "Part of this computer's history is missing here.", "{out}");
+    assert!(!after("TABLET").starts_with("Part of"), "{out}");
+}

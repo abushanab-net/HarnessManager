@@ -2478,6 +2478,30 @@ description: Bulk skill ${i}
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=pcard-pcs]')")), 'Projects as before');
   });
 
+  await test("computers: a card says when part of another computer's history has not arrived yet, or is missing here", async () => {
+    // the status as the backend gives it for three other computers: one waited for, one given up, one whole
+    await exec(`const t = window.__TAURI__, real = t.core; window.__gapReal = real;
+      const peers = [{ id: 'pc-laptop', name: 'LAPTOP', gap: { from: 1, to: 40, waiting: true, since: Date.now() } }, { id: 'pc-old', name: 'OLD-PC', gap: { from: 1, to: 9, waiting: false } }, { id: 'pc-tablet', name: 'TABLET', gap: null }];
+      t.core = { ...real, invoke: (cmd, a, o) => real.invoke(cmd, a, o).then((r) => (a && a.op === 'computers_status' ? { ...r, peers } : r)) };`);
+    try {
+      await nav('#home');
+      await nav('#computers');
+      await $('[data-testid=gap-pc-laptop]');
+      const d = await exec(`const q = (id) => document.querySelector('[data-testid=gap-' + id + ']');
+        return { laptop: q('pc-laptop').textContent, old: q('pc-old').textContent, oldWarns: getComputedStyle(q('pc-old')).color !== getComputedStyle(q('pc-laptop')).color, tablet: !!q('pc-tablet'), lines: document.querySelectorAll('[data-testid=computer-cards] .pc-note').length,
+          inCard: !!q('pc-laptop').closest('[data-testid=computer-pc-laptop]'), px: parseFloat(getComputedStyle(q('pc-laptop')).fontSize) }`);
+      assert.equal(d.laptop, "Part of this computer's history has not arrived yet. Waiting for it to come online.", 'what is missing and what happens next');
+      assert.equal(d.old, "Part of this computer's history is missing here.", 'given up: said as a fact');
+      assert.ok(d.oldWarns && d.inCard, 'on that computer\'s own card, in the warning tone once given up');
+      assert.ok(!d.tablet && d.lines === 2, 'a computer whose history is whole has no such line, nor has this one');
+      assert.ok(d.px >= 12, 'nothing under 12 px');
+      await shot('19b-computers-gap');
+    } finally {
+      await exec('window.__TAURI__.core = window.__gapReal; window.__gapReal = null;');
+      await nav('#home');
+    }
+  });
+
   await test('computers: a page of its own in the sidebar, which the chip opens; its name, a switch, Pair and the first-run choice work from it; Settings has no Computers section', async () => {
     const saved = () => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8'));
     await nav('#home');
