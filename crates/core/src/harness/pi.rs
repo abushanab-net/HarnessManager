@@ -53,6 +53,36 @@ impl PiLike {
         out
     }
 
+    /// The sessions of `files` (each with its time and size), from their cached records where a file is as it was.
+    fn scan(&self, ctx: &Ctx, p: &Profile, files: Vec<(PathBuf, i64, u64)>, cached: HashMap<String, (i64, i64, SessionMeta)>, since: i64) -> Result<Vec<SessionMeta>> {
+        let mut out = vec![];
+        let mut todo = vec![];
+        for (f, mtime, len) in files {
+            if mtime < since { continue; }
+            let key = format!("{}|{}|{}", self.id, p.name, f.display());
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a session still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) if !parse_now() => {
+                    out.push(stale(meta, mtime));
+                    let (id, name) = (self.id, p.name.clone());
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, id, &name, f, false).meta));
+                }
+                _ => todo.push((f, mtime, len)),
+            }
+        }
+        each_file_parallel_sig(&todo, |f, mtime, len| {
+            let text = std::fs::read_to_string(f).ok()?;
+            Some((mtime, len, parse_session(&text, self.id, &p.name, f, false).meta))
+        }, |r| {
+            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
+            ctx.db.put_session(&format!("{}|{}|{}", self.id, p.name, meta.source_path), &meta, mtime, len as i64)?;
+            out.push(meta);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+
     /// The `hrm` provider in the profile's `models.json`: an endpoint Pi talks to with the key it finds in
     /// `$HRM_PI_KEY` at launch, so no key is written to disk.
     fn write_provider(&self, home: &Path, base_url: &str, api: &str, model: &str) -> Result<()> {
@@ -174,33 +204,11 @@ impl Harness for PiLike {
     fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> { vec![self.home(ctx, p).join("sessions")].into_iter().filter(|d| d.is_dir()).collect() }
 
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
-        let mut out = vec![];
-        let mut todo = vec![];
-        let cached = ctx.db.sessions_cached_for(&format!("{}|{}|", self.id, p.name))?;
-        for (f, mtime, len) in self.session_files(ctx, p) {
-            if mtime < since { continue; }
-            let key = format!("{}|{}|{}", self.id, p.name, f.display());
-            match cached.get(&key) {
-                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
-                // a session still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) if !parse_now() => {
-                    out.push(stale(meta, mtime));
-                    let (id, name) = (self.id, p.name.clone());
-                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, id, &name, f, false).meta));
-                }
-                _ => todo.push((f, mtime, len)),
-            }
-        }
-        each_file_parallel_sig(&todo, |f, mtime, len| {
-            let text = std::fs::read_to_string(f).ok()?;
-            Some((mtime, len, parse_session(&text, self.id, &p.name, f, false).meta))
-        }, |r| {
-            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
-            ctx.db.put_session(&format!("{}|{}|{}", self.id, p.name, meta.source_path), &meta, mtime, len as i64)?;
-            out.push(meta);
-            Ok(())
-        })?;
-        Ok(out)
+        self.scan(ctx, p, self.session_files(ctx, p), ctx.db.sessions_cached_for(&format!("{}|{}|", self.id, p.name))?, since)
+    }
+
+    fn sessions_in(&self, ctx: &Ctx, p: &Profile, files: &[PathBuf]) -> Option<Result<Vec<SessionMeta>>> {
+        changed(ctx, self.id, &p.name, files, |f| f.extension().map(|e| e == "jsonl").unwrap_or(false)).transpose().map(|r| r.and_then(|(files, cached)| self.scan(ctx, p, files, cached, 0)))
     }
 
     fn transcript(&self, _ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {

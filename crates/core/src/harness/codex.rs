@@ -21,11 +21,45 @@ impl Codex {
     fn rollouts(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
         let home = self.home(ctx, p);
         let mut out = vec![];
-        let keep = |f: &Path| f.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("rollout-") && (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))).unwrap_or(false);
-        crate::util::walk_files_sig(&home.join("sessions"), &keep, &mut out);
-        crate::util::walk_files_sig(&home.join("archived_sessions"), &keep, &mut out);
+        crate::util::walk_files_sig(&home.join("sessions"), &is_rollout, &mut out);
+        crate::util::walk_files_sig(&home.join("archived_sessions"), &is_rollout, &mut out);
         out
     }
+
+    /// The sessions of `files` (each with its time and size), from their cached records where a file is as it was.
+    fn scan(&self, ctx: &Ctx, p: &Profile, files: Vec<(PathBuf, i64, u64)>, cached: HashMap<String, (i64, i64, SessionMeta)>, since: i64) -> Result<Vec<SessionMeta>> {
+        let mut out = vec![];
+        let mut todo = vec![];
+        for (f, mtime, len) in files {
+            if mtime < since { continue; }
+            let key = format!("codex|{}|{}", p.name, f.display());
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a rollout still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) if !parse_now() => {
+                    out.push(stale(meta, mtime));
+                    let name = p.name.clone();
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
+                }
+                _ => todo.push((f, mtime, len)),
+            }
+        }
+        each_file_parallel_sig(&todo, |f, mtime, len| {
+            let text = read_text(f).ok()?;
+            Some((mtime, len, parse_rollout(&text, &p.name, f, false).meta))
+        }, |r| {
+            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
+            ctx.db.put_session(&format!("codex|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
+            out.push(meta);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+}
+
+/// A rollout by its name: `rollout-….jsonl`, compressed or not.
+fn is_rollout(f: &Path) -> bool {
+    f.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("rollout-") && (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))).unwrap_or(false)
 }
 
 fn window_label(minutes: i64) -> (String, String) {
@@ -286,33 +320,11 @@ impl Harness for Codex {
     }
 
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
-        let mut out = vec![];
-        let mut todo = vec![];
-        let cached = ctx.db.sessions_cached_for(&format!("codex|{}|", p.name))?;
-        for (f, mtime, len) in self.rollouts(ctx, p) {
-            if mtime < since { continue; }
-            let key = format!("codex|{}|{}", p.name, f.display());
-            match cached.get(&key) {
-                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
-                // a rollout still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) if !parse_now() => {
-                    out.push(stale(meta, mtime));
-                    let name = p.name.clone();
-                    refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
-                }
-                _ => todo.push((f, mtime, len)),
-            }
-        }
-        each_file_parallel_sig(&todo, |f, mtime, len| {
-            let text = read_text(f).ok()?;
-            Some((mtime, len, parse_rollout(&text, &p.name, f, false).meta))
-        }, |r| {
-            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
-            ctx.db.put_session(&format!("codex|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
-            out.push(meta);
-            Ok(())
-        })?;
-        Ok(out)
+        self.scan(ctx, p, self.rollouts(ctx, p), ctx.db.sessions_cached_for(&format!("codex|{}|", p.name))?, since)
+    }
+
+    fn sessions_in(&self, ctx: &Ctx, p: &Profile, files: &[PathBuf]) -> Option<Result<Vec<SessionMeta>>> {
+        changed(ctx, "codex", &p.name, files, is_rollout).transpose().map(|r| r.and_then(|(files, cached)| self.scan(ctx, p, files, cached, 0)))
     }
 
     fn transcript(&self, _ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {

@@ -803,7 +803,7 @@ pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcri
     let s = match find()? {
         Some(s) => s,
         // a session the index has not seen yet (its file was just written): its account's folders are read now
-        None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false)?; find()?.context("session not found")? }
+        None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false, None)?; find()?.context("session not found")? }
     };
     if s.archived { return crate::archive::transcript(&s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;

@@ -66,17 +66,21 @@ fn run(ctx_of: CtxOf, on_refresh: OnRefresh) {
         while let Ok(p) = rx.recv_timeout(SETTLE.min(most.saturating_duration_since(Instant::now()))) { paths.insert(p); }
         let ctx = ctx_of();
         let paths: Vec<PathBuf> = paths.into_iter().collect();
-        // usage first, from the cursors, for the accounts the files belong to; then their sessions
-        if let Ok(reg) = ctx.registry() {
-            for p in reg.profiles.iter().filter(|p| { let d = harness::of(p).session_dirs(&ctx, p); paths.iter().any(|f| d.iter().any(|x| f.starts_with(x))) }) {
-                if let Err(e) = harness::of(p).import_usage(&ctx, p) { crate::log::warn(&format!("watch: usage import for {}: {e:#}", p.name)); }
-            }
-        }
-        match index::refresh(&ctx, Scope::Paths(paths)) {
-            Ok(r) => on_refresh(&r),
-            Err(e) => crate::log::warn(&format!("watch: index refresh: {e:#}")),
-        }
+        if let Some(r) = changed(&ctx, paths) { on_refresh(&r); }
     }
+}
+
+/// What a burst of changed paths asks for: the usage import, from the cursors, of the accounts they belong to, then
+/// the index refresh of those paths. None when no account's sessions can have changed (a file a tool keeps beside
+/// its sessions): nothing is read and nothing redrawn.
+pub fn changed(ctx: &Ctx, paths: Vec<PathBuf>) -> Option<Report> {
+    let reg = ctx.registry().map_err(|e| crate::log::warn(&format!("watch: index refresh: {e:#}"))).ok()?;
+    let owners = index::owners(ctx, &reg, &paths);
+    if owners.is_empty() { return None; }
+    for p in owners {
+        if let Err(e) = harness::of(p).import_usage(ctx, p) { crate::log::warn(&format!("watch: usage import for {}: {e:#}", p.name)); }
+    }
+    index::refresh(ctx, Scope::Paths(paths)).map_err(|e| crate::log::warn(&format!("watch: index refresh: {e:#}"))).ok()
 }
 
 #[cfg(test)]
@@ -84,6 +88,22 @@ mod tests {
     use super::*;
     use crate::index::tests::{claude_file, computer};
     use crate::service::{sessions, SessionFilter};
+
+    #[test]
+    fn what_a_tool_writes_beside_its_sessions_starts_no_refresh() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = computer(t.path());
+        let mut reg = ctx.registry().unwrap();
+        reg.add_profile(crate::Profile { name: "opencode-main".into(), label: None, harness: "opencode".into(), kind: crate::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+        ctx.save_registry(&reg).unwrap();
+        let data = harness::opencode::OpenCode.data_dir(&ctx, reg.get("opencode-main").unwrap());
+        std::fs::create_dir_all(data.join("snapshot")).unwrap();
+        assert!(changed(&ctx, vec![data.join("snapshot").join("pack-1.idx"), data.join("log").join("today.log")]).is_none());
+        assert!(changed(&ctx, vec![t.path().join("elsewhere.jsonl")]).is_none());
+        // its database's log does: the account is looked at (it has no database yet, so no session)
+        let r = changed(&ctx, vec![data.join("snapshot").join("pack-1.idx"), data.join("opencode.db-wal")]).unwrap();
+        assert_eq!((r.profiles, r.sessions), (1, 0));
+    }
 
     #[test]
     fn a_file_written_under_a_watched_folder_is_in_the_index_within_two_seconds() {

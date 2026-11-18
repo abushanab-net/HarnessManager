@@ -124,9 +124,22 @@ impl Harness for OpenCode {
 
     fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> { vec![self.data_dir(ctx, p)].into_iter().filter(|d| d.is_dir()).collect() }
 
+    // sessions and usage are in the database, whose write-ahead log moves at every write; snapshots, logs and tool output are not
+    fn watches(&self, path: &Path) -> bool { matches!(path.file_name().and_then(|n| n.to_str()), Some("opencode.db" | "opencode.db-wal")) }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         let Some(db) = self.open_db(ctx, p) else { return Ok(vec![]) };
-        let path = self.data_dir(ctx, p).join("opencode.db").display().to_string();
+        let file = self.data_dir(ctx, p).join("opencode.db");
+        // shortcut: the list is remembered in this process (another one asks the database again) by the size and time of the
+        // database and its log, both still for two seconds (`still`); a clock set back can hide a write until the next one
+        type Listed = HashMap<(PathBuf, String, i64), ([Option<(i64, u64)>; 2], Vec<SessionMeta>)>;
+        static LISTED: std::sync::Mutex<Option<Listed>> = std::sync::Mutex::new(None);
+        let sig = [crate::util::file_sig(&file), crate::util::file_sig(&file.with_extension("db-wal"))];
+        let at = (file.clone(), p.name.clone(), since);
+        if let Some((s, list)) = LISTED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).get(&at) {
+            if *s == sig { return Ok(list.clone()); }
+        }
+        let path = file.display().to_string();
         let mut st = db.prepare(
             "select s.id, s.title, s.directory, s.time_created, s.time_updated, coalesce(s.tokens_input,0)+coalesce(s.tokens_output,0), coalesce(s.model,''),
              (select count(*) from message m where m.session_id=s.id),
@@ -151,7 +164,9 @@ impl Harness for OpenCode {
                 ..Default::default()
             })
         })?;
-        Ok(rows.flatten().collect())
+        let list: Vec<SessionMeta> = rows.flatten().collect();
+        if sig.iter().all(|s| crate::util::still(*s)) { LISTED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(at, (sig, list.clone())); }
+        Ok(list)
     }
 
     fn transcript(&self, ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {
@@ -239,6 +254,44 @@ impl Harness for OpenCode {
 /// The import command of OpenCode 2.x (`session import`, with the folder) or 1.x (`import`).
 pub fn import_args(v2: bool, file: &Path, local_root: &Path) -> Vec<String> {
     if v2 { vec!["session".into(), "import".into(), file.display().to_string(), "--directory".into(), local_root.display().to_string()] } else { vec!["import".into(), file.display().to_string()] }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_session_list_follows_the_database_also_when_it_was_remembered() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let p = Profile { name: "opencode-main".into(), label: None, harness: "opencode".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let file = OpenCode.data_dir(&ctx, &p).join("opencode.db");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let db = Connection::open(&file).unwrap();
+        db.execute_batch("create table session(id text, parent_id text, title text, directory text, time_created int, time_updated int, time_archived int, tokens_input int, tokens_output int, model text);
+            create table message(id text, session_id text, time_created int, time_updated int, data text);
+            create table part(id text, message_id text, session_id text, time_created int, time_updated int, data text);
+            insert into session values('ses_1', null, 'Fix the flaky build', 'C:\\work', 5, 9, null, 300, 40, '');
+            insert into message values('m1', 'ses_1', 5, 5, '{\"role\":\"user\"}');").unwrap();
+        drop(db);
+        let titles = || OpenCode.sessions(&ctx, &p, 0).unwrap().into_iter().map(|s| (s.title, s.messages, s.prompts)).collect::<Vec<_>>();
+        // written a while ago: the list is remembered, and asked again it is the same
+        std::fs::File::options().write(true).open(&file).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
+        for _ in 0..2 { assert_eq!(titles(), [("Fix the flaky build".to_string(), 1, 1)]); }
+        // a write moves the file's time: the database is asked again, at once and at every look while the write is fresh
+        let db = Connection::open(&file).unwrap();
+        db.execute_batch("update session set title = 'Fix the build for good'; insert into message values('m2', 'ses_1', 6, 6, '{\"role\":\"assistant\"}');").unwrap();
+        drop(db);
+        assert_eq!(titles(), [("Fix the build for good".to_string(), 2, 1)]);
+        let db = Connection::open(&file).unwrap();
+        db.execute_batch("insert into message values('m3', 'ses_1', 7, 7, '{\"role\":\"user\"}');").unwrap();
+        drop(db);
+        assert_eq!(titles(), [("Fix the build for good".to_string(), 3, 2)]);
+        // the watcher takes the database and its log, and leaves what OpenCode writes beside them
+        let dir = file.parent().unwrap();
+        assert!(OpenCode.watches(&file) && OpenCode.watches(&dir.join("opencode.db-wal")));
+        assert!(!OpenCode.watches(&dir.join("opencode.db-shm")) && !OpenCode.watches(&dir.join("snapshot").join("pack-1.idx")) && !OpenCode.watches(&dir.join("log").join("2026-11-01.log")));
+    }
 }
 
 fn model_name(raw: &str) -> String {

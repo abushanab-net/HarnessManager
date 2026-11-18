@@ -112,6 +112,23 @@ impl NewCursor {
 pub static PARSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn parse_now() -> bool { PARSE_NOW.load(std::sync::atomic::Ordering::Relaxed) }
 
+/// Of the paths a burst changed, the session files (`keep`) that are still there, each with its time and size as a
+/// walk gives them, and the cached records of those files alone: what a scan of the changed files starts from.
+/// None when one of them has no record: a session's first write, or a known file under another spelling of its
+/// path (a short name, a link), and only a listing of the account tells the two apart.
+#[allow(clippy::type_complexity)]
+pub fn changed(ctx: &Ctx, harness: &str, profile: &str, files: &[std::path::PathBuf], keep: impl Fn(&Path) -> bool) -> Result<Option<(Vec<(std::path::PathBuf, i64, u64)>, std::collections::HashMap<String, (i64, i64, SessionMeta)>)>> {
+    let files: Vec<_> = files.iter().filter(|f| keep(f)).filter_map(|f| crate::util::file_sig(f).map(|(m, l)| (f.clone(), m, l))).collect();
+    let mut cached = std::collections::HashMap::new();
+    for (f, _, _) in &files {
+        let key = format!("{harness}|{profile}|{}", f.display());
+        let rows = ctx.db.sessions_cached_for(&key)?;
+        if !rows.contains_key(&key) { return Ok(None); }
+        cached.extend(rows);
+    }
+    Ok(Some((files, cached)))
+}
+
 pub fn stale(meta: &SessionMeta, mtime: i64) -> SessionMeta {
     let mut m = meta.clone();
     m.last_active_at = m.last_active_at.max(mtime);

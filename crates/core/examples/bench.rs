@@ -339,15 +339,7 @@ fn settled(ctx: &Ctx, files: &[PathBuf]) -> f64 {
 }
 
 /// What the watcher does with a burst of changed paths: the owners' usage import, then the index refresh of those paths.
-fn watched(ctx: &Ctx, paths: Vec<PathBuf>) -> (index::Report, f64) {
-    let t = Instant::now();
-    let reg = ctx.registry().unwrap();
-    for p in reg.profiles.iter().filter(|p| { let d = harness::of(p).session_dirs(ctx, p); paths.iter().any(|f| d.iter().any(|x| f.starts_with(x))) }) {
-        harness::of(p).import_usage(ctx, p).unwrap();
-    }
-    let import = t.elapsed().as_secs_f64() * 1000.0;
-    (index::refresh(ctx, index::Scope::Paths(paths)).unwrap(), import)
-}
+fn watched(ctx: &Ctx, paths: Vec<PathBuf>) -> Option<index::Report> { hrm_core::watch::changed(ctx, paths) }
 
 fn run(ctx: &Ctx, only: Option<String>) -> anyhow::Result<()> {
     let want = |part: &str| only.as_deref().is_none_or(|o| o == part);
@@ -412,12 +404,37 @@ fn run(ctx: &Ctx, only: Option<String>) -> anyhow::Result<()> {
     let big = codex.iter().max_by_key(|f| f.2).unwrap().0.clone();
     let oc = home.join(".local").join("share").join("opencode");
     let conv = home.join(".gemini").join("antigravity-cli").join("conversations").join("conv-007.db");
+    if want("pieces") {
+    println!("\n-- what a refresh of one account is made of");
+    for name in ["claude-main", "codex-main", "opencode-main", "agy-main"] {
+        let (p, h) = (reg.get(name)?, harness::of(reg.get(name)?));
+        time(&format!("{name}: its scan, nothing changed"), 5, || h.sessions(ctx, p, 0).unwrap().len());
+        time(&format!("{name}: its usage import, nothing changed"), 5, || h.import_usage(ctx, p).unwrap());
+        time(&format!("{name}: its open consoles"), 5, || h.running(ctx, p).len());
+        time(&format!("{name}: a refresh by one path, nothing changed"), 5, || index::refresh(ctx, index::Scope::Paths(h.session_dirs(ctx, p))).unwrap());
+    }
+    // the 100 MB rollout read again by the scan itself, as the full walk has it (the consoles' lookup apart)
+    let p = reg.get("codex-main")?;
+    let (_, mb) = peak_mb(|| time("codex-main: its scan, the 100 MB rollout changed, parsed in the scan", 3, || {
+        append(&big, &mut r);
+        harness::parse::PARSE_NOW.store(true, Ordering::Relaxed);
+        let n = harness::of(p).sessions(ctx, p, 0).unwrap().len();
+        harness::parse::PARSE_NOW.store(false, Ordering::Relaxed);
+        n
+    }));
+    println!("    memory at its highest: +{mb} MB");
+    let id = harness::parse::first_line(&big).and_then(|l| serde_json::from_str::<Value>(&l).ok()).map(|v| v["payload"]["id"].as_str().unwrap_or("").to_string()).unwrap_or_default();
+    index::refresh(ctx, index::Scope::All)?;
+    let (t, mb) = peak_mb(|| time("codex-main: the 100 MB session's transcript", 3, || service::transcript(ctx, "codex-main", &id).unwrap()));
+    println!("    memory at its highest: +{mb} MB; {} turns, {} prompts, {} tool calls, {} failed", t.turns.len(), t.meta.prompts, t.meta.tool_calls, t.meta.failed);
+    }
+
     if want("watch") {
     println!("\n-- one changed file, as the watcher handles it");
     for (label, file) in [("a Claude session (1,300 in the account)", claude[7].0.clone()), ("a small Codex rollout (353 in the account)", small.clone()), ("the 100 MB Codex rollout", big.clone())] {
-        let (mut wait, mut import) = (0.0, 0.0);
-        time(&format!("watcher: {label}"), 3, || { append(&file, &mut r); let rep = watched(ctx, vec![file.clone()]); import = rep.1; wait = settled(ctx, &[file.clone()]); rep });
-        println!("    of which the usage import {import:.1} ms; its parse landed {wait:.0} ms after the refresh returned");
+        let mut wait = 0.0;
+        time(&format!("watcher: {label}"), 3, || { append(&file, &mut r); let rep = watched(ctx, vec![file.clone()]); wait = settled(ctx, &[file.clone()]); rep });
+        println!("    its parse landed {wait:.0} ms after the refresh returned");
     }
     time("watcher: OpenCode wrote a snapshot file (not its database)", 3, || { let f = oc.join("snapshot").join("pack.tmp"); std::fs::write(&f, r.id()).unwrap(); watched(ctx, vec![f]) });
     time("watcher: OpenCode's database, unchanged since the last scan", 3, || watched(ctx, vec![oc.join("opencode.db-wal")]));

@@ -181,7 +181,7 @@ pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id:
     let t = fetch(ctx, device, harness_id, profile, id)?;
     let m = h.materialize(ctx, p, &root, &t)?;
     crate::service::start(ctx, profile, Some(m.cwd.clone()), &m.launch_args)?;
-    if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false) { crate::log::warn(&format!("index after resume here: {e:#}")); }
+    if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false, None) { crate::log::warn(&format!("index after resume here: {e:#}")); }
     let key = format!("forked:{harness_id}/{profile}/{id}");
     ctx.db.kv_set(&key, &json!({"from": device, "at": now_ms()}).to_string())?;
     Ok(json!({"ok": true, "cwd": m.cwd, "args": m.launch_args, "note": m.note}))
