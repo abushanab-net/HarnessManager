@@ -135,6 +135,29 @@ mod keep_tests {
     }
 
     #[test]
+    fn a_backup_made_now_holds_the_transcripts_when_asked_for_or_when_the_setting_says_so() {
+        let t = tempfile::tempdir().unwrap();
+        let mut ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let src = t.path().join("s1.jsonl");
+        std::fs::write(&src, "{\"type\":\"user\"}\n").unwrap();
+        let m = crate::model::SessionMeta { harness: "claude".into(), profile: "work".into(), id: "s1".into(), source_path: src.display().to_string(), ..Default::default() };
+        ctx.db.put_session(&format!("claude|work|{}", src.display()), &m, 1, 1).unwrap();
+        let made = |ctx: &Ctx, label: Option<&str>, transcripts: Option<bool>| {
+            let (b, with) = create_now(ctx, label, transcripts).unwrap();
+            let mut z = zip::ZipArchive::new(std::fs::File::open(dir(ctx).join(&b.name)).unwrap()).unwrap();
+            let held = (0..z.len()).any(|i| z.by_index(i).unwrap().name().unwrap().starts_with("transcripts/"));
+            assert_eq!(held, with, "{}", b.name);
+            (b.label, with)
+        };
+        assert_eq!(made(&ctx, None, None), ("Manual".to_string(), false));
+        assert_eq!(made(&ctx, Some("Before the move"), Some(true)), ("Before the move".to_string(), true));
+        // the setting decides when nothing is said: `hrm backup` without its flag left them out here
+        ctx.settings.backup_transcripts = true;
+        assert!(made(&ctx, None, None).1);
+        assert!(!made(&ctx, None, Some(false)).1, "a plain no is kept");
+    }
+
+    #[test]
     fn a_session_id_in_two_files_does_not_fail_the_backup_and_a_failed_one_leaves_no_part_file() {
         let t = tempfile::tempdir().unwrap();
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
@@ -355,6 +378,13 @@ fn sweep_parts(d: &Path, older_ms: i64) -> usize {
 
 /// Make a backup with this label ("Automatic", "Manual", "Before restore", ...), with transcripts as the setting says.
 pub fn create(ctx: &Ctx, label: &str) -> Result<Backup> { create_with(ctx, label, ctx.settings.backup_transcripts) }
+
+/// The backup the window's button and `hrm backup` make: labelled "Manual" unless told otherwise, with transcripts
+/// when asked for, else as the setting says. Returns it and whether the transcripts are in it.
+pub fn create_now(ctx: &Ctx, label: Option<&str>, transcripts: Option<bool>) -> Result<(Backup, bool)> {
+    let with = transcripts.unwrap_or(ctx.settings.backup_transcripts);
+    Ok((create_with(ctx, label.unwrap_or("Manual"), with)?, with))
+}
 
 pub fn create_with(ctx: &Ctx, label: &str, with_transcripts: bool) -> Result<Backup> {
     let label = clean_label(label)?;

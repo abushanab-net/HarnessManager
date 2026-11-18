@@ -134,7 +134,7 @@ enum Cmd {
     },
     /// Make a backup now (the account list, settings, the history; never keys or logins)
     Backup {
-        /// Also this computer's session transcripts, compressed
+        /// Also this computer's session transcripts, compressed (without it, the backup_transcripts setting decides)
         #[arg(long)] with_transcripts: bool,
         #[command(flatten)] j: Json,
     },
@@ -776,9 +776,10 @@ fn real_main(cli: Cli) -> Result<i32> {
             println!("{} {} leftovers of interrupted operations ({:.1} MB).", if dry_run { "Would remove" } else { "Removed" }, s.files, s.bytes as f64 / 1_048_576.0);
         }
         Cmd::Backup { with_transcripts, j } => {
-            let b = hrm_core::backup::create_with(&ctx, "Manual", with_transcripts)?;
+            // the flag asks for them; without it the Include transcripts setting decides, as for the window's button
+            let (b, with) = hrm_core::backup::create_now(&ctx, None, with_transcripts.then_some(true))?;
             if j.json { return print_json(&b).map(|_| 0); }
-            println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with_transcripts { ", with transcripts" } else { "" });
+            println!("Backed up: {} ({:.1} MB){}", b.name, b.size as f64 / 1_048_576.0, if with { ", with transcripts" } else { "" });
         }
         Cmd::Restore { source, adopt, preview, j } => {
             let src = hrm_core::restore::Source::of_path(&source)?;

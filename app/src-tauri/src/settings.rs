@@ -33,7 +33,7 @@ pub fn backups(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {
 }
 
 pub fn backup_create(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    Ok(json!(hrm_core::backup::create_with(ctx, a["label"].as_str().unwrap_or("Manual"), a["transcripts"].as_bool().unwrap_or(ctx.settings.backup_transcripts))?))
+    Ok(json!(hrm_core::backup::create_now(ctx, a["label"].as_str(), a["transcripts"].as_bool())?.0))
 }
 
 pub fn backup_delete(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::backup::delete(ctx, &s(a, "name")?)?; Ok(json!(true)) }
