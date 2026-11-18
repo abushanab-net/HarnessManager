@@ -3,12 +3,13 @@
 //! them (relay). Other origins' caches are pruned to the last 50 MB, oldest first, never below the newest chunk.
 //! This computer's own journal is kept whole, its older chunks joined into files of up to 1 MB.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
-use crate::util::{read_json, safe_name, sha256_hex, write_atomic};
+use crate::util::{read_json, safe_name, sha256_hex, write_atomic, NamedLock};
 use crate::Ctx;
 
 const KEEP_BYTES: i64 = 50_000_000;
@@ -48,44 +49,72 @@ pub fn put_manifest_empty(ctx: &Ctx, origin: &str, incarnation: &str) -> Result<
     write_atomic(&dir(ctx, origin).join("manifest.json"), json!({"incarnation": incarnation, "last_seq": 0, "chunks": []}).to_string().as_bytes())
 }
 
-/// This computer's chunks older than its newest `keep`, joined into files of up to `max` bytes once that saves
-/// `keep` files: the same entries in the same order, each joined file signed anew by `sign(from, to, sha256)`. A
-/// reader skips the entries its cursor is past, so one that took some of the small files takes the rest from the
-/// joined one. The list is written before the files it replaces go: a reader that still asks for one tries again.
+/// One writer of an origin's list at a time, across threads and processes: it is read, changed and written back
+/// with the files it names, and a list written from a copy read earlier would drop what another writer added.
+fn list_lock(origin: &str) -> NamedLock { NamedLock::take(&format!("journal-list-{origin}")) }
+
+/// One run of this computer's chunks older than its newest `keep`, joined into one file of up to `max` bytes: a
+/// run that is full, or the last one once it holds more than `keep`. The same entries in the same order, signed
+/// anew by `sign(from, to, sha256)`; a reader skips the entries its cursor is past, so one that took some of the
+/// small files takes the rest from the joined one. One run a call keeps the publish lock short however many
+/// files wait. The list is read again under its lock before it is written: when another publisher changed it
+/// meanwhile, nothing is written or removed this time, and the files removed are those the new list replaced.
 pub fn join_old(ctx: &Ctx, keep: usize, max: usize, sign: &dyn Fn(i64, i64, &str) -> String) -> Result<()> {
     let me = &ctx.settings.device_id;
-    let Some(mut man) = manifest(ctx, me) else { return Ok(()) };
+    let Some(man) = manifest(ctx, me) else { return Ok(()) };
     let (inc, list) = (man["incarnation"].as_str().unwrap_or("").to_string(), man["chunks"].as_array().cloned().unwrap_or_default());
     if list.len() <= keep { return Ok(()); }
-    let (old, kept) = list.split_at(list.len() - keep);
+    let old = &list[..list.len() - keep];
     let (seq, size) = (|c: &Value, k: &str| c[k].as_i64().unwrap_or(0), |c: &Value| c["bytes"].as_i64().unwrap_or(0) as usize);
-    // runs of chunks that follow each other without a hole and fit one file together
-    let mut runs: Vec<Vec<&Value>> = vec![];
-    for ch in old {
-        match runs.last_mut() {
-            Some(r) if seq(ch, "from") == seq(r[r.len() - 1], "to") + 1 && r.iter().map(|c| size(c)).sum::<usize>() + size(ch) <= max => r.push(ch),
-            _ => runs.push(vec![ch]),
-        }
-    }
-    if old.len() - runs.len() < keep { return Ok(()); }
+    // runs of chunks that follow each other without a hole and fit one file together; the first worth joining
+    let mut end = 0;
+    let start = loop {
+        if end == old.len() { return Ok(()); }
+        let start = end;
+        end += 1;
+        let mut bytes = size(&old[start]);
+        while end < old.len() && seq(&old[end], "from") == seq(&old[end - 1], "to") + 1 && bytes + size(&old[end]) <= max { bytes += size(&old[end]); end += 1; }
+        if end - start >= 2 && (end < old.len() || end - start > keep) { break start; }
+    };
+    let mut bytes = vec![];
+    for ch in &old[start..end] { bytes.extend(chunk(ctx, me, ch["file"].as_str().unwrap_or(""))?); }
+    let (from, to, sha) = (seq(&old[start], "from"), seq(&old[end - 1], "to"), sha256_hex(&bytes));
+    let joined = json!({"file": format!("{inc}-{from}-{to}.jsonl"), "from": from, "to": to, "sha256": sha, "sig": sign(from, to, &sha), "bytes": bytes.len()});
+    let one = list_lock(me);
+    if !one.held() || manifest(ctx, me).as_ref() != Some(&man) { return Ok(()); }
     let dir = dir(ctx, me).join("journal");
-    let (mut out, mut gone): (Vec<Value>, Vec<&str>) = (vec![], vec![]);
-    for r in runs {
-        if r.len() == 1 { out.push(r[0].clone()); continue; }
-        let mut bytes = vec![];
-        for ch in &r { bytes.extend(chunk(ctx, me, ch["file"].as_str().unwrap_or(""))?); }
-        let (from, to, sha) = (seq(r[0], "from"), seq(r[r.len() - 1], "to"), sha256_hex(&bytes));
-        let file = format!("{inc}-{from}-{to}.jsonl");
-        write_atomic(&dir.join(&file), &bytes)?;
-        out.push(json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sign(from, to, &sha), "bytes": bytes.len()}));
-        gone.extend(r.iter().filter_map(|c| c["file"].as_str()));
-    }
-    out.extend(kept.iter().cloned());
-    man["chunks"] = json!(out);
-    write_atomic(&dir.with_file_name("manifest.json"), serde_json::to_string_pretty(&man)?.as_bytes())?;
-    crate::log::info(&format!("journal: {} old chunks joined into files of up to {} KB", gone.len(), max / 1000));
-    for f in gone { let _ = std::fs::remove_file(dir.join(f)); }
+    write_atomic(&dir.join(joined["file"].as_str().unwrap_or("")), &bytes)?;
+    let mut now = man.clone();
+    now["chunks"] = json!(list[..start].iter().chain([&joined]).chain(&list[end..]).collect::<Vec<_>>());
+    write_atomic(&dir.with_file_name("manifest.json"), serde_json::to_string_pretty(&now)?.as_bytes())?;
+    for ch in &old[start..end] { let _ = std::fs::remove_file(dir.join(ch["file"].as_str().unwrap_or(""))); }
+    crate::log::info(&format!("journal: {} old chunks joined into one of {} KB", end - start, bytes.len() / 1000));
     Ok(())
+}
+
+/// This computer's list against its files: a listed chunk whose file is gone is cut again from the outbox
+/// (`cut(from, to)`, the same entries), or leaves the list when the outbox no longer holds them all. A reader of
+/// that list then finds entries missing, says so and goes on, where it would ask for the file for good.
+pub fn mend(ctx: &Ctx, cut: &dyn Fn(i64, i64) -> Option<Vec<u8>>, sign: &dyn Fn(i64, i64, &str) -> String) -> Result<()> {
+    let me = &ctx.settings.device_id;
+    let one = list_lock(me);
+    let Some(mut man) = manifest(ctx, me).filter(|_| one.held()) else { return Ok(()) };
+    let dir = dir(ctx, me).join("journal");
+    let have: HashSet<String> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str().map(String::from)).collect();
+    let list = man["chunks"].as_array().cloned().unwrap_or_default();
+    if list.iter().all(|c| have.contains(c["file"].as_str().unwrap_or(""))) { return Ok(()); }
+    let mut out = vec![];
+    for ch in list {
+        let (file, from, to) = (ch["file"].as_str().unwrap_or("").to_string(), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
+        if have.contains(&file) { out.push(ch); continue; }
+        let Some(bytes) = cut(from, to).filter(|_| safe_file(&file)) else { crate::log::warn(&format!("journal: {file} is gone and the outbox no longer holds its entries; it leaves the list")); continue };
+        write_atomic(&dir.join(&file), &bytes)?;
+        let sha = sha256_hex(&bytes);
+        crate::log::warn(&format!("journal: {file} was gone; cut again from the outbox"));
+        out.push(json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sign(from, to, &sha), "bytes": bytes.len()}));
+    }
+    man["chunks"] = json!(out);
+    write_atomic(&dir.with_file_name("manifest.json"), serde_json::to_string_pretty(&man)?.as_bytes())
 }
 
 /// Keep one chunk and list it in the origin's manifest (a new incarnation starts the list over).
@@ -93,6 +122,7 @@ pub fn put_chunk(ctx: &Ctx, origin: &str, incarnation: &str, entry: &Value, byte
     let file = entry["file"].as_str().unwrap_or("");
     if !safe_file(file) || !safe_origin(origin) { bail!("not a chunk name"); }
     let d = dir(ctx, origin);
+    let _one = list_lock(origin);
     let mut man = manifest(ctx, origin).filter(|m| m["incarnation"].as_str() == Some(incarnation)).unwrap_or_else(|| {
         let _ = std::fs::remove_dir_all(d.join("journal"));
         json!({"incarnation": incarnation, "last_seq": 0, "chunks": []})

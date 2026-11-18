@@ -138,20 +138,28 @@ fn backfill_if_needed(ctx: &Ctx) -> Result<()> {
     Ok(())
 }
 
+/// The outbox's entries after `after` up to `upto`, in order.
+fn outbox(ctx: &Ctx, after: i64, upto: i64) -> Result<Vec<Entry>> {
+    ctx.db.with(|c| {
+        let mut st = c.prepare("select seq, ts, op, key, data from outbox where seq > ? and seq <= ? order by seq")?;
+        let v = st.query_map([after, upto], |r| Ok(Entry { seq: r.get(0)?, ts: r.get(1)?, op: r.get(2)?, key: r.get(3)?,
+            data: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    })
+}
+
+/// An entry as its line of a chunk file.
+fn line(e: &Entry) -> String { format!("{}\n", serde_json::to_string(e).unwrap_or_default()) }
+
 /// Unpublished entries as signed chunk files in the local store, then its manifest: readers only ever see whole
 /// chunks. The store's manifest is the water line; a store lost with the data folder is simply made again.
 pub fn publish(ctx: &Ctx) -> Result<()> {
     // the refresh round, the 10 s tick and the hub's events thread all publish: one at a time
-    let _one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
+    let one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
     let me = &ctx.settings.device_id;
     let inc = &ctx.settings.incarnation;
     let published = store::manifest(ctx, me).filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
-    let entries: Vec<Entry> = ctx.db.with(|c| {
-        let mut st = c.prepare("select seq, ts, op, key, data from outbox where seq > ? order by seq")?;
-        let v = st.query_map([published], |r| Ok(Entry { seq: r.get(0)?, ts: r.get(1)?, op: r.get(2)?, key: r.get(3)?,
-            data: serde_json::from_str(&r.get::<_, String>(4)?).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
-        Ok(v)
-    })?;
+    let entries = outbox(ctx, published, i64::MAX)?;
     if entries.is_empty() {
         if store::manifest(ctx, me).is_none() { store::put_manifest_empty(ctx, me, inc)?; }
         ctx.db.kv_set("journal:published_seq", &published.to_string())?;
@@ -160,7 +168,7 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
     let id = identity::load(ctx)?;
     let mut chunks: Vec<(i64, i64, Vec<u8>)> = vec![];
     for e in &entries {
-        let line = format!("{}\n", serde_json::to_string(e)?);
+        let line = line(e);
         match chunks.last_mut() {
             Some((_, to, bytes)) if bytes.len() + line.len() <= CHUNK_BYTES => { *to = e.seq; bytes.extend_from_slice(line.as_bytes()); }
             _ => chunks.push((e.seq, e.seq, line.into_bytes())),
@@ -171,7 +179,12 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
         let sig = id.sign(identity::chunk_message(inc, *from, *to, &sha).as_bytes());
         store::put_chunk(ctx, me, inc, &json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sig, "bytes": bytes.len()}), bytes)?;
     }
-    if let Err(e) = store::join_old(ctx, SMALL_KEPT, CHUNK_BYTES, &|from, to, sha| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes())) { crate::log::warn(&format!("journal: joining old chunks: {e:#}")); }
+    // not beside another publisher: after its 10 s wait this one goes on without the lock, and then only adds its chunks
+    if one.held() {
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes());
+        let cut = |from: i64, to: i64| outbox(ctx, from - 1, to).ok().filter(|es| es.len() as i64 == to - from + 1).map(|es| es.iter().map(line).collect::<String>().into_bytes());
+        if let Err(e) = store::mend(ctx, &cut, &sign).and_then(|_| store::join_old(ctx, SMALL_KEPT, CHUNK_BYTES, &sign)) { crate::log::warn(&format!("journal: joining old chunks: {e:#}")); }
+    }
     let last = entries.last().map(|e| e.seq).unwrap_or(published);
     ctx.db.kv_set("journal:published_seq", &last.to_string())?;
     crate::log::info(&format!("journal: published {} entries in {} chunks (to seq {last})", entries.len(), chunks.len()));
@@ -750,6 +763,78 @@ mod tests {
             assert_eq!(count(x, "select count(*) from usage"), all as i64, "{st}");
             assert_eq!(st["peers"].as_array().unwrap().iter().find(|p| p["id"] == me.as_str()).map(|p| (p["applied_seq"].as_i64(), &p["gap"])), Some((Some(all as i64), &Value::Null)));
         }
+    }
+
+    #[test]
+    fn a_join_gives_way_to_a_publisher_that_changed_the_list_meanwhile_and_a_listed_file_that_is_gone_is_cut_again() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let (me, id) = (&a.settings.device_id, identity::load(&a).unwrap());
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(&a.settings.incarnation, from, to, sha).as_bytes());
+        let list = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().map(|c| (c["from"].as_i64().unwrap(), c["to"].as_i64().unwrap())).collect::<Vec<_>>();
+        let whole = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().all(|c| store::chunk(&a, me, c["file"].as_str().unwrap()).map(|b| sha256_hex(&b) == c["sha256"].as_str().unwrap()).unwrap_or(false));
+        (1..=6).for_each(tick);
+        let one = store::manifest(&a, me).unwrap()["chunks"][0]["bytes"].as_u64().unwrap() as usize;
+        // one run a call, however many could be joined: the lock a publisher holds meanwhile stays short
+        store::join_old(&a, 2, 2 * one, &sign).unwrap();
+        assert_eq!(list(), [(1, 2), (3, 3), (4, 4), (5, 5), (6, 6)]);
+        // T1 has read the list and the files of its run when T2 publishes a chunk and joins a run of its own
+        let met = std::cell::Cell::new(false);
+        store::join_old(&a, 2, CHUNK_BYTES, &|from, to, sha| {
+            if !met.replace(true) {
+                tick(7);
+                store::join_old(&a, 2, CHUNK_BYTES, &sign).unwrap();
+                assert_eq!(list(), [(1, 5), (6, 6), (7, 7)], "T2's join");
+            }
+            sign(from, to, sha)
+        }).unwrap();
+        assert!(met.get());
+        assert_eq!(list(), [(1, 5), (6, 6), (7, 7)], "T1 wrote nothing from the list it read before: T2's chunk is listed");
+        assert!(whole(), "and every listed file is there");
+        assert_eq!(std::fs::read_dir(store::dir(&a, me).join("journal")).unwrap().count(), 3, "no file but the listed ones");
+        // a listed file that is gone is cut again from the outbox at the next publish, with the same bytes
+        let first = store::manifest(&a, me).unwrap()["chunks"][0].clone();
+        std::fs::remove_file(store::dir(&a, me).join("journal").join(first["file"].as_str().unwrap())).unwrap();
+        tick(8);
+        assert!(whole());
+        assert_eq!(store::manifest(&a, me).unwrap()["chunks"][0], first, "the same entries, so the same hash and signature");
+        // and when the outbox no longer holds its entries it leaves the list: a reader says what is missing and goes on
+        std::fs::remove_file(store::dir(&a, me).join("journal").join(first["file"].as_str().unwrap())).unwrap();
+        a.db.with(|c| Ok(c.execute("delete from outbox where seq = 3", [])?)).unwrap();
+        tick(9);
+        assert_eq!(list(), [(6, 6), (7, 7), (8, 8), (9, 9)]);
+        round(&a).unwrap();
+        let st = round(&b).unwrap();
+        // the row whose entry left the outbox is journaled again by A's backfill, as entry 10
+        assert_eq!(count(&b, "select count(*) from usage"), 5, "{st}");
+        assert_eq!((st["peers"][0]["applied_seq"].as_i64(), st["peers"][0]["gap"]["from"].as_i64(), st["peers"][0]["gap"]["to"].as_i64()), (Some(10), Some(1), Some(5)), "{st}");
+    }
+
+    #[test]
+    fn a_publisher_that_could_not_take_the_lock_adds_its_chunk_and_joins_nothing() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let chunks = || store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().len();
+        (0..2 * SMALL_KEPT).for_each(tick);
+        assert_eq!(chunks(), 2 * SMALL_KEPT, "one more and the old ones are joined");
+        // another publisher holds the lock for longer than this one waits
+        let (name, (taken, told), (done, wait)) = (format!("journal-{}", a.settings.device_id), std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
+        let holder = std::thread::spawn(move || { let _held = crate::util::NamedLock::take(&name); taken.send(()).unwrap(); let _ = wait.recv(); });
+        told.recv().unwrap();
+        tick(2 * SMALL_KEPT);
+        assert_eq!(chunks(), 2 * SMALL_KEPT + 1, "its chunk is listed, nothing was joined beside the holder");
+        done.send(()).unwrap();
+        holder.join().unwrap();
+        tick(2 * SMALL_KEPT + 1);
+        assert!(chunks() <= SMALL_KEPT + 3, "with the lock, the join: {}", chunks());
     }
 
     #[test]
