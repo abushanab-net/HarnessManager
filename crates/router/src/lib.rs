@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -68,6 +68,14 @@ impl AppState {
         let retry_at = b.open_until.map(|t| hrm_core::util::now_ms() + t.saturating_duration_since(Instant::now()).as_millis() as i64);
         let _ = self.ctx.db.kv_set(&format!("breaker:{provider}"), &json!({"state": if open { "open" } else { "closed" }, "failures": b.failures, "retry_at": retry_at}).to_string());
     }
+
+    /// The provider answered: it counts as working, and a failover that got here is told.
+    fn served(&self, provider: &str, profile: &str, tried: &[String]) {
+        self.report(provider, true);
+        if !tried.is_empty() {
+            let _ = self.ctx.db.event("warn", "router", &format!("{profile} failed over from {} to {provider}. No request lost.", tried.join(" and ")));
+        }
+    }
 }
 
 pub fn router(ctx: Arc<Ctx>) -> Router {
@@ -96,6 +104,24 @@ pub async fn serve_on(ctx: Arc<Ctx>, listener: tokio::net::TcpListener) -> Resul
 
 fn err(status: StatusCode, kind: &str, msg: impl Into<String>) -> Response {
     (status, Json(json!({"type": "error", "error": {"type": kind, "message": msg.into()}}))).into_response()
+}
+
+/// A provider's refusal as the tool should see it: the provider's status, the Anthropic error type for it and
+/// its `retry-after`, so a limit is waited out and a refused key is not retried.
+fn upstream_err(status: StatusCode, retry_after: Option<&HeaderValue>, msg: String) -> Response {
+    let kind = match status.as_u16() {
+        400 | 422 => "invalid_request_error",
+        401 => "authentication_error",
+        403 => "permission_error",
+        404 => "not_found_error",
+        413 => "request_too_large",
+        429 => "rate_limit_error",
+        529 => "overloaded_error",
+        _ => "api_error",
+    };
+    let mut r = err(status, kind, msg);
+    if let Some(v) = retry_after { r.headers_mut().insert("retry-after", v.clone()); }
+    r
 }
 
 fn authorized(st: &AppState, headers: &HeaderMap) -> bool {
@@ -165,6 +191,8 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
     let failover = route.mode == "failover";
     // providers that failed this request, for the failover event
     let mut tried: Vec<String> = vec![];
+    // the last refusal a provider answered with: what the tool gets when every provider failed
+    let mut refused: Option<Response> = None;
     for (p, model) in list {
         if failover && !st.allowed(&p.id) {
             last_error = format!("{} is paused after repeated failures", p.id);
@@ -200,40 +228,47 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
         let status = resp.status();
         if !status.is_success() {
             let code = status.as_u16();
+            let retry_after = resp.headers().get("retry-after").cloned();
             let text = resp.text().await.unwrap_or_default();
             log(&st, &route_id, &profile, &p.id, &model, code, started, None, NO_TOKENS);
             // the next provider would reject the same request; do not fail over on these
             if matches!(code, 400 | 413 | 422) {
                 st.report(&p.id, true);
-                return err(status, "invalid_request_error", format!("{}: {}", p.id, hrm_core::util::truncate(&text, 400)));
+                return upstream_err(status, None, format!("{}: {}", p.id, hrm_core::util::truncate(&text, 400)));
             }
             st.report(&p.id, false);
             tried.push(p.id.clone());
             last_error = format!("{} answered {code}: {}", p.id, hrm_core::util::truncate(&text, 200));
-            if failover { continue } else { return err(status, "api_error", last_error) }
+            refused = Some(upstream_err(status, retry_after.as_ref(), last_error.clone()));
+            if failover { continue } else { break }
         }
-        st.report(&p.id, true);
-        if failover && !tried.is_empty() {
-            let _ = st.ctx.db.event("warn", "router", &format!("{profile} failed over from {} to {}. No request lost.", tried.join(" and "), p.id));
+        if stream {
+            st.served(&p.id, &profile, &tried);
+            return stream_back(st.clone(), resp, p, model, route_id.clone(), profile.clone(), started);
         }
-        return if stream {
-            stream_back(st.clone(), resp, p, model, route_id.clone(), profile.clone(), started)
-        } else {
-            let v: Value = match resp.json().await {
-                Ok(v) => v,
-                Err(e) => {
-                    log(&st, &route_id, &profile, &p.id, &model, 502, started, None, NO_TOKENS);
-                    return err(StatusCode::BAD_GATEWAY, "api_error", format!("{} sent a reply that is not JSON: {e}", p.id));
-                }
-            };
-            let out = if p.format == "openai" { convert::openai_to_anthropic(&v, &model) } else { v };
-            // not streamed: the first chunk is the whole answer
-            let ms = started.elapsed().as_millis() as i64;
-            log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), tokens_of(&out["usage"]));
-            Json(out).into_response()
+        // a 200 whose body is no answer (not JSON, or an OpenAI-format error) is a failure like any other
+        let answer = match resp.json::<Value>().await {
+            Err(e) => Err(format!("sent a reply that is not JSON: {e}")),
+            Ok(v) if p.format == "openai" => match convert::failure(&v) { Some(why) => Err(format!("answered with an error: {why}")), None => Ok(convert::openai_to_anthropic(&v, &model)) },
+            Ok(v) => Ok(v),
         };
+        let out = match answer {
+            Ok(out) => out,
+            Err(why) => {
+                st.report(&p.id, false);
+                tried.push(p.id.clone());
+                log(&st, &route_id, &profile, &p.id, &model, 502, started, None, NO_TOKENS);
+                last_error = format!("{} {}", p.id, hrm_core::util::truncate(&why, 200));
+                if failover { continue } else { break }
+            }
+        };
+        st.served(&p.id, &profile, &tried);
+        // not streamed: the first chunk is the whole answer
+        let ms = started.elapsed().as_millis() as i64;
+        log(&st, &route_id, &profile, &p.id, &model, 200, started, Some(ms), tokens_of(&out["usage"]));
+        return Json(out).into_response();
     }
-    err(StatusCode::BAD_GATEWAY, "api_error", last_error)
+    refused.unwrap_or_else(|| err(StatusCode::BAD_GATEWAY, "api_error", last_error))
 }
 
 /// Relay a streaming answer, converting OpenAI chunks to Anthropic events on the fly.
@@ -248,9 +283,12 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
         let mut tokens = NO_TOKENS;
         let mut broken = None;
         let mut first: Option<i64> = None;
+        // the start of the body: an OpenAI-format failure can come as plain JSON with status 200, and it says why
+        let mut head: Vec<u8> = Vec::new();
         while let Some(chunk) = upstream.next().await {
             let chunk = match chunk { Ok(c) => c, Err(e) => { broken = Some(e.to_string()); break } };
             if first.is_none() { first = Some(started.elapsed().as_millis() as i64); }
+            if openai && head.len() < 4096 { head.extend_from_slice(&chunk); }
             // Anthropic format: passed through unchanged, read on the way for the usage numbers
             if !openai && tx.send(Ok(chunk.clone())).await.is_err() { log(&st, &route, &profile, &p.id, &model, 499, started, first, tokens); return; }
             buf.extend_from_slice(&chunk);
@@ -276,6 +314,10 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
             }
         }
         if openai { tokens = (conv.input_tokens - conv.cache_read, conv.output_tokens, conv.cache_read, 0); }
+        // no event at all is a failure too, where it once ended as an empty answer marked complete
+        if openai && broken.is_none() && conv.error.is_none() && !conv.started {
+            broken = convert::failure(&serde_json::from_slice(&head).unwrap_or(Value::Null));
+        }
         if let Some(e) = broken.or_else(|| conv.error.take()) {
             // never end a cut-off answer as if it were complete
             let ev = json!({"type": "error", "error": {"type": "api_error", "message": format!("{} stopped mid-answer: {e}", p.id)}});
