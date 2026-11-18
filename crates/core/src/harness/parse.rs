@@ -115,6 +115,7 @@ pub fn parse_now() -> bool { PARSE_NOW.load(std::sync::atomic::Ordering::Relaxed
 pub fn stale(meta: &SessionMeta, mtime: i64) -> SessionMeta {
     let mut m = meta.clone();
     m.last_active_at = m.last_active_at.max(mtime);
+    m.placeholder = Some(mtime);
     m
 }
 

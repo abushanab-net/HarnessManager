@@ -287,6 +287,11 @@ impl Registry {
 
     fn write(&self, path: &Path, forget: bool) -> Result<()> {
         static WARNED: std::sync::Once = std::sync::Once::new();
+        let old = crate::util::read_or_empty(path).unwrap_or_default();
+        // a newer version wrote the file (a list shared between computers): saved from here it would lose every field this version does not know
+        if let Some(v) = serde_json::from_str::<serde_json::Value>(&old).ok().and_then(|v| v["version"].as_u64()).filter(|v| *v > VERSION as u64) {
+            bail!("{} was written by a newer Harness Manager (format {v}, this version writes {VERSION}); update Harness Manager on this computer to change the account list", path.display());
+        }
         let mut file = self.clone();
         let mut live = std::collections::BTreeSet::new();
         for (t, v) in file.mcp.iter_mut().flat_map(McpServer::values) {
@@ -304,7 +309,6 @@ impl Registry {
             if !v.is_empty() && secrets::get_key(&t).as_deref() == Some(v.as_str()) { v.clear(); }
         }
         let text = file.file_text()?;
-        let old = crate::util::read_or_empty(path).unwrap_or_default();
         if old != text { write_atomic(path, text.as_bytes())?; }
         // a server or key this save removed: its credentials go (a renamed server's are under its new name by now)
         // shortcut: another computer that shares the list keeps its own credentials of a server removed here; list and delete them there if that matters
@@ -340,8 +344,9 @@ impl Registry {
         if !valid_name(&p.name) {
             bail!("'{}' is not a valid name: use letters, digits, - and _ (it becomes a folder name)", p.name);
         }
-        if self.profile(&p.name).is_some() {
-            bail!("a profile named '{}' already exists", p.name);
+        // without case: `Work` and `work` are one folder and one saved key on Windows and macOS
+        if let Some(q) = self.profiles.iter().find(|q| q.name.eq_ignore_ascii_case(&p.name)) {
+            bail!("a profile named '{}' already exists", q.name);
         }
         if crate::harness::by_id(&p.harness).is_none() {
             bail!("unknown harness '{}'", p.harness);

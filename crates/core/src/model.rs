@@ -133,6 +133,10 @@ pub struct SessionMeta {
     /// The transcript moved to the archive (`source_path` is the archived copy): readable, not resumable.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// A scan's stand-in for a file that changed and is parsed later: the last cached record, with the file's
+    /// time here. Its numbers are the old file's, so it is never stored as the session's record.
+    #[serde(skip)]
+    pub placeholder: Option<i64>,
 }
 
 /// A transcript as typed blocks, grouped into turns (one user prompt and the answer to it).

@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 use super::parse::*;
@@ -57,10 +57,32 @@ impl PiLike {
     /// `$HRM_PI_KEY` at launch, so no key is written to disk.
     fn write_provider(&self, home: &Path, base_url: &str, api: &str, model: &str) -> Result<()> {
         let path = home.join("models.json");
-        let mut v = read_json(&path).unwrap_or_else(|| json!({}));
-        if !v.is_object() { v = json!({}); }
+        // the user's own providers are in this file: one that cannot be read or is not what Pi writes is left as it is, as the MCP writer leaves a config
+        let text = crate::util::read_or_empty(&path)?;
+        let mut v: Value = if text.trim().is_empty() { json!({}) } else { serde_json::from_str(&text).with_context(|| format!("{} is not valid JSON; left unchanged", path.display()))? };
+        if !v.is_object() || v.get("providers").is_some_and(|p| !p.is_object() && !p.is_null()) { bail!("{} is not a list of providers; left unchanged", path.display()); }
         v["providers"]["hrm"] = json!({"baseUrl": base_url, "api": api, "apiKey": "$HRM_PI_KEY", "models": [{"id": model}]});
         write_atomic(&path, serde_json::to_string_pretty(&v)?.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+
+    #[test]
+    fn a_models_file_that_does_not_parse_is_left_as_it_is() {
+        let t = tempfile::tempdir().unwrap();
+        let path = t.path().join("models.json");
+        // caught mid-write, or with a mistake in it: the user's own provider is in there
+        let broken = r#"{"providers": {"mine": {"baseUrl": "https://llm.example.com/v1"}"#;
+        std::fs::write(&path, broken).unwrap();
+        assert!(PI.write_provider(t.path(), "http://127.0.0.1:1", "anthropic-messages", "m").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+        std::fs::write(&path, format!("{broken}}}}}")).unwrap();
+        PI.write_provider(t.path(), "http://127.0.0.1:1", "anthropic-messages", "m").unwrap();
+        let v = read_json(&path).unwrap();
+        assert!(v["providers"]["mine"].is_object() && v["providers"]["hrm"]["models"][0]["id"] == "m", "{v}");
     }
 }
 

@@ -5,3 +5,7 @@ members = ["crates/core", "crates/cli", "crates/router", "crates/fakeharness", "
 [workspace.package]
 version = "1.11.0"
 edition = "2021"
+
+# unwinding stays on (no panic = "abort"): a background loop catches a panic in one round and runs the next
+[profile.release]
+strip = true

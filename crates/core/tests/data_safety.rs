@@ -28,6 +28,19 @@ fn an_unreadable_registry_is_an_error_not_an_empty_list() {
 }
 
 #[test]
+fn an_account_list_from_a_newer_version_is_read_but_not_saved_over() {
+    let (dir, _ctx) = ctx();
+    let path = dir.path().join("profiles.json");
+    let newer = r#"{"version": 3, "profiles": [], "groups": [{"name": "team"}]}"#;
+    std::fs::write(&path, newer).unwrap();
+    let mut reg = Registry::load(&path).unwrap();
+    reg.projects.push(ProjectAlias { key: "k".into(), name: Some("n".into()), merge_into: None });
+    let err = reg.save(&path).unwrap_err();
+    assert!(format!("{err:#}").contains("newer Harness Manager"), "{err:#}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), newer, "the fields this version does not know are still there");
+}
+
+#[test]
 fn parallel_registry_writers_lose_nothing() {
     let (_dir, ctx) = ctx();
     std::thread::scope(|s| {
@@ -57,6 +70,50 @@ fn a_half_written_claude_json_is_left_alone() {
     let err = hrm_core::shared::sync_claude(&main, &dir.path().join("home").join(".claude.json"), &prof).unwrap_err();
     assert!(format!("{err:#}").contains("left unchanged"), "{err:#}");
     assert_eq!(std::fs::read_to_string(prof.join(".claude.json")).unwrap(), broken);
+}
+
+#[test]
+fn a_second_claude_account_starts_when_the_main_settings_cannot_be_mirrored() {
+    let (_dir, ctx) = ctx();
+    let work = profile("claude-work", "claude", false);
+    let h = harness::of(&work);
+    std::fs::create_dir_all(ctx.home.join(".claude")).unwrap();
+    std::fs::write(ctx.home.join(".claude").join("settings.json"), r#"{"model": "opus", "#).unwrap();
+    h.prepare(&ctx, &work).expect("the launch does not need the mirror");
+    assert!(h.home(&ctx, &work).is_dir());
+}
+
+#[test]
+fn an_accounts_own_claude_md_that_does_not_read_as_text_is_left_alone() {
+    let (dir, _ctx) = ctx();
+    let (main, prof) = (dir.path().join("home").join(".claude"), dir.path().join("home").join(".claude-work"));
+    std::fs::create_dir_all(&main).unwrap();
+    std::fs::create_dir_all(&prof).unwrap();
+    std::fs::write(main.join("CLAUDE.md"), "main rules").unwrap();
+    // saved as UTF-16 by an editor: there, and not text to this read
+    let own: Vec<u8> = [0xFF, 0xFE].into_iter().chain("own rules".encode_utf16().flat_map(u16::to_le_bytes)).collect();
+    std::fs::write(prof.join("CLAUDE.md"), &own).unwrap();
+    hrm_core::shared::sync_claude(&main, &dir.path().join("home").join(".claude.json"), &prof).unwrap();
+    assert_eq!(std::fs::read(prof.join("CLAUDE.md")).unwrap(), own);
+}
+
+#[test]
+fn a_name_that_differs_only_in_letter_case_is_the_same_account() {
+    let mut reg = Registry::default();
+    reg.add_profile(profile("work", "claude", false)).unwrap();
+    let err = reg.add_profile(profile("Work", "claude", false)).unwrap_err();
+    assert!(err.to_string().contains("'work' already exists"), "{err}");
+    assert_eq!(reg.profiles.len(), 1);
+}
+
+#[test]
+fn removing_an_account_forgets_how_far_its_usage_was_read() {
+    let (_dir, ctx) = ctx();
+    ctx.db.kv_set("opencode:usage:oc-work", "1700000000000").unwrap();
+    ctx.db.kv_set("opencode:usage:oc-other", "5").unwrap();
+    ctx.db.forget_profile("oc-work").unwrap();
+    assert_eq!(ctx.db.kv_get("opencode:usage:oc-work").unwrap(), None, "added again, its earlier usage is read from the start");
+    assert_eq!(ctx.db.kv_get("opencode:usage:oc-other").unwrap().as_deref(), Some("5"), "another account's mark stays");
 }
 
 #[test]

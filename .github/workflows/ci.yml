@@ -26,8 +26,9 @@ jobs:
       - uses: actions/checkout@v5
         # a self-hosted runner keeps target/ from the last run, so only what changed is rebuilt
         with: { clean: false }
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with: { toolchain: stable }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: runner.environment == 'github-hosted'
         with:
           # only develop saves the cache; pull requests restore it, so the cache does not fill with branch copies
@@ -68,7 +69,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { clean: false }
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with: { toolchain: stable }
       - run: cargo check --workspace --lib --bins
       # the tests of the desktop app and of hrm (crates/cli) drive Windows consoles, so they stay in the Windows job
       - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast
@@ -87,5 +89,6 @@ jobs:
       # the C compiler that SQLite and the TLS library are built with, as release.yml installs it. It belongs in the
       # runner image: this step does nothing once it is there
       - run: command -v cc || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config; }
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with: { toolchain: stable }
       - run: cargo test -p hrm-core -p hrm-hub --no-fail-fast

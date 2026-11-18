@@ -286,11 +286,9 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
     let w = match app.get_webview_window("limits") {
         Some(w) => { if w.is_visible().unwrap_or(false) { let _ = w.hide(); return; } w }
         None => {
-            // three rings to a row, a row per three shown accounts. shortcut: sized once, at its first open; an account added later scrolls, until the app restarts
-            let n = { let ctx = app.state::<Arc<AppState>>().ctx(); let hidden = &ctx.settings.hidden_tools; ctx.registry().map(|r| r.profiles.iter().filter(|p| !hidden.contains(&p.harness)).count()).unwrap_or(0) };
             let w = match WebviewWindowBuilder::new(app, "limits", WebviewUrl::App("limits.html".into()))
                 .title("Limits").decorations(false).resizable(false).always_on_top(true).skip_taskbar(true).visible(false)
-                .inner_size(372.0, 20.0 + n.max(1).div_ceil(3) as f64 * 104.0).build() {
+                .inner_size(372.0, 139.0).build() {
                 Ok(w) => w,
                 Err(e) => { hrm_core::log::warn(&format!("limits popup: {e:#}")); return }
             };
@@ -300,10 +298,15 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
         }
     };
     // by the icon: above a tray at the foot of the screen (Windows), under one at the top (macOS), and within the screen
-    let size = w.outer_size().unwrap_or_default();
-    let (sw, sh) = (size.width as f64, size.height as f64);
     let m = app.monitor_from_point(at.x, at.y).ok().flatten();
     let scale = m.as_ref().map_or(1.0, |m| m.scale_factor());
+    // sized at every open, by the accounts shown now: two rings to a row (app.css .tray-rings-grid), a row tall enough
+    // for a name on two lines, all of it scaled as Text size zooms the page
+    let (n, z) = { let ctx = app.state::<Arc<AppState>>().ctx(); let hidden = &ctx.settings.hidden_tools;
+        (ctx.registry().map(|r| r.profiles.iter().filter(|p| !hidden.contains(&p.harness)).count()).unwrap_or(0), match ctx.settings.text_size.as_str() { "compact" => 0.92, "large" => 1.12, _ => 1.0 }) };
+    let (lw, lh) = (372.0 * z, (69.0 + n.max(1).div_ceil(2) as f64 * 70.0) * z);
+    let _ = w.set_size(tauri::LogicalSize::new(lw, lh));
+    let (sw, sh) = (lw * scale, lh * scale);
     let (mx, my, mw, mh) = m.map(|m| (m.position().x as f64, m.position().y as f64, m.size().width as f64, m.size().height as f64)).unwrap_or((0.0, 0.0, at.x + sw, at.y + sh));
     let top = match icon.position { tauri::Position::Physical(p) => p.y as f64, tauri::Position::Logical(p) => p.y * scale };
     let bottom = top + match icon.size { tauri::Size::Physical(s) => s.height as f64, tauri::Size::Logical(s) => s.height * scale };

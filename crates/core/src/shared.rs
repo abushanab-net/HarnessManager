@@ -101,9 +101,10 @@ pub fn sync_claude(main_home: &Path, main_json: &Path, prof: &Path) -> Result<()
     let own_md = prof.join("CLAUDE.md");
     if main_md.exists() {
         let import = format!("@{}\n", main_md.display());
-        let own = std::fs::read_to_string(&own_md).ok();
+        let own = std::fs::read_to_string(&own_md);
         let main_text = std::fs::read_to_string(&main_md).unwrap_or_default();
-        if own.is_none() || own.as_deref() == Some(main_text.as_str()) {
+        // a file that is there but does not read (saved as UTF-16, held by another program) is the profile's own: left alone
+        if matches!(&own, Err(e) if e.kind() == std::io::ErrorKind::NotFound) || own.is_ok_and(|o| o == main_text) {
             write_atomic(&own_md, import.as_bytes())?;
         }
     }

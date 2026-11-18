@@ -46,6 +46,9 @@ Download the installer from the [latest release](https://github.com/abushanab-ne
 | macOS | `Harness.Manager_<version>_<arch>.dmg` | Built on the release Mac; the core passes its tests on macOS, the app is not tested there. Signed with a Developer ID and notarized when the release has the Apple signing secrets, otherwise signed ad hoc (macOS then asks for Open Anyway at the first start). |
 | Linux | `.AppImage` or `.deb` | Built on the release Linux runner; the core passes its tests on Linux, the app is not tested there. |
 
+The Windows installers are not code-signed, so Windows SmartScreen shows a warning the first time one is run:
+choose More info, then Run anyway.
+
 What macOS and Linux lack today: launch at sign-in is Windows only, switching Antigravity between accounts is
 Windows only (there Antigravity runs as its one account), and on Linux a new terminal opens through
 `x-terminal-emulator` alone.

@@ -1815,6 +1815,13 @@ try {
     const missing = await exec("return import('./accounts.js').then((a) => ['TOOL', 'money', 'fmtDuration', 'fmtAbsoluteReset', 'showUsed', 'acctView', 'accountViews', 'eligible', 'w5of', 'wkof', 'metricsOf', 'renderRingSvg', 'winTrack', 'trayHtml', 'drawTray'].filter((n) => a[n] === undefined))");
     assert.deepEqual(missing, [], 'the names other modules import from accounts.js are still there');
     assert.ok(await exec("return Promise.all([import('./accounts.js'), import('./limits.js')]).then(([a, l]) => a.metricsOf === l.metricsOf && a.drawTray === l.drawTray)"), 'and they are the limits module\'s');
+    // a picture of the popup at its window's size (main.rs sizes it by the number of rings), for the eye: the tray window itself is outside this page's reach
+    const [tall, needs] = await exec(`return new Promise((done) => { const f = document.createElement('iframe'); f.id = 'popup-shot'; f.src = 'limits.html';
+      f.style.cssText = 'position:fixed;left:0;top:0;width:372px;height:100%;border:0;z-index:99999;background:#000';
+      f.onload = () => setTimeout(() => done([69 + Math.ceil(Math.max(1, f.contentDocument.querySelectorAll('.tray-ring-card').length) / 2) * 70, f.contentDocument.querySelector('.tray-rings-grid').getBoundingClientRect().bottom + 12]), 800); document.body.append(f); })`);
+    await page.screenshot({ path: path.join(shots, 'tray-popup.png'), clip: { x: 0, y: 0, width: 372, height: tall } });
+    await exec("document.querySelector('#popup-shot').remove()");
+    assert.ok(needs <= tall, 'the rings fit the height main.rs gives the tray window (69 + 70 a row of two): ' + needs + ' of ' + tall);
   });
 
   await test('a click that only changes what is shown asks the backend nothing: a step unfolded in a session, an Accounts group folded, the charts opened, a tool chosen', async () => {
