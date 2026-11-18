@@ -344,8 +344,9 @@ impl Registry {
         if !valid_name(&p.name) {
             bail!("'{}' is not a valid name: use letters, digits, - and _ (it becomes a folder name)", p.name);
         }
-        if self.profile(&p.name).is_some() {
-            bail!("a profile named '{}' already exists", p.name);
+        // without case: `Work` and `work` are one folder and one saved key on Windows and macOS
+        if let Some(q) = self.profiles.iter().find(|q| q.name.eq_ignore_ascii_case(&p.name)) {
+            bail!("a profile named '{}' already exists", q.name);
         }
         if crate::harness::by_id(&p.harness).is_none() {
             bail!("unknown harness '{}'", p.harness);

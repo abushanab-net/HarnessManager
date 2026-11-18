@@ -84,6 +84,39 @@ fn a_second_claude_account_starts_when_the_main_settings_cannot_be_mirrored() {
 }
 
 #[test]
+fn an_accounts_own_claude_md_that_does_not_read_as_text_is_left_alone() {
+    let (dir, _ctx) = ctx();
+    let (main, prof) = (dir.path().join("home").join(".claude"), dir.path().join("home").join(".claude-work"));
+    std::fs::create_dir_all(&main).unwrap();
+    std::fs::create_dir_all(&prof).unwrap();
+    std::fs::write(main.join("CLAUDE.md"), "main rules").unwrap();
+    // saved as UTF-16 by an editor: there, and not text to this read
+    let own: Vec<u8> = [0xFF, 0xFE].into_iter().chain("own rules".encode_utf16().flat_map(u16::to_le_bytes)).collect();
+    std::fs::write(prof.join("CLAUDE.md"), &own).unwrap();
+    hrm_core::shared::sync_claude(&main, &dir.path().join("home").join(".claude.json"), &prof).unwrap();
+    assert_eq!(std::fs::read(prof.join("CLAUDE.md")).unwrap(), own);
+}
+
+#[test]
+fn a_name_that_differs_only_in_letter_case_is_the_same_account() {
+    let mut reg = Registry::default();
+    reg.add_profile(profile("work", "claude", false)).unwrap();
+    let err = reg.add_profile(profile("Work", "claude", false)).unwrap_err();
+    assert!(err.to_string().contains("'work' already exists"), "{err}");
+    assert_eq!(reg.profiles.len(), 1);
+}
+
+#[test]
+fn removing_an_account_forgets_how_far_its_usage_was_read() {
+    let (_dir, ctx) = ctx();
+    ctx.db.kv_set("opencode:usage:oc-work", "1700000000000").unwrap();
+    ctx.db.kv_set("opencode:usage:oc-other", "5").unwrap();
+    ctx.db.forget_profile("oc-work").unwrap();
+    assert_eq!(ctx.db.kv_get("opencode:usage:oc-work").unwrap(), None, "added again, its earlier usage is read from the start");
+    assert_eq!(ctx.db.kv_get("opencode:usage:oc-other").unwrap().as_deref(), Some("5"), "another account's mark stays");
+}
+
+#[test]
 fn enabling_a_prompt_keeps_every_accounts_own_file_and_app_edits_stick() {
     let (_dir, ctx) = ctx();
     let mut reg = ctx.registry().unwrap();
