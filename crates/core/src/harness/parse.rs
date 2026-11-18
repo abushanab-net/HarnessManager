@@ -91,6 +91,15 @@ pub fn read_text(path: &Path) -> Result<String> {
     Ok(String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 
+/// The lines of a log as they are asked for, the file never held whole (`.zst` decompressed as it is read); text
+/// that is not UTF-8 is taken as `read_text` takes it.
+pub fn lines(path: &Path) -> Result<impl Iterator<Item = std::io::Result<String>>> {
+    use std::io::BufRead;
+    let f = std::fs::File::open(path)?;
+    let r: Box<dyn Read> = if path.extension().map(|e| e == "zst").unwrap_or(false) { Box::new(zstd::Decoder::new(f)?) } else { Box::new(f) };
+    Ok(std::io::BufReader::with_capacity(1 << 16, r).split(b'\n').map(|l| l.map(|b| String::from_utf8(b).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))))
+}
+
 /// The first line of a log, reading only as much as needed (`.zst` decompressed as it is read).
 pub fn first_line(path: &Path) -> Option<String> {
     use std::io::BufRead;
@@ -111,6 +120,23 @@ impl NewCursor {
 /// Set while the index refreshes: a changed file is parsed now, on the refresh's thread, not later.
 pub static PARSE_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn parse_now() -> bool { PARSE_NOW.load(std::sync::atomic::Ordering::Relaxed) }
+
+/// Of the paths a burst changed, the session files (`keep`) that are still there, each with its time and size as a
+/// walk gives them, and the cached records of those files alone: what a scan of the changed files starts from.
+/// None when one of them has no record: a session's first write, or a known file under another spelling of its
+/// path (a short name, a link), and only a listing of the account tells the two apart.
+#[allow(clippy::type_complexity)]
+pub fn changed(ctx: &Ctx, harness: &str, profile: &str, files: &[std::path::PathBuf], keep: impl Fn(&Path) -> bool) -> Result<Option<(Vec<(std::path::PathBuf, i64, u64)>, std::collections::HashMap<String, (i64, i64, SessionMeta)>)>> {
+    let files: Vec<_> = files.iter().filter(|f| keep(f)).filter_map(|f| crate::util::file_sig(f).map(|(m, l)| (f.clone(), m, l))).collect();
+    let mut cached = std::collections::HashMap::new();
+    for (f, _, _) in &files {
+        let key = format!("{harness}|{profile}|{}", f.display());
+        let rows = ctx.db.sessions_cached_for(&key)?;
+        if !rows.contains_key(&key) { return Ok(None); }
+        cached.extend(rows);
+    }
+    Ok(Some((files, cached)))
+}
 
 pub fn stale(meta: &SessionMeta, mtime: i64) -> SessionMeta {
     let mut m = meta.clone();

@@ -21,11 +21,44 @@ impl Codex {
     fn rollouts(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
         let home = self.home(ctx, p);
         let mut out = vec![];
-        let keep = |f: &Path| f.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("rollout-") && (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))).unwrap_or(false);
-        crate::util::walk_files_sig(&home.join("sessions"), &keep, &mut out);
-        crate::util::walk_files_sig(&home.join("archived_sessions"), &keep, &mut out);
+        crate::util::walk_files_sig(&home.join("sessions"), &is_rollout, &mut out);
+        crate::util::walk_files_sig(&home.join("archived_sessions"), &is_rollout, &mut out);
         out
     }
+
+    /// The sessions of `files` (each with its time and size), from their cached records where a file is as it was.
+    fn scan(&self, ctx: &Ctx, p: &Profile, files: Vec<(PathBuf, i64, u64)>, cached: HashMap<String, (i64, i64, SessionMeta)>, since: i64) -> Result<Vec<SessionMeta>> {
+        let mut out = vec![];
+        let mut todo = vec![];
+        for (f, mtime, len) in files {
+            if mtime < since { continue; }
+            let key = format!("codex|{}|{}", p.name, f.display());
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a rollout still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) if !parse_now() => {
+                    out.push(stale(meta, mtime));
+                    let name = p.name.clone();
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| parse_rollout_file(f, &name, false).ok().map(|t| t.meta));
+                }
+                _ => todo.push((f, mtime, len)),
+            }
+        }
+        each_file_parallel_sig(&todo, |f, mtime, len| {
+            Some((mtime, len, parse_rollout_file(f, &p.name, false).ok()?.meta))
+        }, |r| {
+            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
+            ctx.db.put_session(&format!("codex|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
+            out.push(meta);
+            Ok(())
+        })?;
+        Ok(out)
+    }
+}
+
+/// A rollout by its name: `rollout-….jsonl`, compressed or not.
+fn is_rollout(f: &Path) -> bool {
+    f.file_name().and_then(|n| n.to_str()).map(|n| n.starts_with("rollout-") && (n.ends_with(".jsonl") || n.ends_with(".jsonl.zst"))).unwrap_or(false)
 }
 
 fn window_label(minutes: i64) -> (String, String) {
@@ -48,6 +81,17 @@ pub fn parse_rate_limits(rl: &Value, at: i64) -> Quota {
     }
     Quota { tiers, fetched_at: Some(at), source: "codex".into() }
 }
+
+/// The limits a rollout line carries (a token_count event with `rate_limits`), dated by the line.
+fn limits_of(line: &str) -> Option<Quota> {
+    if !line.contains("\"rate_limits\"") { return None; }
+    let v: Value = serde_json::from_str(line).ok()?;
+    let rl = &v["payload"]["rate_limits"];
+    (rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object())).then(|| parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or(""))))
+}
+
+/// Set once an account's rollouts were read for a reading the import had not kept (`quota`).
+pub(crate) fn limits_mark(profile: &str) -> String { format!("codex:limits:{profile}") }
 
 /// Public claims of the id_token Codex saved, for showing which ChatGPT account and plan a profile is.
 /// The token itself is never sent anywhere.
@@ -141,24 +185,24 @@ impl Harness for Codex {
         Identity { logged_in: api, plan: api.then(|| "API key".into()), ..Default::default() }
     }
 
+    /// The reading the usage import kept (it reads those lines anyway): one row, no file.
     fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> {
+        if let Ok(Some(q)) = ctx.db.get_quota(&p.name) { return Some(q); }
+        // an account imported before readings were kept has none until its next turn: its newest rollouts are read for it, once
+        let mark = limits_mark(&p.name);
+        if ctx.db.kv_get(&mark).ok().flatten().is_some() { return None; }
         let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).collect();
         files.sort_by(|a, b| b.0.cmp(&a.0));
         // the newest reading by when Codex took it: Codex rewrites old rollouts, so the newest file can hold an old one
         let mut best: Option<Quota> = None;
         for (_, f) in files.into_iter().take(5) {
             let Ok(text) = read_text(&f) else { continue };
-            for line in text.lines().rev() {
-                if !line.contains("\"rate_limits\"") { continue; }
-                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
-                let rl = &v["payload"]["rate_limits"];
-                if rl.is_object() && (rl["primary"].is_object() || rl["secondary"].is_object()) {
-                    let q = parse_rate_limits(rl, ts_ms(v["timestamp"].as_str().unwrap_or("")));
-                    if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
-                    break;
-                }
+            if let Some(q) = text.lines().rev().find_map(limits_of) {
+                if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
             }
         }
+        if let Some(q) = &best { let _ = ctx.db.put_quota(&p.name, q); }
+        let _ = ctx.db.kv_set(&mark, "1");
         best
     }
 
@@ -168,7 +212,7 @@ impl Harness for Codex {
         let prices = crate::pricing::load(ctx);
         let files = self.rollouts(ctx, p);
         let cursors = ctx.db.cursors_for(&p.name)?;
-        type Read = Option<(Vec<UsageRow>, Option<crate::harness::parse::NewCursor>, (String, i64, u64))>;
+        type Read = Option<(Vec<UsageRow>, Option<Quota>, Option<crate::harness::parse::NewCursor>, (String, i64, u64))>;
         each_file_parallel_sig(&files, |f, mtime, len| -> Result<Read> {
             let key = f.display().to_string();
             let compressed = f.extension().map(|e| e == "zst").unwrap_or(false);
@@ -194,7 +238,10 @@ impl Harness for Codex {
             let (mut model, mut cwd, mut sid) = (String::new(), String::new(), String::new());
             // reply timing: a request starts at the user's message or a tool's output; its first item done is the first reply
             let (mut start, mut first): (Option<i64>, Option<i64>) = (None, None);
+            let mut limits: Option<Quota> = None;
             for line in text.lines() {
+                // the last reading of these lines, as the limits read took the last of a file
+                if let Some(q) = limits_of(line) { limits = Some(q); }
                 if line.contains("\"type\":\"response_item\"") && (line.contains("\"role\":\"user\"") || line.contains("\"type\":\"function_call_output\"")) {
                     start = line_ts(line);
                     first = None;
@@ -248,12 +295,14 @@ impl Harness for Codex {
                 let last: Option<String> = ctx.db.with(|c| Ok(c.query_row("select model from usage where session_id = ? order by ts desc limit 1", [&sid], |r| r.get(0)).optional()?))?;
                 if let Some(m) = last { for r in rows.iter_mut().filter(|r| r.model == "codex") { r.model = m.clone(); } }
             }
-            Ok(Some((rows, cursor, (key, mtime, len))))
+            Ok(Some((rows, limits, cursor, (key, mtime, len))))
         }, |r| {
             match r {
                 // rows first, then the cursor: an interrupted import reads this file again
-                Ok(Some((rows, cursor, (key, mtime, len)))) => {
+                Ok(Some((rows, limits, cursor, (key, mtime, len)))) => {
                     stored += ctx.db.insert_usage(&rows, &prices)?;
+                    // the account's reading is the newest by Codex's own time, whichever file it came from
+                    if let Some(q) = limits { if ctx.db.get_quota(&p.name)?.is_none_or(|kept| q.fetched_at > kept.fetched_at) { ctx.db.put_quota(&p.name, &q)?; } }
                     match cursor { Some(c) => c.save(ctx)?, None => ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")? }
                 }
                 Ok(None) => {}
@@ -270,38 +319,16 @@ impl Harness for Codex {
     }
 
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
-        let mut out = vec![];
-        let mut todo = vec![];
-        let cached = ctx.db.sessions_cached_for(&format!("codex|{}|", p.name))?;
-        for (f, mtime, len) in self.rollouts(ctx, p) {
-            if mtime < since { continue; }
-            let key = format!("codex|{}|{}", p.name, f.display());
-            match cached.get(&key) {
-                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
-                // a rollout still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) if !parse_now() => {
-                    out.push(stale(meta, mtime));
-                    let name = p.name.clone();
-                    refresh_session_later(ctx, key, f, mtime, len, move |f| read_text(f).ok().map(|t| parse_rollout(&t, &name, f, false).meta));
-                }
-                _ => todo.push((f, mtime, len)),
-            }
-        }
-        each_file_parallel_sig(&todo, |f, mtime, len| {
-            let text = read_text(f).ok()?;
-            Some((mtime, len, parse_rollout(&text, &p.name, f, false).meta))
-        }, |r| {
-            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| !m.id.is_empty()) else { return Ok(()) };
-            ctx.db.put_session(&format!("codex|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
-            out.push(meta);
-            Ok(())
-        })?;
-        Ok(out)
+        self.scan(ctx, p, self.rollouts(ctx, p), ctx.db.sessions_cached_for(&format!("codex|{}|", p.name))?, since)
+    }
+
+    fn sessions_in(&self, ctx: &Ctx, p: &Profile, files: &[PathBuf]) -> Option<Result<Vec<SessionMeta>>> {
+        changed(ctx, "codex", &p.name, files, is_rollout).transpose().map(|r| r.and_then(|(files, cached)| self.scan(ctx, p, files, cached, 0)))
     }
 
     fn transcript(&self, _ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {
         let path = PathBuf::from(&s.source_path);
-        Ok(parse_rollout(&read_text(&path)?, &p.name, &path, true))
+        parse_rollout_file(&path, &p.name, true)
     }
 
     fn resume_args(&self, id: &str) -> Vec<String> { vec!["resume".into(), id.into()] }
@@ -370,19 +397,38 @@ fn real_prompt(text: &str) -> Option<String> {
     Some(t.to_string())
 }
 
-/// Parse a Codex rollout. `full` also builds the turns.
+/// A line that says what the user typed as an event (`event_msg` `user_message`).
+fn user_message(line: &str) -> bool {
+    line.contains("\"user_message\"") && serde_json::from_str::<Value>(line).is_ok_and(|v| v["payload"]["type"] == "user_message")
+}
+
+/// Parse a Codex rollout from its file, a line at a time: one can be over a hundred megabytes, and neither its text
+/// nor its parsed lines are held. `full` also builds the turns.
+pub fn parse_rollout_file(path: &Path, profile: &str, full: bool) -> Result<Transcript> {
+    // whether it carries what the user typed as events is known before the lines are counted: a first look, as far as the first one
+    let mut has_events = false;
+    for line in lines(path)? { if user_message(&line?) { has_events = true; break; } }
+    let mut failed = None;
+    let t = parse_lines(lines(path)?.map_while(|l| l.map_err(|e| failed = Some(e)).ok()), has_events, profile, path, full);
+    match failed { Some(e) => Err(e.into()), None => Ok(t) }
+}
+
+/// Parse a Codex rollout held as text. `full` also builds the turns.
 pub fn parse_rollout(text: &str, profile: &str, path: &Path, full: bool) -> Transcript {
+    parse_lines(text.lines(), text.lines().any(user_message), profile, path, full)
+}
+
+/// `has_events`: newer rollouts carry what the user typed as event_msg user_message; older ones only as messages.
+fn parse_lines<S: AsRef<str>>(lines: impl Iterator<Item = S>, has_events: bool, profile: &str, path: &Path, full: bool) -> Transcript {
     let mut meta = SessionMeta { harness: "codex".into(), profile: profile.into(), source_path: path.display().to_string(), ..Default::default() };
-    let lines: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
-    // newer rollouts carry what the user typed as event_msg user_message; older ones only as messages
-    let has_events = lines.iter().any(|v| v["payload"]["type"] == "user_message");
     let mut turns: Vec<Turn> = vec![];
     let mut calls: HashMap<String, (usize, usize, i64)> = HashMap::new();
     let mut first_prompt = String::new();
     let mut first_answer = String::new();
     let mut agent = String::new();
     let mut last_total = 0i64;
-    for v in &lines {
+    for line in lines {
+        let Ok(v) = serde_json::from_str::<Value>(line.as_ref()) else { continue };
         let ts = v["timestamp"].as_str().map(ts_ms).unwrap_or(0);
         if ts > 0 {
             if meta.started_at == 0 { meta.started_at = ts; }
@@ -504,6 +550,100 @@ fn exit_code(raw: &str) -> Option<i64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod rollout_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_rollout_read_a_line_at_a_time_is_what_its_text_parses_to() {
+        let t = tempfile::tempdir().unwrap();
+        let at = "2026-11-01T10:00:00.000Z";
+        let line = |kind: &str, payload: Value| json!({"type": kind, "timestamp": at, "payload": payload}).to_string();
+        let message = |role: &str, text: &str| line("response_item", json!({"type": "message", "role": role, "content": [{"type": "text", "text": text}]}));
+        let newer = [
+            line("session_meta", json!({"id": "c1", "cwd": "C:\\work"})), line("turn_context", json!({"model": "gpt-6"})),
+            line("event_msg", json!({"type": "user_message", "message": "Bump ArgoCD"})), message("user", "Bump ArgoCD"),
+            line("response_item", json!({"type": "function_call", "name": "exec_command", "call_id": "k1", "arguments": "{\"cmd\":\"helm upgrade\"}"})),
+            line("response_item", json!({"type": "function_call_output", "call_id": "k1", "output": "Exit code: 1\nno such release"})),
+            message("assistant", "The release is missing."), line("event_msg", json!({"type": "token_count", "info": {"total_token_usage": {"total_tokens": 520}}})),
+        ];
+        // an older rollout says what the user typed only as messages, among the ones Codex injects
+        let older = [line("session_meta", json!({"id": "c0", "cwd": "C:\\work"})), message("user", "<environment_context>cwd</environment_context>"), message("user", "Rotate the certificates"), message("assistant", "Done.")];
+        let mut seen = vec![];
+        for (name, lines) in [("rollout-new.jsonl", &newer[..]), ("rollout-old.jsonl", &older[..])] {
+            // as Codex leaves a rollout it is writing: Windows line ends, a byte that is no UTF-8 inside an answer, half a last line
+            let mut bytes = lines.join("\r\n").into_bytes();
+            bytes.extend_from_slice(b"\r\n");
+            bytes.extend_from_slice(message("assistant", "caf#").as_bytes());
+            let mark = bytes.iter().rposition(|b| *b == b'#').unwrap();
+            bytes[mark] = 0xff;
+            bytes.extend_from_slice(b"\n{\"type\":\"respon");
+            for (file, bytes) in [(t.path().join(name), bytes.clone()), (t.path().join(format!("{name}.zst")), zstd::encode_all(&bytes[..], 3).unwrap())] {
+                std::fs::write(&file, bytes).unwrap();
+                for full in [false, true] {
+                    let read = parse_rollout_file(&file, "codex-main", full).unwrap();
+                    assert_eq!(serde_json::to_value(&read).unwrap(), serde_json::to_value(parse_rollout(&read_text(&file).unwrap(), "codex-main", &file, full)).unwrap(), "{name} full={full}");
+                    seen.push((read.meta.id.clone(), read.meta.title.clone(), read.meta.prompts, read.meta.messages, read.meta.tool_calls, read.meta.failed, read.meta.tokens, read.turns.len()));
+                }
+            }
+        }
+        let new = |turns| ("c1".to_string(), "Bump ArgoCD".to_string(), 1, 3, 1, 1, 520, turns);
+        let old = |turns| ("c0".to_string(), "Rotate the certificates".to_string(), 1, 4, 0, 0, 0, turns);
+        assert_eq!(seen, [new(0), new(1), new(0), new(1), old(0), old(1), old(0), old(1)]);
+        assert!(parse_rollout_file(&t.path().join("rollout-none.jsonl"), "codex-main", false).is_err(), "a file that cannot be read is no empty session");
+    }
+}
+
+#[cfg(test)]
+mod limits_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn reading(at: &str, week: f64) -> String {
+        format!("{}\n", json!({"type": "event_msg", "timestamp": at, "payload": {"type": "token_count", "rate_limits": {"secondary": {"used_percent": week, "window_minutes": 10080, "resets_at": 4102444800i64}}}}))
+    }
+
+    #[test]
+    fn the_limits_are_the_newest_reading_whether_the_import_or_the_files_gave_it() {
+        let t = tempfile::tempdir().unwrap();
+        // the import prices rows from a catalog: a local one, so the test never reaches the network
+        std::fs::write(t.path().join("pricing.json"), "{}").unwrap();
+        std::env::set_var("HRM_PRICING_FILE", t.path().join("pricing.json"));
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let (main, other, none) = (p("codex-main", true), p("other", false), p("none", false));
+        let week = |q: Option<Quota>| q.map(|q| (q.tier("week").unwrap().used, q.fetched_at.unwrap()));
+        let file = |p: &Profile, name: &str, text: &str| { let f = Codex.home(&ctx, p).join("sessions").join(name); std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, text).unwrap(); f };
+        // an old rollout Codex rewrote later holds an old reading in the newest file
+        let new = file(&main, "rollout-2026-11-01T10-00-00-a.jsonl", &reading("2026-11-01T10:00:00.000Z", 21.0));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        file(&main, "rollout-2026-10-01T10-00-00-b.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));
+        let at = ts_ms("2026-11-01T10:00:00.000Z");
+        // read before any import (an account from an earlier version): the files give it, once, and the row answers after
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
+        assert_eq!(week(ctx.db.get_quota("codex-main").unwrap()), Some((21.0, at)));
+        // the import keeps the newest reading it reads, and an older one never replaces it
+        Codex.import_usage(&ctx, &main).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
+        std::fs::write(&new, format!("{}{}{}", reading("2026-11-01T10:00:00.000Z", 21.0), reading("2026-11-02T08:00:00.000Z", 30.0), reading("2026-11-02T09:00:00.000Z", 34.0))).unwrap();
+        Codex.import_usage(&ctx, &main).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &main)), Some((34.0, ts_ms("2026-11-02T09:00:00.000Z"))));
+        // an account whose first read is its import has the same reading
+        file(&other, "rollout-2026-11-01T10-00-00-c.jsonl", &reading("2026-11-01T10:00:00.000Z", 21.0));
+        file(&other, "rollout-2026-10-01T10-00-00-d.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));
+        Codex.import_usage(&ctx, &other).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &other)), Some((21.0, at)));
+        // rollouts without a reading (an API key) are read for one once, not at every look
+        let f = file(&none, "rollout-2026-11-01T10-00-00-e.jsonl", "{\"type\":\"session_meta\",\"payload\":{\"id\":\"e\"}}\n");
+        assert!(Codex.quota(&ctx, &none).is_none() && ctx.db.kv_get(&limits_mark("none")).unwrap().is_some());
+        std::fs::write(&f, reading("2026-11-03T10:00:00.000Z", 5.0)).unwrap();
+        assert!(Codex.quota(&ctx, &none).is_none(), "the files are not read again");
+        Codex.import_usage(&ctx, &none).unwrap();
+        assert_eq!(week(Codex.quota(&ctx, &none)), Some((5.0, ts_ms("2026-11-03T10:00:00.000Z"))), "the import brings its first reading");
+    }
 }
 
 #[cfg(test)]

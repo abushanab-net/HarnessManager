@@ -260,6 +260,11 @@ pub fn file_sig(path: &Path) -> Option<(i64, u64)> {
     Some((mtime, m.len()))
 }
 
+/// Whether a file's time and size (`file_sig`; None: no such file) can stand for what was read of it: it was last
+/// written over two seconds ago. A second write within the clock's step of the first moves neither (a database's log
+/// is rewritten in place), so what is read of a file written just now is not remembered by them.
+pub fn still(sig: Option<(i64, u64)>) -> bool { sig.is_none_or(|(mtime, _)| now_ms() - mtime > 2_000) }
+
 /// `walk_files` with each file's modification time (ms) and size, taken from the directory listing: on Windows a
 /// metadata call opens the file (half a millisecond each with the antivirus looking on), the listing is free.
 pub fn walk_files_sig(dir: &Path, keep: &dyn Fn(&Path) -> bool, out: &mut Vec<(PathBuf, i64, u64)>) {

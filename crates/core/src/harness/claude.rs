@@ -35,6 +35,31 @@ impl Claude {
     }
 
     fn creds(&self, ctx: &Ctx, p: &Profile) -> Option<Value> { read_json(&self.home(ctx, p).join(".credentials.json")) }
+
+    /// The login and the cached limits out of `.claude.json`, read once per state of the file: it is megabytes of
+    /// per-project history, and an account view asked for it twice.
+    fn account_doc(&self, ctx: &Ctx, p: &Profile) -> Option<AccountDoc> {
+        // shortcut: a rewrite that leaves the file's size and its time as they were is not seen; none is known, Claude Code replaces the file
+        type Read = HashMap<PathBuf, ((Option<std::time::SystemTime>, u64), Option<AccountDoc>)>;
+        static READ: std::sync::Mutex<Option<Read>> = std::sync::Mutex::new(None);
+        let path = self.claude_json(ctx, p);
+        let sig = std::fs::metadata(&path).ok().map(|m| (m.modified().ok(), m.len()))?;
+        if let Some((s, doc)) = READ.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).get(&path) {
+            if *s == sig { return doc.clone(); }
+        }
+        let doc = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<AccountDoc>(&t).ok());
+        READ.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(path, (sig, doc.clone()));
+        doc
+    }
+}
+
+/// The two parts of `.claude.json` the account views read; the rest is skipped unparsed.
+#[derive(Clone, Default, serde::Deserialize)]
+struct AccountDoc {
+    #[serde(default, rename = "oauthAccount")]
+    account: Value,
+    #[serde(default, rename = "cachedUsageUtilization")]
+    usage: Value,
 }
 
 /// When Anthropic last refused an account's login (epoch ms).
@@ -85,6 +110,36 @@ impl Claude {
             }
         }
         out
+    }
+
+    /// The sessions of `files` (each with its time and size), from their cached records where a file is as it was.
+    fn scan(&self, ctx: &Ctx, p: &Profile, files: Vec<(PathBuf, i64, u64)>, cached: HashMap<String, (i64, i64, SessionMeta)>, since: i64) -> Result<Vec<SessionMeta>> {
+        let mut out = vec![];
+        let mut todo = vec![];
+        for (f, mtime, len) in files {
+            if mtime < since { continue; }
+            let key = format!("claude|{}|{}", p.name, f.display());
+            match cached.get(&key) {
+                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
+                // a session still being written: its last record now, the file parsed again in the background
+                Some((_, _, meta)) if !parse_now() => {
+                    out.push(stale(meta, mtime));
+                    let name = p.name.clone();
+                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, &name, f, false).meta));
+                }
+                _ => todo.push((f, mtime, len)),
+            }
+        }
+        each_file_parallel_sig(&todo, |f, mtime, len| {
+            let text = std::fs::read_to_string(f).ok()?;
+            Some((mtime, len, parse_session(&text, &p.name, f, false).meta))
+        }, |r| {
+            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| m.started_at != 0) else { return Ok(()) };
+            ctx.db.put_session(&format!("claude|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
+            out.push(meta);
+            Ok(())
+        })?;
+        Ok(out)
     }
 }
 
@@ -215,8 +270,7 @@ impl Harness for Claude {
             let has = crate::secrets::get_key(&crate::secrets::key_target(&p.name)).is_some() || p.kind == Kind::Routed;
             return Identity { logged_in: has, plan: Some(if p.kind == Kind::Routed { "Routed".into() } else { "API key".into() }), ..Default::default() };
         }
-        let cj = read_json(&self.claude_json(ctx, p)).unwrap_or(Value::Null);
-        let acc = &cj["oauthAccount"];
+        let acc = &self.account_doc(ctx, p).unwrap_or_default().account;
         let creds = self.creds(ctx, p).unwrap_or(Value::Null);
         let oauth = &creds["claudeAiOauth"];
         let logged_in = oauth.get("accessToken").is_some() || (cfg!(target_os = "macos") && acc.is_object());
@@ -241,9 +295,9 @@ impl Harness for Claude {
         if p.kind != Kind::Subscription {
             return None;
         }
-        let cj = read_json(&self.claude_json(ctx, p))?;
-        let cache = &cj["cachedUsageUtilization"];
-        let mut q = if cache.is_object() && cache["accountUuid"] == cj["oauthAccount"]["accountUuid"] {
+        let doc = self.account_doc(ctx, p)?;
+        let cache = &doc.usage;
+        let mut q = if cache.is_object() && cache["accountUuid"] == doc.account["accountUuid"] {
             Some(parse_utilization(&cache["utilization"], cache["fetchedAtMs"].as_i64(), "claude-code"))
         } else {
             None
@@ -321,33 +375,14 @@ impl Harness for Claude {
     fn session_dirs(&self, ctx: &Ctx, p: &Profile) -> Vec<PathBuf> { vec![self.home(ctx, p).join("projects")].into_iter().filter(|d| d.is_dir()).collect() }
 
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
-        let mut out = vec![];
-        let mut todo = vec![];
-        let cached = ctx.db.sessions_cached_for(&format!("claude|{}|", p.name))?;
-        for (f, mtime, len) in self.session_files(ctx, p) {
-            if mtime < since { continue; }
-            let key = format!("claude|{}|{}", p.name, f.display());
-            match cached.get(&key) {
-                Some((m, l, meta)) if *m == mtime && *l == len as i64 => out.push(meta.clone()),
-                // a session still being written: its last record now, the file parsed again in the background
-                Some((_, _, meta)) if !parse_now() => {
-                    out.push(stale(meta, mtime));
-                    let name = p.name.clone();
-                    refresh_session_later(ctx, key, f, mtime, len, move |f| std::fs::read_to_string(f).ok().map(|t| parse_session(&t, &name, f, false).meta));
-                }
-                _ => todo.push((f, mtime, len)),
-            }
-        }
-        each_file_parallel_sig(&todo, |f, mtime, len| {
-            let text = std::fs::read_to_string(f).ok()?;
-            Some((mtime, len, parse_session(&text, &p.name, f, false).meta))
-        }, |r| {
-            let Some((mtime, len, meta)) = r.filter(|(_, _, m)| m.started_at != 0) else { return Ok(()) };
-            ctx.db.put_session(&format!("claude|{}|{}", p.name, meta.source_path), &meta, mtime, len as i64)?;
-            out.push(meta);
-            Ok(())
-        })?;
-        Ok(out)
+        self.scan(ctx, p, self.session_files(ctx, p), ctx.db.sessions_cached_for(&format!("claude|{}|", p.name))?, since)
+    }
+
+    fn sessions_in(&self, ctx: &Ctx, p: &Profile, files: &[PathBuf]) -> Option<Result<Vec<SessionMeta>>> {
+        // a session's file sits in a folder of `projects`; what lies deeper (its sub-agents' logs, tool results) is not one
+        let root = self.home(ctx, p).join("projects");
+        let keep = |f: &Path| f.extension().map(|e| e == "jsonl").unwrap_or(false) && f.parent().and_then(|d| d.parent()) == Some(root.as_path());
+        changed(ctx, "claude", &p.name, files, keep).transpose().map(|r| r.and_then(|(files, cached)| self.scan(ctx, p, files, cached, 0)))
     }
 
     fn transcript(&self, _ctx: &Ctx, p: &Profile, s: &SessionMeta) -> Result<Transcript> {
@@ -547,4 +582,33 @@ fn clean_prompt(raw: &str) -> Option<String> {
         return None;
     }
     Some(t.to_string())
+}
+
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn the_login_and_the_cached_limits_follow_the_account_file_as_it_changes() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let p = Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let file = Claude.claude_json(&ctx, &p);
+        let doc = |uuid: &str, email: &str| json!({"projects": {"C:\\work": {"history": ["one", "two"]}}, "oauthAccount": {"accountUuid": uuid, "emailAddress": email},
+            "cachedUsageUtilization": {"accountUuid": "u1", "fetchedAtMs": 5, "utilization": {"seven_day": {"utilization": 12.0}}}}).to_string();
+        let read = || (Claude.identity(&ctx, &p).email, Claude.quota(&ctx, &p).map(|q| (q.tier("week").unwrap().used, q.fetched_at, q.source)));
+        assert_eq!(read(), (None, None), "no file yet");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, doc("u1", "alex@example.com")).unwrap();
+        for _ in 0..2 { assert_eq!(read(), (Some("alex@example.com".into()), Some((12.0, Some(5), "claude-code".into())))); }
+        // another account signed in: the limits Claude Code cached are the first one's, so none are shown
+        std::fs::write(&file, doc("u2", "sam@example.com")).unwrap();
+        assert_eq!(read(), (Some("sam@example.com".into()), None));
+        // caught half written, then gone
+        std::fs::write(&file, "{\"oauthAccount\": {").unwrap();
+        assert_eq!(read(), (None, None));
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(read(), (None, None));
+    }
 }

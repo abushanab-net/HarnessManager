@@ -61,14 +61,12 @@ pub fn parse_catalog(v: &Value) -> Prices {
     out
 }
 
-/// Prices from the local cache, fetched again when older than a day. `HRM_PRICING_FILE` points at a
-/// catalog file instead (tests, offline computers). Without a catalog every cost is unknown, never guessed.
-pub fn load(ctx: &Ctx) -> Prices {
-    if let Ok(f) = std::env::var("HRM_PRICING_FILE") {
-        return std::fs::read_to_string(f).ok().and_then(|s| serde_json::from_str(&s).ok()).map(|v| parse_catalog(&v)).unwrap_or_default();
-    }
+/// The catalog downloaded again when the stored one is older than a day. Called where a round of work begins
+/// (the usage import of every account), never from a read: the download can take its whole 10 s.
+pub fn refresh(ctx: &Ctx) {
+    if std::env::var_os("HRM_PRICING_FILE").is_some() { return; }
     let fresh = ctx.db.kv_get("pricing:at").ok().flatten().and_then(|s| s.parse::<i64>().ok()).map(|t| crate::util::now_ms() - t < DAY_MS).unwrap_or(false);
-    // a failed download is tried again after 15 minutes, not on every call (Home asks four times per view)
+    // a failed download is tried again after 15 minutes, not at every round
     let tried = ctx.db.kv_get("pricing:tried").ok().flatten().and_then(|s| s.parse::<i64>().ok()).map(|t| crate::util::now_ms() - t < 15 * 60_000).unwrap_or(false);
     if !fresh && !tried {
         let _ = ctx.db.kv_set("pricing:tried", &crate::util::now_ms().to_string());
@@ -76,6 +74,14 @@ pub fn load(ctx: &Ctx) -> Prices {
             let _ = ctx.db.kv_set("pricing:catalog", &v.to_string());
             let _ = ctx.db.kv_set("pricing:at", &crate::util::now_ms().to_string());
         }
+    }
+}
+
+/// Prices from the local cache, as `refresh` last stored them. `HRM_PRICING_FILE` points at a
+/// catalog file instead (tests, offline computers). Without a catalog every cost is unknown, never guessed.
+pub fn load(ctx: &Ctx) -> Prices {
+    if let Ok(f) = std::env::var("HRM_PRICING_FILE") {
+        return std::fs::read_to_string(f).ok().and_then(|s| serde_json::from_str(&s).ok()).map(|v| parse_catalog(&v)).unwrap_or_default();
     }
     // parsed once per stored catalog: the watcher prices every file change, and parsing it each time was most of
     // the app's background CPU while a session was being written
@@ -139,6 +145,21 @@ mod tests {
         let c = find(&p, "gpt-6.1-sol").unwrap();
         assert_eq!(c.cache_write, 2.5, "missing cache write priced at 1.25x input");
         assert!((find(&p, "claude-opus-5-5").unwrap().cost(1_000_000, 100_000, 2_000_000, 0) - 6.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_read_of_the_price_list_gives_what_is_stored_and_never_starts_a_download() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let _ = load(&ctx);
+        assert!(ctx.db.kv_get("pricing:tried").unwrap().is_none() && ctx.db.kv_get("pricing:at").unwrap().is_none(), "no download was tried");
+        ctx.db.kv_set("pricing:catalog", r#"{"openai": {"models": {"gpt-6.1-sol": {"cost": {"input": 2, "output": 10}}}}}"#).unwrap();
+        ctx.db.kv_set("pricing:at", "1").unwrap();
+        let stored = load(&ctx);
+        // another test of this run may point every read at its own file (they only ever set it); without that, the stored catalog is what a read gives
+        if std::env::var_os("HRM_PRICING_FILE").is_none() {
+            assert_eq!(find(&stored, "gpt-6.1-sol").map(|p| p.output), Some(10.0), "a catalog older than a day still prices, until the round replaces it");
+        }
     }
 
     #[test]

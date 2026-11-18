@@ -227,27 +227,44 @@ impl Harness for Agy {
         [self.root(ctx).join("antigravity-cli"), self.root(ctx).join("antigravity")].into_iter().filter(|d| d.is_dir()).collect()
     }
 
+    // conversations and their summaries are databases (each with its log); nothing else in these folders is a session
+    fn watches(&self, path: &Path) -> bool { path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".db") || n.ends_with(".db-wal")) }
+
     fn sessions(&self, ctx: &Ctx, p: &Profile, since: i64) -> Result<Vec<SessionMeta>> {
         // conversations are shared by every Antigravity profile; they are listed under the main one
         if !p.main { return Ok(vec![]); }
         let mut sums = summaries(&self.root(ctx).join("antigravity-cli").join("conversation_summaries.db"));
         sums.extend(summaries(&self.root(ctx).join("antigravity").join("conversation_summaries.db")));
         let mut out = vec![];
+        // shortcut: what was read of a conversation (its first prompt, its prompts, its steps) is remembered in this process by the
+        // size and time of its database and that one's log, both still for two seconds (`still`); a clock set back can hide a write until the next one
+        type Read = std::collections::HashMap<PathBuf, ([Option<(i64, u64)>; 2], (String, u32, u32))>;
+        static READ: std::sync::Mutex<Option<Read>> = std::sync::Mutex::new(None);
+        let mut read = READ.lock().unwrap_or_else(|e| e.into_inner());
+        let read = read.get_or_insert_with(Default::default);
         for f in self.conversations(ctx) {
             let id = f.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-            let (mtime, _) = file_sig(&f).unwrap_or((0, 0));
+            let sig = [file_sig(&f), file_sig(&f.with_extension("db-wal"))];
+            let (mtime, _) = sig[0].unwrap_or((0, 0));
             if mtime < since { continue; }
             let s = sums.iter().find(|s| s.0 == id);
-            let steps = read_steps(&f);
-            let first_user = steps.iter().find(|(t, _)| *t == 14).and_then(|(_, txt)| txt.first().cloned()).unwrap_or_default();
+            let (first_user, prompts, messages) = match read.get(&f) {
+                Some((was, r)) if *was == sig => r.clone(),
+                _ => {
+                    let steps = read_steps(&f);
+                    let r = (steps.iter().find(|(t, _)| *t == 14).and_then(|(_, txt)| txt.first().cloned()).unwrap_or_default(), steps.iter().filter(|(t, _)| *t == 14).count() as u32, steps.len() as u32);
+                    if sig.iter().all(|s| crate::util::still(*s)) { read.insert(f.clone(), (sig, r.clone())); }
+                    r
+                }
+            };
             let title = s.map(|s| if s.1.is_empty() { s.2.clone() } else { s.1.clone() }).filter(|t| !t.is_empty()).unwrap_or(first_user);
             out.push(SessionMeta {
                 harness: "agy".into(), profile: p.name.clone(), id,
                 title: truncate(&title, 80),
                 cwd: s.map(|s| s.3.clone()).unwrap_or_default(),
                 started_at: mtime, last_active_at: mtime,
-                prompts: steps.iter().filter(|(t, _)| *t == 14).count() as u32,
-                messages: steps.len() as u32,
+                prompts,
+                messages,
                 source_path: f.display().to_string(),
                 ..Default::default()
             });
@@ -344,6 +361,36 @@ fn has_uuid(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_conversation_is_read_again_when_its_database_moved_also_when_it_was_remembered() {
+        use crate::harness::Harness;
+        let t = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let p = crate::registry::Profile { name: "agy-main".into(), label: None, harness: "agy".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let file = ctx.home.join(".gemini").join("antigravity-cli").join("conversations").join("conv-1.db");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let step = |idx: i64, kind: i64, text: &str| { let mut pb = vec![0x0a, text.len() as u8]; pb.extend_from_slice(text.as_bytes());
+            let db = rusqlite::Connection::open(&file).unwrap();
+            db.execute_batch("create table if not exists steps(idx integer, step_type integer, status integer, step_payload blob)").unwrap();
+            db.execute("insert into steps values(?,?,3,?)", rusqlite::params![idx, kind, pb]).unwrap(); };
+        step(0, 14, "Explain the release script");
+        step(1, 15, "It builds the installer.");
+        let read = || super::Agy.sessions(&ctx, &p, 0).unwrap().into_iter().map(|s| (s.id, s.title, s.prompts, s.messages)).collect::<Vec<_>>();
+        // written a while ago: what was read is remembered, and asked again it is the same
+        let aged = || std::fs::File::options().write(true).open(&file).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(60)).unwrap();
+        aged();
+        for _ in 0..2 { assert_eq!(read(), [("conv-1".to_string(), "Explain the release script".to_string(), 1, 2)]); }
+        // a new step moves the file's time: the conversation is read again, at once and at every look while the write is fresh
+        step(2, 14, "And the signing?");
+        assert_eq!(read()[0].2, 2);
+        step(3, 15, "It signs with the release key.");
+        assert_eq!((read()[0].2, read()[0].3), (2, 4));
+        // the watcher takes the databases and their logs, and leaves the rest of Antigravity's folders
+        use std::path::Path;
+        assert!(super::Agy.watches(&file) && super::Agy.watches(Path::new("conversation_summaries.db-wal")));
+        assert!(!super::Agy.watches(Path::new("conv-1.db-shm")) && !super::Agy.watches(Path::new("cli.log")) && !super::Agy.watches(file.parent().unwrap()));
+    }
+
     #[test]
     fn usage_groups_become_limits() {
         // trimmed from a real `agy -p /usage --output-format json`

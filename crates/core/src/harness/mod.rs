@@ -62,6 +62,13 @@ pub trait Harness: Sync + Send {
     fn session_dirs(&self, _ctx: &Ctx, _p: &Profile) -> Vec<PathBuf> { vec![] }
     /// Sessions active since `since` (epoch ms); files untouched since then are skipped unread.
     fn sessions(&self, _ctx: &Ctx, _p: &Profile, _since: i64) -> Result<Vec<SessionMeta>> { Ok(vec![]) }
+    /// The sessions of these changed files alone (a burst the watcher saw), from a tool that keeps a file per
+    /// session: the rest of the account is not listed. None: they cannot be told from these files (the tool's sessions
+    /// are not files, or one of the files is not known yet), and `sessions` lists the account.
+    fn sessions_in(&self, _ctx: &Ctx, _p: &Profile, _files: &[PathBuf]) -> Option<Result<Vec<SessionMeta>>> { None }
+    /// Whether a change of this path, under a session folder, can change a session or its usage: the watcher
+    /// leaves the others (OpenCode and Antigravity write much beside their databases).
+    fn watches(&self, _path: &Path) -> bool { true }
     fn transcript(&self, _ctx: &Ctx, _p: &Profile, _s: &SessionMeta) -> Result<Transcript> { anyhow::bail!("sessions are not readable for {}", self.label()) }
     fn resume_args(&self, _session_id: &str) -> Vec<String> { vec![] }
     fn running(&self, _ctx: &Ctx, _p: &Profile) -> Vec<RunningConsole> { vec![] }

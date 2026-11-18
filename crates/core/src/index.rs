@@ -43,22 +43,28 @@ pub fn local_key(m: &SessionMeta) -> String {
     if m.harness == "opencode" { format!("{}|{}|{}", m.harness, m.profile, m.id) } else { format!("{}|{}|{}", m.harness, m.profile, m.source_path) }
 }
 
-/// The accounts a changed file belongs to: those with a session folder above it.
-fn owners<'a>(ctx: &Ctx, reg: &'a Registry, paths: &[PathBuf]) -> Vec<&'a Profile> {
-    reg.profiles.iter().filter(|p| { let dirs = harness::of(p).session_dirs(ctx, p); paths.iter().any(|f| dirs.iter().any(|d| f.starts_with(d))) }).collect()
+/// The changed paths that are an account's: under one of its session folders, and of a kind its tool's sessions or usage change with.
+fn mine(ctx: &Ctx, p: &Profile, paths: &[PathBuf]) -> Vec<PathBuf> {
+    let (h, dirs) = (harness::of(p), harness::of(p).session_dirs(ctx, p));
+    paths.iter().filter(|f| h.watches(f) && dirs.iter().any(|d| f.starts_with(d))).cloned().collect()
+}
+
+/// The accounts a burst of changed paths belongs to.
+pub(crate) fn owners<'a>(ctx: &Ctx, reg: &'a Registry, paths: &[PathBuf]) -> Vec<&'a Profile> {
+    reg.profiles.iter().filter(|p| !mine(ctx, p, paths).is_empty()).collect()
 }
 
 pub fn refresh(ctx: &Ctx, scope: Scope) -> Result<Report> {
     let reg = ctx.registry()?;
-    let names: Vec<String> = match &scope {
-        Scope::All => reg.profiles.iter().map(|p| p.name.clone()).collect(),
-        Scope::Paths(paths) => owners(ctx, &reg, paths).into_iter().map(|p| p.name.clone()).collect(),
-    };
-    refresh_profiles(ctx, &reg, &names, matches!(scope, Scope::All))
+    match &scope {
+        Scope::All => refresh_profiles(ctx, &reg, &reg.profiles.iter().map(|p| p.name.clone()).collect::<Vec<_>>(), true, None),
+        Scope::Paths(paths) => refresh_profiles(ctx, &reg, &owners(ctx, &reg, paths).into_iter().map(|p| p.name.clone()).collect::<Vec<_>>(), false, Some(paths)),
+    }
 }
 
-/// The refresh of some accounts; `all` records `index:refreshed_at` (a partial refresh leaves it).
-pub(crate) fn refresh_profiles(ctx: &Ctx, reg: &Registry, names: &[String], all: bool) -> Result<Report> {
+/// The refresh of some accounts; `all` records `index:refreshed_at` (a partial refresh leaves it). With `changed`
+/// (a burst the watcher saw), an account whose tool keeps a file per session is refreshed by its changed files alone.
+pub(crate) fn refresh_profiles(ctx: &Ctx, reg: &Registry, names: &[String], all: bool, changed: Option<&[PathBuf]>) -> Result<Report> {
     let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
     let t = Instant::now();
     struct Now;
@@ -73,14 +79,24 @@ pub(crate) fn refresh_profiles(ctx: &Ctx, reg: &Registry, names: &[String], all:
     let mut infos: HashMap<String, ProjectInfo> = HashMap::new();
     for p in reg.profiles.iter().filter(|p| names.contains(&p.name)) {
         let h = harness::of(p);
-        let list = match h.sessions(ctx, p, 0) {
+        // by its changed files alone when each is a file, or a session's file that went: a folder that came, went or
+        // moved can bring or take any number of files, and then the account is listed as in a walk
+        let prefix = format!("{}|{}|", h.id(), p.name);
+        let known = |f: &PathBuf| ctx.db.read(|c| Ok(c.prepare_cached("select 1 from sessions where key = ?")?.exists([format!("{prefix}{}", f.display())])?)).unwrap_or(false);
+        let part = changed.map(|paths| mine(ctx, p, paths)).filter(|m| m.iter().all(|f| f.is_file() || (!f.exists() && known(f))));
+        let part = part.and_then(|m| h.sessions_in(ctx, p, &m).map(|list| (list, m)));
+        let (list, only) = match part { Some((list, m)) => (list, Some(m)), None => (h.sessions(ctx, p, 0), None) };
+        let list = match list {
             Ok(l) => l,
             Err(e) => { crate::log::warn(&format!("index: sessions for {}: {e:#}", p.name)); continue; }
         };
-        let open = open_ids(h, ctx, p, &list);
+        let running = h.running(ctx, p);
+        // the rows of a few files keep `open` as it is: the consoles decide it for the whole account right after
+        let open = only.is_none().then(|| open_ids(&running, &list));
         rep.profiles += 1;
         rep.sessions += list.len();
-        reconcile(ctx, h, p, list, &open, &mut res, &mut infos, &mut to_journal, &mut rep)?;
+        reconcile(ctx, h, p, list, open.as_ref(), only.as_deref(), &mut res, &mut infos, &mut to_journal, &mut rep)?;
+        if only.is_some() { set_open(ctx, h, p, &running)?; }
     }
     // the other computers learn of this one's sessions here, once their projects are known
     if let Err(e) = ctx.db.journal_sessions(&to_journal) { crate::log::warn(&format!("journal: sessions: {e:#}")); }
@@ -98,8 +114,7 @@ pub(crate) fn refresh_profiles(ctx: &Ctx, reg: &Registry, names: &[String], all:
 
 /// The sessions the open consoles are working in: the ones they name, and for consoles that name none, the most
 /// recently active ones.
-fn open_ids(h: &dyn Harness, ctx: &Ctx, p: &Profile, list: &[SessionMeta]) -> HashSet<String> {
-    let running = h.running(ctx, p);
+fn open_ids(running: &[crate::model::RunningConsole], list: &[SessionMeta]) -> HashSet<String> {
     if running.is_empty() { return HashSet::new(); }
     let mut recent: Vec<&SessionMeta> = list.iter().collect();
     recent.sort_by_key(|s| std::cmp::Reverse(s.last_active_at));
@@ -108,24 +123,30 @@ fn open_ids(h: &dyn Harness, ctx: &Ctx, p: &Profile, list: &[SessionMeta]) -> Ha
 }
 
 /// One account's index rows against what its scan listed: rows written only where something differs (the JSON,
-/// the project, `open`), rows whose session is gone removed, and the scan's cache signature left alone.
+/// the project, `open`), rows whose session is gone removed, and the scan's cache signature left alone. With `only`
+/// (the scan listed these changed files alone), the rows of those files; `open` is then left as each row has it.
 #[allow(clippy::too_many_arguments)]
-fn reconcile(ctx: &Ctx, h: &dyn Harness, p: &Profile, list: Vec<SessionMeta>, open: &HashSet<String>, res: &mut Resolver, infos: &mut HashMap<String, ProjectInfo>, to_journal: &mut Vec<SessionMeta>, rep: &mut Report) -> Result<()> {
+fn reconcile(ctx: &Ctx, h: &dyn Harness, p: &Profile, list: Vec<SessionMeta>, open: Option<&HashSet<String>>, only: Option<&[PathBuf]>, res: &mut Resolver, infos: &mut HashMap<String, ProjectInfo>, to_journal: &mut Vec<SessionMeta>, rep: &mut Report) -> Result<()> {
     let prefix = format!("{}|{}|", h.id(), p.name);
-    let existing: HashMap<String, (String, String, String, bool)> = ctx.db.with(|c| {
-        let mut st = c.prepare("select key, json, project_key, project_name, open from sessions where key >= ?1 and key < ?2 and device = ?3")?;
-        let rows = st.query_map(params![prefix, crate::db::prefix_end(&prefix), ctx.db.device], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0))))?;
-        Ok(rows.flatten().collect())
+    let existing: HashMap<String, (String, String, String, bool)> = ctx.db.read(|c| {
+        let row = |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, i64>(4)? != 0)));
+        Ok(match only {
+            Some(files) => c.prepare("select key, json, project_key, project_name, open from sessions where key in (select value from json_each(?1)) and device = ?2")?
+                .query_map(params![json!(files.iter().map(|f| format!("{prefix}{}", f.display())).collect::<Vec<_>>()).to_string(), ctx.db.device], row)?.flatten().collect(),
+            None => c.prepare("select key, json, project_key, project_name, open from sessions where key >= ?1 and key < ?2 and device = ?3")?
+                .query_map(params![prefix, crate::db::prefix_end(&prefix), ctx.db.device], row)?.flatten().collect(),
+        })
     })?;
     let mut seen: HashSet<String> = HashSet::new();
     let (device, device_name) = (ctx.db.device.clone(), ctx.settings.device_name.clone());
+    // each session's project before the write transaction: a folder not looked up yet is read from the disk, and no other write should wait on that
+    let list: Vec<(SessionMeta, ProjectInfo)> = list.into_iter().map(|m| { let info = res.resolve(&m.cwd); (m, info) }).collect();
     ctx.db.with(|c| {
         let tx = c.transaction()?;
-        for m in list {
+        for (m, info) in list {
             let key = local_key(&m);
-            let info = res.resolve(&m.cwd);
             infos.entry(info.key.clone()).or_insert_with(|| info.clone());
-            let is_open = open.contains(&m.id);
+            let is_open = match open { Some(o) => o.contains(&m.id), None => existing.get(&key).is_some_and(|e| e.3) };
             let json = serde_json::to_string(&m)?;
             match existing.get(&key) {
                 Some((j, pk, pn, op)) if *j == json && *pk == info.key && *pn == info.name && *op == is_open => {}
@@ -172,21 +193,25 @@ pub fn mark_open(ctx: &Ctx) -> Result<()> {
     let reg = ctx.registry()?;
     for p in &reg.profiles {
         let h = harness::of(p);
-        let running = h.running(ctx, p);
-        let unnamed = running.iter().filter(|r| r.session_id.is_none()).count();
-        let mut ids: Vec<String> = running.iter().filter_map(|r| r.session_id.clone()).collect();
-        ctx.db.with(|c| {
-            if unnamed > 0 {
-                let mut st = c.prepare("select id from sessions where device=?1 and harness=?2 and profile=?3 and instr(key, '|') > 0 order by last_active_at desc limit ?4")?;
-                ids.extend(st.query_map(params![ctx.db.device, h.id(), p.name, unnamed as i64], |r| r.get::<_, String>(0))?.flatten());
-            }
-            let set = json!(ids).to_string();
-            c.execute("update sessions set open = (id in (select value from json_each(?1))) where device=?2 and harness=?3 and profile=?4 and instr(key, '|') > 0 and open <> (id in (select value from json_each(?1)))",
-                params![set, ctx.db.device, h.id(), p.name])?;
-            Ok(())
-        })?;
+        set_open(ctx, h, p, &h.running(ctx, p))?;
     }
     Ok(())
+}
+
+/// The `open` column of one account's rows from its consoles (the rule of `open_ids`, over the rows).
+fn set_open(ctx: &Ctx, h: &dyn Harness, p: &Profile, running: &[crate::model::RunningConsole]) -> Result<()> {
+    let unnamed = running.iter().filter(|r| r.session_id.is_none()).count();
+    let mut ids: Vec<String> = running.iter().filter_map(|r| r.session_id.clone()).collect();
+    ctx.db.with(|c| {
+        if unnamed > 0 {
+            let mut st = c.prepare("select id from sessions where device=?1 and harness=?2 and profile=?3 and instr(key, '|') > 0 order by last_active_at desc limit ?4")?;
+            ids.extend(st.query_map(params![ctx.db.device, h.id(), p.name, unnamed as i64], |r| r.get::<_, String>(0))?.flatten());
+        }
+        let set = json!(ids).to_string();
+        c.execute("update sessions set open = (id in (select value from json_each(?1))) where device=?2 and harness=?3 and profile=?4 and instr(key, '|') > 0 and open <> (id in (select value from json_each(?1)))",
+            params![set, ctx.db.device, h.id(), p.name])?;
+        Ok(())
+    })
 }
 
 /// A refresh of every account when the last one is older than `max_age_ms` (the CLI, which has no background walk).
@@ -304,7 +329,7 @@ pub(crate) mod tests {
         let line = json!({"type": "user", "sessionId": "s2", "cwd": ctx.home.join("work"), "timestamp": "2026-11-06T09:00:00.000Z", "message": {"role": "user", "content": "and then"}});
         std::fs::write(&f2, format!("{}{line}\n", std::fs::read_to_string(&f2).unwrap())).unwrap();
         let r = refresh(&ctx, Scope::Paths(vec![f2.clone()])).unwrap();
-        assert_eq!((r.profiles, r.sessions, r.removed), (1, 2, 0), "{r:?}");
+        assert_eq!((r.profiles, r.sessions, r.removed), (1, 1, 0), "the changed file alone is listed: {r:?}");
         let after = rows(&ctx);
         assert_eq!(before.len(), after.len());
         for (b, a) in before.iter().zip(after.iter()) {
@@ -322,6 +347,28 @@ pub(crate) mod tests {
         assert_eq!((parsed.prompts, parsed.last_active_at), (2, harness::parse::ts_ms("2026-11-06T09:00:00.000Z")));
         // a path under no account's folder refreshes nothing
         assert_eq!(refresh(&ctx, Scope::Paths(vec![t.path().join("elsewhere.jsonl")])).unwrap().profiles, 0);
+        // a sub-agent's log lies deeper than the sessions and is none: nothing is listed for it, as a walk lists nothing
+        let sub = f2.with_extension("").join("subagents").join("agent-1.jsonl");
+        std::fs::create_dir_all(sub.parent().unwrap()).unwrap();
+        std::fs::write(&sub, format!("{line}\n")).unwrap();
+        let r = refresh(&ctx, Scope::Paths(vec![sub.clone()])).unwrap();
+        assert_eq!((r.profiles, r.sessions, r.changed, r.removed), (1, 0, 0, 0), "{r:?}");
+        // a folder among the changed paths can bring or take any number of files: the account is listed whole
+        let r = refresh(&ctx, Scope::Paths(vec![sub.parent().unwrap().to_path_buf()])).unwrap();
+        assert_eq!((r.sessions, r.changed, r.removed), (2, 0, 0), "{r:?}");
+        // a session's file that went is dropped by its path alone, and the other row stays
+        std::fs::remove_file(&f2).unwrap();
+        let r = refresh(&ctx, Scope::Paths(vec![f2.clone()])).unwrap();
+        assert_eq!((r.sessions, r.changed, r.removed), (0, 0, 1), "{r:?}");
+        assert_eq!(ids(&ctx, &SessionFilter::default()), vec!["s1"]);
+        // and all of it is what a walk finds
+        let r = refresh(&ctx, Scope::All).unwrap();
+        assert_eq!((r.sessions, r.changed, r.removed), (1, 0, 0), "{r:?}");
+        // a session's first write has no row to go by: the account is listed, and the new session is in
+        let f3 = claude_file(&ctx, "s3", "three", "2026-11-07T10:00:00.000Z");
+        let r = refresh(&ctx, Scope::Paths(vec![f3])).unwrap();
+        assert_eq!((r.sessions, r.changed, r.removed), (2, 1, 0), "{r:?}");
+        assert_eq!(ids(&ctx, &SessionFilter::default()), vec!["s3", "s1"]);
     }
 
     #[test]
@@ -341,7 +388,7 @@ pub(crate) mod tests {
         // the parse lands first
         let t0 = Instant::now();
         while !rows(&ctx)[0].1.contains("\"prompts\":2") && t0.elapsed().as_secs() < 5 { std::thread::sleep(std::time::Duration::from_millis(20)); }
-        reconcile(&ctx, h, p, list, &HashSet::new(), &mut Resolver::new(&reg.projects), &mut HashMap::new(), &mut vec![], &mut Report::default()).unwrap();
+        reconcile(&ctx, h, p, list, Some(&HashSet::new()), None, &mut Resolver::new(&reg.projects), &mut HashMap::new(), &mut vec![], &mut Report::default()).unwrap();
         drop(one);
         // and the old record does not replace it: with the file's signature on the row, no later scan would read the file again
         refresh(&ctx, Scope::All).unwrap();

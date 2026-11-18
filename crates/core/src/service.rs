@@ -25,12 +25,15 @@ pub struct HarnessView {
 }
 
 pub fn harnesses() -> Vec<HarnessView> {
-    harness::all().iter().map(|h| HarnessView {
-        id: h.id().into(),
-        label: h.label().into(),
-        installed: crate::launch::resolve_program(h.id(), h.binary()).is_ok(),
-        caps: h.caps(),
-    }).collect()
+    // every look at the state asked for all six programs, each lookup trying every folder of PATH with every extension
+    // shortcut: a tool installed or removed shows here up to five seconds late (the Apps page and a start look for themselves); look each time if that is ever in the way
+    static FOUND: Mutex<Option<(std::time::Instant, Vec<bool>)>> = Mutex::new(None);
+    let mut found = FOUND.lock().unwrap_or_else(|e| e.into_inner());
+    let installed = match found.as_ref() {
+        Some((at, v)) if at.elapsed().as_secs() < 5 => v.clone(),
+        _ => found.insert((std::time::Instant::now(), harness::all().iter().map(|h| crate::launch::resolve_program(h.id(), h.binary()).is_ok()).collect())).1.clone(),
+    };
+    harness::all().iter().zip(installed).map(|(h, installed)| HarnessView { id: h.id().into(), label: h.label().into(), installed, caps: h.caps() }).collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -164,6 +167,8 @@ pub fn list_views(ctx: &Ctx) -> Result<Vec<ProfileView>> {
 
 /// Import new usage for every profile. Returns the number of new rows.
 pub fn import_usage(ctx: &Ctx) -> Result<usize> {
+    // the day's price list first, here in the round: the reads that price something take what is stored
+    crate::pricing::refresh(ctx);
     let reg = ctx.registry()?;
     // accounts side by side (each also reads its files on all cores): a first run reads gigabytes of logs
     let results: Vec<(String, Result<usize>)> = std::thread::scope(|s| {
@@ -748,16 +753,29 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
     let span = days.unwrap_or(30).clamp(1, 53 * 7);
     let day_list = last_days(span);
     let from = from_day(days);
-    let (dc, dv) = device_clause(ctx, scope, 2);
-    let rows: Vec<(String, String, i64, Option<f64>, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare(&format!("select project, day, sum(input + output + cache_read + cache_write), sum(cost), coalesce(sum(priced_tokens), 0) from usage_day where day >= ?1 and {dc} group by project, day"))?;
-        let r = st.query_map(rusqlite::params![from, dv], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?;
-        Ok(r)
+    // (another computer's project, this computer's folder, day, tokens, cost, priced tokens)
+    type Used = (Option<String>, String, String, i64, Option<f64>, i64);
+    let rows: Vec<Used> = ctx.db.read(|c| {
+        let used = |r: &rusqlite::Row| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?));
+        let mut st = c.prepare("select null, project, day, sum(input + output + cache_read + cache_write), sum(cost), coalesce(sum(priced_tokens), 0) from usage_day where day >= ?1 and device = ?2 group by project, day")?;
+        let mut v: Vec<Used> = st.query_map(rusqlite::params![from, ctx.db.device], used)?.collect::<rusqlite::Result<_>>()?;
+        if scope != Some("here") {
+            // another computer's folder is not on this disk, or is another repository here: its requests go by the project
+            // its session row carries (the journal key). Only computers with usage are read, from two days before the range
+            // (the index's start; the day decides, and it was this computer's local day when the row arrived)
+            let since = days.map(|d| now_ms() - (d.max(1) + 2) * 86_400_000).unwrap_or(0);
+            let mut st = c.prepare("select s.project_key, '', u.day, sum(u.input + u.output + u.cache_read + u.cache_write), sum(u.cost_usd),
+                coalesce(sum(case when u.cost_usd is null then 0 else u.input + u.output + u.cache_read + u.cache_write end), 0)
+                from usage u join sessions s on s.key = u.harness || '/' || u.profile || '/' || u.session_id
+                where u.day >= ?1 and u.ts >= ?3 and u.device in (select device from usage_day where device <> ?2) group by s.project_key, u.day")?;
+            for r in st.query_map(rusqlite::params![from, ctx.db.device, since], used)? { v.push(r?); }
+        }
+        Ok(v)
     })?;
     let mut res = Resolver::new(&reg.projects);
     let mut by_key: HashMap<String, (Option<f64>, i64, i64, Vec<i64>)> = HashMap::new(); // cost, priced tokens, all tokens, series
-    for (dir, day, tokens, cost, priced) in rows {
-        let key = res.resolve(&dir).key;
+    for (theirs, dir, day, tokens, cost, priced) in rows {
+        let key = theirs.unwrap_or_else(|| res.resolve(&dir).key);
         let e = by_key.entry(key).or_insert_with(|| (None, 0, 0, vec![0; day_list.len()]));
         e.2 += tokens;
         if let Some(c) = cost { e.0 = Some(e.0.unwrap_or(0.0) + c); e.1 += priced; }
@@ -796,7 +814,7 @@ fn session_row(ctx: &Ctx, reg: &Registry, profile: &str, session_id: &str) -> Re
     match find()? {
         Some(s) => Ok(s),
         // a session the index has not seen yet (its file was just written): its account's folders are read now
-        None => { crate::index::refresh_profiles(ctx, reg, &[profile.to_string()], false)?; find()?.context("session not found") }
+        None => { crate::index::refresh_profiles(ctx, reg, &[profile.to_string()], false, None)?; find()?.context("session not found") }
     }
 }
 
@@ -1458,6 +1476,45 @@ mod tests {
     fn ctx(t: &tempfile::TempDir) -> Ctx { Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap() }
 
     fn refused(r: Result<impl Sized>) -> String { format!("{:#}", r.err().expect("refused")) }
+
+    #[test]
+    fn a_project_costs_what_its_sessions_cost_on_every_computer_whatever_their_folders_are_here() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = crate::index::tests::computer(t.path());
+        let other = "0b1c2d3e-aaaa-4bbb-8ccc-1234567890ab";
+        // two repositories on this disk, each with a session of this computer
+        let repo = |dir: &str, name: &str| { let d = ctx.home.join(dir); std::fs::create_dir_all(d.join(".git")).unwrap(); std::fs::write(d.join(".git").join("config"), format!("[remote \"origin\"]\n\turl = git@github.com:example/{name}.git\n")).unwrap(); d.display().to_string() };
+        let (app, billing) = (repo("work", "app"), repo("billing", "billing"));
+        let at = chrono::Utc::now().to_rfc3339();
+        crate::index::tests::claude_file(&ctx, "s-app", "one", &at);
+        std::fs::write(ctx.home.join(".claude").join("projects").join("p").join("s-billing.jsonl"), format!("{}\n", serde_json::json!({"type": "user", "sessionId": "s-billing", "cwd": billing, "timestamp": at, "message": {"role": "user", "content": "two"}}))).unwrap();
+        crate::index::refresh(&ctx, crate::index::Scope::All).unwrap();
+        // the other computer's sessions as the journal merged them: one of the same repository in a folder that is not on this disk,
+        // one in a folder that is `billing` here, one of a project only that computer has
+        let theirs = [("r-app", "/home/alex/src/app", "github.com/example/app", 0.5), ("r-app-2", billing.as_str(), "github.com/example/app", 0.125), ("r-docs", "/home/alex/src/docs", "github.com/example/docs", 0.25)];
+        let now = now_ms();
+        let used = |id: &str, session: &str, folder: &str| UsageRow { request_id: id.into(), profile: "claude-main".into(), harness: "claude".into(), ts: now, model: "m".into(), project: folder.into(), session_id: session.into(),
+            input: 100, output: 10, cache_read: 0, cache_write: 0, ttft_ms: None, gen_ms: None };
+        ctx.db.with(|c| {
+            crate::db::upsert_usage(c, &used("u1", "s-app", &app), &ctx.db.device, Some(1.0), Some("t"))?;
+            crate::db::upsert_usage(c, &used("u2", "s-billing", &billing), &ctx.db.device, Some(2.0), Some("t"))?;
+            for (id, cwd, key, cost) in theirs {
+                let m = SessionMeta { harness: "claude".into(), profile: "claude-main".into(), id: id.into(), cwd: cwd.into(), started_at: now, last_active_at: now, tokens: 110, project_key: key.into(), project_name: key.rsplit('/').next().unwrap().into(), ..Default::default() };
+                crate::db::upsert_session(c, &crate::db::session_key(&m), &m, other)?;
+                crate::db::upsert_usage(c, &used(&format!("u-{id}"), id, cwd), other, Some(cost), Some("t"))?;
+            }
+            Ok(())
+        }).unwrap();
+        let cost = |scope: Option<&str>| { let mut v: Vec<(String, Option<f64>, i64)> = projects(&ctx, None, scope).unwrap().into_iter().map(|p| (p.key, p.cost, p.series.iter().sum())).collect(); v.sort_by(|a, b| a.0.cmp(&b.0)); v };
+        assert_eq!(cost(None), vec![("github.com/example/app".to_string(), Some(1.625), 330), ("github.com/example/billing".to_string(), Some(2.0), 110), ("github.com/example/docs".to_string(), Some(0.25), 110)]);
+        assert_eq!(cost(Some("here")), vec![("github.com/example/app".to_string(), Some(1.0), 110), ("github.com/example/billing".to_string(), Some(2.0), 110)]);
+    }
+
+    #[test]
+    fn the_tool_list_names_every_tool_and_whether_its_program_is_found_the_same_at_every_ask() {
+        let found: Vec<(String, bool)> = harness::all().iter().map(|h| (h.id().to_string(), crate::launch::resolve_program(h.id(), h.binary()).is_ok())).collect();
+        for _ in 0..2 { assert_eq!(harnesses().into_iter().map(|h| (h.id, h.installed)).collect::<Vec<_>>(), found); }
+    }
 
     #[test]
     fn a_route_is_checked_the_same_for_the_window_and_the_command_line() {

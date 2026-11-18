@@ -485,6 +485,8 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Quota { name, live, j } => {
             let reg = ctx.registry()?;
             let p = reg.get(&name)?;
+            // Codex's limits are the reading its usage import kept: read what its logs gained first
+            if !live && p.harness == "codex" { if let Err(e) = harness::of(p).import_usage(&ctx, p) { eprintln!("usage import: {e:#}"); } }
             let q = if live { Some(service::quota_live(&ctx, &name)?) } else { harness::of(p).quota(&ctx, p) };
             if j.json { return print_json(&q).map(|_| 0); }
             match q {
