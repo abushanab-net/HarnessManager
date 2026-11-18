@@ -157,7 +157,10 @@ impl Harness for Claude {
         let home = self.home(ctx, p);
         std::fs::create_dir_all(&home)?;
         if !p.main {
-            crate::shared::sync_claude(&self.default_home(ctx), &ctx.home.join(".claude.json"), &home)?;
+            // the mirror is a convenience: when it fails the account starts with the settings it has
+            if let Err(e) = crate::shared::sync_claude(&self.default_home(ctx), &ctx.home.join(".claude.json"), &home) {
+                crate::log::warn(&format!("{}: the main account's settings were not mirrored: {e:#}", p.name));
+            }
         }
         if p.kind == Kind::ApiKey {
             if let Some(key) = crate::secrets::get_key(&crate::secrets::key_target(&p.name)) {

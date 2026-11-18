@@ -73,6 +73,17 @@ fn a_half_written_claude_json_is_left_alone() {
 }
 
 #[test]
+fn a_second_claude_account_starts_when_the_main_settings_cannot_be_mirrored() {
+    let (_dir, ctx) = ctx();
+    let work = profile("claude-work", "claude", false);
+    let h = harness::of(&work);
+    std::fs::create_dir_all(ctx.home.join(".claude")).unwrap();
+    std::fs::write(ctx.home.join(".claude").join("settings.json"), r#"{"model": "opus", "#).unwrap();
+    h.prepare(&ctx, &work).expect("the launch does not need the mirror");
+    assert!(h.home(&ctx, &work).is_dir());
+}
+
+#[test]
 fn enabling_a_prompt_keeps_every_accounts_own_file_and_app_edits_stick() {
     let (_dir, ctx) = ctx();
     let mut reg = ctx.registry().unwrap();
