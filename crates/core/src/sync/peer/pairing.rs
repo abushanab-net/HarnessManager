@@ -35,7 +35,7 @@ fn b64(bytes: &[u8]) -> String { base64::engine::general_purpose::STANDARD.encod
 fn unb64(s: &str) -> Result<Vec<u8>> { Ok(base64::engine::general_purpose::STANDARD.decode(s.trim())?) }
 
 /// `{nonce ++ ciphertext}` base64 of the JSON, under the pairing key.
-fn seal(key: &[u8], v: &Value) -> Result<String> {
+pub(super) fn seal(key: &[u8], v: &Value) -> Result<String> {
     let mut nonce = [0u8; 12];
     getrandom::fill(&mut nonce).map_err(|e| anyhow!("random bytes: {e}"))?;
     let ct = ChaCha20Poly1305::new_from_slice(key)?.encrypt(&Nonce::from(nonce), v.to_string().as_bytes()).map_err(|_| anyhow!("seal"))?;
@@ -169,7 +169,9 @@ async fn finish(State(s): State<Arc<Shared>>, Json(a): Json<Value>) -> Response 
     let Some(key) = key else { return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "start first"}))).into_response() };
     match open(&key, a["payload"].as_str().unwrap_or("")) {
         Ok(p) => {
-            let (ctx, address) = (s.ctx.clone(), a["address"].as_str().unwrap_or("").to_string());
+            // where to reach the joiner comes from the sealed payload; beside it, where anyone on the way can
+            // rewrite it, only from a computer up to 1.11.0, which seals none
+            let (ctx, address) = (s.ctx.clone(), p["address"].as_str().or(a["address"].as_str()).unwrap_or("").to_string());
             let c2 = ctx.clone();
             let sealed = match tokio::task::spawn_blocking(move || payload(&c2)).await.expect("payload").and_then(|m| seal(&key, &m)) {
                 Ok(p) => p,
@@ -213,9 +215,12 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
     let (st, outbound) = Spake2::<Ed25519Group>::start_a(&Password::new(code.as_bytes()), &Identity::new(me.as_bytes()), &Identity::new(their_id.as_bytes()));
     let r = json(http.post(format!("{base}/pair/start")).json(&json!({"id": me, "msg": b64(&outbound)})).send()?.error_for_status().context("the other computer refused the pairing")?)?;
     let key = st.finish(&unb64(r["msg"].as_str().unwrap_or(""))?).map_err(|_| anyhow!("the pairing exchange failed"))?;
-    let mine = payload(ctx)?;
+    let mut mine = payload(ctx)?;
     // the other side learns of a wrong code only from a payload it cannot open
     let address = if via_host { mine["address_hint"].as_str().unwrap_or("").to_string() } else { String::new() };
+    // sealed, so nobody on the way can change where the host will reach this computer; the copy beside the payload
+    // is all a host up to 1.11.0 reads
+    mine["address"] = json!(address);
     let f = http.post(format!("{base}/pair/finish")).json(&json!({"id": me, "payload": seal(&key, &mine)?, "address": address})).send()?;
     if f.status() == reqwest::StatusCode::FORBIDDEN { bail!("the code did not match; check it and try again"); }
     if !f.status().is_success() { bail!("the other computer did not accept the pairing: {}", json(f).ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_default()); }

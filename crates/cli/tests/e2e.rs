@@ -1010,3 +1010,25 @@ fn a_login_that_expires_is_an_event_once() {
     assert_eq!(ev.len(), 1, "{ev:?}");
     assert!(ev[0]["text"].as_str().unwrap().contains("team-alex's login expired"));
 }
+
+#[test]
+fn a_secret_left_out_of_the_arguments_is_read_from_piped_input() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let e = Env::new();
+    let piped = |args: &[&str], line: &str| {
+        let mut c = e.cmd(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(line.as_bytes()).unwrap();
+        let out = c.wait_with_output().unwrap();
+        (out.status.success(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())
+    };
+    let (ok, so, se) = piped(&["ring", "enter"], "ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567\n");
+    assert!(ok && so.contains("the ring key is set"), "{so}{se}");
+    // --admin alone: the token is read and the hub is asked (nothing listens there), where the bare flag was once refused
+    let (ok, _, se) = piped(&["hub", "join", "http://127.0.0.1:1", "--admin"], "not-a-token\n");
+    assert!(!ok && !se.contains("a value is required") && !se.contains("six-digit code"), "{se}");
+    // the argument still works: the same answer from the hub that is not there
+    let (ok, _, se2) = piped(&["hub", "join", "http://127.0.0.1:1", "--admin", "not-a-token"], "");
+    assert!(!ok && se2 == se, "{se2}");
+    for args in [["hub", "join", "--help"], ["ring", "enter", "--help"]] { assert!(e.ok(&args).contains("shell history")); }
+}

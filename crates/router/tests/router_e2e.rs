@@ -26,6 +26,13 @@ async fn fail(State(h): State<Arc<Hits>>) -> Response {
 
 async fn bad() -> Response { (StatusCode::BAD_REQUEST, "prompt is too long").into_response() }
 
+async fn limited() -> Response { (StatusCode::TOO_MANY_REQUESTS, [("retry-after", "7")], "slow down").into_response() }
+
+async fn denied() -> Response { (StatusCode::UNAUTHORIZED, "the key is not valid").into_response() }
+
+/// A failure the way some OpenAI-format providers send it: status 200, an `error` and no `choices`.
+async fn oai_err() -> Response { Json(json!({"error": {"message": "the model is overloaded", "code": 503}})).into_response() }
+
 async fn anth(State(h): State<Arc<Hits>>, headers: HeaderMap, Json(req): Json<Value>) -> Response {
     h.anth.fetch_add(1, Ordering::SeqCst);
     assert_eq!(headers.get("x-api-key").unwrap(), "key-anth", "the provider key is injected");
@@ -77,6 +84,9 @@ async fn setup() -> Setup {
     let mock = Router::new()
         .route("/fail/v1/messages", post(fail))
         .route("/bad/v1/messages", post(bad))
+        .route("/limited/v1/messages", post(limited))
+        .route("/denied/v1/messages", post(denied))
+        .route("/oaierr/chat/completions", post(oai_err))
         .route("/anth/v1/messages", post(anth))
         .route("/oai/chat/completions", post(oai))
         .with_state(hits.clone());
@@ -91,18 +101,24 @@ async fn setup() -> Setup {
         prov("p-bad", "bad", "anthropic", &[]),
         prov("p-anth", "anth", "anthropic", &["claude-sonnet-5-5"]),
         prov("p-oai", "oai", "openai", &["gpt-6", "gpt-6-mini"]),
+        prov("p-limited", "limited", "anthropic", &[]),
+        prov("p-denied", "denied", "anthropic", &[]),
+        prov("p-oaierr", "oaierr", "openai", &[]),
     ];
     reg.routes = vec![
         Route { id: "fo".into(), mode: "failover".into(), providers: vec!["p-fail".into(), "p-anth".into()], default_provider: None },
         Route { id: "bad".into(), mode: "failover".into(), providers: vec!["p-bad".into(), "p-anth".into()], default_provider: None },
         Route { id: "oai".into(), mode: "failover".into(), providers: vec!["p-oai".into()], default_provider: None },
         Route { id: "agg".into(), mode: "aggregate".into(), providers: vec!["p-anth".into(), "p-oai".into()], default_provider: Some("p-anth".into()) },
+        Route { id: "limited".into(), mode: "failover".into(), providers: vec!["p-fail".into(), "p-limited".into()], default_provider: None },
+        Route { id: "denied".into(), mode: "aggregate".into(), providers: vec!["p-denied".into()], default_provider: None },
+        Route { id: "oaierr".into(), mode: "failover".into(), providers: vec!["p-oaierr".into(), "p-anth".into()], default_provider: None },
+        Route { id: "oaierr1".into(), mode: "failover".into(), providers: vec!["p-oaierr".into()], default_provider: None },
     ];
     ctx.save_registry(&reg).unwrap();
     hrm_core::secrets::set_key(&hrm_core::secrets::provider_target("p-anth"), "key-anth").unwrap();
     hrm_core::secrets::set_key(&hrm_core::secrets::provider_target("p-oai"), "key-oai").unwrap();
-    hrm_core::secrets::set_key(&hrm_core::secrets::provider_target("p-fail"), "x").unwrap();
-    hrm_core::secrets::set_key(&hrm_core::secrets::provider_target("p-bad"), "x").unwrap();
+    for id in ["p-fail", "p-bad", "p-limited", "p-denied", "p-oaierr"] { hrm_core::secrets::set_key(&hrm_core::secrets::provider_target(id), "x").unwrap(); }
     let token = hrm_core::service::router_token(&ctx).unwrap();
 
     let rl = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -128,7 +144,9 @@ async fn router_end_to_end() {
 
     // 1. the launch token is required
     assert_eq!(post_msg(&s, "fo", &body("claude-sonnet-5-5", false), None).await.status(), 401);
-    assert_eq!(post_msg(&s, "fo", &body("claude-sonnet-5-5", false), Some("wrong")).await.status(), 401);
+    let r = post_msg(&s, "fo", &body("claude-sonnet-5-5", false), Some("wrong")).await;
+    assert_eq!(r.status(), 401);
+    assert_eq!(r.json::<Value>().await.unwrap()["error"]["type"], "authentication_error");
 
     // 2. failover: p-fail answers 500, p-anth serves the request
     let r = post_msg(&s, "fo", &body("claude-sonnet-5-5", false), Some(&s.token)).await;
@@ -148,6 +166,7 @@ async fn router_end_to_end() {
     // 4. a request the provider rejects as invalid is not failed over
     let r = post_msg(&s, "bad", &body("claude-sonnet-5-5", false), Some(&s.token)).await;
     assert_eq!(r.status(), 400);
+    assert_eq!(r.json::<Value>().await.unwrap()["error"]["type"], "invalid_request_error");
     let anth_before = s.hits.anth.load(Ordering::SeqCst);
     assert_eq!(anth_before, 5);
 
@@ -169,7 +188,9 @@ async fn router_end_to_end() {
     let v: Value = post_msg(&s, "agg", &body("claude-sonnet-5-5", false), Some(&s.token)).await.json().await.unwrap();
     assert_eq!(v["content"][0]["text"], "from anthropic", "no prefix goes to the default provider");
     assert_eq!(post_msg(&s, "agg", &body("hm-p-fail--x", false), Some(&s.token)).await.status(), 404);
-    assert_eq!(post_msg(&s, "agg", &body("hm-nope--x", false), Some(&s.token)).await.status(), 404);
+    let r = post_msg(&s, "agg", &body("hm-nope--x", false), Some(&s.token)).await;
+    assert_eq!(r.status(), 404);
+    assert_eq!(r.json::<Value>().await.unwrap()["error"]["type"], "not_found_error");
 
     // 8. model list for the picker
     let m: Value = reqwest::Client::new().get(format!("{}/r/agg/acct/v1/models", s.base)).bearer_auth(&s.token).send().await.unwrap().json().await.unwrap();
@@ -183,6 +204,55 @@ async fn router_end_to_end() {
     assert!(log.iter().any(|r| r["provider"] == "p-oai" && r["output"] == 2), "stream usage recorded");
     assert!(log.iter().all(|r| r["profile"] == "acct"));
 
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_providers_error_keeps_its_status_its_type_and_its_retry_after() {
+    let s = setup().await;
+
+    // every provider failed: the last refusal comes back with its retry-after, where it was a 502 a tool retries at once
+    let r = post_msg(&s, "limited", &body("m", false), Some(&s.token)).await;
+    assert_eq!((r.status().as_u16(), r.headers().get("retry-after").and_then(|v| v.to_str().ok())), (429, Some("7")));
+    let v: Value = r.json().await.unwrap();
+    assert_eq!((v["type"].as_str(), v["error"]["type"].as_str()), (Some("error"), Some("rate_limit_error")), "{v}");
+    assert!(v["error"]["message"].as_str().unwrap().contains("p-limited answered 429"), "{v}");
+
+    // a key the provider refuses is an authentication error, and no retry-after is made up for it
+    let r = post_msg(&s, "denied", &body("m", false), Some(&s.token)).await;
+    assert_eq!((r.status().as_u16(), r.headers().get("retry-after")), (401, None));
+    assert_eq!(r.json::<Value>().await.unwrap()["error"]["type"], "authentication_error");
+
+    // an OpenAI-format error with status 200 is a failure: the next provider answers
+    let before = s.hits.anth.load(Ordering::SeqCst);
+    let r = post_msg(&s, "oaierr", &body("m", false), Some(&s.token)).await;
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.json::<Value>().await.unwrap()["content"][0]["text"], "from anthropic");
+    assert_eq!(s.hits.anth.load(Ordering::SeqCst), before + 1);
+
+    // with no other provider it is an error with the provider's reason, never an empty answer marked complete
+    let r = post_msg(&s, "oaierr1", &body("m", false), Some(&s.token)).await;
+    assert_eq!(r.status(), 502);
+    let v: Value = r.json().await.unwrap();
+    assert_eq!(v["error"]["type"], "api_error");
+    assert!(v["error"]["message"].as_str().unwrap().contains("the model is overloaded"), "{v}");
+    let text = post_msg(&s, "oaierr1", &body("m", true), Some(&s.token)).await.text().await.unwrap();
+    assert!(text.contains("event: error") && text.contains("the model is overloaded"), "{text}");
+    assert!(!text.contains("message_stop"), "{text}");
+
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let log = s.ctx.db.route_log(100).unwrap();
+    assert!(log.iter().any(|r| r["provider"] == "p-limited" && r["status"] == 429), "{log:?}");
+    assert!(!log.iter().any(|r| r["provider"] == "p-oaierr" && r["status"] == 200), "a failure is not logged as an answer: {log:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn health_names_the_program_only_to_the_tokens_holder() {
+    let s = setup().await;
+    let get = |token: Option<&str>| { let mut r = reqwest::Client::new().get(format!("{}/health", s.base)); if let Some(t) = token { r = r.bearer_auth(t); } r.send() };
+    assert_eq!(get(None).await.unwrap().text().await.unwrap(), "ok");
+    assert_eq!(get(Some("wrong")).await.unwrap().text().await.unwrap(), "ok");
+    let named = get(Some(&s.token)).await.unwrap().text().await.unwrap();
+    assert!(named.strip_prefix("ok\n").is_some_and(|exe| !exe.is_empty()), "the program file follows for the caller with the token");
 }
 
 /// A provider that answers with a chunked stream cut exactly where the test says, by request path:

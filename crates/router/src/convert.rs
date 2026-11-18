@@ -95,6 +95,13 @@ pub fn stop_reason(finish: &str) -> &'static str {
     }
 }
 
+/// Why an OpenAI-format body is no answer, whatever its status: it carries an `error`, or no choice at all.
+pub fn failure(resp: &Value) -> Option<String> {
+    let e = &resp["error"];
+    if !e.is_null() { return Some(e["message"].as_str().map(String::from).unwrap_or_else(|| e.to_string())); }
+    resp["choices"][0].is_null().then(|| "the reply has no choices".into())
+}
+
 /// OpenAI Chat Completions response -> Anthropic Messages response.
 pub fn openai_to_anthropic(resp: &Value, model: &str) -> Value {
     let choice = &resp["choices"][0];
@@ -142,7 +149,8 @@ fn sse(event: &str, data: Value) -> String { format!("event: {event}\ndata: {dat
 /// Turns OpenAI stream chunks into Anthropic stream events.
 pub struct StreamConv {
     model: String,
-    started: bool,
+    /// False until the first event of an answer went out.
+    pub started: bool,
     open: Option<usize>,
     /// "text" or "thinking" when the open block is one of those
     open_kind: &'static str,
@@ -281,6 +289,14 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(c.error.as_deref(), Some("upstream overloaded"));
         assert!(c.finish().is_empty(), "no message_stop after an error");
+    }
+
+    #[test]
+    fn a_body_with_an_error_or_without_choices_is_no_answer() {
+        assert_eq!(failure(&json!({"error": {"message": "quota exceeded", "code": 429}})).as_deref(), Some("quota exceeded"));
+        assert_eq!(failure(&json!({"error": "bad gateway"})).as_deref(), Some("\"bad gateway\""));
+        assert!(failure(&json!({"id": "c", "choices": []})).is_some() && failure(&json!({"id": "c"})).is_some());
+        assert_eq!(failure(&json!({"choices": [{"message": {"content": "ok"}}]})), None);
     }
 
     #[test]
