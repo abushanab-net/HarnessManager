@@ -1259,6 +1259,29 @@ mod tests {
     }
 
     #[test]
+    fn two_processes_that_add_the_same_columns_at_once_both_open_the_database() {
+        let t = tempfile::tempdir().unwrap();
+        let data = t.path().join("A");
+        std::fs::create_dir_all(&data).unwrap();
+        // the peers table as 1.11 left it, seen by two processes before either changed it
+        let old = "create table peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer, last_seq integer, applied_seq integer, roots text, transport text, presence text,
+            address text, last_error text, port integer, cert_pem text, pubkey text, paired_at integer, last_pull integer, path text, connected integer, relayed_by text);";
+        let (first, second) = (Connection::open(data.join("hm.db")).unwrap(), Connection::open(data.join("hm.db")).unwrap());
+        first.execute_batch(old).unwrap();
+        let missing = |c: &Connection, col: &str| !c.prepare("select 1 from pragma_table_info('peers') where name = ?").unwrap().exists([col]).unwrap();
+        let new = ["gap", "presence_seen", "presence_checked", "last_good"];
+        assert!(new.iter().all(|col| missing(&first, col) && missing(&second, col)), "both looked, and both found them missing");
+        for c in [&first, &second] {
+            for col in new { crate::db::add_column(c, "peers", col, "text").unwrap(); }
+        }
+        assert!(new.iter().all(|col| !missing(&second, col)));
+        assert!(crate::db::add_column(&first, "nowhere", "gap", "text").is_err(), "any other failure is still one");
+        drop((first, second));
+        let ctx = Ctx::open_at(&data, &t.path().join("home")).unwrap();
+        assert!(peers(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
     fn a_merged_session_and_its_tombstone() {
         let t = tempfile::tempdir().unwrap();
         let shared = t.path().join("shared");

@@ -217,6 +217,15 @@ create trigger if not exists sessions_fts_au after update of title, cwd, profile
   insert into sessions_fts(rowid, title, cwd, profile) values (new.rowid, new.title, new.cwd, new.profile); end;
 "#;
 
+/// A column for a table of an earlier version. The app and `hrm` can open the database at the same moment after
+/// an update and both find it missing: the one that comes second is told it is there, which is all it wanted.
+pub(crate) fn add_column(conn: &Connection, table: &str, col: &str, ty: &str) -> rusqlite::Result<()> {
+    match conn.execute_batch(&format!("alter table {table} add column {col} {ty};")) {
+        Err(e) if e.to_string().contains("duplicate column name") => Ok(()),
+        r => r,
+    }
+}
+
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
         let mut conn = Connection::open(path)?;
@@ -270,7 +279,7 @@ impl Db {
         // the direct connection: how a peer is reached and what it signs with
         for (col, ty) in [("address", "text"), ("last_error", "text"), ("port", "integer"), ("cert_pem", "text"), ("pubkey", "text"), ("paired_at", "integer"), ("last_pull", "integer"), ("path", "text"), ("connected", "integer"), ("relayed_by", "text"), ("gap", "text"), ("presence_seen", "integer"), ("presence_checked", "integer"), ("last_good", "text")] {
             let has: bool = conn.prepare("select 1 from pragma_table_info('peers') where name = ?")?.exists([col])?;
-            if !has { conn.execute_batch(&format!("alter table peers add column {col} {ty};"))?; }
+            if !has { add_column(&conn, "peers", col, ty)?; }
         }
         let done: bool = conn.prepare("select 1 from kv where k = 'migrated:device'")?.exists([])?;
         if !done {
