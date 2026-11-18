@@ -94,7 +94,8 @@ pub fn join_old(ctx: &Ctx, keep: usize, max: usize, sign: &dyn Fn(i64, i64, &str
 
 /// This computer's list against its files: a listed chunk whose file is gone is cut again from the outbox
 /// (`cut(from, to)`, the same entries), or leaves the list when the outbox no longer holds them all. A reader of
-/// that list then finds entries missing, says so and goes on, where it would ask for the file for good.
+/// that list then finds entries missing, says so and goes on, where it would ask for the file for good. And a
+/// chunk file the list does not name goes: a join that was stopped between its list and its removals left it.
 pub fn mend(ctx: &Ctx, cut: &dyn Fn(i64, i64) -> Option<Vec<u8>>, sign: &dyn Fn(i64, i64, &str) -> String) -> Result<()> {
     let me = &ctx.settings.device_id;
     let one = list_lock(me);
@@ -102,6 +103,7 @@ pub fn mend(ctx: &Ctx, cut: &dyn Fn(i64, i64) -> Option<Vec<u8>>, sign: &dyn Fn(
     let dir = dir(ctx, me).join("journal");
     let have: HashSet<String> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| e.file_name().to_str().map(String::from)).collect();
     let list = man["chunks"].as_array().cloned().unwrap_or_default();
+    for f in have.iter().filter(|f| f.ends_with(".jsonl") && !list.iter().any(|c| c["file"] == f.as_str())) { let _ = std::fs::remove_file(dir.join(f)); }
     if list.iter().all(|c| have.contains(c["file"].as_str().unwrap_or(""))) { return Ok(()); }
     let mut out = vec![];
     for ch in list {

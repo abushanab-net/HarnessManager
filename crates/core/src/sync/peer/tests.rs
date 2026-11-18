@@ -521,6 +521,12 @@ fn polls_within_half_a_minute_get_one_making_of_the_record_and_presence_and_the_
     assert_eq!(poll(), first, "the same signed record and presence, not made again");
     for _ in 0..3 { identity::load(&a.ctx).unwrap(); }
     assert_eq!(count(&a.ctx, "select count(*) from writes"), 0, "the key was there already");
+    // and what is kept is made again once it is half a minute old
+    let (slot, made) = (super::listener::Kept::default(), std::cell::Cell::new(0));
+    let ask = || super::listener::kept(&slot, || { made.set(made.get() + 1); Ok(json!(made.get())) }).unwrap();
+    assert_eq!((ask(), ask()), (json!(1), json!(1)));
+    slot.lock().unwrap().as_mut().unwrap().0 = std::time::Instant::now().checked_sub(super::listener::KEPT).expect("the clock has run for half a minute");
+    assert_eq!((ask(), ask()), (json!(2), json!(2)), "made once more, then kept again");
 }
 
 #[test]

@@ -94,7 +94,9 @@ pub fn backfill(ctx: &Ctx) -> Result<usize> { record_missing(ctx, true) }
 /// The backfill's work. The limit readings only when asked: `quota_point` journals each with its row, so later
 /// the only rows without an entry are other computers' merged ones, which are not this computer's to publish.
 /// Usage rows are only ever added, so the catch-up (not the backfill) looks at those added since the last look:
-/// `journal:usage_mark` is the row it reached.
+/// `journal:usage_mark` is the row it reached. A row below the mark becomes this computer's in two places only:
+/// the stamp at the start, which removes the mark with it, and a restore that adopts a computer, which asks for
+/// the backfill.
 fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
     let n = ctx.db.with(|c| {
         let tx = c.transaction()?;
@@ -926,10 +928,69 @@ mod tests {
         catch_up();
         assert_eq!((journaled("claude:3"), mark().as_deref()), (1, Some("3")), "the new row is caught up, and the mark moves past it");
         // a row before the mark is not looked at again by the catch-up; the backfill still looks at all
-        a.db.with(|c| Ok(c.execute("delete from outbox where key = 'claude:1'", [])?)).unwrap();
+        a.db.with(|c| Ok(c.execute("delete from outbox where key in ('claude:1', 'claude:2')", [])?)).unwrap();
         catch_up();
-        assert_eq!(journaled("claude:1"), 0);
-        assert_eq!((backfill(&a).unwrap(), journaled("claude:1")), (1, 1));
+        assert_eq!((journaled("claude:1"), journaled("claude:2")), (0, 0));
+        assert_eq!((backfill(&a).unwrap(), journaled("claude:1"), journaled("claude:2")), (2, 1, 1));
+        // a row before the mark that becomes this computer's when the database is next opened takes the mark away with its stamp
+        a.db.with(|c| Ok(c.execute_batch("delete from outbox where key = 'claude:1'; update usage set device = '' where request_id = 'claude:1';")?)).unwrap();
+        let again = Ctx::open_at(&a.data, &a.home).unwrap();
+        assert_eq!((count(&again, "select count(*) from usage where device = ''"), again.db.kv_get("journal:usage_mark").unwrap()), (0, None));
+        again.db.kv_set("journal:catchup_at", "0").unwrap();
+        round(&again).unwrap();
+        assert_eq!(journaled("claude:1"), 1, "so the catch-up looks at it");
+    }
+
+    #[test]
+    fn a_chunk_file_the_list_no_longer_names_is_removed_at_the_next_publish() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        (1..=2).for_each(tick);
+        // as a join leaves them when it is stopped after its list was written and before the small files went
+        let dir = store::dir(&a, &a.settings.device_id).join("journal");
+        let left = dir.join(format!("{}-0-0.jsonl", a.settings.incarnation));
+        std::fs::write(&left, b"{}\n").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"not a chunk").unwrap();
+        tick(3);
+        assert!(!left.exists(), "the chunk file no list names is gone");
+        let names: Vec<String> = { let mut v: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(); v.sort(); v };
+        let listed: Vec<String> = store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().iter().map(|c| c["file"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names.iter().filter(|n| n.ends_with(".jsonl")).cloned().collect::<Vec<_>>(), { let mut l = listed.clone(); l.sort(); l }, "the listed ones stay");
+        assert!(names.contains(&"notes.txt".to_string()), "and what is not a chunk file is left alone");
+    }
+
+    /// A source that only says what runs on one computer: `(id, presence, live)`.
+    struct Says(&'static str, Value, bool);
+    impl Source for Says {
+        fn manifest(&self, _: &str, _: &str, _: i64) -> Result<Option<Value>> { Ok(None) }
+        fn read(&self, _: &str, _: &str) -> Result<Vec<u8>> { bail!("no chunks") }
+        fn presence(&self) -> Result<Vec<(String, Value)>> { Ok(vec![(self.0.to_string(), self.1.clone())]) }
+        fn live(&self) -> bool { self.2 }
+    }
+
+    #[test]
+    fn a_presence_asked_for_live_is_taken_after_the_other_clock_was_set_back_and_an_older_stored_copy_is_not() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name) values('peer-1', 'P')", [])?)).unwrap();
+        let says = |off: i64, session: &str, live: bool| take_presence(&ctx, &Says("peer-1", json!({"at": now_ms() + off, "running": [{"session_id": session}]}), live)).unwrap();
+        let running = |at: i64| open_elsewhere(&peers(&ctx).unwrap(), at).into_iter().collect::<Vec<_>>();
+        // asked of the computer itself, whose clock is an hour ahead
+        says(3_600_000, "s1", true);
+        assert_eq!(running(now_ms()), ["s1"]);
+        // its clock is set right, an hour back: what it says now replaces what is held, and counts from now
+        says(0, "s2", true);
+        assert_eq!((running(now_ms()), running(now_ms() + 360_000)), (vec!["s2".to_string()], vec![]));
+        // the folder's or the hub's copy from before that is older by the computer's own clock: not taken
+        says(-60_000, "s3", false);
+        assert_eq!(running(now_ms()), ["s2"]);
+        // a later one is
+        says(1_000, "s4", false);
+        assert_eq!(running(now_ms()), ["s4"]);
     }
 
     #[test]

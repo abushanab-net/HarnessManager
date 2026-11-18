@@ -62,8 +62,8 @@ pub struct Listener {
 
 /// Every paired computer asks for this computer's record and presence every ten seconds, and each costs a scan
 /// of usage, the credential store and a signature, or a look at the processes: one making serves them this long.
-const KEPT: Duration = Duration::from_secs(30);
-type Kept = Arc<Mutex<Option<(Instant, Value)>>>;
+pub(super) const KEPT: Duration = Duration::from_secs(30);
+pub(super) type Kept = Arc<Mutex<Option<(Instant, Value)>>>;
 
 /// What the routes share: the context the listener started with, and the two answers it keeps.
 #[derive(Clone)]
@@ -78,7 +78,7 @@ impl axum::extract::FromRef<Served> for Arc<Ctx> {
 }
 
 /// The answer kept in `slot`, made again once it is older than `KEPT`; polls that come together wait for one making.
-fn kept(slot: &Kept, make: impl FnOnce() -> Result<Value>) -> Result<Value> {
+pub(super) fn kept(slot: &Kept, make: impl FnOnce() -> Result<Value>) -> Result<Value> {
     let mut s = slot.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, v)) = s.as_ref() { if at.elapsed() < KEPT { return Ok(v.clone()); } }
     let v = make()?;

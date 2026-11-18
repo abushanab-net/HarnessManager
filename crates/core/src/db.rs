@@ -280,9 +280,12 @@ impl Db {
         }
         // a row written without a computer (seen once after an update) belongs to this one
         if !device.is_empty() {
-            // rows that became this computer's after the journal's catch-up passed them: it looks at all again
-            if conn.execute("update usage set device=?1 where device=''", [device])? > 0 { conn.execute("delete from kv where k = 'journal:usage_mark'", [])?; }
-            conn.execute("update sessions set device=?1 where device=''", [device])?;
+            // rows that became this computer's after the journal's catch-up passed them: it looks at all again. One
+            // transaction: a stamp kept without the mark's removal would leave those rows unjournaled for good
+            let tx = conn.transaction()?;
+            if tx.execute("update usage set device=?1 where device=''", [device])? > 0 { tx.execute("delete from kv where k = 'journal:usage_mark'", [])?; }
+            tx.execute("update sessions set device=?1 where device=''", [device])?;
+            tx.commit()?;
         }
         // the index (WP-10): the pages read the sessions table, so its filter and sort columns leave the JSON
         for (col, ty) in [("id", "text not null default ''"), ("title", "text not null default ''"), ("cwd", "text not null default ''"), ("started_at", "integer not null default 0"),
