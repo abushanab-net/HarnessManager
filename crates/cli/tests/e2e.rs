@@ -785,6 +785,9 @@ fn routed_profile_starts_the_router_and_gets_its_address_and_token() {
     e.ok(&["provider", "add", "openrouter", "--base-url", "https://openrouter.ai/api/v1", "--format", "openai", "--models", "deepseek/deepseek-v4,z-ai/glm-5"]);
     e.ok(&["route", "add", "cheap", "--mode", "aggregate", "--providers", "openrouter"]);
     assert!(e.fail(&["route", "add", "x", "--providers", "missing"]).contains("no provider"));
+    // the checks the window makes, made here too
+    assert!(e.fail(&["route", "add", "x", "--mode", "both", "--providers", "openrouter"]).contains("mode must be"));
+    assert!(e.fail(&["provider", "add", "other", "--base-url", "openrouter.ai/api/v1"]).contains("http://"));
     e.ok(&["add", "routed-1", "--route", "cheap", "--model", "hm-openrouter--z-ai/glm-5"]);
     assert_eq!(e.profile("routed-1")["identity"]["plan"], "Routed");
     let models = e.ok(&["router", "models", "cheap"]);

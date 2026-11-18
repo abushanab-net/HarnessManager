@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::harness::{self, Harness};
 use crate::model::*;
 use crate::projects::Resolver;
-use crate::registry::{Kind, Profile, Registry};
-use crate::util::now_ms;
+use crate::registry::{Kind, Profile, Provider, Registry, Route};
+use crate::util::{now_ms, valid_name};
 use crate::Ctx;
 
 #[derive(Debug, Clone, Serialize)]
@@ -209,6 +209,18 @@ pub fn refresh_quotas(ctx: &Ctx, force: bool) -> Vec<(String, String)> {
         });
     }
     errors
+}
+
+/// One account's limits read now, by the tools that can be asked: Claude from Anthropic with the login Claude Code
+/// saved, Antigravity from its own program. The reading is kept like every other.
+pub fn quota_live(ctx: &Ctx, name: &str) -> Result<Quota> {
+    let reg = ctx.registry()?;
+    let p = reg.get(name)?;
+    match (p.harness.as_str(), p.kind) {
+        ("claude", Kind::Subscription) => harness::claude::Claude.live_quota(ctx, p),
+        ("agy", Kind::Subscription) => harness::agy::Agy.live_quota(ctx, p),
+        _ => bail!("live limits are only available for Claude and Antigravity subscription accounts"),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -794,6 +806,64 @@ pub fn alias_project(ctx: &Ctx, key: &str, name: Option<String>, merge_into: Opt
     Ok(())
 }
 
+/// Replace the tags of a session ("session", key profile/id) or a project ("project", the project key); none
+/// clears them.
+pub fn tag_set(ctx: &Ctx, kind: &str, key: &str, tags: &[String]) -> Result<()> {
+    if kind != "project" && kind != "session" { bail!("the kind is session or project"); }
+    let tags: Vec<String> = tags.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+    ctx.db.tag_set(kind, key, &tags)
+}
+
+// ---------- shared setup ----------
+
+/// Folders the old PowerShell launcher copied into each Claude account, replaced with links to the main profile's:
+/// one "account: folders" line per account changed.
+pub fn relink(ctx: &Ctx) -> Result<Vec<String>> {
+    let reg = ctx.registry()?;
+    let mut relinked = vec![];
+    let c = harness::claude::Claude;
+    for p in reg.profiles.iter().filter(|p| p.harness == "claude" && !p.main) {
+        let done = crate::shared::relink_copies(&Harness::default_home(&c, ctx), &Harness::home(&c, ctx, p))?;
+        if !done.is_empty() { relinked.push(format!("{}: {}", p.name, done.join(", "))); }
+    }
+    Ok(relinked)
+}
+
+/// The accounts of the old claude-accounts.ps1 launcher (its list at `path`, or where it kept it), added and their
+/// folders prepared.
+pub fn import_powershell(ctx: &Ctx, path: Option<PathBuf>) -> Result<crate::import::ImportReport> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let mut rep = crate::import::ImportReport::default();
+    let path = path.unwrap_or_else(|| crate::import::default_ps_registry(ctx));
+    crate::import::import_powershell(&mut reg, &path, &mut rep)?;
+    ctx.save_registry(&reg)?;
+    for p in &reg.profiles { let _ = harness::of(p).prepare(ctx, p); }
+    Ok(rep)
+}
+
+/// A main profile added for each tool found on this computer that has none yet.
+pub fn detect(ctx: &Ctx) -> Result<crate::import::ImportReport> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let mut rep = crate::import::ImportReport::default();
+    crate::import::detect_main_profiles(ctx, &mut reg, &mut rep);
+    ctx.save_registry(&reg)?;
+    Ok(rep)
+}
+
+/// An MCP server or a skill out of the list and out of every tool; a skill's files leave the store after the
+/// tools' links to them.
+pub fn item_remove(ctx: &Ctx, kind: &str, name: &str) -> Result<crate::items::SyncReport> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    crate::items::remove_item(&mut reg, kind, name)?;
+    ctx.save_registry(&reg)?;
+    let rep = crate::items::sync(ctx, &reg)?;
+    if kind == "skill" { crate::items::delete_skill_files(ctx, name)?; }
+    Ok(rep)
+}
+
 // ---------- in-app login ----------
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1018,6 +1088,59 @@ fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T {
 #[cfg(not(windows))]
 fn without_inherited_std<T>(f: impl FnOnce() -> T) -> T { f() }
 
+/// What a provider must be before its key is asked for or saved.
+pub fn provider_check(id: &str, format: &str, base_url: &str) -> Result<()> {
+    if !valid_name(id) { bail!("'{id}' is not a valid id: use letters, digits, - and _"); }
+    if !matches!(format, "anthropic" | "openai") { bail!("format must be anthropic or openai"); }
+    if !base_url.starts_with("http") { bail!("the base URL must start with http:// or https://"); }
+    Ok(())
+}
+
+/// Add a router provider, or replace the one with its id. `key` goes to the credential store; without one the key
+/// saved before stays, and a provider that never had one is refused.
+pub fn provider_add(ctx: &Ctx, mut p: Provider, key: Option<&str>) -> Result<()> {
+    provider_check(&p.id, &p.format, &p.base_url)?;
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    p.models = p.models.iter().map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect();
+    if let Some(k) = key.filter(|k| !k.is_empty()) { crate::secrets::set_key(&crate::secrets::provider_target(&p.id), k.trim())?; }
+    else if crate::secrets::get_key(&crate::secrets::provider_target(&p.id)).is_none() { bail!("enter the provider's key"); }
+    reg.providers.retain(|x| x.id != p.id);
+    reg.providers.push(p);
+    ctx.save_registry(&reg)
+}
+
+/// Remove a provider and its saved key; refused while a route uses it.
+pub fn provider_remove(ctx: &Ctx, id: &str) -> Result<()> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    reg.remove_provider(id)?;
+    crate::secrets::delete(&crate::secrets::provider_target(id))?;
+    ctx.save_registry(&reg)
+}
+
+/// Add a route, or replace the one with its id: "failover" tries its providers in order, "aggregate" offers one
+/// model list across them.
+pub fn route_add(ctx: &Ctx, r: Route) -> Result<()> {
+    if !valid_name(&r.id) { bail!("'{}' is not a valid id", r.id); }
+    if !matches!(r.mode.as_str(), "failover" | "aggregate") { bail!("mode must be failover or aggregate"); }
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    if r.providers.is_empty() { bail!("choose at least one provider"); }
+    for p in &r.providers { if !reg.providers.iter().any(|x| &x.id == p) { bail!("no provider named '{p}'"); } }
+    reg.routes.retain(|x| x.id != r.id);
+    reg.routes.push(r);
+    ctx.save_registry(&reg)
+}
+
+/// Remove a route; refused while an account is routed through it.
+pub fn route_remove(ctx: &Ctx, id: &str) -> Result<()> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    reg.remove_route(id)?;
+    ctx.save_registry(&reg)
+}
+
 /// One setting changed and saved, for `hrm settings` and the window; the context comes back with it. The keys the
 /// sync's own checks guard are refused, and a value of the wrong type is reported, never saved. A new place for
 /// the account list gets the list before the setting points at it.
@@ -1237,4 +1360,60 @@ pub fn breakdown_of(ctx: &Ctx, by: &str, days: Option<i64>, harness: Option<&str
         v.sort_by(|a, b| b.tokens.cmp(&a.tokens));
         Ok(v)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx(t: &tempfile::TempDir) -> Ctx { Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap() }
+
+    fn refused(r: Result<impl Sized>) -> String { format!("{:#}", r.err().expect("refused")) }
+
+    #[test]
+    fn a_route_is_checked_the_same_for_the_window_and_the_command_line() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let mut reg = ctx.registry().unwrap();
+        reg.providers.push(Provider { id: "one".into(), name: "One".into(), base_url: "https://one.example".into(), format: "openai".into(), models: vec![] });
+        ctx.save_registry(&reg).unwrap();
+        let route = |id: &str, mode: &str, providers: &[&str]| Route { id: id.into(), mode: mode.into(), providers: providers.iter().map(|p| p.to_string()).collect(), default_provider: None };
+        assert!(refused(route_add(&ctx, route("r", "both", &["one"]))).contains("mode must be failover or aggregate"));
+        assert!(refused(route_add(&ctx, route("r r", "failover", &["one"]))).contains("not a valid id"));
+        assert!(refused(route_add(&ctx, route("r", "failover", &[]))).contains("at least one provider"));
+        assert!(refused(route_add(&ctx, route("r", "failover", &["two"]))).contains("no provider named 'two'"));
+        assert!(ctx.registry().unwrap().routes.is_empty(), "a refused route is not saved");
+        route_add(&ctx, route("r", "failover", &["one"])).unwrap();
+        route_add(&ctx, route("r", "aggregate", &["one"])).unwrap();
+        let routes = ctx.registry().unwrap().routes;
+        assert_eq!((routes.len(), routes[0].mode.as_str()), (1, "aggregate"), "the same id replaces the route");
+        // refused before its key is looked for or saved
+        let p = Provider { id: "two".into(), name: "Two".into(), base_url: "ftp://two.example".into(), format: "openai".into(), models: vec![] };
+        assert!(refused(provider_add(&ctx, p, Some("k"))).contains("http://"));
+        assert_eq!(ctx.registry().unwrap().providers.len(), 1);
+    }
+
+    #[test]
+    fn live_limits_are_refused_for_accounts_no_tool_reads_them_for() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let mut reg = ctx.registry().unwrap();
+        for (name, harness, kind) in [("codex-1", "codex", Kind::Subscription), ("claude-key", "claude", Kind::ApiKey)] {
+            reg.add_profile(Profile { name: name.into(), label: None, harness: harness.into(), kind, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+        }
+        ctx.save_registry(&reg).unwrap();
+        for name in ["codex-1", "claude-key"] { assert!(refused(quota_live(&ctx, name)).contains("only available for Claude and Antigravity subscription accounts"), "{name}"); }
+        assert!(quota_live(&ctx, "nobody").is_err());
+    }
+
+    #[test]
+    fn tags_are_cleaned_and_only_sessions_and_projects_take_them() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        assert!(refused(tag_set(&ctx, "account", "a", &["x".into()])).contains("session or project"));
+        tag_set(&ctx, "project", "p", &[" release ".into(), "".into(), "  ".into()]).unwrap();
+        assert_eq!(ctx.db.tag_list().unwrap(), vec![("release".to_string(), 0, 1)]);
+        tag_set(&ctx, "project", "p", &[]).unwrap();
+        assert!(ctx.db.tag_list().unwrap().is_empty());
+    }
 }

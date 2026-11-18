@@ -122,6 +122,23 @@ a.a-tag:hover { filter: brightness(1.12); }
 .a-srow .a-act .a-reason { font-size: var(--fs-small); color: var(--ink-muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .a-more-row { display: flex; align-items: center; min-height: 36px; padding: 0 12px 0 20px; border-top: 1px solid var(--line-subtle); }
 .a-empty { padding: 14px 12px; color: var(--ink-muted); display: flex; align-items: center; gap: 10px; }
+/* beside the pane (b-sessions.html): the drawn columns only, without the row's own action, which the pane carries */
+.a-smain.paned { --cols: 8px minmax(0, 1fr) 124px 108px 48px 92px; }
+.a-smain.paned.nopc { --cols: 8px minmax(0, 1fr) 132px 48px 92px; }
+/* (a group's band has less room: what tells the project apart gives way before its name does) */
+.a-smain.paned .a-gh .a-path { flex-shrink: 1000; }
+.a-smain.paned .a-gname { flex-shrink: 0; max-width: 60%; }
+/* the pane of a session: the last steps on one grid (mark, tool, what, outcome), the last reply as a bubble */
+.pn-where .cdot { width: 7px; height: 7px; }
+.pane-why .a-dot, .pane-why .live-pulse-dot { flex: none; }
+.pn-steps { display: grid; grid-template-columns: 14px fit-content(96px) minmax(0, 1fr) auto; column-gap: 6px; align-items: center; }
+.pn-steps > * { height: 26px; line-height: 26px; min-width: 0; }
+.pn-steps > svg { height: 14px; }
+.pn-steps > b { font-weight: 600; font-size: var(--fs-small); }
+.pn-steps > .mono { font-size: var(--fs-small); color: var(--ink-secondary); }
+.pn-steps > .strong { font-weight: 600; }
+.pn-mark.ok { color: var(--ac); } .pn-mark.bad { color: var(--neg); } .pn-mark.busy { color: var(--ink-muted); }
+.pn-bubble { border-radius: 4px var(--radius-card) var(--radius-card) var(--radius-card); max-height: 220px; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
 /* the Project and Tag pickers: the app's menu; an item is a dot, a name and a count, and a line starts a new part */
 .menu:has(.a-pk) { width: 320px; max-height: calc(var(--vh) - 96px); overflow: auto; }
 .a-pk { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 16px; }

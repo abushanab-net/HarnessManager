@@ -65,6 +65,53 @@
   .acct-row .spark { display: none; }
 }
 
+/* ---- beside the pane (b-accounts.html): the drawn columns only (ring, who, limits, the range's usage, state) on
+   44 px rows, their names once above the cards; the pane carries the row's actions ---- */
+.acct-cols, .acct-row.paned { grid-template-columns: 38px minmax(0, 1fr) 226px 60px 116px; column-gap: 12px; }
+.acct-cols { display: grid; align-items: center; height: 20px; padding: 0 15px; white-space: nowrap; }
+.acct-row.paned { height: 44px; }
+.acct-row.paned .a-ring, .acct-row.paned .a-ring svg { width: 38px; height: 38px; }
+.acct-row.paned .a-ring b { letter-spacing: -.03em; }
+.acct-row.paned .who { line-height: 16px; }
+.acct-row.paned .lims { gap: 8px; } .acct-row.paned .lim { width: 70px; } .acct-row.paned .lim.cap { width: 226px; }
+.acct-row.paned .lims.more .lim { width: 58px; }
+.acct-row.paned .lim .t { line-height: 15px; }
+.acct-row.paned .use, .acct-row.paned .state { line-height: 16px; }
+.acct-row .state .v { font-weight: 600; }
+.a-groups:has(> .acct-cols) .tool-group-header .sum > :first-child { display: none; }
+/* a list with room for them (a wide window): the limits at their usual width, and a wider state */
+@container sheet (min-width: 800px) {
+  .acct-cols, .acct-row.paned { grid-template-columns: 38px minmax(0, 1fr) 240px 64px 140px; }
+  .acct-row.paned .lims { gap: 12px; } .acct-row.paned .lim { width: 72px; } .acct-row.paned .lims.more .lim { width: 60px; }
+}
+
+/* ---- the pane of an account: the ring with every limit window, the week's runway, its tabs ---- */
+.pn-limits { display: flex; gap: 14px; align-items: center; }
+.a-ring.big, .a-ring.big svg { width: 72px; height: 72px; }
+.a-ring.big b { font-size: 16px; line-height: 17px; text-align: center; }
+.a-ring.big b small { display: block; font-size: var(--fs-small); font-weight: 500; color: var(--ink-muted); }
+.pn-wins { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, auto) minmax(40px, 1fr) 36px 66px; column-gap: 8px; align-items: center; font-size: var(--fs-small); line-height: 18px; }
+.pn-wins > b { text-align: right; font-weight: 650; }
+.pn-wins > .h { color: var(--ink-dim); } .pn-wins > .h:first-child { grid-column: 1 / 3; font-weight: 600; color: var(--ink-muted); }
+.pn-wins > .wide { grid-column: 1 / -1; }
+.pn-wins .win-track { height: 5px; border: 0; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--line-subtle); }
+svg.pn-run { display: block; width: 100%; height: 54px; overflow: visible; }
+.pn-run text { font-family: var(--font-text); font-size: 12px; fill: var(--ink-dim); }
+.pn-run text.lbl { font-weight: 600; fill: var(--ink-primary); }
+.pn-run .trk { fill: var(--track-bg); stroke: var(--line-subtle); stroke-width: 1; }
+.pn-run .fill { fill: var(--ac); } .pn-run .fill.warn { fill: var(--warn); }
+.pn-run .starve { fill: url(#starve-stripe); stroke: var(--neg-border); stroke-width: 1; }
+.pn-run .tick { fill: var(--ink-primary); }
+.pn-verdict { margin-top: 4px; } .pn-verdict b, .pane-mini .strong { font-weight: 600; }
+.pane-more { color: var(--ac); font-weight: 600; font-size: var(--fs-small); min-height: 28px; margin: -6px 0; }
+.pane-more:hover { text-decoration: underline; }
+.pane .btn.quiet.neg { color: var(--neg); margin-left: -10px; }
+.pane-tabs > a svg { margin-left: 3px; }
+/* the account page's own Sessions and Projects tabs, in the pane: flat (no card in a card), the project's key left to its page */
+.pane-tab .panel-card { border: 0; border-radius: 0; box-shadow: none; background: none; padding: 12px 16px; }
+.pane-tab .replies-table :is(th, td):nth-child(2) { display: none; }
+.pane-tab .account-session:last-child { border-bottom: 0; }
+
 /* the ⋯ menu of an account (the shared .menu, as the drawing draws it): 30 px items, a line before Remove… */
 .menu.acct-menu { min-width: 196px; border-radius: var(--radius-card); }
 .menu.acct-menu button { height: 30px; padding: 0 10px; font-size: var(--fs-body); white-space: nowrap; }
@@ -79,7 +126,7 @@
 
 /* ---- the page of one account ---- */
 /* its small controls (the tabs, Open and Follow on a session, the folder, All N) at the 28 px floor */
-.a-account :is(.filter-chip:not(.back-chip), .btn-follow, .facts-grid dd .btn-secondary) { min-height: 28px; }
+:is(.a-account, .pane-tab) :is(.filter-chip:not(.back-chip), .btn-follow, .facts-grid dd .btn-secondary) { min-height: 28px; }
 .page-head .actions .btn > .trunc { max-width: 220px; }
 /* nothing read: the Limits card is one line across the page (the reason, then the action that fixes it), and the login's
    facts take two columns under it, so no half of the row is an empty box */

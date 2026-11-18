@@ -472,7 +472,10 @@ document.addEventListener('keydown', (e) => {
     if (dialogOpen()) { closeDialog(); return; }
     if (menuEl) { closeMenu(); return; }
   }
-  if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); document.getElementById('find').focus(); }
+  // "/" moves to the top bar's search (this page's filter, or the sessions'); in a field it is a character.
+  // Ctrl K is the command palette's (palette.js)
+  const find = document.getElementById('find');
+  if (e.key === '/' && find && !e.ctrlKey && !e.metaKey && !e.altKey && !dialogOpen() && !menuEl && !e.target.closest('input, textarea, select, [contenteditable]')) { e.preventDefault(); find.focus(); }
   // a non-button element acting as one (role="button") answers Enter and Space like a button, when the focus is on
   // it: a button inside such a row acts for itself
   const rb = e.target.matches && e.target.matches('[role=button][data-act], [tabindex="0"][data-act]') && e.target;

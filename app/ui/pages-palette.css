@@ -1,0 +1,34 @@
+/* The command palette (palette.js), as docs/project-review-2026-11/mockups/b-palette.html draws it: a 640 px card near
+   the top of the window, the page behind washed out, not blurred. It is a dialog of the dialog controller (app.css
+   .modal-backdrop / .modal-card), restyled here. Rows are 40 px, text 13 px, hints and group names 12 px. */
+.modal-backdrop:has(> .pal) { align-items: flex-start; padding: 8px 20px; background: color-mix(in srgb, var(--bg-rail) 62%, transparent); backdrop-filter: none; }
+.modal-card.pal { max-width: 640px; max-height: calc(var(--vh) - 16px); padding: 0; gap: 0; overflow: hidden; background: var(--bg-elevated); animation: pal-in .12s ease-out; }
+@keyframes pal-in { from { opacity: 0; transform: translateY(-6px); } } /* app.css stills every animation for reduced motion and Moving routes off */
+
+.pal-in { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line-default); color: var(--ink-muted); }
+.pal-in .nav-icon { width: 18px; height: 18px; }
+.pal-in input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; font-size: var(--fs-section); color: var(--ink-primary); }
+.pal-in input::placeholder { color: var(--ink-muted); }
+.pal .kbd { padding: 1px 6px; background: var(--bg-panel); }
+
+.pal-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 6px; }
+.pal-g { padding: 10px 16px 4px; font-size: var(--fs-small); font-weight: 600; color: var(--ink-muted); }
+.pal-r { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; height: 40px; margin: 0 6px; padding: 0 10px; border-radius: var(--radS); cursor: pointer; }
+.pal-r.on { background: var(--ac-soft); box-shadow: inset 0 0 0 1px var(--ac-border); }
+.pal-ic { justify-self: center; display: flex; color: var(--ink-muted); }
+.pal-ic svg { width: 18px; height: 18px; color: inherit; }
+.pal-r b { font-weight: 700; }
+.pal-r .sub { color: var(--ink-muted); }
+/* the typed words in a row: underlined in the accent, never a colour alone */
+.pal-r mark { background: none; color: inherit; text-decoration: underline; text-decoration-color: var(--ac); text-underline-offset: 3px; }
+.pal-none { padding: 18px 16px 12px; color: var(--ink-muted); }
+
+.pal-f { flex: none; display: flex; align-items: center; gap: 14px; height: 38px; padding: 0 16px; border-top: 1px solid var(--line-default); background: var(--bg-panel); font-size: var(--fs-small); color: var(--ink-muted); }
+.pal-f span { display: inline-flex; align-items: center; gap: 6px; }
+.pal-f .grow { flex: 1; }
+
+/* "Run a command" beside the top bar's search: quiet, with its key */
+.cmd-btn { gap: 8px; color: var(--ink-muted); }
+.cmd-btn:hover { color: var(--ink-primary); }
+/* a narrow window (it goes down to 980 px) keeps the key and drops the words, so the chips at the right stay in the bar */
+@media (max-width: 1200px) { .cmd-label { display: none; } }

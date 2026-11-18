@@ -16,6 +16,7 @@ import './apps.js';
 import './guide.js';
 import './computers.js';
 import './computers-page.js';
+import './palette.js';
 
 document.documentElement.dataset.theme = 'dark';
 document.getElementById('brand-mark').innerHTML = brandMark(26);
