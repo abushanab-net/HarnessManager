@@ -74,7 +74,6 @@ pub fn restore_preview(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hr
 
 pub fn restore_run(state: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     let r = hrm_core::restore::run(ctx, &hrm_core::restore::Source::parse(a)?, a["adopt"] == true)?;
-    hrm_core::restore::welcome_done(ctx)?;
     // with adopt the settings changed: the identity follows now
     let fresh = Arc::new(Ctx::open_at(&ctx.data, &ctx.home)?);
     *state.ctx.lock().unwrap_or_else(|e| e.into_inner()) = fresh;

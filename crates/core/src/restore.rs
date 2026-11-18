@@ -21,13 +21,10 @@ use crate::Ctx;
 pub enum Source { Zip(PathBuf), Folder(PathBuf) }
 
 impl Source {
-    /// `{zip?, folder?}` as the ops and the CLI give it.
+    /// `{zip?, folder?}` as the window gives it: the path either names, checked and told apart by `of_path`.
     pub fn parse(a: &Value) -> Result<Source> {
-        match (a["zip"].as_str().filter(|s| !s.is_empty()), a["folder"].as_str().filter(|s| !s.is_empty())) {
-            (Some(z), _) => Ok(Source::Zip(PathBuf::from(z))),
-            (_, Some(f)) => Ok(Source::Folder(PathBuf::from(f))),
-            _ => bail!("give a backup zip or a sync folder"),
-        }
+        let path = |k: &str| a[k].as_str().filter(|s| !s.is_empty());
+        Source::of_path(Path::new(path("zip").or(path("folder")).context("give a backup zip or a sync folder")?))
     }
 
     /// A path: a folder, or a zip file.
@@ -301,6 +298,8 @@ pub fn run(ctx: &Ctx, src: &Source, adopt: bool) -> Result<Value> {
     }
     crate::log::info(&format!("restore: {added}"));
     let _ = ctx.db.event("ok", "restore", &format!("Restored: {} requests, {} sessions and {} archived transcripts added.", added["usage"], added["sessions"], added["archived"]));
+    // a restore answers what Welcome back asks at the first launch, from the window or from `hrm restore`
+    welcome_done(ctx)?;
     Ok(added)
 }
 
@@ -381,6 +380,25 @@ mod tests {
         let r = run(&b, &src, false).unwrap();
         assert_eq!(r, json!({"usage": 0, "sessions": 0, "quota": 0, "tags": 0, "peers": 0, "archived": 0, "profiles": 0, "adopted": false, "device": null}), "{r}");
         assert_eq!((count(&b, "select count(*) from usage"), count(&b, "select count(*) from sessions"), count(&b, "select count(*) from quota_hist"), count(&b, "select count(*) from archived")), (2, 1, 2, 1));
+    }
+
+    #[test]
+    fn a_source_must_be_there_and_a_restore_answers_the_welcome_back_question() {
+        let t = tempfile::tempdir().unwrap();
+        // the command line checked the path; the window took its word and failed later with the system's text
+        let gone = t.path().join("gone.zip");
+        for k in ["zip", "folder"] { assert_eq!(Source::parse(&json!({k: gone})).unwrap_err().to_string(), format!("{} is not a folder or a zip", gone.display())); }
+        assert_eq!(Source::parse(&json!({"zip": ""})).unwrap_err().to_string(), "give a backup zip or a sync folder");
+        assert!(matches!(Source::parse(&json!({"zip": t.path()})).unwrap(), Source::Folder(_)), "what it is, not what it was called");
+        let a = computer(t.path(), "A");
+        let src = Source::parse(&json!({"zip": crate::backup::dir(&a).join(crate::backup::create(&a, "Manual").unwrap().name)})).unwrap();
+        assert!(matches!(src, Source::Zip(_)));
+        // the window marked the question answered after its restore; after `hrm restore` the next launch asked again
+        let b = Ctx::open_at(&t.path().join("B"), &t.path().join("home-b")).unwrap();
+        assert!(run(&b, &src, true).is_err(), "B is not named in A's backup");
+        assert_eq!(b.db.kv_get("welcome:done").unwrap(), None, "a restore that was refused answers nothing");
+        run(&b, &src, false).unwrap();
+        assert_eq!(b.db.kv_get("welcome:done").unwrap().as_deref(), Some("1"));
     }
 
     #[test]
