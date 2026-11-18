@@ -391,3 +391,78 @@ fn presence_and_transcripts_switched_off_are_not_served_to_a_paired_computer_eit
     assert_eq!(c.json("/v1/presence").unwrap(), None);
     assert_eq!(c.json(&transcript).unwrap(), None);
 }
+
+/// B's copy of C's journal without its first chunk, as after its cache was pruned.
+fn prune_first(b: &Computer, c: &Computer) {
+    let dir = store::dir(&b.ctx, &c.ctx.settings.device_id);
+    let mut man = store::manifest(&b.ctx, &c.ctx.settings.device_id).unwrap();
+    let first = man["chunks"].as_array_mut().unwrap().remove(0);
+    std::fs::remove_file(dir.join("journal").join(first["file"].as_str().unwrap())).unwrap();
+    crate::util::write_atomic(&dir.join("manifest.json"), man.to_string().as_bytes()).unwrap();
+}
+
+/// C publishes two chunks of one row each, and B takes each as it comes.
+fn two_chunks_of_c_reach_b(b: &Computer, c: &Computer) {
+    for r in ["claude:c1", "claude:c2"] {
+        c.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        c.rt.tick(&c.ctx);
+        b.rt.tick(&b.ctx);
+    }
+    assert_eq!(store::manifest(&b.ctx, &c.ctx.settings.device_id).unwrap()["chunks"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn a_journal_whose_start_a_relay_no_longer_holds_is_taken_with_the_gap_on_its_card() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b, c) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"));
+    pair(&a, &b);
+    pair(&b, &c);
+    two_chunks_of_c_reach_b(&b, &c);
+    prune_first(&b, &c);
+    // A hears of C through B alone and is not paired with C: nobody else could fill it
+    a.rt.tick(&a.ctx);
+    assert_eq!(count(&a.ctx, "select count(*) from usage"), 1, "the rest is taken");
+    let st = journal::status(&a.ctx).unwrap();
+    let pc = peer(&st, &c.ctx.settings.device_id);
+    assert_eq!((pc["applied_seq"].as_i64(), pc["gap"]["from"].as_i64(), pc["gap"]["to"].as_i64(), pc["gap"]["waiting"].as_bool()), (Some(2), Some(1), Some(1), Some(false)), "the card says what is missing: {st}");
+    a.rt.tick(&a.ctx);
+    assert_eq!(peer(&journal::status(&a.ctx).unwrap(), &c.ctx.settings.device_id)["gap"]["from"], 1, "and goes on saying it");
+}
+
+#[test]
+fn a_gap_at_a_relay_waits_for_the_paired_computer_itself_which_fills_it() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b, c) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"));
+    pair(&a, &b);
+    pair(&b, &c);
+    pair(&c, &a);
+    let c_id = c.ctx.settings.device_id.clone();
+    // C stops answering A (a closed port), and goes on answering B
+    super::set_peer(&a.ctx, &c_id, Some("127.0.0.1:1"), None).unwrap();
+    two_chunks_of_c_reach_b(&b, &c);
+    prune_first(&b, &c);
+    let gap = || peer(&journal::status(&a.ctx).unwrap(), &c_id)["gap"].clone();
+    for _ in 0..2 {
+        a.rt.tick(&a.ctx);
+        assert_eq!(count(&a.ctx, "select count(*) from usage"), 0, "nothing is taken past the gap while C can still be asked");
+        assert_eq!((gap()["from"].as_i64(), gap()["to"].as_i64(), gap()["waiting"].as_bool()), (Some(1), Some(1), Some(true)));
+    }
+    // C answers again: its own journal is whole
+    super::set_peer(&a.ctx, &c_id, Some(&format!("127.0.0.1:{}", port(&c))), None).unwrap();
+    a.rt.tick(&a.ctx);
+    assert_eq!(count(&a.ctx, "select count(*) from usage"), 2);
+    assert_eq!(gap(), Value::Null, "filled, so the card says nothing");
+    // gone again, for more than a week, while B drops two more chunks: C is not waited for any longer
+    super::set_peer(&a.ctx, &c_id, Some("127.0.0.1:1"), None).unwrap();
+    for r in ["claude:c3", "claude:c4"] {
+        c.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        c.rt.tick(&c.ctx);
+        b.rt.tick(&b.ctx);
+    }
+    prune_first(&b, &c);
+    prune_first(&b, &c);
+    a.ctx.db.with(|x| Ok(x.execute("update peers set paired_at = paired_at - 8 * 86400000, connected = connected - 8 * 86400000 where device_id = ?1", [&c_id])?)).unwrap();
+    a.rt.tick(&a.ctx);
+    assert_eq!(count(&a.ctx, "select count(*) from usage"), 3, "the rest is taken");
+    assert_eq!((gap()["from"].as_i64(), gap()["to"].as_i64(), gap()["waiting"].as_bool()), (Some(3), Some(3), Some(false)));
+}

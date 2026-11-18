@@ -28,6 +28,9 @@ pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
 pub const MAX_JSON_BYTES: u64 = 32 * 1024 * 1024;
 /// A peer whose `hello` answered within this long is connected.
 pub const CONNECTED_MS: i64 = 30_000;
+/// A gap in what a relay or the hub holds of a paired computer waits this long for the computer itself, counted
+/// from its last answer or the pairing: it alone holds its whole journal. After that the rest is taken.
+const GAP_WAIT_MS: i64 = 7 * 86_400_000;
 
 /// One change, as a line of the journal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +67,9 @@ pub struct Peer {
     pub relayed_by: String,
     /// Why the last attempt to reach it failed; empty once one succeeds.
     pub last_error: String,
+    /// Entries of its journal that no source held, `{incarnation, from, to, waiting}`, or null. `waiting`: what
+    /// follows them is not taken yet, the computer itself is asked first.
+    pub gap: Value,
 }
 
 /// Append one change to the outbox, inside the writer's own transaction.
@@ -230,8 +236,10 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
 /// tries again. Stops too at the first entry of a kind this version does not know, with the cursor just before
 /// it, and says so on that computer's row: the entry and all after it are taken once this computer is updated.
-/// Returns the sequence applied up to.
-pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
+/// A list that starts beyond the cursor has lost entries (a relay and the hub drop their oldest chunks): the gap
+/// goes on that computer's row, and unless the list is its `own` (read from the computer itself or its folder)
+/// the rest waits while that computer can still be asked. Returns the sequence applied up to.
+pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>, own: bool) -> Result<i64> {
     if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
     let pubkey = pubkey_of(ctx, id)?;
@@ -240,6 +248,16 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     for ch in man["chunks"].as_array().into_iter().flatten() {
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || !store::safe_file(file) { continue; }
+        let gap = (from > cur + 1).then(|| -> Result<Value> {
+            let waiting = !own && ctx.db.with(|c| Ok(c.query_row("select coalesce(cert_pem, '') <> '' and ?1 - max(coalesce(connected, 0), coalesce(paired_at, 0)) < ?2 from peers where device_id=?3",
+                params![now_ms(), GAP_WAIT_MS, id], |r| r.get::<_, bool>(0)).optional()?))?.unwrap_or(false);
+            Ok(json!({"incarnation": inc, "from": cur + 1, "to": from - 1, "waiting": waiting}))
+        }).transpose()?;
+        if let Some(g) = gap.as_ref().filter(|g| g["waiting"] == true) {
+            ctx.db.with(|c| { c.execute("update peers set gap=?1 where device_id=?2 and gap is not ?1", params![g.to_string(), id])?; Ok(()) })?;
+            crate::log::info(&format!("journal: entries {} to {} of {id} are no longer held where it was read; what follows waits for that computer itself", g["from"], g["to"]));
+            break;
+        }
         let bytes = match read(file) {
             Ok(b) => b,
             Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
@@ -268,10 +286,13 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
                 }
             }
             tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, upto])?;
+            // skipped for good with this cursor: said on its row, which the folder may not have made yet
+            if let Some(g) = &gap { tx.execute("insert into peers(device_id, gap) values(?1, ?2) on conflict(device_id) do update set gap=?2", params![id, g.to_string()])?; }
             tx.commit()?;
             Ok(())
         })?;
         if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
+        if let Some(g) = &gap { crate::log::warn(&format!("journal: entries {} to {} of {id} are held nowhere this computer can read; its journal goes on after them", g["from"], g["to"])); }
         cur = upto;
         if newer {
             crate::log::warn(&format!("journal: entry {} of {file} from {id} is of a kind this version does not know; it and what follows wait until Harness Manager is updated on this computer", upto + 1));
@@ -282,6 +303,8 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     }
     // said on that computer's card while it waits, and taken off once a chunk is read through again (after the update)
     ctx.db.with(|c| { c.execute("update peers set last_error = case when ?1 then ?2 else '' end where device_id = ?3 and (?1 or (?4 and last_error = ?2))", params![newer, UPDATE_HERE, id, through])?; Ok(()) })?;
+    // a gap that waited is over once the cursor is past it, and any gap with its incarnation
+    ctx.db.with(|c| { c.execute("update peers set gap = null where device_id = ?1 and (json_extract(gap, '$.incarnation') <> ?2 or (json_extract(gap, '$.waiting') and json_extract(gap, '$.to') <= ?3))", params![id, inc, cur])?; Ok(()) })?;
     Ok(cur)
 }
 
@@ -298,6 +321,8 @@ pub trait Source {
     fn needs_key(&self) -> bool { true }
     /// Its presence is made as it is asked for, so it replaces what is held; a stored copy only when no older.
     fn live(&self) -> bool { false }
+    /// What it holds of this origin is the origin's own whole journal: nothing else could fill a gap in it.
+    fn is_origin(&self, _origin: &str) -> bool { false }
 }
 
 /// One origin's journal from a source: its chunk list since this computer's cursor (asked again when the source
@@ -312,7 +337,7 @@ pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<Option<(Value, 
     if inc != known && !inc.is_empty() { man = src.manifest(origin, &inc, cursor(&inc))?.context("the origin vanished")?; }
     if man["device"].is_object() { learn_device(ctx, origin, &man["device"])?; }
     if src.needs_key() && pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
-    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file))?;
+    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file), src.is_origin(origin))?;
     Ok(Some((man, applied)))
 }
 
@@ -432,14 +457,15 @@ pub fn presence_tick(ctx: &Ctx) -> Result<()> {
 
 pub fn peers(ctx: &Ctx) -> Result<Vec<Peer>> {
     ctx.db.read(|c| {
-        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error
+        let mut st = c.prepare("select device_id, name, os, app_version, last_seen, last_seq, applied_seq, transport, presence, incarnation, address, port, cert_pem, pubkey, paired_at, last_pull, path, connected, relayed_by, last_error, gap
             from peers order by name, device_id")?;
         let s = |r: &rusqlite::Row, i: usize| -> rusqlite::Result<String> { Ok(r.get::<_, Option<String>>(i)?.unwrap_or_default()) };
         let v = st.query_map([], |r| Ok(Peer { id: r.get(0)?, name: s(r, 1)?, os: s(r, 2)?, app_version: s(r, 3)?, last_seen: r.get(4)?, last_seq: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
             applied_seq: r.get::<_, Option<i64>>(6)?.unwrap_or(0), transport: s(r, 7)?,
             presence: r.get::<_, Option<String>>(8)?.and_then(|p| serde_json::from_str(&p).ok()).unwrap_or(Value::Null), incarnation: s(r, 9)?,
             address: s(r, 10)?, port: r.get::<_, Option<i64>>(11)?.unwrap_or(0) as u16, cert_pem: s(r, 12)?, pubkey: s(r, 13)?, paired_at: r.get(14)?, last_pull: r.get(15)?,
-            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)? }))?.collect::<rusqlite::Result<_>>()?;
+            path: s(r, 16)?, connected: r.get(17)?, relayed_by: s(r, 18)?, last_error: s(r, 19)?,
+            gap: r.get::<_, Option<String>>(20)?.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or(Value::Null) }))?.collect::<rusqlite::Result<_>>()?;
         Ok(v)
     })
 }
@@ -471,7 +497,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
         "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": if fresh(&p, now) { p.presence["running"].as_array().cloned().unwrap_or_default() } else { vec![] },
         "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
-        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error})).collect();
+        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error, "gap": p.gap})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
         "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
         "last_run": last["at"], "error": last["error"], "peers": peers, "hub": crate::sync::hub::status(ctx)}))
@@ -749,7 +775,7 @@ mod tests {
         id.sign_record(&mut rec);
         assert!(identity::record_ok(&rec), "signed by the key it carries");
         assert!(!learn_device(&ctx, evil, &rec).unwrap());
-        assert!(apply_manifest(&ctx, evil, &json!({"incarnation": "i", "chunks": []}), &|_| Ok(vec![])).is_err());
+        assert!(apply_manifest(&ctx, evil, &json!({"incarnation": "i", "chunks": []}), &|_| Ok(vec![]), true).is_err());
         assert!(!t.path().join("evil").exists() && !t.path().join("A").join("evil").exists());
         assert!(!store::dir(&ctx, evil).starts_with(t.path().join("evil")) && store::dir(&ctx, evil).starts_with(ctx.data.join("journal-cache")), "and the store stays in its folder");
         let _ = crate::secrets::delete(&identity::target(&ctx.settings.device_id));
@@ -849,7 +875,7 @@ mod tests {
         let bytes = entries.iter().map(|e| format!("{e}\n")).collect::<String>().into_bytes();
         let to = entries.last().and_then(|e| e["seq"].as_i64()).unwrap_or(0);
         let man = json!({"incarnation": "i", "chunks": [{"file": format!("i-1-{to}.jsonl"), "from": 1, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}]});
-        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone())).unwrap()
+        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone()), true).unwrap()
     }
 
     fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
@@ -893,7 +919,7 @@ mod tests {
         let asked = std::cell::RefCell::new(Vec::<String>::new());
         for name in [".i-1-1.jsonl", "-i-1-1.jsonl", "..", "../up.jsonl", "C:evil.jsonl", "i-1-1.jsonl:stream", "NUL", "nul.jsonl", long.as_str()] {
             let man = json!({"incarnation": "i", "chunks": [{"file": name, "from": 1, "to": 1, "sha256": sha256_hex(b""), "bytes": 0}]});
-            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }).unwrap(), 0, "{name}");
+            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }, true).unwrap(), 0, "{name}");
             assert!(store::chunk(&ctx, "peer-1", name).is_err(), "{name}");
             assert!(store::put_chunk(&ctx, "peer-1", "i", &json!({"file": name, "from": 1, "to": 1, "bytes": 0}), b"").is_err(), "{name}");
         }

@@ -143,6 +143,8 @@ impl journal::Source for Via<'_> {
     fn presence(&self) -> Result<Vec<(String, Value)>> { Ok(self.c.json("/v1/presence")?.map(|v| (self.id.to_string(), v)).into_iter().collect()) }
 
     fn live(&self) -> bool { true }
+
+    fn is_origin(&self, origin: &str) -> bool { origin == self.id }
 }
 
 /// Every paired computer, now: found by mDNS or its address, greeted, its journal and presence taken, then
