@@ -1,5 +1,6 @@
 //! A sandbox of realistic volume and the timings the performance work is judged by:
-//! `cargo run --release -p hrm-core --example bench -- gen` once, then `-- run` (and `-- price` on an empty sandbox).
+//! `cargo run --release -p hrm-core --example bench -- gen` once, then `-- run` (or one part of it: `-- run cold|state|pages|watch|walk|backup`),
+//! and `-- price` on an empty sandbox.
 //! Never the real data: it stops unless HRM_HOME, HRM_PROFILES_HOME and HRM_CRED_PREFIX point at a sandbox.
 
 use std::io::Write;
@@ -252,13 +253,13 @@ fn counts(ctx: &Ctx) -> anyhow::Result<()> {
     })
 }
 
-/// `f` run `reps` times: the median and the fastest, in milliseconds.
+/// `f` run `reps` times: the median, the fastest and the slowest (the first, where something is remembered after it), in milliseconds.
 fn time<T>(label: &str, reps: usize, mut f: impl FnMut() -> T) -> T {
     let mut ms = vec![];
     let mut last = None;
     for _ in 0..reps { let t = Instant::now(); last = Some(f()); ms.push(t.elapsed().as_secs_f64() * 1000.0); }
     ms.sort_by(|a, b| a.total_cmp(b));
-    println!("{label:<66} median {:>9.1} ms   min {:>9.1} ms   ({reps}x)", ms[ms.len() / 2], ms[0]);
+    println!("{label:<66} median {:>9.1} ms   min {:>9.1} ms   max {:>9.1} ms   ({reps}x)", ms[ms.len() / 2], ms[0], ms[ms.len() - 1]);
     last.unwrap()
 }
 
@@ -338,37 +339,48 @@ fn settled(ctx: &Ctx, files: &[PathBuf]) -> f64 {
 }
 
 /// What the watcher does with a burst of changed paths: the owners' usage import, then the index refresh of those paths.
-fn watched(ctx: &Ctx, paths: Vec<PathBuf>) -> index::Report {
+fn watched(ctx: &Ctx, paths: Vec<PathBuf>) -> (index::Report, f64) {
+    let t = Instant::now();
     let reg = ctx.registry().unwrap();
     for p in reg.profiles.iter().filter(|p| { let d = harness::of(p).session_dirs(ctx, p); paths.iter().any(|f| d.iter().any(|x| f.starts_with(x))) }) {
         harness::of(p).import_usage(ctx, p).unwrap();
     }
-    index::refresh(ctx, index::Scope::Paths(paths)).unwrap()
+    let import = t.elapsed().as_secs_f64() * 1000.0;
+    (index::refresh(ctx, index::Scope::Paths(paths)).unwrap(), import)
 }
 
-fn run(ctx: &Ctx) -> anyhow::Result<()> {
+fn run(ctx: &Ctx, only: Option<String>) -> anyhow::Result<()> {
+    let want = |part: &str| only.as_deref().is_none_or(|o| o == part);
     let mut r = Rng(hrm_core::util::now_ms() as u64 | 1);
     let reg = ctx.registry()?;
     let home = &ctx.home;
     counts(ctx)?;
+    if want("cold") {
     println!("\n-- the first walk of this process (nothing changed; project lookups not yet remembered)");
     let (rep, ms, w, rd) = waits(ctx, || index::refresh(ctx, index::Scope::All).unwrap());
     println!("{:<66} {ms:>9.1} ms   longest wait: a write {w:.1} ms, a cache read {rd:.1} ms   ({} sessions)", "full walk, nothing changed, cold", rep.sessions);
     time("full walk, nothing changed", 3, || index::refresh(ctx, index::Scope::All).unwrap());
+    }
 
+    if want("state") {
     println!("\n-- state");
     time("state: list_views (6 accounts)", 5, || service::list_views(ctx).unwrap());
     time("state: harnesses (6 program lookups)", 5, service::harnesses);
     for name in ["claude-main", "claude-work"] {
         let p = reg.get(name)?;
         time(&format!("identity + limits of {name} (.claude.json)"), 5, || { let h = harness::of(p); (h.identity(ctx, p), h.quota(ctx, p)) });
+        let file = harness::claude::Claude.claude_json(ctx, p);
+        let text = std::fs::read_to_string(&file)?;
+        time(&format!("identity + limits of {name}, the file just rewritten"), 5, || { std::fs::write(&file, &text).unwrap(); let h = harness::of(p); (h.identity(ctx, p), h.quota(ctx, p)) });
     }
     for name in ["codex-main", "codex-work"] {
         let p = reg.get(name)?;
         let q = time(&format!("limits read of {name}"), 3, || harness::of(p).quota(ctx, p));
         println!("    {}", serde_json::to_string(&q)?);
     }
+    }
 
+    if want("pages") {
     println!("\n-- pages");
     let page = SessionFilter { per: Some(50), page: Some(0), days: Some(7), ..Default::default() };
     time("sessions: a page of 50, 7 days", 5, || service::sessions(ctx, &page).unwrap());
@@ -388,18 +400,21 @@ fn run(ctx: &Ctx) -> anyhow::Result<()> {
     time("router: live strip (dash::live)", 5, || hrm_core::dash::live(ctx, now).unwrap());
     time("router: request log, newest 40", 5, || ctx.db.route_log(40).unwrap());
     time("dashboard today", 3, || hrm_core::dash::dashboard(ctx, 0, None, None).unwrap());
+    }
 
-    println!("\n-- one changed file, as the watcher handles it");
+
     let claude = files_of(&home.join(".claude").join("projects"), "jsonl");
     let codex = files_of(&home.join(".codex").join("sessions"), "jsonl");
     let small = codex.iter().find(|f| f.2 < 1 << 20).unwrap().0.clone();
     let big = codex.iter().max_by_key(|f| f.2).unwrap().0.clone();
     let oc = home.join(".local").join("share").join("opencode");
     let conv = home.join(".gemini").join("antigravity-cli").join("conversations").join("conv-007.db");
+    if want("watch") {
+    println!("\n-- one changed file, as the watcher handles it");
     for (label, file) in [("a Claude session (1,300 in the account)", claude[7].0.clone()), ("a small Codex rollout (353 in the account)", small.clone()), ("the 100 MB Codex rollout", big.clone())] {
-        let mut wait = 0.0;
-        time(&format!("watcher: {label}"), 3, || { append(&file, &mut r); let rep = watched(ctx, vec![file.clone()]); wait = settled(ctx, &[file.clone()]); rep });
-        println!("    its parse landed {wait:.0} ms after the refresh returned");
+        let (mut wait, mut import) = (0.0, 0.0);
+        time(&format!("watcher: {label}"), 3, || { append(&file, &mut r); let rep = watched(ctx, vec![file.clone()]); import = rep.1; wait = settled(ctx, &[file.clone()]); rep });
+        println!("    of which the usage import {import:.1} ms; its parse landed {wait:.0} ms after the refresh returned");
     }
     time("watcher: OpenCode wrote a snapshot file (not its database)", 3, || { let f = oc.join("snapshot").join("pack.tmp"); std::fs::write(&f, r.id()).unwrap(); watched(ctx, vec![f]) });
     time("watcher: OpenCode's database, unchanged since the last scan", 3, || watched(ctx, vec![oc.join("opencode.db-wal")]));
@@ -415,7 +430,9 @@ fn run(ctx: &Ctx) -> anyhow::Result<()> {
         drop(db);
         watched(ctx, vec![conv.clone()])
     });
+    }
 
+    if want("walk") {
     println!("\n-- a full walk with changed files");
     let mut wait = 0.0;
     let (_, mb) = peak_mb(|| time("full walk: only the 100 MB rollout changed", 3, || { append(&big, &mut r); let rep = index::refresh(ctx, index::Scope::All).unwrap(); wait = settled(ctx, &[big.clone()]); rep }));
@@ -442,10 +459,13 @@ fn run(ctx: &Ctx) -> anyhow::Result<()> {
     // what the pages show afterwards: the same whichever way the files were parsed
     let s = service::sessions(ctx, &SessionFilter { id: Some(hrm_core::harness::parse::first_line(&big).and_then(|l| serde_json::from_str::<Value>(&l).ok()).map(|v| v["payload"]["id"].as_str().unwrap_or("").to_string()).unwrap_or_default()), ..Default::default() })?;
     println!("    the 100 MB session: {}", s.first().map(|s| format!("{} prompts, {} messages, {} tool calls, {} failed, {} tokens, model {}", s.prompts, s.messages, s.tool_calls, s.failed, s.tokens, s.model)).unwrap_or_default());
+    }
 
+    if want("backup") {
     println!("\n-- a backup beside other work");
     let (b, ms, w, rd) = waits(ctx, || hrm_core::backup::create(ctx, "Bench").unwrap());
     println!("{:<66} {ms:>9.1} ms   longest wait: a write {w:.1} ms, a cache read {rd:.1} ms   ({} MB)", "backup (history of every usage row)", b.size >> 20);
+    }
     Ok(())
 }
 
@@ -476,7 +496,7 @@ fn main() -> anyhow::Result<()> {
     println!("{:<66} {:>9.1} ms", "open (schema and migrations)", t.elapsed().as_secs_f64() * 1000.0);
     match mode.as_str() {
         "gen" => generate(&ctx),
-        "run" => run(&ctx),
+        "run" => run(&ctx, std::env::args().nth(2)),
         _ => anyhow::bail!("gen, run or price"),
     }
 }

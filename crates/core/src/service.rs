@@ -25,12 +25,15 @@ pub struct HarnessView {
 }
 
 pub fn harnesses() -> Vec<HarnessView> {
-    harness::all().iter().map(|h| HarnessView {
-        id: h.id().into(),
-        label: h.label().into(),
-        installed: crate::launch::resolve_program(h.id(), h.binary()).is_ok(),
-        caps: h.caps(),
-    }).collect()
+    // every look at the state asked for all six programs, each lookup trying every folder of PATH with every extension
+    // shortcut: a tool installed or removed shows here up to five seconds late (the Apps page and a start look for themselves); look each time if that is ever in the way
+    static FOUND: Mutex<Option<(std::time::Instant, Vec<bool>)>> = Mutex::new(None);
+    let mut found = FOUND.lock().unwrap_or_else(|e| e.into_inner());
+    let installed = match found.as_ref() {
+        Some((at, v)) if at.elapsed().as_secs() < 5 => v.clone(),
+        _ => found.insert((std::time::Instant::now(), harness::all().iter().map(|h| crate::launch::resolve_program(h.id(), h.binary()).is_ok()).collect())).1.clone(),
+    };
+    harness::all().iter().zip(installed).map(|(h, installed)| HarnessView { id: h.id().into(), label: h.label().into(), installed, caps: h.caps() }).collect()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1374,6 +1377,12 @@ mod tests {
     fn ctx(t: &tempfile::TempDir) -> Ctx { Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap() }
 
     fn refused(r: Result<impl Sized>) -> String { format!("{:#}", r.err().expect("refused")) }
+
+    #[test]
+    fn the_tool_list_names_every_tool_and_whether_its_program_is_found_the_same_at_every_ask() {
+        let found: Vec<(String, bool)> = harness::all().iter().map(|h| (h.id().to_string(), crate::launch::resolve_program(h.id(), h.binary()).is_ok())).collect();
+        for _ in 0..2 { assert_eq!(harnesses().into_iter().map(|h| (h.id, h.installed)).collect::<Vec<_>>(), found); }
+    }
 
     #[test]
     fn a_route_is_checked_the_same_for_the_window_and_the_command_line() {
