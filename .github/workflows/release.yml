@@ -11,7 +11,6 @@ concurrency: { group: release, cancel-in-progress: false }
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
-  GH_TOKEN: ${{ github.token }}
   GH_REPO: ${{ github.repository }}
 jobs:
   test:
@@ -21,6 +20,7 @@ jobs:
     needs: test
     runs-on: ${{ vars.RUNNER_LINUX }}
     outputs: { id: '${{ steps.r.outputs.id }}' }
+    env: { GH_TOKEN: '${{ github.token }}' }
     steps:
       - id: r
         run: |
@@ -58,7 +58,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf file
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with: { toolchain: stable }
       # the cross target goes into the toolchain cargo will actually use: the Windows runner pins its own with
       # RUSTUP_TOOLCHAIN, so the action's `targets` (which installs for stable) never reached it. On the persistent
       # self-hosted runner this installs once into its toolchain and is a no-op on every later release
@@ -72,7 +73,7 @@ jobs:
       # ring's C code is compiled by clang against the MSVC headers. This runs the installed Visual Studio's
       # vcvarsamd64_arm64; nothing is downloaded
       - if: matrix.target == 'aarch64-pc-windows-msvc'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with: { arch: amd64_arm64 }
       # with the MSVC environment set, rustc takes link.exe from PATH, and in the bash steps Git's own
       # /usr/bin/link.exe (a coreutils tool) comes first: name the MSVC ARM64 linker explicitly
@@ -130,7 +131,7 @@ jobs:
             echo "APPLE_PASSWORD=$APW"
             echo "APPLE_TEAM_ID=$TEAM"
           } >> "$GITHUB_ENV"
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -148,6 +149,7 @@ jobs:
       - name: .dmg (hdiutil, no Finder)
         if: matrix.os == 'macos'
         shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
           test -n "$app"
@@ -177,6 +179,7 @@ jobs:
         with: { clean: false }
       - name: Build and push
         shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           v="${GITHUB_REF_NAME#v}"
           image="ghcr.io/${GH_REPO,,}"; image="${image%/*}/hrm-hub"
@@ -188,6 +191,7 @@ jobs:
   publish:
     needs: [draft, build]
     runs-on: ${{ vars.RUNNER_LINUX }}
+    env: { GH_TOKEN: '${{ github.token }}' }
     steps:
       - name: Publish, then keep only the newest 2 releases
         run: |
@@ -201,5 +205,6 @@ jobs:
     needs: [draft, build]
     if: ${{ always() && needs.draft.result == 'success' && needs.build.result != 'success' }}
     runs-on: ${{ vars.RUNNER_LINUX }}
+    env: { GH_TOKEN: '${{ github.token }}' }
     steps:
       - run: gh api -X DELETE "repos/$GH_REPO/releases/${{ needs.draft.outputs.id }}" --silent
