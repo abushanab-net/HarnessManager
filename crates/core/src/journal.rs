@@ -157,7 +157,9 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
     let one = crate::util::NamedLock::take(&format!("journal-{}", ctx.settings.device_id));
     let me = &ctx.settings.device_id;
     let inc = &ctx.settings.incarnation;
-    let published = store::manifest(ctx, me).filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
+    // a list that could not be read is not an empty one: publishing from it would start the journal over
+    let published = store::read_list(ctx, me).context("this computer's chunk list could not be read; nothing is published this time")?
+        .filter(|m| m["incarnation"].as_str() == Some(inc)).and_then(|m| m["last_seq"].as_i64()).unwrap_or(0);
     let entries = outbox(ctx, published, i64::MAX)?;
     if entries.is_empty() {
         if store::manifest(ctx, me).is_none() { store::put_manifest_empty(ctx, me, inc)?; }
@@ -624,6 +626,19 @@ mod tests {
 
     fn count(ctx: &Ctx, sql: &str) -> i64 { ctx.db.with(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() }
 
+    /// A row for each of `seqs`, the next entries of this computer's journal, each cut as its own chunk the way
+    /// the ten-second tick cuts them. The key is loaded once by the caller: a publish per chunk reads the
+    /// credential store hundreds of times, beside every other test that reads it.
+    fn cut_each(a: &Ctx, id: &identity::Identity, seqs: std::ops::RangeInclusive<i64>) {
+        let (me, inc) = (&a.settings.device_id, &a.settings.incarnation);
+        for i in seqs {
+            a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i)], &Prices::new()).unwrap();
+            let bytes = line(&outbox(a, i - 1, i).unwrap()[0]).into_bytes();
+            let sha = sha256_hex(&bytes);
+            store::put_chunk(a, me, inc, &json!({"file": format!("{inc}-{i}-{i}.jsonl"), "from": i, "to": i, "sha256": sha, "sig": id.sign(identity::chunk_message(inc, i, i, &sha).as_bytes()), "bytes": bytes.len()}), &bytes).unwrap();
+        }
+    }
+
     /// Deletes the computers' device keys from the credential store when the test ends.
     struct Keys(Vec<String>);
     impl Drop for Keys {
@@ -740,15 +755,18 @@ mod tests {
         let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
         let _k = keys(&[&a, &b]);
         let me = &a.settings.device_id;
-        // one chunk per row, as the ten-second tick cuts them
-        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let id = identity::load(&a).unwrap();
         let chunks = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().clone();
-        (0..5).for_each(tick);
+        cut_each(&a, &id, 1..=5);
         round(&a).unwrap();
         round(&b).unwrap();
         assert_eq!((chunks().len(), count(&b, "select count(*) from usage")), (5, 5), "B holds the first five small chunks");
         let all = 2 * SMALL_KEPT + 5;
-        (5..all).for_each(tick);
+        cut_each(&a, &id, 6..=all as i64 - 1);
+        assert_eq!(chunks().len(), all - 1);
+        // the publish of one more row joins the old ones
+        a.db.insert_usage(&[row("claude:last", 9_000)], &Prices::new()).unwrap();
+        publish(&a).unwrap();
         let list = chunks();
         assert!(list.len() <= SMALL_KEPT + 5, "{} files for {all} chunks", list.len());
         assert_eq!((list[0]["from"].as_i64(), list[0]["file"].as_str()), (Some(1), Some(format!("{}-1-{}.jsonl", a.settings.incarnation, list[0]["to"]).as_str())));
@@ -818,26 +836,124 @@ mod tests {
     }
 
     #[test]
+    fn threads_that_add_join_and_mend_at_once_leave_a_whole_list() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        const N: i64 = 120;
+        a.db.insert_usage(&(1..=N).map(|i| row(&format!("claude:{i}"), 1_000 + i)).collect::<Vec<_>>(), &Prices::new()).unwrap();
+        let (me, inc, id) = (&a.settings.device_id, &a.settings.incarnation, identity::load(&a).unwrap());
+        let sign = |from: i64, to: i64, sha: &str| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes());
+        let cut = |from: i64, to: i64| outbox(&a, from - 1, to).ok().filter(|es| es.len() as i64 == to - from + 1).map(|es| es.iter().map(line).collect::<String>().into_bytes());
+        let (one, done) = (cut(1, 1).unwrap().len(), std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|s| {
+            // two publishers, each cutting a chunk per entry of its half, with a breath between two: a join gives
+            // way whenever the list changed under it
+            for half in 0..2 {
+                let (a, cut, sign, done) = (&a, &cut, &sign, &done);
+                s.spawn(move || {
+                    for i in (1..=N).filter(|i| i % 2 == half) {
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                        let bytes = cut(i, i).unwrap();
+                        let sha = sha256_hex(&bytes);
+                        store::put_chunk(a, me, inc, &json!({"file": format!("{inc}-{i}-{i}.jsonl"), "from": i, "to": i, "sha256": sha, "sig": sign(i, i, &sha), "bytes": bytes.len()}), &bytes).unwrap();
+                    }
+                    done.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
+            // a third joins and mends all the while, as the publish of another process does
+            s.spawn(|| {
+                while done.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+                    store::join_old(&a, 2, 6 * one, &sign).unwrap();
+                    store::mend(&a, &cut, &sign).unwrap();
+                }
+            });
+        });
+        let man = store::manifest(&a, me).unwrap();
+        let (mut cur, mut lines) = (0, vec![]);
+        for c in man["chunks"].as_array().unwrap() {
+            assert_eq!(c["from"], cur + 1, "the list goes on without a hole or a chunk twice: {}", man["chunks"]);
+            let bytes = store::chunk(&a, me, c["file"].as_str().unwrap()).expect("every listed file is there");
+            assert_eq!(sha256_hex(&bytes), c["sha256"].as_str().unwrap(), "with the listed hash");
+            lines.extend(String::from_utf8(bytes).unwrap().lines().map(String::from));
+            cur = c["to"].as_i64().unwrap();
+        }
+        assert_eq!((cur, man["last_seq"].as_i64()), (N, Some(N)));
+        assert!(man["chunks"].as_array().unwrap().len() < N as usize, "and a join did happen meanwhile: {}", man["chunks"].as_array().unwrap().len());
+        assert_eq!(lines, outbox(&a, 0, i64::MAX).unwrap().iter().map(|e| line(e).trim_end().to_string()).collect::<Vec<_>>(), "no entry lost against the outbox");
+    }
+
+    #[test]
+    fn this_computers_list_is_not_started_over_when_it_cannot_be_read() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a) };
+        let me = &a.settings.device_id;
+        tick(1).unwrap();
+        tick(2).unwrap();
+        let (list, files) = (store::dir(&a, me).join("manifest.json"), || std::fs::read_dir(store::dir(&a, me).join("journal")).unwrap().count());
+        // the list cannot be read (a folder stands where it was, as a lock or a disk error would answer)
+        let kept = std::fs::read(&list).unwrap();
+        std::fs::remove_file(&list).unwrap();
+        std::fs::create_dir(&list).unwrap();
+        let e = tick(3).unwrap_err();
+        assert!(format!("{e:#}").contains("could not be read"), "{e:#}");
+        assert_eq!(files(), 2, "nothing was written, and no chunk was removed");
+        // readable again: the entry that waited in the outbox goes out, after the two that were there
+        std::fs::remove_dir(&list).unwrap();
+        std::fs::write(&list, &kept).unwrap();
+        publish(&a).unwrap();
+        let chunks: Vec<(i64, i64)> = store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().iter().map(|c| (c["from"].as_i64().unwrap(), c["to"].as_i64().unwrap())).collect();
+        assert_eq!(chunks, [(1, 1), (2, 2), (3, 3)]);
+        // a list that reads but is not one starts over, and the same publish cuts the whole outbox again
+        std::fs::write(&list, b"not a list").unwrap();
+        tick(4).unwrap();
+        let man = store::manifest(&a, me).unwrap();
+        assert_eq!((man["chunks"][0]["from"].as_i64(), man["last_seq"].as_i64(), files()), (Some(1), Some(4), 1), "{man}");
+    }
+
+    #[test]
     fn a_publisher_that_could_not_take_the_lock_adds_its_chunk_and_joins_nothing() {
         let t = tempfile::tempdir().unwrap();
         let shared = t.path().join("shared");
         std::fs::create_dir_all(&shared).unwrap();
         let a = computer(t.path(), "A", &shared);
         let _k = keys(&[&a]);
-        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:t{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
         let chunks = || store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().len();
-        (0..2 * SMALL_KEPT).for_each(tick);
+        cut_each(&a, &identity::load(&a).unwrap(), 1..=2 * SMALL_KEPT as i64);
         assert_eq!(chunks(), 2 * SMALL_KEPT, "one more and the old ones are joined");
         // another publisher holds the lock for longer than this one waits
-        let (name, (taken, told), (done, wait)) = (format!("journal-{}", a.settings.device_id), std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
-        let holder = std::thread::spawn(move || { let _held = crate::util::NamedLock::take(&name); taken.send(()).unwrap(); let _ = wait.recv(); });
+        let (names, (taken, told), (done, wait)) = ([format!("journal-{}", a.settings.device_id), format!("journal-list-{}", a.settings.device_id)], std::sync::mpsc::channel::<()>(), std::sync::mpsc::channel::<()>());
+        let holder = std::thread::spawn(move || {
+            let _publishing = crate::util::NamedLock::take(&names[0]);
+            taken.send(()).unwrap();
+            let _ = wait.recv();
+            let _list = crate::util::NamedLock::take(&names[1]);
+            taken.send(()).unwrap();
+            let _ = wait.recv();
+        });
         told.recv().unwrap();
         tick(2 * SMALL_KEPT);
         assert_eq!(chunks(), 2 * SMALL_KEPT + 1, "its chunk is listed, nothing was joined beside the holder");
+        // and while the other is at the list itself, this one writes nothing: the entry waits in the outbox
+        done.send(()).unwrap();
+        told.recv().unwrap();
+        a.db.insert_usage(&[row("claude:waits", 1_000)], &Prices::new()).unwrap();
+        let e = publish(&a).unwrap_err();
+        assert!(format!("{e:#}").contains("held by another publisher"), "{e:#}");
+        assert_eq!(chunks(), 2 * SMALL_KEPT + 1);
         done.send(()).unwrap();
         holder.join().unwrap();
         tick(2 * SMALL_KEPT + 1);
-        assert!(chunks() <= SMALL_KEPT + 3, "with the lock, the join: {}", chunks());
+        let list = store::manifest(&a, &a.settings.device_id).unwrap();
+        assert!(chunks() <= SMALL_KEPT + 3, "with the locks, the join: {}", chunks());
+        assert_eq!(list["last_seq"].as_i64(), Some(2 * SMALL_KEPT as i64 + 3), "and the entry that waited went out with the next");
     }
 
     #[test]
@@ -883,11 +999,15 @@ mod tests {
         (1..=2).for_each(tick);
         // as a join leaves them when it is stopped after its list was written and before the small files went
         let dir = store::dir(&a, &a.settings.device_id).join("journal");
-        let left = dir.join(format!("{}-0-0.jsonl", a.settings.incarnation));
+        let (left, young) = (dir.join(format!("{}-0-0.jsonl", a.settings.incarnation)), dir.join(format!("{}-9-9.jsonl", a.settings.incarnation)));
         std::fs::write(&left, b"{}\n").unwrap();
+        std::fs::File::options().write(true).open(&left).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(600)).unwrap();
+        // one written a moment ago may be another publisher's, whose list is not written yet
+        std::fs::write(&young, b"{}\n").unwrap();
         std::fs::write(dir.join("notes.txt"), b"not a chunk").unwrap();
         tick(3);
-        assert!(!left.exists(), "the chunk file no list names is gone");
+        assert!(!left.exists() && young.exists(), "the chunk file no list names is gone once it is old, and not before");
+        std::fs::remove_file(&young).unwrap();
         let names: Vec<String> = { let mut v: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect(); v.sort(); v };
         let listed: Vec<String> = store::manifest(&a, &a.settings.device_id).unwrap()["chunks"].as_array().unwrap().iter().map(|c| c["file"].as_str().unwrap().to_string()).collect();
         assert_eq!(names.iter().filter(|n| n.ends_with(".jsonl")).cloned().collect::<Vec<_>>(), { let mut l = listed.clone(); l.sort(); l }, "the listed ones stay");
