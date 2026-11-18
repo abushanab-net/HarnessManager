@@ -73,8 +73,11 @@ pub struct Peer {
 }
 
 /// Append one change to the outbox, inside the writer's own transaction.
-pub fn record(c: &Connection, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> {
-    c.execute("insert into outbox(ts, op, key, data) values(?,?,?,?)", params![now_ms(), op, key, data.to_string()])?;
+pub fn record(c: &Connection, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> { record_at(c, now_ms(), op, key, data) }
+
+/// `record` for a change whose time the merge compares (a tag list): the entry carries the time kept here.
+pub fn record_at(c: &Connection, ts: i64, op: &str, key: &str, data: &Value) -> rusqlite::Result<()> {
+    c.execute("insert into outbox(ts, op, key, data) values(?,?,?,?)", params![ts, op, key, data.to_string()])?;
     Ok(())
 }
 
@@ -103,8 +106,11 @@ fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
                 from (select distinct profile, tier, used, resets_at, ts, account from quota_hist where coalesce(device, ?2) = ?2)
                 where (profile || '/' || tier, ts) not in (select key, coalesce(json_extract(data, '$.at'), 0) from outbox where op = 'quota')", params![now, dev])?;
         }
-        n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
-            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", [now])?;
+        // a tag list journaled late carries the time of its change, so it never passes for a newer one
+        tx.execute("insert or ignore into tag_times select kind, key, ?1, ?2 from tags t
+            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", params![now, dev])?;
+        n += tx.execute("insert into outbox(ts, op, key, data) select (select ts from tag_times x where x.kind = t.kind and x.key = t.key), 'tag', kind || '/' || key, json_object('tags', json_group_array(tag)) from tags t
+            group by kind, key having not exists (select 1 from outbox o where o.op = 'tag' and o.key = t.kind || '/' || t.key)", [])?;
         tx.execute("insert or replace into kv values('journal:backfilled', '1')", [])?;
         tx.commit()?;
         Ok(n)
@@ -185,6 +191,13 @@ pub(crate) fn session_key_ok(key: &str) -> bool {
 /// On a computer's card while an entry of a kind this version does not know holds its journal back.
 const UPDATE_HERE: &str = "it sent a kind of entry this version does not know: update Harness Manager on this computer to take the rest of its journal";
 
+/// Whether a change to an item's tags made at `ts` on `device` is later than the last one kept for it, and then it
+/// is the one kept. Two computers that changed the same item apart both end with the later change; the
+/// computer's id decides between equal times.
+fn tag_newer(tx: &Connection, kind: &str, key: &str, ts: i64, device: &str) -> Result<bool> {
+    Ok(tx.execute("insert into tag_times values(?1, ?2, ?3, ?4) on conflict(kind, key) do update set ts = ?3, device = ?4 where ?3 > ts or (?3 = ts and ?4 > device)", params![kind, key, ts, device])? > 0)
+}
+
 /// One entry of another computer's (`device`) journal into this database, on the computer `here`. `Ok(false)`:
 /// its kind is one this version does not know (a newer version wrote it), and nothing was done.
 fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
@@ -207,6 +220,7 @@ fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
         "tag" => {
             let (kind, key) = e.key.split_once('/').context("tag key")?;
             if !matches!(kind, "session" | "project") { bail!("tag kind {kind}"); }
+            if !tag_newer(tx, kind, key, e.ts, device)? { return Ok(true); }
             tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
             for t in e.data["tags"].as_array().into_iter().flatten().filter_map(|t| t.as_str()) {
                 tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t])?;
@@ -215,7 +229,7 @@ fn apply(tx: &Connection, device: &str, here: &str, e: &Entry) -> Result<bool> {
         // never a usage row: what was spent was spent; and of the sessions, only that computer's own
         "tombstone" => match e.key.split_once('/').context("tombstone key")? {
             ("session", k) => { tx.execute("delete from sessions where key=? and device=?", [k, device])?; }
-            ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; tx.execute("delete from tags where kind=? and key=?", [kind, key])?; }
+            ("tag", k) => { let (kind, key) = k.split_once('/').context("tag key")?; if tag_newer(tx, kind, key, e.ts, device)? { tx.execute("delete from tags where kind=? and key=?", [kind, key])?; } }
             ("transcript", k) => crate::sync::transcripts::tombstone(tx, device, k)?,
             _ => return Ok(false),
         },
@@ -612,6 +626,37 @@ mod tests {
         assert_eq!(count(&b, "select count(*) from usage"), 2);
         assert_eq!(count(&b, "select count(*) from quota_hist"), 1);
         assert_eq!(count(&b, "select count(*) from cursors2"), 1);
+    }
+
+    #[test]
+    fn two_computers_that_tag_the_same_item_before_syncing_end_with_the_same_tags() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let sync = || for c in [&a, &b, &a, &b] { round(c).unwrap(); };
+        let tags = |c: &Ctx, kind: &str, key: &str| c.db.tags_of(kind).unwrap().remove(key).unwrap_or_default();
+        // B's change is the later one: it stays on both, whichever entry each applies last
+        a.db.tag_set("session", "work/s1", &["from-a".into()]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(3));
+        b.db.tag_set("session", "work/s1", &["from-b".into()]).unwrap();
+        sync();
+        assert_eq!((tags(&a, "session", "work/s1"), tags(&b, "session", "work/s1")), (vec!["from-b".to_string()], vec!["from-b".to_string()]));
+        // made in the same millisecond: the computer's id decides, the same way on both
+        a.db.tag_set("project", "k", &["from-a".into()]).unwrap();
+        b.db.tag_set("project", "k", &["from-b".into()]).unwrap();
+        for c in [&a, &b] { c.db.with(|x| Ok(x.execute_batch("update outbox set ts = 5000 where key = 'project/k'; update tag_times set ts = 5000 where key = 'k';")?)).unwrap(); }
+        sync();
+        let winner = if a.settings.device_id > b.settings.device_id { "from-a" } else { "from-b" };
+        assert_eq!((tags(&a, "project", "k"), tags(&b, "project", "k")), (vec![winner.to_string()], vec![winner.to_string()]));
+        // a change made here after one from a computer whose clock runs ahead is still the later one everywhere
+        a.db.with(|x| Ok(x.execute_batch("update outbox set ts = ts + 3600000 where key = 'session/work/s1'; update tag_times set ts = ts + 3600000 where key = 'work/s1';")?)).unwrap();
+        a.db.tag_set("session", "work/s1", &["ahead".into()]).unwrap();
+        sync();
+        b.db.tag_set("session", "work/s1", &["after".into()]).unwrap();
+        sync();
+        assert_eq!((tags(&a, "session", "work/s1"), tags(&b, "session", "work/s1")), (vec!["after".to_string()], vec!["after".to_string()]));
     }
 
     #[test]

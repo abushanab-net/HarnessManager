@@ -41,6 +41,7 @@ create index if not exists events_ts on events(ts);
 create table if not exists quota_hist(ts integer not null, profile text not null, tier text not null, used real not null, resets_at integer);
 create index if not exists quota_hist_p on quota_hist(profile, tier, ts);
 create table if not exists tags(kind text not null, key text not null, tag text not null, primary key(kind, key, tag));
+create table if not exists tag_times(kind text not null, key text not null, ts integer not null, device text not null, primary key(kind, key));
 create table if not exists outbox(seq integer primary key autoincrement, ts integer not null, op text not null, key text not null, data text not null);
 create index if not exists outbox_key on outbox(op, key);
 create table if not exists peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer,
@@ -296,6 +297,11 @@ impl Db {
             promote_columns(&conn)?;
             conn.execute_batch("insert into sessions_fts(sessions_fts) values('rebuild'); insert or replace into kv values('migrated:index', '1');")?;
         }
+        // tags learned when they were last changed: for those this computer changed, its journal knows
+        if !conn.prepare("select 1 from kv where k = 'migrated:tag-times'")?.exists([])? {
+            conn.execute("insert or ignore into tag_times select substr(key, 1, instr(key, '/') - 1), substr(key, instr(key, '/') + 1), max(ts), ?1 from outbox where op = 'tag' and instr(key, '/') > 1 group by key", [device])?;
+            conn.execute("insert or replace into kv values('migrated:tag-times', '1')", [])?;
+        }
         conn.execute_batch(INDEX_TRIGGERS)?;
         conn.execute_batch(USAGE_DAY)?;
         if !conn.prepare("select 1 from kv where k = 'migrated:usage_day'")?.exists([])? {
@@ -520,7 +526,10 @@ impl Db {
             let tx = c.transaction()?;
             tx.execute("delete from tags where kind=? and key=?", [kind, key])?;
             for t in tags { tx.execute("insert or ignore into tags values(?,?,?)", [kind, key, t.as_str()])?; }
-            if self.journal { crate::journal::record(&tx, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?; }
+            // later than the change it replaces even when this computer's clock is behind: every computer must take it
+            let at: i64 = tx.query_row("select max(?1, coalesce((select ts + 1 from tag_times where kind=?2 and key=?3), 0))", params![crate::util::now_ms(), kind, key], |r| r.get(0))?;
+            tx.execute("insert or replace into tag_times values(?,?,?,?)", params![kind, key, at, self.device])?;
+            if self.journal { crate::journal::record_at(&tx, at, "tag", &format!("{kind}/{key}"), &serde_json::json!({"tags": tags}))?; }
             tx.commit()?;
             Ok(())
         })
