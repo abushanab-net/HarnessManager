@@ -375,13 +375,25 @@ pub fn start(ctx: &Ctx, name: &str, cwd: Option<PathBuf>, extra: &[String]) -> R
     crate::launch::open_terminal(&ctx.settings.terminal, &title, &args, cwd.as_deref())
 }
 
+/// Reopen a session in a new terminal, in its own account, in the folder `resume_cwd` gives.
 pub fn resume(ctx: &Ctx, profile: &str, session_id: &str, cwd: Option<PathBuf>) -> Result<()> {
     let reg = ctx.registry()?;
     let p = reg.get(profile)?;
     let args = harness::of(p).resume_args(session_id);
     if args.is_empty() { bail!("{} cannot resume sessions", harness::of(p).label()); }
     if crate::archive::is_archived(ctx, profile, session_id) { bail!("{}", crate::archive::REFUSAL); }
+    let cwd = resume_cwd(ctx, &reg, profile, session_id, cwd)?;
     start(ctx, profile, cwd, &args)
+}
+
+/// Where a resumed session's terminal opens: `cwd`, which must be a folder here; without one, the folder the
+/// session ran in on this computer while that is still there (else wherever a terminal opens).
+fn resume_cwd(ctx: &Ctx, reg: &Registry, profile: &str, session_id: &str, cwd: Option<PathBuf>) -> Result<Option<PathBuf>> {
+    Ok(match cwd {
+        Some(c) if c.is_dir() => Some(c),
+        Some(c) => bail!("{} is not a folder on this computer", c.display()),
+        None => session_row(ctx, reg, profile, session_id).ok().filter(|s| s.device == ctx.db.device).map(|s| PathBuf::from(s.cwd)).filter(|c| c.is_dir()),
+    })
 }
 
 // ---------- usage ----------
@@ -776,17 +788,22 @@ pub fn projects(ctx: &Ctx, days: Option<i64>, scope: Option<&str>) -> Result<Vec
     Ok(out)
 }
 
-pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {
-    let reg = ctx.registry()?;
-    let p = reg.get(profile)?;
+/// One session's row in the index.
+fn session_row(ctx: &Ctx, reg: &Registry, profile: &str, session_id: &str) -> Result<SessionMeta> {
     let f = SessionFilter { profile: Some(profile.into()), id: Some(session_id.into()), ..Default::default() };
     // this computer's own copy first: a session continued from another computer shares its id with the row from there
     let find = || -> Result<Option<SessionMeta>> { let list = sessions(ctx, &f)?; Ok(list.iter().find(|s| s.device == ctx.db.device).or_else(|| list.first()).cloned()) };
-    let s = match find()? {
-        Some(s) => s,
+    match find()? {
+        Some(s) => Ok(s),
         // a session the index has not seen yet (its file was just written): its account's folders are read now
-        None => { crate::index::refresh_profiles(ctx, &reg, &[profile.to_string()], false)?; find()?.context("session not found")? }
-    };
+        None => { crate::index::refresh_profiles(ctx, reg, &[profile.to_string()], false)?; find()?.context("session not found") }
+    }
+}
+
+pub fn transcript(ctx: &Ctx, profile: &str, session_id: &str) -> Result<Transcript> {
+    let reg = ctx.registry()?;
+    let p = reg.get(profile)?;
+    let s = session_row(ctx, &reg, profile, session_id)?;
     if s.archived { return crate::archive::transcript(&s); }
     let mut t = harness::of(p).transcript(ctx, p, &s)?;
     t.meta = s;
@@ -1561,6 +1578,32 @@ mod tests {
         let reg = ctx.registry().unwrap();
         assert_eq!(reg.skills.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["notes", "notes-2"]);
         assert_eq!(reg.targets.iter().map(|t| (t.item.as_str(), t.harness.as_str())).collect::<Vec<_>>(), [("notes-2", "codex")]);
+    }
+
+    #[test]
+    fn a_session_resumes_in_the_folder_given_or_its_own_and_a_folder_that_is_not_there_is_refused() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        two_codex_accounts(&ctx);
+        let (own, other, gone) = (t.path().join("own"), t.path().join("other"), t.path().join("gone"));
+        for d in [&own, &other] { std::fs::create_dir_all(d).unwrap(); }
+        let row = |id: &str, cwd: &std::path::Path| {
+            let m = SessionMeta { harness: "codex".into(), profile: "codex-main".into(), id: id.into(), cwd: cwd.display().to_string(), last_active_at: 5, ..Default::default() };
+            ctx.db.put_session(&format!("codex|codex-main|{id}.jsonl"), &m, 5, 10).unwrap();
+        };
+        // an index already walked: the first walk would drop rows that have no file
+        ctx.db.kv_set("index:refreshed_at", "1").unwrap();
+        row("c1", &own);
+        row("c2", &gone);
+        let reg = ctx.registry().unwrap();
+        let at = |id: &str, cwd: Option<&PathBuf>| resume_cwd(&ctx, &reg, "codex-main", id, cwd.cloned());
+        // the window left such a folder out; the command line handed it to the terminal as it was
+        assert!(refused(at("c1", Some(&gone))).ends_with("is not a folder on this computer"));
+        assert_eq!(at("c1", Some(&other)).unwrap(), Some(other.clone()));
+        // none given: the session's own (the command line's rule, which the window left to its page)
+        assert_eq!(at("c1", None).unwrap(), Some(own.clone()));
+        assert_eq!(at("c2", None).unwrap(), None, "its folder is gone: wherever a terminal opens");
+        assert_eq!(at("c9", None).unwrap(), None, "a session the index does not have");
     }
 
     #[test]

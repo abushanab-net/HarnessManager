@@ -32,6 +32,7 @@ pub fn file_stamp(_: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
 
 pub fn resume(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     let (profile, id) = (s(a, "profile")?, s(a, "id")?);
+    // the folder is the one the session's row names, not one typed: gone, it is left out, where `hrm resume --cwd` is refused
     let cwd = opt(a, "cwd").map(PathBuf::from).filter(|p| p.is_dir());
     service::resume(ctx, &profile, &id, cwd)?;
     Ok(json!(true))

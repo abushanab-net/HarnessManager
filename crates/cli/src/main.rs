@@ -528,7 +528,6 @@ fn real_main(cli: Cli) -> Result<i32> {
             for (t, s, p) in list { println!("{t:<24} {s:>4} sessions  {p:>3} projects"); }
         }
         Cmd::Resume { profile, id, cwd } => {
-            let cwd = cwd.or_else(|| service::transcript(&ctx, &profile, &id).ok().map(|t| PathBuf::from(t.meta.cwd)).filter(|p| p.is_dir()));
             service::resume(&ctx, &profile, &id, cwd)?;
             println!("Resumed {id} in a new terminal");
         }
