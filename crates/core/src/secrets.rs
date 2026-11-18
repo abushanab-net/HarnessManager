@@ -6,7 +6,21 @@
 
 use anyhow::Result;
 
-pub fn prefix() -> String { crate::testenv::var("HRM_CRED_PREFIX").unwrap_or_else(|| "HarnessManager".into()) }
+pub fn prefix() -> String {
+    let p = crate::testenv::var("HRM_CRED_PREFIX");
+    // a test run that was killed, or a test that failed, never removes its entries, and some hundreds of them make
+    // Credential Manager refuse writes: each test process first removes what earlier runs left over an hour ago
+    #[cfg(windows)]
+    if p.as_deref().is_some_and(|p| p.starts_with(TEST_PREFIX)) {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| { let _ = delete_older(TEST_PREFIX, std::time::Duration::from_secs(3600)); });
+    }
+    p.unwrap_or_else(|| "HarnessManager".into())
+}
+
+/// How every test names its namespace, whichever suite it belongs to.
+#[cfg(windows)]
+const TEST_PREFIX: &str = "HRMTEST-";
 
 /// Target name for a profile's API key.
 pub fn key_target(profile: &str) -> String { format!("{}:key:{profile}", prefix()) }
@@ -105,8 +119,14 @@ mod imp {
 
 /// Delete every credential whose target starts with `prefix` (test cleanup).
 #[cfg(windows)]
-pub fn delete_prefix(prefix: &str) -> Result<usize> {
+pub fn delete_prefix(prefix: &str) -> Result<usize> { delete_older(prefix, std::time::Duration::ZERO) }
+
+/// The same, of those last written at least `age` ago.
+#[cfg(windows)]
+fn delete_older(prefix: &str, age: std::time::Duration) -> Result<usize> {
     use windows_sys::Win32::Security::Credentials::{CredEnumerateW, CredFree, CREDENTIALW};
+    // a FILETIME counts 100 ns from 1601
+    let before = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() + 11_644_473_600).saturating_sub(age.as_secs()) * 10_000_000;
     let filter: Vec<u16> = format!("{prefix}*").encode_utf16().chain(std::iter::once(0)).collect();
     let mut count = 0u32;
     let mut list: *mut *mut CREDENTIALW = std::ptr::null_mut();
@@ -117,6 +137,7 @@ pub fn delete_prefix(prefix: &str) -> Result<usize> {
     unsafe {
         for i in 0..count as usize {
             let c = &**list.add(i);
+            if !age.is_zero() && ((c.LastWritten.dwHighDateTime as u64) << 32 | c.LastWritten.dwLowDateTime as u64) > before { continue; }
             let mut n = 0;
             while *c.TargetName.add(n) != 0 { n += 1; }
             targets.push(String::from_utf16_lossy(std::slice::from_raw_parts(c.TargetName, n)));
@@ -363,6 +384,18 @@ mod tests {
         std::fs::write(&f, "not json").unwrap();
         assert!(file::put(&f, "t:a", b"x").is_err() && file::remove(&f, "t:a").is_err());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "not json");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn what_an_earlier_test_run_left_is_removed_by_its_age_and_a_fresh_entry_stays() {
+        let mine = format!("HRMTEST-sweep-{}", crate::util::uuid4());
+        write(&format!("{mine}:a"), "hrm", b"x").unwrap();
+        assert_eq!(delete_older(&mine, std::time::Duration::from_secs(3600)).unwrap(), 0, "written just now: another run may still use it");
+        assert!(read(&format!("{mine}:a")).is_some());
+        std::thread::sleep(std::time::Duration::from_millis(2100));
+        assert_eq!(delete_older(&mine, std::time::Duration::from_secs(1)).unwrap(), 1, "old enough: gone");
+        assert!(read(&format!("{mine}:a")).is_none());
     }
 
     #[test]
