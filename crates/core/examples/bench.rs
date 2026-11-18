@@ -400,6 +400,9 @@ fn run(ctx: &Ctx, only: Option<String>) -> anyhow::Result<()> {
     time("router: live strip (dash::live)", 5, || hrm_core::dash::live(ctx, now).unwrap());
     time("router: request log, newest 40", 5, || ctx.db.route_log(40).unwrap());
     time("dashboard today", 3, || hrm_core::dash::dashboard(ctx, 0, None, None).unwrap());
+    time("router: the first request logged (ninety days in the log)", 1, || ctx.db.log_route("main", "claude-routed", "one", "deepseek-flash", 200, 900, Some(300), (2_000, 300, 9_000, 0)).unwrap());
+    time("router: a request logged", 5, || ctx.db.log_route("main", "claude-routed", "one", "deepseek-flash", 200, 900, Some(300), (2_000, 300, 9_000, 0)).unwrap());
+    println!("    router_log: {} rows", ctx.db.read(|c| Ok(c.query_row("select count(*) from router_log", [], |r| r.get::<_, i64>(0))?))?);
     }
 
 

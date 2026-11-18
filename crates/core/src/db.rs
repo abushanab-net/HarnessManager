@@ -88,6 +88,9 @@ fn quota_known(c: &Connection, profile: &str, tier: &str, used: f64, resets_at: 
 /// How far back one limit's history goes, from its newest reading.
 const QUOTA_KEEP_MS: i64 = 60 * 86_400_000;
 
+/// How long a request the router handled stays in its log.
+const ROUTER_LOG_KEEP_MS: i64 = 30 * 86_400_000;
+
 /// A limit reading into the history, unless it is known already (`quota_known`); true when it was new. `device`:
 /// the computer it was read on; `account`: the login it was read for (a profile name can be another account on
 /// another computer); either None when not known (a restore, an older version).
@@ -202,6 +205,10 @@ create index if not exists usage_ts on usage(ts);
 create index if not exists usage_profile_ts on usage(profile, ts);
 -- the live strip (this computer's last five minutes): device alone matched nearly every row
 create index if not exists usage_device_ts on usage(device, ts);
+-- one session's requests (its numbers on its page, its last model at an import): by its id, not every row of its account
+create index if not exists usage_session on usage(session_id);
+-- the router's readers ask for the last minutes, the last day or the newest rows: each scanned the whole log
+create index if not exists router_log_ts on router_log(ts);
 create table if not exists project_index(key text primary key, name text not null, root text not null, remote text);
 create virtual table if not exists sessions_fts using fts5(title, cwd, profile, content='sessions', content_rowid='rowid');
 "#;
@@ -571,8 +578,12 @@ impl Db {
     #[allow(clippy::too_many_arguments)]
     pub fn log_route(&self, route: &str, profile: &str, provider: &str, model: &str, status: i64, ms: i64, first_ms: Option<i64>, tokens: (i64, i64, i64, i64)) -> Result<()> {
         self.with(|c| {
+            let now = crate::util::now_ms();
             c.execute("insert into router_log(ts, route, profile, provider, model, status, ms, first_ms, input, output, cache_read, cache_write) values(?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![crate::util::now_ms(), route, profile, provider, model, status, ms, first_ms, tokens.0, tokens.1, tokens.2, tokens.3])?;
+                params![now, route, profile, provider, model, status, ms, first_ms, tokens.0, tokens.1, tokens.2, tokens.3])?;
+            // thirty days of them, as of events: the readers look at five minutes (the live strip), a day (the router's numbers,
+            // a cap's spend) and the newest rows (the request log), and the table grew without end
+            c.execute("delete from router_log where ts < ?", [now - ROUTER_LOG_KEEP_MS])?;
             Ok(())
         })
     }
@@ -652,5 +663,46 @@ impl Db {
             tx.commit()?;
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_router_log_keeps_thirty_days_and_its_readers_count_what_they_counted() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let now = crate::util::now_ms();
+        let day = 86_400_000;
+        // an older version's log: requests of forty days, twenty-nine days and two hours ago
+        ctx.db.with(|c| {
+            for (ago, provider, status) in [(40 * day, "one", 200), (29 * day, "one", 500), (2 * 3_600_000, "two", 200)] {
+                c.execute("insert into router_log(ts, route, profile, provider, model, status, ms, first_ms, input, output) values(?, 'main', 'routed', ?, 'm', ?, 900, 300, 10, 5)", params![now - ago, provider, status])?;
+            }
+            Ok(())
+        }).unwrap();
+        let providers = |n| ctx.db.route_log(n).unwrap().iter().map(|r| r["provider"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(providers(10), ["two", "one", "one"], "newest first");
+        ctx.db.log_route("main", "routed", "three", "m", 502, 1200, None, (100, 20, 0, 0)).unwrap();
+        assert_eq!(providers(10), ["three", "two", "one"], "the request of forty days ago is gone, the one of twenty-nine days stays");
+        assert_eq!(providers(2), ["three", "two"]);
+        let stats = crate::dash::router_stats(&ctx, crate::util::now_ms()).unwrap();
+        assert_eq!((stats["requests"].as_i64(), stats["errors"].as_i64(), stats["providers"]["two"]["p95_first"].as_i64()), (Some(2), Some(1), Some(300)), "{stats}");
+        let live = crate::dash::live(&ctx, crate::util::now_ms()).unwrap();
+        assert_eq!((live["providers"]["three"]["tokens"].as_i64(), live["providers"]["two"].is_null()), (Some(120), true), "{live}");
+    }
+
+    #[test]
+    fn a_session_is_found_among_the_requests_of_every_account_by_its_id() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let row = |id: &str, profile: &str, session: &str, output| UsageRow { request_id: id.into(), profile: profile.into(), harness: "claude".into(), ts: 1_793_527_200_000, model: "m".into(), project: String::new(),
+            session_id: session.into(), input: 10, output, cache_read: 30, cache_write: 0, ttft_ms: Some(400), gen_ms: None };
+        ctx.db.insert_usage(&[row("r1", "a", "s1", 5), row("r2", "a", "s1", 7), row("r3", "a", "s2", 100), row("r4", "b", "s1", 1000)], &Default::default()).unwrap();
+        let s = crate::dash::session_stats(&ctx, "a", "s1").unwrap();
+        assert_eq!((s["requests"].as_i64(), s["tokens"].as_i64(), s["hit"].as_f64(), s["p50"].as_i64()), (Some(2), Some(92), Some(0.75), Some(400)), "{s}");
+        assert_eq!(crate::dash::session_stats(&ctx, "a", "none").unwrap()["requests"], 0);
     }
 }
