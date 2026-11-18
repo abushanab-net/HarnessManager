@@ -21,6 +21,8 @@ use crate::Ctx;
 
 /// Chunks stay under this many bytes, so a cloud drive moves each in one go.
 const CHUNK_BYTES: usize = 1_000_000;
+/// This computer's newest chunks stay as they were cut, one whenever a tick finds news; the older ones are joined.
+const SMALL_KEPT: usize = 100;
 /// No more than this is read of a chunk another computer sends: four times the size they are cut at, as one long
 /// entry may run over it.
 pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
@@ -89,16 +91,21 @@ pub fn backfill(ctx: &Ctx) -> Result<usize> { record_missing(ctx, true) }
 
 /// The backfill's work. The limit readings only when asked: `quota_point` journals each with its row, so later
 /// the only rows without an entry are other computers' merged ones, which are not this computer's to publish.
+/// Usage rows are only ever added, so the catch-up (not the backfill) looks at those added since the last look:
+/// `journal:usage_mark` is the row it reached.
 fn record_missing(ctx: &Ctx, quota: bool) -> Result<usize> {
     let n = ctx.db.with(|c| {
         let tx = c.transaction()?;
         let now = now_ms();
         let dev = &ctx.db.device;
+        let top: i64 = tx.query_row("select coalesce(max(rowid), 0) from usage", [], |r| r.get(0))?;
+        let mark: i64 = if quota { 0 } else { tx.query_row("select v from kv where k = 'journal:usage_mark'", [], |r| r.get::<_, String>(0)).optional()?.and_then(|v| v.parse().ok()).filter(|m| *m <= top).unwrap_or(0) };
         let mut n = tx.execute("insert into outbox(ts, op, key, data) select ?1, 'usage', request_id,
             json_object('request_id', request_id, 'profile', profile, 'harness', harness, 'ts', ts, 'model', model, 'project', project,
                 'session_id', session_id, 'input', input, 'output', output, 'cache_read', cache_read, 'cache_write', cache_write,
                 'ttft_ms', ttft_ms, 'gen_ms', gen_ms, 'cost_usd', cost_usd, 'price_rev', price_rev)
-            from usage u where device = ?2 and not exists (select 1 from outbox o where o.op = 'usage' and o.key = u.request_id)", params![now, dev])?;
+            from usage u where u.rowid > ?3 and device = ?2 and not exists (select 1 from outbox o where o.op = 'usage' and o.key = u.request_id)", params![now, dev, mark])?;
+        tx.execute("insert or replace into kv values('journal:usage_mark', ?)", [top.to_string()])?;
         // sessions as the journal knows them (resolved, keyed harness/profile/id); the per-file cache rows have a '|' key
         n += tx.execute("insert into outbox(ts, op, key, data) select ?1, 'session', key, json from sessions s
             where device = ?2 and instr(key, '|') = 0 and not exists (select 1 from outbox o where o.op = 'session' and o.key = s.key)", params![now, dev])?;
@@ -162,6 +169,7 @@ pub fn publish(ctx: &Ctx) -> Result<()> {
         let sig = id.sign(identity::chunk_message(inc, *from, *to, &sha).as_bytes());
         store::put_chunk(ctx, me, inc, &json!({"file": file, "from": from, "to": to, "sha256": sha, "sig": sig, "bytes": bytes.len()}), bytes)?;
     }
+    if let Err(e) = store::join_old(ctx, SMALL_KEPT, CHUNK_BYTES, &|from, to, sha| id.sign(identity::chunk_message(inc, from, to, sha).as_bytes())) { crate::log::warn(&format!("journal: joining old chunks: {e:#}")); }
     let last = entries.last().map(|e| e.seq).unwrap_or(published);
     ctx.db.kv_set("journal:published_seq", &last.to_string())?;
     crate::log::info(&format!("journal: published {} entries in {} chunks (to seq {last})", entries.len(), chunks.len()));
@@ -180,7 +188,13 @@ fn mirror(ctx: &Ctx, root: &Path) -> Result<()> {
         if dir.join("journal").join(file).is_file() { continue; }
         folder::write_chunk(&dir, file, &store::chunk(ctx, me, file)?)?;
     }
-    folder::write_manifest(&dir, &man)
+    folder::write_manifest(&dir, &man)?;
+    // what the folder's list named and this one no longer does: chunks joined since, or of an earlier incarnation
+    let listed = |m: &Value, f: &Value| m["chunks"].as_array().into_iter().flatten().any(|c| c["file"] == *f);
+    for f in there.iter().flat_map(|t| t["chunks"].as_array().into_iter().flatten()).map(|c| &c["file"]).filter(|f| !listed(&man, f)) {
+        if let Some(f) = f.as_str().filter(|f| store::safe_file(f)) { let _ = std::fs::remove_file(dir.join("journal").join(f)); }
+    }
+    Ok(())
 }
 
 /// A session's journal key, `<tool>/<account>/<id>`, as another computer may send it: the three become path parts
@@ -563,6 +577,8 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::pricing::Prices;
 
@@ -692,6 +708,67 @@ mod tests {
         assert_eq!(running(now_ms()), ["s3"]);
         round(&b).unwrap();
         assert_eq!(running(now_ms() + 360_000), Vec::<String>::new(), "it stopped: its clock does not keep it busy");
+    }
+
+    #[test]
+    fn this_computers_old_chunks_are_joined_and_a_reader_that_holds_some_takes_the_rest() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let (a, b) = (computer(t.path(), "A", &shared), computer(t.path(), "B", &shared));
+        let _k = keys(&[&a, &b]);
+        let me = &a.settings.device_id;
+        // one chunk per row, as the ten-second tick cuts them
+        let tick = |i: usize| { a.db.insert_usage(&[row(&format!("claude:{i}"), 1_000 + i as i64)], &Prices::new()).unwrap(); publish(&a).unwrap(); };
+        let chunks = || store::manifest(&a, me).unwrap()["chunks"].as_array().unwrap().clone();
+        (0..5).for_each(tick);
+        round(&a).unwrap();
+        round(&b).unwrap();
+        assert_eq!((chunks().len(), count(&b, "select count(*) from usage")), (5, 5), "B holds the first five small chunks");
+        let all = 2 * SMALL_KEPT + 5;
+        (5..all).for_each(tick);
+        let list = chunks();
+        assert!(list.len() <= SMALL_KEPT + 5, "{} files for {all} chunks", list.len());
+        assert_eq!((list[0]["from"].as_i64(), list[0]["file"].as_str()), (Some(1), Some(format!("{}-1-{}.jsonl", a.settings.incarnation, list[0]["to"]).as_str())));
+        assert!(list[0]["to"].as_i64().unwrap() > 5 && list[0]["bytes"].as_u64().unwrap() <= CHUNK_BYTES as u64, "the joined file starts before B's cursor and ends after it: {}", list[0]);
+        assert_eq!(list.last().unwrap()["to"], all as i64);
+        let files = |dir: PathBuf| std::fs::read_dir(dir.join("journal")).unwrap().count();
+        assert_eq!(files(store::dir(&a, me)), list.len(), "the small files it replaced are gone");
+        // the folder follows; B takes what it lacks of the joined file, signed by A like any chunk; C reads it whole
+        round(&a).unwrap();
+        assert_eq!(files(shared.join("devices").join(me)), list.len());
+        let c = computer(t.path(), "C", &shared);
+        let _kc = keys(&[&c]);
+        for x in [&b, &c] {
+            let st = round(x).unwrap();
+            assert_eq!(count(x, "select count(*) from usage"), all as i64, "{st}");
+            assert_eq!(st["peers"].as_array().unwrap().iter().find(|p| p["id"] == me.as_str()).map(|p| (p["applied_seq"].as_i64(), &p["gap"])), Some((Some(all as i64), &Value::Null)));
+        }
+    }
+
+    #[test]
+    fn the_catch_up_looks_at_the_usage_rows_added_since_its_last_look() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared);
+        let _k = keys(&[&a]);
+        a.db.insert_usage(&[row("claude:1", 1_000), row("claude:2", 2_000)], &Prices::new()).unwrap();
+        round(&a).unwrap();
+        let mark = || a.db.kv_get("journal:usage_mark").unwrap();
+        assert_eq!(mark().as_deref(), Some("2"));
+        // rows that reach the database without an entry: a process that still had sync off wrote them
+        let quiet = crate::db::Db::open(&a.data.join("hm.db"), &a.settings.device_id, false).unwrap();
+        quiet.insert_usage(&[row("claude:3", 3_000)], &Prices::new()).unwrap();
+        let journaled = |id: &str| count(&a, &format!("select count(*) from outbox where op = 'usage' and key = '{id}'"));
+        let catch_up = || { a.db.kv_set("journal:catchup_at", "0").unwrap(); round(&a).unwrap(); };
+        catch_up();
+        assert_eq!((journaled("claude:3"), mark().as_deref()), (1, Some("3")), "the new row is caught up, and the mark moves past it");
+        // a row before the mark is not looked at again by the catch-up; the backfill still looks at all
+        a.db.with(|c| Ok(c.execute("delete from outbox where key = 'claude:1'", [])?)).unwrap();
+        catch_up();
+        assert_eq!(journaled("claude:1"), 0);
+        assert_eq!((backfill(&a).unwrap(), journaled("claude:1")), (1, 1));
     }
 
     #[test]
