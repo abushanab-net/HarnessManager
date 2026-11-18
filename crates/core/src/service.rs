@@ -1172,6 +1172,29 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
     Ok(fresh)
 }
 
+/// The Computers settings changed and saved, for `hrm computers set` and the window: `{device_name?, sync_mode?,
+/// sync_folder?, sync_transcripts?, sync_presence?, direct_connection?, listen_port?}`; the context comes back with
+/// them. Any other key (a hub's address is set by joining it) and a value of the wrong type are refused: the
+/// journal passes over both, and the change would be reported as saved.
+pub fn computers_set(ctx: &Ctx, a: &serde_json::Value) -> Result<Ctx> {
+    for (k, v) in a.as_object().into_iter().flatten().filter(|(_, v)| !v.is_null()) {
+        let fits = match k.as_str() {
+            "device_name" | "sync_mode" | "sync_folder" => v.is_string(),
+            "sync_transcripts" | "sync_presence" | "direct_connection" => v.is_boolean(),
+            "listen_port" => v.is_i64(),
+            _ => bail!("{k} is not one of the Computers settings"),
+        };
+        if !fits { bail!("that value does not fit {k}"); }
+    }
+    crate::journal::configure(&ctx.data, &ctx.home, a)
+}
+
+/// What a change of the Computers settings ends with and answers: a round now while anything syncs (a folder, a
+/// hub, the direct connection), else the status alone.
+pub fn computers_round(ctx: &Ctx) -> Result<serde_json::Value> {
+    if crate::journal::on(ctx) { crate::journal::round(ctx) } else { crate::journal::status(ctx) }
+}
+
 // ---------- home: totals, heatmap, request log ----------
 
 #[derive(Debug, Clone, Serialize)]
@@ -1420,5 +1443,35 @@ mod tests {
         assert_eq!(ctx.db.tag_list().unwrap(), vec![("release".to_string(), 0, 1)]);
         tag_set(&ctx, "project", "p", &[]).unwrap();
         assert!(ctx.db.tag_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_computers_settings_take_their_own_keys_only_and_values_of_the_right_type() {
+        use serde_json::json;
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        // the command line has no flag for a hub's address; the window passed any key on
+        assert!(refused(computers_set(&ctx, &json!({"sync_presence": false, "hub_url": "https://hub.example"}))).contains("hub_url is not one of the Computers settings"));
+        // its flags are typed; the window's values were passed over when they were not, and the change reported as saved
+        for a in [json!({"sync_presence": "off"}), json!({"listen_port": "4100"}), json!({"listen_port": 4100.5}), json!({"device_name": 7, "sync_transcripts": false})] {
+            assert!(refused(computers_set(&ctx, &a)).contains("that value does not fit"), "{a}");
+        }
+        let s = self::ctx(&t).settings;
+        assert_eq!((s.hub_url.as_str(), s.sync_presence, s.sync_transcripts, s.listen_port), ("", true, true, 0), "a refused change saves nothing");
+        let fresh = computers_set(&ctx, &json!({"device_name": " desk ", "sync_presence": false, "listen_port": 4100, "sync_folder": null})).unwrap();
+        assert_eq!((fresh.settings.device_name.as_str(), fresh.settings.sync_presence, fresh.settings.listen_port), ("desk", false, 4100));
+    }
+
+    #[test]
+    fn a_change_of_the_computers_settings_ends_with_a_round_whenever_anything_syncs() {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        assert!(computers_round(&ctx).unwrap()["last_run"].is_null(), "nothing syncs: the status alone");
+        // the command line ran a round for the folder only
+        let fresh = computers_set(&ctx, &serde_json::json!({"direct_connection": true})).unwrap();
+        let st = computers_round(&fresh).unwrap();
+        let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&fresh.settings.device_id));
+        assert!(st["last_run"].is_i64() && st["error"].is_null(), "{st}");
     }
 }

@@ -642,8 +642,7 @@ fn real_main(cli: Cli) -> Result<i32> {
                 ComputersCmd::Set { name, mode, folder, transcripts, presence, direct, port, j } => {
                     let args = serde_json::json!({"device_name": name, "sync_mode": mode, "sync_folder": folder.map(|f| f.display().to_string()),
                         "sync_transcripts": on_off(&transcripts)?, "sync_presence": on_off(&presence)?, "direct_connection": on_off(&direct)?, "listen_port": port});
-                    let fresh = hrm_core::journal::configure(&ctx.data, &ctx.home, &args)?;
-                    (if fresh.settings.sync_mode == "folder" { hrm_core::journal::round(&fresh)? } else { hrm_core::journal::status(&fresh)? }, j)
+                    (service::computers_round(&service::computers_set(&ctx, &args)?)?, j)
                 }
                 ComputersCmd::Forget { id } => (hrm_core::sync::peer::forget(&ctx, &id)?, Json { json: false }),
                 ComputersCmd::Peers { j } => {
