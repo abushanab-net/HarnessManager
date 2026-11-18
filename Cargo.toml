@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/core", "crates/cli", "crates/router", "crates/fakeharness", "crates/hub", "app/src-tauri"]
 
 [workspace.package]
-version = "1.11.2"
+version = "1.11.3"
 edition = "2021"
 
 # unwinding stays on (no panic = "abort"): a background loop catches a panic in one round and runs the next
