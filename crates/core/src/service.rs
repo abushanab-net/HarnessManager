@@ -883,6 +883,17 @@ pub fn mcp_save(ctx: &Ctx, mut server: McpServer, replace: bool, tools: Option<&
     crate::items::sync(ctx, &reg)
 }
 
+/// A tool's own skill folders (its main profile's) moved into the store and linked back, then every tool brought
+/// in step, so the tool's other accounts have them at once: the names imported, the names left alone because the
+/// store has a different skill by that name, and what the sync did.
+pub fn skill_import(ctx: &Ctx, harness_id: &str) -> Result<(Vec<String>, Vec<String>, crate::items::SyncReport)> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let (added, kept) = crate::items::import_skills(ctx, &mut reg, harness_id)?;
+    ctx.save_registry(&reg)?;
+    Ok((added, kept, crate::items::sync(ctx, &reg)?))
+}
+
 // ---------- in-app login ----------
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1487,6 +1498,32 @@ mod tests {
         assert!(refused(mcp_save(&ctx, server("no name", "", Some("npx"), None), false, None)).contains("not a valid name"));
         assert!(refused(mcp_save(&ctx, server("web", "http", None, None), false, None)).contains("needs a URL"));
         assert_eq!(ctx.registry().unwrap().mcp.len(), 2);
+    }
+
+    /// A Codex main profile and a second account, saved; their skills folders.
+    fn two_codex_accounts(ctx: &Ctx) -> (PathBuf, PathBuf) {
+        let mut reg = ctx.registry().unwrap();
+        for (name, main) in [("codex-main", true), ("codex-work", false)] {
+            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+        }
+        ctx.save_registry(&reg).unwrap();
+        let skills = |name: &str| { let p = reg.get(name).unwrap(); harness::of(p).item_paths(ctx, p).skills.unwrap() };
+        (skills("codex-main"), skills("codex-work"))
+    }
+
+    #[test]
+    fn imported_skills_reach_the_tools_other_accounts_at_once() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = ctx(&t);
+        let (main, work) = two_codex_accounts(&ctx);
+        std::fs::create_dir_all(main.join("notes")).unwrap();
+        std::fs::write(main.join("notes").join("SKILL.md"), "---\nname: notes\n---\n").unwrap();
+        let (added, kept, sync) = skill_import(&ctx, "codex").unwrap();
+        assert_eq!((added, kept), (vec!["notes".to_string()], vec![]));
+        assert!(crate::shared::is_link(&main.join("notes")) && crate::items::skill_store(&ctx).join("notes").join("SKILL.md").is_file(), "moved to the store and linked back");
+        // the command line synced after its import; the window left the other accounts for the next sync
+        assert!(crate::shared::is_link(&work.join("notes")) && work.join("notes").join("SKILL.md").is_file(), "{sync:?}");
+        assert!(refused(skill_import(&ctx, "opencode")).contains("no main opencode profile"));
     }
 
     #[test]

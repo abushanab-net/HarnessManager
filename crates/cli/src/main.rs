@@ -910,9 +910,10 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
         SkillCmd::Enable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), true)?; }
         SkillCmd::Disable { name, harness: h, profile } => { items::set_target(&mut reg, "skill", &name, &h, profile.as_deref(), false)?; }
         SkillCmd::Import { harness: h } => {
-            let (a, kept) = items::import_skills(ctx, &mut reg, &h)?;
+            let (a, kept, rep) = service::skill_import(ctx, &h)?;
             println!("Imported {} skill(s): {}", a.len(), a.join(", "));
             if !kept.is_empty() { println!("Left alone, a different skill with that name is already installed: {}", kept.join(", ")); }
+            return Ok(skill_notes(rep));
         }
         SkillCmd::Check => {
             for (n, upd) in items::check_skill_updates(ctx, &reg) { println!("{n:<24} {}", match upd { Some(true) => "update available", Some(false) => "up to date", None => "could not check (source not reachable)" }); }
@@ -920,9 +921,13 @@ fn skills(ctx: &Ctx, cmd: SkillCmd) -> Result<i32> {
         }
     }
     ctx.save_registry(&reg)?;
-    let rep = items::sync(ctx, &reg)?;
+    Ok(skill_notes(items::sync(ctx, &reg)?))
+}
+
+/// What a sync after a skill change left alone, on stderr.
+fn skill_notes(rep: items::SyncReport) -> i32 {
     for c in rep.conflicts { eprintln!("conflict: {c}"); }
-    Ok(0)
+    0
 }
 
 fn prompts(ctx: &Ctx, cmd: PromptCmd) -> Result<i32> {

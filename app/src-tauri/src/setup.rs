@@ -157,10 +157,8 @@ pub fn skill_takeover(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 }
 
 pub fn skill_import(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    let mut reg = ctx.registry()?;
-    let (added, kept) = items::import_skills(ctx, &mut reg, &s(a, "harness")?)?;
-    ctx.save_registry(&reg)?;
-    Ok(json!({"added": added, "kept": kept}))
+    let (added, kept, sync) = service::skill_import(ctx, &s(a, "harness")?)?;
+    Ok(json!({"added": added, "kept": kept, "sync": sync}))
 }
 
 pub fn skill_check(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {
