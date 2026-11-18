@@ -129,25 +129,20 @@ pub fn transcript_from_peers(ctx: &Ctx, origin: &str, harness: &str, profile: &s
     None
 }
 
-/// One origin's chunks from a connected peer: since the cursor, the device record checked and learned, every
-/// chunk verified and applied. `Ok(false)` when the peer holds nothing of that origin.
-fn pull_origin(ctx: &Ctx, c: &Client, origin: &str) -> Result<bool> {
-    let known: String = ctx.db.with(|c| Ok(c.query_row("select coalesce(incarnation, '') from peers where device_id=?", [origin], |r| r.get(0)).unwrap_or_default()))?;
-    let cursor = |inc: &str| -> i64 { ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [origin, inc], |r| r.get(0)).unwrap_or(0))).unwrap_or(0) };
-    let Some(mut r) = c.json(&format!("/v1/chunks/{origin}?since={}&incarnation={known}", cursor(&known)))? else { return Ok(false) };
-    let inc = r["incarnation"].as_str().unwrap_or("").to_string();
-    if inc != known {
-        r = c.json(&format!("/v1/chunks/{origin}?since={}&incarnation={inc}", cursor(&inc)))?.context("the origin vanished")?;
-    }
-    if r["device"].is_object() { journal::learn_device(ctx, origin, &r["device"])?; }
-    if journal::pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
-    let applied = journal::apply_manifest(ctx, origin, &r, &|file| c.bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ))?;
-    ctx.db.with(|c| {
-        c.execute("update peers set incarnation=?1, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
-            params![inc, r["last_seq"].as_i64().unwrap_or(0), applied, now_ms(), origin])?;
-        Ok(())
-    })?;
-    Ok(true)
+/// A connected paired computer (`id`) as a source: what it holds of any origin, and its own presence.
+struct Via<'a> {
+    c: &'a Client,
+    id: &'a str,
+}
+
+impl journal::Source for Via<'_> {
+    fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>> { self.c.json(&format!("/v1/chunks/{origin}?since={since}&incarnation={incarnation}")) }
+
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { self.c.bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ) }
+
+    fn presence(&self) -> Result<Vec<(String, Value)>> { Ok(self.c.json("/v1/presence")?.map(|v| (self.id.to_string(), v)).into_iter().collect()) }
+
+    fn live(&self) -> bool { true }
 }
 
 /// Every paired computer, now: found by mDNS or its address, greeted, its journal and presence taken, then
@@ -167,19 +162,16 @@ pub fn pull_all(ctx: &Ctx) {
         via.push((p, c, h));
     }
     for (p, c, _) in &via {
-        if let Err(e) = pull_origin(ctx, c, &p.id) { crate::log::warn(&format!("computers: pulling {}: {e:#}", p.name)); }
-        match c.json("/v1/presence") {
-            Ok(Some(v)) => { let _ = ctx.db.with(|db| { db.execute("update peers set presence=?1, last_seen=max(coalesce(last_seen, 0), coalesce(json_extract(?1, '$.at'), 0)) where device_id=?2", params![v.to_string(), p.id])?; Ok(()) }); }
-            Ok(None) => {}
-            Err(e) => crate::log::info(&format!("computers: presence of {}: {e:#}", p.name)),
-        }
+        let src = Via { c, id: &p.id };
+        if let Err(e) = journal::pull_noted(ctx, &src, &p.id) { crate::log::warn(&format!("computers: pulling {}: {e:#}", p.name)); }
+        if let Err(e) = journal::take_presence(ctx, &src) { crate::log::info(&format!("computers: presence of {}: {e:#}", p.name)); }
     }
     let connected: HashSet<&str> = via.iter().map(|v| v.0.id.as_str()).collect();
     let mut known: BTreeSet<String> = peers.iter().map(|p| p.id.clone()).collect();
     for (_, _, h) in &via { known.extend(h["origins"].as_array().into_iter().flatten().filter_map(|o| o.as_str().filter(|o| store::safe_origin(o)).map(String::from))); }
     for origin in known.iter().filter(|o| o.as_str() != me && !connected.contains(o.as_str())) {
         for (p, c, _) in &via {
-            match pull_origin(ctx, c, origin) {
+            match journal::pull_noted(ctx, &Via { c, id: &p.id }, origin) {
                 Ok(true) => {
                     let _ = ctx.db.with(|db| { db.execute("update peers set path='relay', relayed_by=?1 where device_id=?2", params![p.id, origin])?; Ok(()) });
                     break;

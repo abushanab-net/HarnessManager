@@ -285,6 +285,62 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     Ok(cur)
 }
 
+/// Where another computer's journal and presence are read: the sync folder, a paired computer or the hub.
+pub trait Source {
+    /// The origin's chunk list after `since`, of `incarnation` where the source tells them apart; `None` when it
+    /// holds nothing of the origin.
+    fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>>;
+    /// One chunk's bytes, as the origin published them.
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>>;
+    /// What runs on the computers this source speaks for, each as `(id, presence)`.
+    fn presence(&self) -> Result<Vec<(String, Value)>>;
+    /// The origin's key must be known before anything of it is taken; not in the folder, which is the owner's.
+    fn needs_key(&self) -> bool { true }
+    /// Its presence is made as it is asked for, so it replaces what is held; a stored copy only when no older.
+    fn live(&self) -> bool { false }
+}
+
+/// One origin's journal from a source: its chunk list since this computer's cursor (asked again when the source
+/// names another incarnation than the one known here), its device record learned when the list carries one, and
+/// every chunk checked and applied. `None` when the source holds nothing of the origin; else the list and the
+/// sequence applied up to.
+pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<Option<(Value, i64)>> {
+    let known: String = ctx.db.with(|c| Ok(c.query_row("select coalesce(incarnation, '') from peers where device_id=?", [origin], |r| r.get(0)).unwrap_or_default()))?;
+    let cursor = |inc: &str| -> i64 { ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [origin, inc], |r| r.get(0)).unwrap_or(0))).unwrap_or(0) };
+    let Some(mut man) = src.manifest(origin, &known, cursor(&known))? else { return Ok(None) };
+    let inc = man["incarnation"].as_str().unwrap_or("").to_string();
+    if inc != known && !inc.is_empty() { man = src.manifest(origin, &inc, cursor(&inc))?.context("the origin vanished")?; }
+    if man["device"].is_object() { learn_device(ctx, origin, &man["device"])?; }
+    if src.needs_key() && pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
+    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file))?;
+    Ok(Some((man, applied)))
+}
+
+/// `pull` through a paired computer or the hub, and what it brought kept on the origin's row. `Ok(false)` when
+/// the source holds nothing of the origin.
+pub fn pull_noted(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<bool> {
+    let Some((man, applied)) = pull(ctx, src, origin)? else { return Ok(false) };
+    let last = man["last_seq"].as_i64().or_else(|| man["chunks"].as_array().and_then(|c| c.last()).and_then(|c| c["to"].as_i64())).unwrap_or(0);
+    ctx.db.with(|c| {
+        c.execute("update peers set incarnation=case when ?1 <> '' then ?1 else incarnation end, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
+            params![man["incarnation"].as_str().unwrap_or(""), last, applied, now_ms(), origin])?;
+        Ok(())
+    })?;
+    Ok(true)
+}
+
+/// What a source says runs on the other computers, kept on their rows.
+pub fn take_presence(ctx: &Ctx, src: &dyn Source) -> Result<()> {
+    for (id, p) in src.presence()? {
+        ctx.db.with(|c| {
+            c.execute("update peers set presence=case when ?3 or coalesce(json_extract(?1, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then ?1 else presence end,
+                last_seen=max(coalesce(last_seen, 0), coalesce(json_extract(?1, '$.at'), 0)) where device_id=?2", params![p.to_string(), id, src.live()])?;
+            Ok(())
+        })?;
+    }
+    Ok(())
+}
+
 /// What another computer says about itself (a `device.json`, from the folder or a peer), when it is signed by
 /// the key it carries: its name, incarnation, roots and key are kept, the record is cached for relay. The key
 /// is learned once and never replaced by a record.
@@ -309,30 +365,22 @@ pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
 /// Every other computer's journal, and what each says about itself, into this database. Per computer: an
 /// error is logged and the next one is tried.
 fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
+    let src = folder::Folder { ctx, root };
     for (id, dir) in folder::others(ctx, root) {
         let dev = crate::util::read_json(&dir.join("device.json")).unwrap_or(Value::Null);
         if dev.is_object() { learn_device(ctx, &id, &dev)?; }
-        let presence = std::fs::read_to_string(dir.join("presence.json")).ok().filter(|s| serde_json::from_str::<Value>(s).is_ok());
-        let man = folder::read_manifest(&dir);
-        let applied = match &man {
-            Some(m) => match apply_manifest(ctx, &id, m, &|file| crate::util::read_capped(std::fs::File::open(dir.join("journal").join(file))?, None, MAX_CHUNK_READ, file)) {
-                Ok(seq) => Some(seq),
-                Err(e) => { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None }
-            },
-            None => None,
-        };
-        let seen = [dev["updated_at"].as_i64(), presence.as_deref().and_then(|p| serde_json::from_str::<Value>(p).ok()).and_then(|p| p["at"].as_i64())].into_iter().flatten().max();
+        let pulled = pull(ctx, &src, &id).unwrap_or_else(|e| { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None });
+        let (man, applied) = (pulled.as_ref().map(|p| &p.0), pulled.as_ref().map(|p| p.1));
         ctx.db.with(|c| {
-            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport, presence) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder',?10)
+            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder')
                 on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
-                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder',
-                presence=case when coalesce(json_extract(?10, '$.at'), 0) >= coalesce(json_extract(presence, '$.at'), 0) then coalesce(?10, presence) else presence end",
-                params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.as_ref().and_then(|m| m["incarnation"].as_str())),
-                    seen, man.as_ref().and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string()), presence])?;
+                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder'",
+                params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.and_then(|m| m["incarnation"].as_str())),
+                    dev["updated_at"].as_i64(), man.and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string())])?;
             Ok(())
         })?;
     }
-    Ok(())
+    take_presence(ctx, &src)
 }
 
 /// Sync in any form: through the folder or straight to paired computers.
