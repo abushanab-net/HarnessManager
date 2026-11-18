@@ -183,6 +183,12 @@ html[data-theme="light"] .yc-cell.lv-0 { fill: var(--line-subtle); }
 .btn-lane-start.neg { border-color: var(--neg); color: var(--neg); }
 .btn-lane-start { white-space: nowrap; }
 @container sheet (max-width: 1168px) { [data-testid=activity-pc] .pc-name { display: none; } }
+/* the year clock's card is at most 340px: the switch goes under the title when it has no room beside it, and long names are cut (the full one is on hover) */
+[data-testid=activity] .panel-head { flex-wrap: wrap; }
+[data-testid=activity-pc], [data-testid=activity-pc] .seg { min-width: 0; max-width: 100%; }
+[data-testid=activity-pc] .seg > * { min-width: 0; }
+[data-testid=activity-pc] .seg > :first-child, [data-testid=activity-pc] .pc-dot { flex: none; }
+[data-testid=activity-pc] .pc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .route-label { color: var(--ink-muted); font-weight: 600; }
 .route-muted { color: var(--ink-muted); } .route-live { color: var(--ac); }
 .route-right { display: flex; align-items: center; gap: 8px; }

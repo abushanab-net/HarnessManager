@@ -2621,6 +2621,9 @@ description: Bulk skill ${i}
     await hasText('[data-testid=activity] .year-clock-pcs', 'LAPTOP');
     assert.ok((await exec("const s = document.getElementById('sheet'); return s.scrollWidth <= s.clientWidth")), 'nothing on the Overview is wider than the page');
     await shot('19c-overview-all-computers');
+    // three computers with long names (the owner's case): the switch stays inside the year clock's card
+    await page.setViewportSize({ width: 1700, height: 800 });   // wide enough for the switch to show the names
+    try { const got = await exec("const q = (s) => document.querySelector(s), r = (e) => e.getBoundingClientRect(), seg = q('[data-testid=activity-pc] .seg'), b = seg.lastElementChild; const shown = getComputedStyle(b.querySelector('.pc-name')).display !== 'none'; b.querySelector('.pc-name').textContent = 'DEVELOPMENT-WORKSTATION'; seg.append(b.cloneNode(true), b.cloneNode(true)); const out = [shown, Math.round(r(seg).right) <= Math.round(r(q('[data-testid=activity]')).right), Math.round(r(seg.lastElementChild).right) <= Math.round(r(seg).right), r(q('[data-testid=activity] .panel-title')).height < 30]; seg.lastElementChild.remove(); seg.lastElementChild.remove(); return out"); assert.equal(got.join(), 'true,true,true,true', 'the switch of the year clock shows the names, stays inside its card with long ones, keeps its buttons inside itself, and the title stays on one line: ' + got); } finally { await page.setViewportSize({ width: 1280, height: 800 }); }
     await click('[data-testid=activity-pc-' + dev + ']');
     await hasText('[data-testid=activity] .year-clock-center', 'LAPTOP');
     await click('[data-testid=scope]');
