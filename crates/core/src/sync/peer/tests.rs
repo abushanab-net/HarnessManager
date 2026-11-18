@@ -466,3 +466,36 @@ fn a_gap_at_a_relay_waits_for_the_paired_computer_itself_which_fills_it() {
     assert_eq!(count(&a.ctx, "select count(*) from usage"), 3, "the rest is taken");
     assert_eq!((gap()["from"].as_i64(), gap()["to"].as_i64(), gap()["waiting"].as_bool()), (Some(3), Some(3), Some(false)));
 }
+
+#[test]
+fn polls_within_half_a_minute_get_one_making_of_the_record_and_presence_and_the_key_is_not_written_again() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    journal::publish(&a.ctx).unwrap();
+    a.ctx.db.with(|c| Ok(c.execute_batch("create table writes(n); create trigger key_writes after insert on kv when new.k = 'device:pubkey' begin insert into writes values(1); end;")?)).unwrap();
+    let a_cert: String = b.ctx.db.with(|c| Ok(c.query_row("select cert_pem from peers where device_id=?", [&a.ctx.settings.device_id], |r| r.get(0))?)).unwrap();
+    let c = Client::connect(&identity::load(&b.ctx).unwrap(), &a_cert, "127.0.0.1", port(&a)).unwrap();
+    let poll = || (c.json(&format!("/v1/chunks/{}", a.ctx.settings.device_id)).unwrap().unwrap()["device"].clone(), c.json("/v1/presence").unwrap().unwrap());
+    let first = poll();
+    assert!(identity::record_ok(&first.0) && first.1["at"].is_i64(), "{first:?}");
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    assert_eq!(poll(), first, "the same signed record and presence, not made again");
+    for _ in 0..3 { identity::load(&a.ctx).unwrap(); }
+    assert_eq!(count(&a.ctx, "select count(*) from writes"), 0, "the key was there already");
+}
+
+#[test]
+fn the_address_a_paired_computer_last_answered_at_is_tried_first() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
+    pair(&a, &b);
+    a.rt.tick(&a.ctx);
+    let b_id = b.ctx.settings.device_id.clone();
+    // the hub names another place for B, and its places come before the address the owner gave
+    a.ctx.db.kv_set("hub:rendezvous", &json!({b_id.as_str(): {"addresses": ["127.0.0.1:1"]}}).to_string()).unwrap();
+    let p = journal::peers(&a.ctx).unwrap().into_iter().find(|p| p.id == b_id).unwrap();
+    assert_eq!(p.last_good, format!("127.0.0.1:{}", port(&b)));
+    let order: Vec<(String, u16)> = super::client::candidates(&a.ctx, &p).into_iter().map(|(h, port, _)| (h, port)).collect();
+    assert_eq!(order, [("127.0.0.1".to_string(), port(&b)), ("127.0.0.1".to_string(), 1)]);
+}

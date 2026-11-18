@@ -77,7 +77,9 @@ pub fn load(ctx: &Ctx) -> Result<Identity> {
             c
         }
     };
-    ctx.db.kv_set("device:pubkey", &b64(&pubkey))?;
+    // every pull, poll answer and publish loads the identity: the key is written when it is not there yet
+    let pk = b64(&pubkey);
+    if ctx.db.kv_get("device:pubkey")?.as_deref() != Some(pk.as_str()) { ctx.db.kv_set("device:pubkey", &pk)?; }
     Ok(Identity { key, key_der, cert_pem, cert_der })
 }
 

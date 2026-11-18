@@ -3,7 +3,8 @@
 //! at once). Four routes: who this is, an origin's chunk list, a chunk, and what runs here now.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use axum::extract::{Path, Query, State};
@@ -59,6 +60,32 @@ pub struct Listener {
     pub port: u16,
 }
 
+/// Every paired computer asks for this computer's record and presence every ten seconds, and each costs a scan
+/// of usage, the credential store and a signature, or a look at the processes: one making serves them this long.
+const KEPT: Duration = Duration::from_secs(30);
+type Kept = Arc<Mutex<Option<(Instant, Value)>>>;
+
+/// What the routes share: the context the listener started with, and the two answers it keeps.
+#[derive(Clone)]
+struct Served {
+    ctx: Arc<Ctx>,
+    record: Kept,
+    presence: Kept,
+}
+
+impl axum::extract::FromRef<Served> for Arc<Ctx> {
+    fn from_ref(s: &Served) -> Self { s.ctx.clone() }
+}
+
+/// The answer kept in `slot`, made again once it is older than `KEPT`; polls that come together wait for one making.
+fn kept(slot: &Kept, make: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    let mut s = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, v)) = s.as_ref() { if at.elapsed() < KEPT { return Ok(v.clone()); } }
+    let v = make()?;
+    *s = Some((Instant::now(), v.clone()));
+    Ok(v)
+}
+
 impl Listener {
     pub fn stop(&self) { self.handle.shutdown(); }
 }
@@ -80,7 +107,7 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, port: u16
         .route("/v1/chunk/{origin}/{file}", get(chunk))
         .route("/v1/presence", get(presence))
         .route("/v1/transcript/{origin}/{harness}/{profile}/{id}", get(transcript))
-        .with_state(ctx);
+        .with_state(Served { ctx, record: Kept::default(), presence: Kept::default() });
     let _in_runtime = rt.enter();
     let server = axum_server::from_tcp_rustls(l, axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(cfg)))?.handle(handle.clone());
     rt.spawn(async move {
@@ -111,14 +138,15 @@ struct Since {
 
 /// An origin's chunks after `since` (of the asked incarnation; another one answers with no chunks and its own
 /// name, so the asker can ask again), with the origin's signed device record when there is one.
-async fn chunks(State(ctx): State<Arc<Ctx>>, Path(origin): Path<String>, Query(q): Query<Since>) -> Response {
+async fn chunks(State(s): State<Served>, Path(origin): Path<String>, Query(q): Query<Since>) -> Response {
     blocking(move || {
-        let Some(man) = store::manifest(&ctx, &origin) else { return StatusCode::NOT_FOUND.into_response() };
+        let ctx = &s.ctx;
+        let Some(man) = store::manifest(ctx, &origin) else { return StatusCode::NOT_FOUND.into_response() };
         let inc = man["incarnation"].as_str().unwrap_or("").to_string();
         let same = q.incarnation.as_deref().map(|i| i == inc).unwrap_or(true);
         let since = q.since.unwrap_or(0);
         let list: Vec<Value> = if same { man["chunks"].as_array().into_iter().flatten().filter(|c| c["to"].as_i64().unwrap_or(0) > since).cloned().collect() } else { vec![] };
-        let device = if origin == ctx.settings.device_id { folder::device_record(&ctx).ok() } else { store::device(&ctx, &origin) };
+        let device = if origin == ctx.settings.device_id { kept(&s.record, || folder::device_record(ctx)).ok() } else { store::device(ctx, &origin) };
         Json(json!({"origin": origin, "incarnation": inc, "last_seq": man["last_seq"], "chunks": list, "device": device})).into_response()
     }).await
 }
@@ -148,10 +176,10 @@ async fn transcript(State(ctx): State<Arc<Ctx>>, Path((origin, harness, profile,
     }).await
 }
 
-async fn presence(State(ctx): State<Arc<Ctx>>) -> Response {
+async fn presence(State(s): State<Served>) -> Response {
     blocking(move || {
-        if !switch(&ctx, "sync_presence", ctx.settings.sync_presence) { return StatusCode::NOT_FOUND.into_response(); }
-        match folder::presence(&ctx) {
+        if !switch(&s.ctx, "sync_presence", s.ctx.settings.sync_presence) { return StatusCode::NOT_FOUND.into_response(); }
+        match kept(&s.presence, || folder::presence(&s.ctx)) {
             Ok(v) => Json(v).into_response(),
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")).into_response(),
         }

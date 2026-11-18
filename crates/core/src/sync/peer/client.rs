@@ -87,11 +87,13 @@ pub fn address_of(p: &Peer) -> Option<(String, u16)> {
 }
 
 /// Where a paired computer may answer, in the order tried: the hub's rendezvous addresses, mDNS, then the address
-/// the owner or the pairing gave; each as `(host, port, path)`.
-fn candidates(ctx: &Ctx, p: &Peer) -> Vec<(String, u16, &'static str)> {
+/// the owner or the pairing gave; each as `(host, port, path)`. The one it last answered at comes first: each that
+/// does not answer costs the connect timeout, in every tick.
+pub(super) fn candidates(ctx: &Ctx, p: &Peer) -> Vec<(String, u16, &'static str)> {
     let mut v: Vec<(String, u16, &'static str)> = crate::sync::hub::rendezvous_pairs(ctx, &p.id).into_iter().map(|(h, port)| (h, port, "rendezvous")).collect();
     if let Some((ip, port)) = mdns::lookup(&p.id) { v.push((ip.to_string(), port, "mdns")); }
     if let Some((h, port)) = address_of(p) { v.push((h, port, "address")); }
+    v.sort_by_key(|(h, port, _)| format!("{h}:{port}") != p.last_good);
     v
 }
 
@@ -100,7 +102,11 @@ fn reach(ctx: &Ctx, id: &identity::Identity, p: &Peer) -> Option<(Client, Value,
     let mut why = String::new();
     for (host, port, path) in candidates(ctx, p) {
         match Client::connect(id, &p.cert_pem, &host, port).and_then(|c| c.json("/v1/hello")?.context("no answer").map(|h| (c, h))) {
-            Ok((c, h)) => return Some((c, h, path)),
+            Ok((c, h)) => {
+                let at = format!("{host}:{port}");
+                if at != p.last_good { let _ = ctx.db.with(|db| { db.execute("update peers set last_good=?1 where device_id=?2", params![at, p.id])?; Ok(()) }); }
+                return Some((c, h, path));
+            }
             Err(e) => { why = format!("{host}:{port}: {e:#}"); crate::log::info(&format!("computers: {} at {host}:{port} did not answer: {e:#}", p.name)); }
         }
     }
