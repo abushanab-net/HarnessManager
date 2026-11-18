@@ -8,5 +8,4 @@ edition = "2021"
 
 # unwinding stays on (no panic = "abort"): a background loop catches a panic in one round and runs the next
 [profile.release]
-lto = "thin"
 strip = true
