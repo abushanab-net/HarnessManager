@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(count(&b, "select seq from cursors2"), 0, "the cursor waits before the gap");
         // once the file is there, the merge brings it, and the later chunk adds nothing twice
         std::fs::write(&path, good).unwrap();
-        let cur = crate::journal::apply_manifest(&b, &a.settings.device_id, &man, &|f| Ok(std::fs::read(dir.join("journal").join(f))?), true).unwrap();
+        let cur = crate::journal::apply_manifest(&b, &a.settings.device_id, &man, &|f| Ok(std::fs::read(dir.join("journal").join(f))?)).unwrap();
         assert_eq!(cur, second["to"].as_i64().unwrap());
         assert_eq!(count(&b, "select count(*) from usage"), 3);
         let _ = crate::secrets::delete(&crate::sync::peer::identity::target(&a.settings.device_id));

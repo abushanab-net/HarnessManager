@@ -710,11 +710,7 @@ fn real_main(cli: Cli) -> Result<i32> {
             for p in st["peers"].as_array().into_iter().flatten() {
                 println!("  {:<24} {:<8} {:<8} seen {}  applied {}/{}  {} running", p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""),
                     fmt_reset(p["last_seen"].as_i64()), p["applied_seq"], p["last_seq"], p["running"].as_array().map(|r| r.len()).unwrap_or(0));
-                match p["gap"]["waiting"].as_bool() {
-                    Some(true) => println!("    Part of this computer's history has not arrived yet. Waiting for it to come online."),
-                    Some(false) => println!("    Part of this computer's history is missing here."),
-                    None => {}
-                }
+                if p["gap"].is_object() { println!("    Part of this computer's history is missing here."); }
             }
         }
         Cmd::ResumeHere { session, cwd } => {

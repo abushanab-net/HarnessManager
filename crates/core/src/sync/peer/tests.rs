@@ -401,108 +401,34 @@ fn prune_first(b: &Computer, c: &Computer) {
     crate::util::write_atomic(&dir.join("manifest.json"), man.to_string().as_bytes()).unwrap();
 }
 
-/// `origin` publishes one chunk per row, and every relay takes each as it comes.
-fn chunks_reach(origin: &Computer, relays: &[&Computer], rows: &[&str]) {
-    for r in rows {
-        origin.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
-        origin.rt.tick(&origin.ctx);
-        for b in relays { b.rt.tick(&b.ctx); }
-    }
-}
-
-/// What `c`'s card says of the entries of `of` that did not arrive: `(from, to, waiting)`.
-fn gap(c: &Computer, of: &str) -> Value {
-    let g = peer(&journal::status(&c.ctx).unwrap(), of)["gap"].clone();
-    if g.is_null() { g } else { json!([g["from"], g["to"], g["waiting"]]) }
-}
-
 #[test]
-fn a_journal_whose_start_no_source_holds_is_taken_at_the_rounds_end_with_the_gap_on_its_card() {
+fn a_journal_whose_start_a_relay_no_longer_holds_is_taken_at_once_and_what_was_passed_stays_on_its_card() {
     let t = tempfile::tempdir().unwrap();
     let (a, b, c) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"));
     pair(&a, &b);
     pair(&b, &c);
-    chunks_reach(&c, &[&b], &["claude:c1", "claude:c2"]);
+    for r in ["claude:c1", "claude:c2"] {
+        c.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
+        c.rt.tick(&c.ctx);
+        b.rt.tick(&b.ctx);
+    }
     prune_first(&b, &c);
-    let c_id = &c.ctx.settings.device_id;
-    // the ten-second pull asks B and takes nothing past the missing entry: another source may hold it
-    a.rt.tick(&a.ctx);
-    assert_eq!((count(&a.ctx, "select count(*) from usage"), gap(&a, c_id)), (0, json!([1, 1, true])));
-    // a round asks every source: A is not paired with C, so none is left that could fill it
-    journal::round(&a.ctx).unwrap();
-    assert_eq!(count(&a.ctx, "select count(*) from usage"), 1, "the rest is taken");
-    assert_eq!((peer(&journal::status(&a.ctx).unwrap(), c_id)["applied_seq"].as_i64(), gap(&a, c_id)), (Some(2), json!([1, 1, false])), "the card says what is missing");
-    journal::round(&a.ctx).unwrap();
-    assert_eq!(gap(&a, c_id), json!([1, 1, false]), "and goes on saying it");
-}
-
-#[test]
-fn entries_one_relay_lacks_are_taken_from_another_and_what_none_holds_from_the_one_that_holds_most() {
-    let t = tempfile::tempdir().unwrap();
-    let (a, b, c, d) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"), computer(t.path(), "D"));
-    for relay in [&b, &c] {
-        pair(relay, &d);
-        pair(&a, relay);
-    }
-    let d_id = &d.ctx.settings.device_id;
-    chunks_reach(&d, &[&b, &c], &["claude:d1", "claude:d2", "claude:d3"]);
-    // B, asked first, lacks the first chunk; C holds them all
-    prune_first(&b, &d);
-    a.rt.tick(&a.ctx);
-    assert_eq!((count(&a.ctx, "select count(*) from usage"), gap(&a, d_id)), (3, Value::Null), "nothing is missing: C held what B lacked");
-    // for a computer that comes later both lack the start: B holds the last chunk, C the last two
-    prune_first(&b, &d);
-    prune_first(&c, &d);
-    let e = computer(t.path(), "E");
-    pair(&e, &b);
-    pair(&e, &c);
-    e.rt.tick(&e.ctx);
-    assert_eq!((count(&e.ctx, "select count(*) from usage"), gap(&e, d_id)), (0, json!([1, 1, true])), "missing at both: the least either lacks");
-    // while D's folder is the way in use D can still be read itself, so a round passes nothing
-    let shared = t.path().join("shared");
-    std::fs::create_dir_all(&shared).unwrap();
-    e.ctx.db.with(|x| Ok(x.execute("update peers set transport = 'folder' where device_id = ?1", [d_id])?)).unwrap();
-    let mut by_folder = Ctx::open_at(&e.ctx.data, &e.ctx.home).unwrap();
-    (by_folder.settings.sync_mode, by_folder.settings.sync_folder) = ("folder".into(), shared.display().to_string());
-    journal::round(&by_folder).unwrap();
-    assert_eq!((count(&e.ctx, "select count(*) from usage"), gap(&e, d_id)), (0, json!([1, 1, true])));
-    // without it D is known through relays alone: the round takes the rest from C, which holds more than B
-    journal::round(&e.ctx).unwrap();
-    assert_eq!((count(&e.ctx, "select count(*) from usage"), gap(&e, d_id)), (2, json!([1, 1, false])));
-}
-
-#[test]
-fn a_gap_waits_for_the_paired_computer_itself_and_no_longer_than_a_week_from_when_it_was_first_seen() {
-    let t = tempfile::tempdir().unwrap();
-    let (a, b, c) = (computer(t.path(), "A"), computer(t.path(), "B"), computer(t.path(), "C"));
-    pair(&a, &b);
-    pair(&b, &c);
-    pair(&c, &a);
     let c_id = c.ctx.settings.device_id.clone();
-    // C stops answering A (a closed port), and goes on answering B
-    super::set_peer(&a.ctx, &c_id, Some("127.0.0.1:1"), None).unwrap();
-    chunks_reach(&c, &[&b], &["claude:c1", "claude:c2"]);
-    prune_first(&b, &c);
-    let since = || peer(&journal::status(&a.ctx).unwrap(), &c_id)["gap"]["since"].as_i64();
-    journal::round(&a.ctx).unwrap();
-    let first = since();
-    journal::round(&a.ctx).unwrap();
-    assert_eq!((count(&a.ctx, "select count(*) from usage"), gap(&a, &c_id)), (0, json!([1, 1, true])), "nothing is taken past the gap while C can still be asked");
-    assert!(first.is_some() && since() == first, "counted from when it was first seen");
-    // C answers again: its own journal is whole
-    super::set_peer(&a.ctx, &c_id, Some(&format!("127.0.0.1:{}", port(&c))), None).unwrap();
+    let card = || { let st = journal::status(&a.ctx).unwrap(); let p = peer(&st, &c_id); (count(&a.ctx, "select count(*) from usage"), p["applied_seq"].as_i64(), p["gap"].clone()) };
+    // A hears of C through B alone: what B holds is taken in the same pull, as before, and the card says what was passed
     a.rt.tick(&a.ctx);
-    assert_eq!((count(&a.ctx, "select count(*) from usage"), gap(&a, &c_id)), (2, Value::Null), "filled, so the card says nothing");
-    // gone again while B drops two more chunks, and the entries were first missed more than a week ago
-    super::set_peer(&a.ctx, &c_id, Some("127.0.0.1:1"), None).unwrap();
-    chunks_reach(&c, &[&b], &["claude:c3", "claude:c4"]);
-    prune_first(&b, &c);
-    prune_first(&b, &c);
+    assert_eq!(card(), (1, Some(2), json!({"from": 1, "to": 1})));
+    // a list of another incarnation that brings nothing leaves the record
+    assert_eq!(journal::apply_manifest(&a.ctx, &c_id, &json!({"incarnation": "another", "chunks": []}), &|_| anyhow::bail!("not read")).unwrap(), 0);
+    assert_eq!(card().2, json!({"from": 1, "to": 1}));
+    // C itself, paired later, lists its whole journal: A's cursor is past the entry, so it is not read again, and the card goes on saying so
+    pair(&c, &a);
     a.rt.tick(&a.ctx);
-    assert_eq!(gap(&a, &c_id), json!([3, 3, true]));
-    a.ctx.db.with(|x| Ok(x.execute("update peers set gap = json_set(gap, '$.wait.since', json_extract(gap, '$.wait.since') - 8 * 86400000) where device_id = ?1", [&c_id])?)).unwrap();
-    journal::round(&a.ctx).unwrap();
-    assert_eq!((count(&a.ctx, "select count(*) from usage"), gap(&a, &c_id)), (3, json!([3, 3, false])), "the rest is taken");
+    assert_eq!(peer(&journal::status(&a.ctx).unwrap(), &c_id)["connected"], true);
+    assert_eq!(card(), (1, Some(2), json!({"from": 1, "to": 1})));
+    // only forgetting the computer takes it off
+    super::forget(&a.ctx, &c_id).unwrap();
+    assert!(journal::status(&a.ctx).unwrap()["peers"].as_array().unwrap().iter().all(|p| p["id"] != c_id.as_str()));
 }
 
 #[test]

@@ -30,9 +30,6 @@ pub const MAX_CHUNK_READ: u64 = 4 * 1024 * 1024;
 pub const MAX_JSON_BYTES: u64 = 32 * 1024 * 1024;
 /// A peer whose `hello` answered within this long is connected.
 pub const CONNECTED_MS: i64 = 30_000;
-/// Entries no source held are waited for this long, counted from when they were first missed, while their
-/// computer can still be read itself: it alone holds its whole journal. After that the rest is taken.
-const GAP_WAIT_MS: i64 = 7 * 86_400_000;
 
 /// One change, as a line of the journal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,8 +70,8 @@ pub struct Peer {
     pub last_error: String,
     /// The `host:port` it last answered at.
     pub last_good: String,
-    /// Entries of its journal that no source held, or null: `{incarnation, lost: {from, to}, wait: {from, to,
-    /// since}}`. `lost` were passed for good; what follows `wait` is not taken until every source was asked.
+    /// Entries of its journal that were passed because the list read did not hold them, `{incarnation, from, to}`,
+    /// or null: one range, so after several holes it may name more than is missing.
     pub gap: Value,
 }
 
@@ -278,58 +275,17 @@ pub fn pubkey_of(ctx: &Ctx, id: &str) -> Result<String> {
     ctx.db.with(|c| Ok(c.query_row("select coalesce(pubkey, '') from peers where device_id=?", [id], |r| r.get(0)).optional()?.unwrap_or_default()))
 }
 
-/// What a computer's row keeps of the entries its sources did not hold, null when nothing.
-fn gap_kept(c: &Connection, id: &str) -> rusqlite::Result<Value> {
-    let kept: Option<String> = c.query_row("select gap from peers where device_id=?", [id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten();
-    Ok(kept.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or(Value::Null))
-}
-
-/// The same for one incarnation of its journal: what is kept of another one no longer counts.
-fn gaps(c: &Connection, id: &str, inc: &str) -> rusqlite::Result<Value> {
-    Ok(Some(gap_kept(c, id)?).filter(|g| g["incarnation"] == inc).unwrap_or_else(|| json!({"incarnation": inc})))
-}
-
-fn put_gaps(c: &Connection, id: &str, g: &Value) -> rusqlite::Result<()> {
-    if g["lost"].is_object() || g["wait"].is_object() {
-        // the row may not be there yet: the folder makes it after its merge
-        c.execute("insert into peers(device_id, gap) values(?1, ?2) on conflict(device_id) do update set gap=?2", params![id, g.to_string()])?;
-    } else {
-        c.execute("update peers set gap=null where device_id=?", [id])?;
-    }
-    Ok(())
-}
-
-/// Whether entries of this origin are waited for: the source just asked did not hold them.
-pub fn waits(ctx: &Ctx, origin: &str) -> bool { ctx.db.with(|c| Ok(gap_kept(c, origin)?["wait"].is_object())).unwrap_or(false) }
-
-/// A row's gap as its card says it: `{from, to, waiting, since}` for entries waited for, else `{from, to,
-/// waiting: false}` for entries passed for good, else null.
-fn gap_shown(g: &Value) -> Value {
-    if g["wait"].is_object() { json!({"from": g["wait"]["from"], "to": g["wait"]["to"], "since": g["wait"]["since"], "waiting": true}) }
-    else if g["lost"].is_object() { json!({"from": g["lost"]["from"], "to": g["lost"]["to"], "waiting": false}) }
-    else { Value::Null }
-}
-
-/// After every source of a round was asked. Entries none of them held are waited for while their computer can
-/// still be read itself (it is paired, or its folder is the one in use) and no longer than a week from when
-/// they were first missed. After that, or at once for a computer only relays and the hub know, the rest is
-/// taken from the source whose list reaches back furthest, and what was passed stays on the card.
-fn settle(ctx: &Ctx, mut sources: Vec<Box<dyn Source>>) {
-    let now = now_ms();
-    let due: Vec<Peer> = peers(ctx).unwrap_or_default().into_iter().filter(|p| p.gap["wait"].is_object()).filter(|p| {
-        let itself = !p.cert_pem.is_empty() || (ctx.settings.sync_mode == "folder" && p.transport == "folder");
-        !itself || now - p.gap["wait"]["since"].as_i64().unwrap_or(0) >= GAP_WAIT_MS
-    }).collect();
-    if due.is_empty() { return; }
-    if ctx.settings.sync_mode == "hub" { if let Ok(h) = crate::sync::hub::source(ctx) { sources.push(h); } }
-    for p in due {
-        let (from, inc) = (p.gap["wait"]["from"].as_i64().unwrap_or(0), p.gap["incarnation"].as_str().unwrap_or(""));
-        // where each source's list begins, of the chunks that reach the entries missed or come after them
-        let begins = |s: &dyn Source| s.manifest(&p.id, inc, from - 1).ok().flatten().filter(|m| m["incarnation"] == inc)
-            .and_then(|m| m["chunks"].as_array().into_iter().flatten().filter(|c| c["to"].as_i64().unwrap_or(0) >= from).filter_map(|c| c["from"].as_i64()).min());
-        let Some((_, best)) = sources.iter().filter(|s| !s.is_origin(&p.id)).filter_map(|s| Some((begins(s.as_ref())?, s))).min_by_key(|x| x.0) else { continue };
-        if let Err(e) = pull_noted(ctx, best.as_ref(), &p.id, true) { crate::log::warn(&format!("journal: taking what is left of {}: {e:#}", p.id)); }
-    }
+/// Entries passed because the list read did not hold them, kept on the computer's row for its card: one range,
+/// widened by each hole passed in the same incarnation; one passed in another incarnation starts it anew.
+/// Nothing takes it off but forgetting the computer: what was passed is not read again.
+fn note_gap(ctx: &Ctx, id: &str, inc: &str, from: i64, to: i64) -> Result<()> {
+    ctx.db.with(|c| {
+        let kept: Option<String> = c.query_row("select gap from peers where device_id=?", [id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten();
+        let kept = kept.and_then(|g| serde_json::from_str::<Value>(&g).ok()).filter(|g| g["incarnation"] == inc);
+        let (from, to) = (kept.as_ref().and_then(|g| g["from"].as_i64()).unwrap_or(from).min(from), kept.as_ref().and_then(|g| g["to"].as_i64()).unwrap_or(to).max(to));
+        c.execute("update peers set gap=?1 where device_id=?2", params![json!({"incarnation": inc, "from": from, "to": to}).to_string(), id])?;
+        Ok(())
+    })
 }
 
 /// One computer's new chunks, in manifest order, each read through `read`, checked against its sha256 and (when
@@ -337,11 +293,10 @@ fn settle(ctx: &Ctx, mut sources: Vec<Box<dyn Source>>) {
 /// with the cursor. Stops at the first chunk that cannot be read or checked: order matters, and the next round
 /// tries again. Stops too at the first entry of a kind this version does not know, with the cursor just before
 /// it, and says so on that computer's row: the entry and all after it are taken once this computer is updated.
-/// A list that starts beyond the cursor has lost entries (a relay and the hub drop their oldest chunks). Unless
-/// it may `pass` them (the list is the computer's own, or the round's end decided so: `settle`), nothing after
-/// them is taken and the row says they are waited for, so the other sources are asked first; passed, they stay
-/// on the row as lost. Returns the sequence applied up to.
-pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>, pass: bool) -> Result<i64> {
+/// A list that starts beyond the cursor has lost entries (a relay and the hub drop their oldest chunks): what it
+/// holds is taken all the same, as every version did, and the entries passed are kept on that computer's row.
+/// Returns the sequence applied up to.
+pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> Result<Vec<u8>>) -> Result<i64> {
     if !store::safe_origin(id) { bail!("{id} is not a computer's id"); }
     let inc = man["incarnation"].as_str().context("manifest without incarnation")?;
     let pubkey = pubkey_of(ctx, id)?;
@@ -355,18 +310,6 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
         let (file, from, to) = (ch["file"].as_str().unwrap_or(""), ch["from"].as_i64().unwrap_or(0), ch["to"].as_i64().unwrap_or(0));
         if to <= cur || !store::safe_file(file) { continue; }
         let missing = (from > cur + 1).then_some((cur + 1, from - 1));
-        if let Some((a, b)) = missing.filter(|_| !pass) {
-            // the same entries missed again keep when they were first missed, and the least any source lacked
-            ctx.db.with(|c| {
-                let old = gaps(c, id, inc)?;
-                let (same, mut g) = (old["wait"]["from"] == a, old.clone());
-                g["wait"] = json!({"from": a, "to": if same { old["wait"]["to"].as_i64().unwrap_or(b).min(b) } else { b }, "since": if same { old["wait"]["since"].clone() } else { json!(now_ms()) }});
-                if g != old { put_gaps(c, id, &g)?; }
-                if !same { crate::log::info(&format!("journal: entries {a} to {b} of {id} are not held where it was read; the other sources are asked before what follows is taken")); }
-                Ok(())
-            })?;
-            break;
-        }
         let bytes = match read(file) {
             Ok(b) => b,
             Err(e) => { crate::log::info(&format!("journal: {file} from {id} is waiting for the sync service ({e:#})")); break; }
@@ -395,18 +338,14 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
                 }
             }
             tx.execute("insert or replace into cursors2 values(?,?,?)", params![id, inc, upto])?;
-            // passed for good with this cursor: said on its row
-            if let Some((a, b)) = missing {
-                let mut g = gaps(&tx, id, inc)?;
-                g["lost"] = json!({"from": g["lost"]["from"].as_i64().unwrap_or(a).min(a), "to": g["lost"]["to"].as_i64().unwrap_or(b).max(b)});
-                g.as_object_mut().map(|o| o.remove("wait"));
-                put_gaps(&tx, id, &g)?;
-            }
             tx.commit()?;
             Ok(())
         })?;
         if let Err(e) = store::put_chunk(ctx, id, inc, ch, &bytes) { crate::log::warn(&format!("journal: keeping {file} from {id} for relay: {e:#}")); }
-        if let Some((a, b)) = missing { crate::log::warn(&format!("journal: entries {a} to {b} of {id} are held nowhere this computer can read; its journal goes on after them")); }
+        if let Some((a, b)) = missing {
+            crate::log::warn(&format!("journal: entries {a} to {b} of {id} were not in the list read; its journal goes on after them"));
+            if let Err(e) = note_gap(ctx, id, inc, a, b) { crate::log::warn(&format!("journal: noting the entries of {id} that were passed: {e:#}")); }
+        }
         cur = upto;
         if newer {
             crate::log::warn(&format!("journal: entry {} of {file} from {id} is of a kind this version does not know; it and what follows wait until Harness Manager is updated on this computer", upto + 1));
@@ -417,15 +356,6 @@ pub fn apply_manifest(ctx: &Ctx, id: &str, man: &Value, read: &dyn Fn(&str) -> R
     }
     // said on that computer's card while it waits, and taken off once a chunk is read through again (after the update)
     ctx.db.with(|c| { c.execute("update peers set last_error = case when ?1 then ?2 else '' end where device_id = ?3 and (?1 or (?4 and last_error = ?2))", params![newer, UPDATE_HERE, id, through])?; Ok(()) })?;
-    // entries waited for are no longer once the cursor moved past where they began, and any gap goes with its incarnation
-    ctx.db.with(|c| {
-        let old = gap_kept(c, id)?;
-        if old.is_null() { return Ok(()); }
-        let mut g = gaps(c, id, inc)?;
-        if g["wait"]["from"].as_i64().is_some_and(|f| f <= cur) { g.as_object_mut().map(|o| o.remove("wait")); }
-        if g != old { put_gaps(c, id, &g)?; }
-        Ok(())
-    })?;
     Ok(cur)
 }
 
@@ -442,15 +372,13 @@ pub trait Source {
     fn needs_key(&self) -> bool { true }
     /// Its presence is made as it is asked for, so it replaces what is held; a stored copy only when no older.
     fn live(&self) -> bool { false }
-    /// What it holds of this origin is the origin's own whole journal: nothing else could fill a gap in it.
-    fn is_origin(&self, _origin: &str) -> bool { false }
 }
 
 /// One origin's journal from a source: its chunk list since this computer's cursor (asked again when the source
 /// names another incarnation than the one known here), its device record learned when the list carries one, and
 /// every chunk checked and applied. `None` when the source holds nothing of the origin; else the list and the
-/// sequence applied up to. `past`: entries the source does not hold are passed, as they are in the origin's own list.
-pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str, past: bool) -> Result<Option<(Value, i64)>> {
+/// sequence applied up to.
+pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<Option<(Value, i64)>> {
     let known: String = ctx.db.with(|c| Ok(c.query_row("select coalesce(incarnation, '') from peers where device_id=?", [origin], |r| r.get(0)).unwrap_or_default()))?;
     let cursor = |inc: &str| -> i64 { ctx.db.with(|c| Ok(c.query_row("select seq from cursors2 where device_id=? and incarnation=?", [origin, inc], |r| r.get(0)).unwrap_or(0))).unwrap_or(0) };
     let Some(mut man) = src.manifest(origin, &known, cursor(&known))? else { return Ok(None) };
@@ -458,14 +386,14 @@ pub fn pull(ctx: &Ctx, src: &dyn Source, origin: &str, past: bool) -> Result<Opt
     if inc != known && !inc.is_empty() { man = src.manifest(origin, &inc, cursor(&inc))?.context("the origin vanished")?; }
     if man["device"].is_object() { learn_device(ctx, origin, &man["device"])?; }
     if src.needs_key() && pubkey_of(ctx, origin)?.is_empty() { bail!("no key is known for {origin} yet; nothing of it is taken"); }
-    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file), past || src.is_origin(origin))?;
+    let applied = apply_manifest(ctx, origin, &man, &|file| src.read(origin, file))?;
     Ok(Some((man, applied)))
 }
 
 /// `pull` through a paired computer or the hub, and what it brought kept on the origin's row. `Ok(false)` when
 /// the source holds nothing of the origin.
-pub fn pull_noted(ctx: &Ctx, src: &dyn Source, origin: &str, past: bool) -> Result<bool> {
-    let Some((man, applied)) = pull(ctx, src, origin, past)? else { return Ok(false) };
+pub fn pull_noted(ctx: &Ctx, src: &dyn Source, origin: &str) -> Result<bool> {
+    let Some((man, applied)) = pull(ctx, src, origin)? else { return Ok(false) };
     let last = man["last_seq"].as_i64().or_else(|| man["chunks"].as_array().and_then(|c| c.last()).and_then(|c| c["to"].as_i64())).unwrap_or(0);
     ctx.db.with(|c| {
         c.execute("update peers set incarnation=case when ?1 <> '' then ?1 else incarnation end, last_seq=max(coalesce(last_seq, 0), ?2), applied_seq=?3, last_pull=?4 where device_id=?5",
@@ -501,6 +429,9 @@ pub fn learn_device(ctx: &Ctx, id: &str, dev: &Value) -> Result<bool> {
         crate::log::warn(&format!("computers: {id} presents another key than the one paired; its record is ignored"));
         return Ok(false);
     }
+    // that computer's own record too, from before the one kept (a relay's copy from before a rename or a restore):
+    // it says nothing new, and taking it would set the name and the incarnation back
+    if !known.is_empty() && store::device(ctx, id).is_some_and(|kept| kept["updated_at"].as_i64().unwrap_or(0) > dev["updated_at"].as_i64().unwrap_or(0)) { return Ok(true); }
     ctx.db.with(|c| {
         c.execute("insert into peers(device_id, name, os, app_version, incarnation, roots, pubkey, transport) values(?1,?2,?3,?4,?5,?6,?7,'relay')
             on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
@@ -519,7 +450,7 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
     for (id, dir) in folder::others(ctx, root) {
         let dev = crate::util::read_json(&dir.join("device.json")).unwrap_or(Value::Null);
         if dev.is_object() { learn_device(ctx, &id, &dev)?; }
-        let pulled = pull(ctx, &src, &id, false).unwrap_or_else(|e| { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None });
+        let pulled = pull(ctx, &src, &id).unwrap_or_else(|e| { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None });
         let (man, applied) = (pulled.as_ref().map(|p| &p.0), pulled.as_ref().map(|p| p.1));
         ctx.db.with(|c| {
             c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder')
@@ -562,7 +493,7 @@ pub fn round(ctx: &Ctx) -> Result<Value> {
             merge(ctx, root)?;
         }
         if ctx.settings.sync_mode == "hub" { crate::sync::hub::round(ctx)?; }
-        settle(ctx, if ctx.settings.direct_connection { peer::pull_all(ctx) } else { vec![] });
+        if ctx.settings.direct_connection { peer::pull_all(ctx); }
         Ok(())
     })();
     let error = r.err().map(|e| format!("{e:#}"));
@@ -623,7 +554,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
     let peers: Vec<Value> = peers(ctx)?.into_iter().map(|p| json!({"id": p.id, "name": p.name, "os": p.os, "app_version": p.app_version, "last_seen": p.last_seen,
         "last_seq": p.last_seq, "applied_seq": p.applied_seq, "transport": p.transport, "presence_at": p.presence["at"], "running": if fresh(&p, now) { p.presence["running"].as_array().cloned().unwrap_or_default() } else { vec![] },
         "address": p.address, "path": p.path, "connected": p.connected.map(|t| now - t < CONNECTED_MS).unwrap_or(false), "last_pull": p.last_pull, "paired_at": p.paired_at,
-        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error, "gap": gap_shown(&p.gap)})).collect();
+        "relayed_by": p.relayed_by, "direct": !p.cert_pem.is_empty(), "error": p.last_error, "gap": if p.gap.is_object() { json!({"from": p.gap["from"], "to": p.gap["to"]}) } else { Value::Null }})).collect();
     Ok(json!({"mode": s.sync_mode, "folder": s.sync_folder, "direct_connection": s.direct_connection,
         "this": {"id": s.device_id, "name": s.device_name, "incarnation": s.incarnation, "last_seq": last_seq, "published_seq": published, "port": s.listen_port, "pubkey": identity::pubkey(ctx), "pairing": pairing},
         "last_run": last["at"], "error": last["error"], "peers": peers, "hub": crate::sync::hub::status(ctx)}))
@@ -1154,7 +1085,7 @@ mod tests {
         id.sign_record(&mut rec);
         assert!(identity::record_ok(&rec), "signed by the key it carries");
         assert!(!learn_device(&ctx, evil, &rec).unwrap());
-        assert!(apply_manifest(&ctx, evil, &json!({"incarnation": "i", "chunks": []}), &|_| Ok(vec![]), true).is_err());
+        assert!(apply_manifest(&ctx, evil, &json!({"incarnation": "i", "chunks": []}), &|_| Ok(vec![])).is_err());
         assert!(!t.path().join("evil").exists() && !t.path().join("A").join("evil").exists());
         assert!(!store::dir(&ctx, evil).starts_with(t.path().join("evil")) && store::dir(&ctx, evil).starts_with(ctx.data.join("journal-cache")), "and the store stays in its folder");
         let _ = crate::secrets::delete(&identity::target(&ctx.settings.device_id));
@@ -1254,10 +1185,29 @@ mod tests {
         let bytes = entries.iter().map(|e| format!("{e}\n")).collect::<String>().into_bytes();
         let to = entries.last().and_then(|e| e["seq"].as_i64()).unwrap_or(0);
         let man = json!({"incarnation": "i", "chunks": [{"file": format!("i-1-{to}.jsonl"), "from": 1, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}]});
-        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone()), true).unwrap()
+        apply_manifest(ctx, id, &man, &|_| Ok(bytes.clone())).unwrap()
     }
 
     fn entry(seq: i64, op: &str, key: &str, data: Value) -> Value { json!({"seq": seq, "ts": 1, "op": op, "key": key, "data": data}) }
+
+    #[test]
+    fn a_record_older_than_the_one_kept_does_not_set_a_computers_name_and_incarnation_back() {
+        std::env::set_var("HRM_CRED_PREFIX", format!("HRMTEST-core-{}", std::process::id()));
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("B"), &t.path().join("home")).unwrap();
+        let id = identity::load(&ctx).unwrap();
+        let record = |name: &str, inc: &str, at: i64| { let mut r = json!({"id": "peer-1", "name": name, "incarnation": inc, "updated_at": at}); id.sign_record(&mut r); r };
+        let kept = || -> (String, String) { ctx.db.with(|c| Ok(c.query_row("select name, incarnation from peers where device_id='peer-1'", [], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() };
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP", "i1", 1_000)).unwrap());
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP-2", "i2", 2_000)).unwrap());
+        // a relay still hands out the first one: it is that computer's, and it changes nothing
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP", "i1", 1_000)).unwrap());
+        assert_eq!(kept(), ("LAPTOP-2".to_string(), "i2".to_string()));
+        assert_eq!(store::device(&ctx, "peer-1").unwrap()["updated_at"], 2_000);
+        assert!(learn_device(&ctx, "peer-1", &record("LAPTOP-3", "i2", 3_000)).unwrap());
+        assert_eq!(kept().0, "LAPTOP-3");
+        let _ = crate::secrets::delete(&identity::target(&ctx.settings.device_id));
+    }
 
     #[test]
     fn a_list_that_names_a_small_chunk_before_the_joined_one_that_covers_it_has_no_gap() {
@@ -1270,7 +1220,7 @@ mod tests {
         // as a relay's store keeps them, by where each ends: the small chunk it took first, then the joined one
         let man = json!({"incarnation": "i", "chunks": [chunk(4, 4), chunk(1, 5)]});
         let read = |file: &str| -> Result<Vec<u8>> { let mut p = file.trim_end_matches(".jsonl").split('-').skip(1).map(|n| n.parse::<i64>().unwrap()); Ok(bytes(p.next().unwrap()..=p.next().unwrap())) };
-        assert_eq!(apply_manifest(&ctx, "peer-1", &man, &read, false).unwrap(), 5);
+        assert_eq!(apply_manifest(&ctx, "peer-1", &man, &read).unwrap(), 5);
         assert_eq!(count(&ctx, "select count(*) from usage"), 5, "the joined chunk held what the small one seemed to skip");
         assert_eq!(count(&ctx, "select count(*) from peers where gap is not null"), 0);
     }
@@ -1314,7 +1264,7 @@ mod tests {
         let asked = std::cell::RefCell::new(Vec::<String>::new());
         for name in [".i-1-1.jsonl", "-i-1-1.jsonl", "..", "../up.jsonl", "C:evil.jsonl", "i-1-1.jsonl:stream", "NUL", "nul.jsonl", long.as_str()] {
             let man = json!({"incarnation": "i", "chunks": [{"file": name, "from": 1, "to": 1, "sha256": sha256_hex(b""), "bytes": 0}]});
-            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }, true).unwrap(), 0, "{name}");
+            assert_eq!(apply_manifest(&ctx, "peer-1", &man, &|f| { asked.borrow_mut().push(f.to_string()); bail!("not read") }).unwrap(), 0, "{name}");
             assert!(store::chunk(&ctx, "peer-1", name).is_err(), "{name}");
             assert!(store::put_chunk(&ctx, "peer-1", "i", &json!({"file": name, "from": 1, "to": 1, "bytes": 0}), b"").is_err(), "{name}");
         }

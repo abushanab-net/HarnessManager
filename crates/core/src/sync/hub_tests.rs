@@ -574,7 +574,7 @@ fn a_blob_sealed_for_one_computer_opens_under_no_other_name_and_one_sealed_befor
 }
 
 #[test]
-fn entries_the_hub_dropped_are_passed_at_the_rounds_end_and_stay_on_the_card() {
+fn entries_the_hub_dropped_are_passed_at_once_and_stay_on_the_card() {
     let rt = runtime();
     let (url, hub) = start_hub(rt.handle(), "admin-secret");
     let t = tempfile::tempdir().unwrap();
@@ -584,11 +584,12 @@ fn entries_the_hub_dropped_are_passed_at_the_rounds_end_and_stay_on_the_card() {
         a.ctx.db.insert_usage(&[row(r, 1_000)], &Prices::new()).unwrap();
         journal::round(&a.ctx).unwrap();
     }
-    // its retention dropped the first chunk before B first asked; B is not paired with A, and no relay knows it
+    // its retention dropped the first chunk before B first asked
     hub.chunks.lock().unwrap().get_mut(&id).unwrap().remove(0);
     let st = journal::round(&b.ctx).unwrap();
     assert_eq!(st["error"], Value::Null, "{st}");
     let pa = peer(&st, &id);
-    assert_eq!((count(&b.ctx, "select count(*) from usage"), pa["applied_seq"].as_i64()), (1, Some(2)), "the rest is taken: {st}");
-    assert_eq!((pa["gap"]["from"].as_i64(), pa["gap"]["to"].as_i64(), pa["gap"]["waiting"].as_bool()), (Some(1), Some(1), Some(false)), "{st}");
+    assert_eq!((count(&b.ctx, "select count(*) from usage"), pa["applied_seq"].as_i64()), (1, Some(2)), "what the hub holds is taken in the same round: {st}");
+    assert_eq!(pa["gap"], json!({"from": 1, "to": 1}), "{st}");
+    assert_eq!(peer(&journal::round(&b.ctx).unwrap(), &id)["gap"], json!({"from": 1, "to": 1}), "and the card goes on saying so");
 }

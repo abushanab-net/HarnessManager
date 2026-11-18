@@ -243,26 +243,23 @@ pub fn leave(ctx: &Ctx) -> Result<Ctx> {
 // ---------- the round ----------
 
 /// The hub as a source: the chunk lists it keeps, each chunk and presence blob opened with the ring key.
-struct Sealed {
-    hub: Hub,
-    key: [u8; 32],
-    me: String,
+struct Sealed<'a> {
+    hub: &'a Hub,
+    key: &'a [u8; 32],
+    me: &'a str,
 }
 
-/// This computer's hub, for the round's end to ask once more.
-pub fn source(ctx: &Ctx) -> Result<Box<dyn journal::Source>> { Ok(Box::new(Sealed { hub: Hub::open(ctx)?, key: ring_key(ctx)?, me: ctx.settings.device_id.clone() })) }
-
-impl journal::Source for Sealed {
+impl journal::Source for Sealed<'_> {
     fn manifest(&self, origin: &str, incarnation: &str, since: i64) -> Result<Option<Value>> { self.hub.get_json(&format!("/v1/chunks/{origin}?since={since}&incarnation={incarnation}")) }
 
-    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { decrypt(&self.key, &self.hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ)?, &bound(origin, "chunk", file)) }
+    fn read(&self, origin: &str, file: &str) -> Result<Vec<u8>> { decrypt(self.key, &self.hub.get_bytes(&format!("/v1/chunk/{origin}/{file}"), journal::MAX_CHUNK_READ)?, &bound(origin, "chunk", file)) }
 
     /// `{<id>: {at, blob}}`, each blob sealed by its computer with the same ring.
     fn presence(&self) -> Result<Vec<(String, Value)>> {
         let Some(p) = self.hub.get_json("/v1/presence")? else { return Ok(vec![]) };
-        Ok(p.as_object().into_iter().flatten().filter(|(id, _)| id.as_str() != self.me).filter_map(|(id, v)| {
+        Ok(p.as_object().into_iter().flatten().filter(|(id, _)| *id != self.me).filter_map(|(id, v)| {
             let blob = v["blob"].as_str().and_then(|b| base64::engine::general_purpose::STANDARD.decode(b).ok())?;
-            let Ok(plain) = decrypt(&self.key, &blob, &bound(id, "presence", "")) else { crate::log::warn(&format!("hub: the presence of {id} does not open with this ring key")); return None };
+            let Ok(plain) = decrypt(self.key, &blob, &bound(id, "presence", "")) else { crate::log::warn(&format!("hub: the presence of {id} does not open with this ring key")); return None };
             Some((id.clone(), serde_json::from_slice(&plain).ok()?))
         }).collect())
     }
@@ -346,12 +343,13 @@ fn note(ctx: &Ctx, k: &str) { let _ = ctx.db.kv_set(k, &now_ms().to_string()); }
 /// One hub round: this computer's new chunks and record up; every device's record learned and its chunks
 /// down; presence both ways; the rendezvous addresses when the direct connection is on.
 pub fn round(ctx: &Ctx) -> Result<()> {
-    let src = Sealed { hub: Hub::open(ctx)?, key: ring_key(ctx)?, me: ctx.settings.device_id.clone() };
-    let (hub, key, me) = (&src.hub, &src.key, src.me.clone());
-    let n = push_chunks(ctx, hub, key)?;
-    push_device(ctx, hub)?;
+    let hub = Hub::open(ctx)?;
+    let key = ring_key(ctx)?;
+    let me = ctx.settings.device_id.clone();
+    let n = push_chunks(ctx, &hub, &key)?;
+    push_device(ctx, &hub)?;
     if ctx.settings.sync_presence && presence_due(ctx) {
-        hub.put("/v1/presence", encrypt(key, folder::presence(ctx)?.to_string().as_bytes(), &bound(&me, "presence", ""))?, &[])?;
+        hub.put("/v1/presence", encrypt(&key, folder::presence(ctx)?.to_string().as_bytes(), &bound(&me, "presence", ""))?, &[])?;
         note(ctx, "hub:presence_at");
     }
     note(ctx, "hub:last_push");
@@ -359,6 +357,7 @@ pub fn round(ctx: &Ctx) -> Result<()> {
     // every other computer on the hub: its record, then its journal
     let devices = hub.get_json("/v1/devices")?.unwrap_or(json!([]));
     let list: Vec<Value> = match &devices { Value::Array(a) => a.clone(), Value::Object(o) => o.values().cloned().collect(), _ => vec![] };
+    let src = Sealed { hub: &hub, key: &key, me: &me };
     for d in &list {
         let (rec, seen, last_seq) = split_device(d);
         let Some(id) = rec["id"].as_str().map(String::from).filter(|i| *i != me && !i.contains(['/', '\\'])) else { continue };
@@ -368,7 +367,7 @@ pub fn round(ctx: &Ctx) -> Result<()> {
             c.execute("update peers set transport='hub', last_seen=max(coalesce(?1, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?2, 0), coalesce(last_seq, 0)) where device_id=?3", params![seen, last_seq, id])?;
             Ok(())
         })?;
-        if let Err(e) = journal::pull_noted(ctx, &src, &id, false) { crate::log::warn(&format!("hub: pulling {id}: {e:#}")); }
+        if let Err(e) = journal::pull_noted(ctx, &src, &id) { crate::log::warn(&format!("hub: pulling {id}: {e:#}")); }
     }
     journal::take_presence(ctx, &src)?;
     // rendezvous: where this computer can be reached, and where the others can

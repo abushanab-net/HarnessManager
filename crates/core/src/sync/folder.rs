@@ -51,8 +51,6 @@ impl crate::journal::Source for Folder<'_> {
     }
 
     fn needs_key(&self) -> bool { false }
-
-    fn is_origin(&self, _origin: &str) -> bool { true }
 }
 
 pub fn write_chunk(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> { write_atomic(&dir.join("journal").join(name), bytes) }
