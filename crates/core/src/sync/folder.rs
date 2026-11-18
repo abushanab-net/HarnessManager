@@ -14,7 +14,7 @@ use crate::{harness, Ctx};
 /// The sync folder, checked to be there: a drive that is not mounted must not look like an empty one.
 pub fn root(ctx: &Ctx) -> Result<PathBuf> {
     let p = PathBuf::from(&ctx.settings.sync_folder);
-    if ctx.settings.sync_folder.is_empty() || !p.is_absolute() { bail!("choose the folder to sync through in Settings > Computers"); }
+    if ctx.settings.sync_folder.is_empty() || !p.is_absolute() { bail!("choose the folder to sync through on the Computers page"); }
     if !p.is_dir() { bail!("the sync folder {} is not reachable", p.display()); }
     Ok(p)
 }

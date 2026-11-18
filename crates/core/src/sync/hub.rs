@@ -60,7 +60,7 @@ pub fn ring_show(ctx: &Ctx) -> Result<String> {
 
 /// The 32-byte key the hub's blobs are sealed with.
 pub fn ring_key(ctx: &Ctx) -> Result<[u8; 32]> {
-    let seed = ring_seed(ctx).context("no ring key on this computer: enter the recovery key in Settings › Computers")?;
+    let seed = ring_seed(ctx).context("no ring key on this computer: enter the recovery key on the Computers page")?;
     let raw = data_encoding::BASE32_NOPAD.decode(seed.as_bytes()).context("the ring key kept here is not valid")?;
     Ok(Sha256::digest(&raw).into())
 }
@@ -134,7 +134,7 @@ impl Hub {
     /// This computer's hub, with its token.
     pub fn open(ctx: &Ctx) -> Result<Hub> {
         let base = normalize_url(&ctx.settings.hub_url).context("no hub address")?;
-        let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… in Settings › Computers")?;
+        let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… on the Computers page")?;
         Hub::at(&base, &token)
     }
 

@@ -1,6 +1,6 @@
 //! Backups of what Harness Manager owns: the account list, settings, what it wrote where (the ledger and
-//! its saved state) and the folders of the skills it manages. Keys and logins stay in Windows Credential
-//! Manager and are never in a backup. A backup is one zip in `<data>/backups`.
+//! its saved state) and the folders of the skills it manages. Keys and logins stay in the system
+//! credential store and are never in a backup. A backup is one zip in `<data>/backups`.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
