@@ -205,6 +205,8 @@ pub fn kind_of(id: &str, path: &Path) -> Kind {
 }
 
 fn q(p: &str) -> String { format!("\"{p}\"") }
+/// A path as a PowerShell literal: in single quotes, an apostrophe in it doubled.
+fn psq(p: &str) -> String { format!("'{}'", p.replace('\'', "''")) }
 /// A PowerShell command line as cmd.exe runs it (the installers are PowerShell on Windows).
 fn ps(cmd: &str) -> String { format!("powershell -NoProfile -ExecutionPolicy Bypass -Command \"{}\"", cmd.replace('"', "'")) }
 
@@ -222,7 +224,7 @@ fn update_method(id: &str, ins: &Installer, c: &Copy) -> Option<Method> {
         _ if !ins.self_update.is_empty() && !(id == "pi" && cfg!(windows)) => m("self", "Run its updater", format!("{} {}", q(&c.path), ins.self_update)),
         // no update command: the installer is run again, over the file it finds (Antigravity's refuses an existing one, so it goes first)
         _ if !native_cmd.is_empty() => {
-            let remove = if id == "agy" { if cfg!(windows) { format!("Remove-Item -Force '{}'; ", c.path) } else { format!("rm -f {} && ", q(&c.path)) } } else { String::new() };
+            let remove = if id == "agy" { if cfg!(windows) { format!("Remove-Item -Force {}; ", psq(&c.path)) } else { format!("rm -f {} && ", q(&c.path)) } } else { String::new() };
             let command = if cfg!(windows) { if remove.is_empty() { native_cmd } else { ps(&format!("{remove}{}", ins.win_install)) } } else { format!("{remove}{}", ins.unix_install) };
             m("native", if remove.is_empty() { "Run the vendor's installer again" } else { "Remove it and run the vendor's installer" }, command)
         }
@@ -421,7 +423,7 @@ fn remove_cmd(ins: Option<&Installer>, c: &Copy) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("remove the copy at {} with {name}, which installed it", c.path));
     Ok(match c.kind {
         Kind::Npm => format!("npm uninstall -g {}", c.package.clone().unwrap_or_default()),
-        Kind::Native | Kind::Unknown => if cfg!(windows) { ps(&format!("Remove-Item -Force '{}'", c.path)) } else { format!("rm -f {}", q(&c.path)) },
+        Kind::Native | Kind::Unknown => if cfg!(windows) { ps(&format!("Remove-Item -Force {}", psq(&c.path))) } else { format!("rm -f {}", q(&c.path)) },
         Kind::Winget => pm("winget", |i| i.winget, |s| format!("winget uninstall {s}"))?,
         Kind::Brew => pm("Homebrew", |i| i.brew, |s| format!("brew uninstall {s}"))?,
         Kind::Scoop => pm("Scoop", |i| i.scoop, |s| format!("scoop uninstall {s}"))?,
@@ -502,6 +504,14 @@ mod tests {
         assert!(agy.contains("antigravity.google/cli/install"), "{agy}");
         let pi = cmd("pi", &PI, c(Kind::Native, r"C:\u\.local\bin\pi.cmd", None));
         if cfg!(windows) { assert!(pi.contains("pi.dev/install.ps1"), "a standalone Pi on Windows runs the installer again: {pi}"); } else { assert_eq!(pi, "\"C:\\u\\.local\\bin\\pi.cmd\" update", "a standalone Pi runs its own updater"); }
+    }
+
+    #[test]
+    fn an_apostrophe_in_a_path_stays_inside_its_quotes() {
+        let c = Copy { path: r"C:\it's here\agy.exe".into(), version: None, kind: Kind::Native, package: None, runs: true };
+        for cmd in [remove_cmd(Some(&AGY), &c).unwrap(), update_method("agy", &AGY, &c).unwrap().command] {
+            if cfg!(windows) { assert!(cmd.contains(r"Remove-Item -Force 'C:\it''s here\agy.exe'"), "{cmd}"); } else { assert!(cmd.contains("rm -f \"C:\\it's here\\agy.exe\""), "{cmd}"); }
+        }
     }
 
     #[test]

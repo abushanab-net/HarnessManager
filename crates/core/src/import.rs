@@ -61,7 +61,8 @@ pub fn import_powershell(reg: &mut Registry, path: &Path, rep: &mut ImportReport
             Ok(s) => s,
             Err(e) => { rep.skipped.push(format!("key {raw}: {e}")); continue; }
         };
-        if reg.profile(&name).is_some() { rep.skipped.push(format!("key {raw}: a profile named {name} exists")); continue; }
+        // without case, as `add_profile` compares: the key below would be saved over that profile's
+        if reg.profiles.iter().any(|p| p.name.eq_ignore_ascii_case(&name)) { rep.skipped.push(format!("key {raw}: a profile named {name} exists")); continue; }
         if let Err(e) = crate::secrets::set_key(&crate::secrets::key_target(&name), &secret) {
             rep.skipped.push(format!("key {raw}: {e:#}"));
             continue;

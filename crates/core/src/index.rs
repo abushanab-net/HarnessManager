@@ -129,6 +129,14 @@ fn reconcile(ctx: &Ctx, h: &dyn Harness, p: &Profile, list: Vec<SessionMeta>, op
             let json = serde_json::to_string(&m)?;
             match existing.get(&key) {
                 Some((j, pk, pn, op)) if *j == json && *pk == info.key && *pn == info.name && *op == is_open => {}
+                // a placeholder's numbers are the old file's: only its time goes in, and only while the row has not the
+                // file's signature yet (a parse that landed first, here or from another process, is the newer record)
+                Some(_) if m.placeholder.is_some() => {
+                    tx.execute("update sessions set json = case when mtime <> ?1 then json_set(json, '$.last_active_at', ?2) else json end,
+                        last_active_at = case when mtime <> ?1 then ?2 else last_active_at end, project_key=?3, project_name=?4, open=?5 where key=?6",
+                        params![m.placeholder, m.last_active_at, info.key, info.name, is_open as i64, key])?;
+                    rep.changed += 1;
+                }
                 Some(_) => {
                     tx.execute("update sessions set json=?, id=?, title=?, cwd=?, started_at=?, last_active_at=?, tokens=?, project_key=?, project_name=?, open=? where key=?",
                         params![json, m.id, m.title, m.cwd, m.started_at, m.last_active_at, m.tokens, info.key, info.name, is_open as i64, key])?;
@@ -314,6 +322,31 @@ pub(crate) mod tests {
         assert_eq!((parsed.prompts, parsed.last_active_at), (2, harness::parse::ts_ms("2026-11-06T09:00:00.000Z")));
         // a path under no account's folder refreshes nothing
         assert_eq!(refresh(&ctx, Scope::Paths(vec![t.path().join("elsewhere.jsonl")])).unwrap().profiles, 0);
+    }
+
+    #[test]
+    fn a_parse_that_lands_before_the_refresh_writes_keeps_its_numbers() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = computer(t.path());
+        let f = claude_file(&ctx, "s1", "one", "2026-11-05T10:00:00.000Z");
+        refresh(&ctx, Scope::All).unwrap();
+        let line = json!({"type": "user", "sessionId": "s1", "cwd": ctx.home.join("work"), "timestamp": "2026-11-06T09:00:00.000Z", "message": {"role": "user", "content": "and then"}});
+        std::fs::write(&f, format!("{}{line}\n", std::fs::read_to_string(&f).unwrap())).unwrap();
+        let reg = ctx.registry().unwrap();
+        let (p, h) = (&reg.profiles[0], harness::of(&reg.profiles[0]));
+        // a partial refresh, step by step (no other refresh runs meanwhile): its scan lists the old record and parses in the background
+        let one = ONE.lock().unwrap_or_else(|e| e.into_inner());
+        let list = h.sessions(&ctx, p, 0).unwrap();
+        assert!(list[0].placeholder.is_some() && list[0].prompts == 1, "{list:?}");
+        // the parse lands first
+        let t0 = Instant::now();
+        while !rows(&ctx)[0].1.contains("\"prompts\":2") && t0.elapsed().as_secs() < 5 { std::thread::sleep(std::time::Duration::from_millis(20)); }
+        reconcile(&ctx, h, p, list, &HashSet::new(), &mut Resolver::new(&reg.projects), &mut HashMap::new(), &mut vec![], &mut Report::default()).unwrap();
+        drop(one);
+        // and the old record does not replace it: with the file's signature on the row, no later scan would read the file again
+        refresh(&ctx, Scope::All).unwrap();
+        let s1 = sessions(&ctx, &SessionFilter { id: Some("s1".into()), ..Default::default() }).unwrap().remove(0);
+        assert_eq!((s1.prompts, s1.last_active_at), (2, harness::parse::ts_ms("2026-11-06T09:00:00.000Z")));
     }
 
     #[test]

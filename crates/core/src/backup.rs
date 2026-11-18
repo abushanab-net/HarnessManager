@@ -23,13 +23,11 @@ pub struct Backup {
 
 pub fn dir(ctx: &Ctx) -> PathBuf { ctx.data.join("backups") }
 
-/// State worth keeping; caches (discover, pricing, version checks), a running router's pid and its token are not:
-/// the token is a secret, and a new one is made when the router starts without one. The journal's marks describe
-/// the outbox, which is not in a backup either.
-fn keep_kv(k: &str) -> bool {
-    !(k.starts_with("discover:") || k.starts_with("pricing:") || k.starts_with("apps:") || k.starts_with("self:")
-        || k == "router:pid" || k == "router:token" || k.starts_with("breaker:") || k.starts_with("journal:") || k.starts_with("computers:") || k.starts_with("backup:"))
-}
+/// State a backup carries and a restore puts back: the live-limits choice, what was written into each prompt file
+/// and the last MCP import. Everything else describes this computer as it is now (which account owns the Antigravity
+/// login, the router's token, its identity, caches, marks of what was read) and is neither kept nor put back: a
+/// restored owner would have the next start save the login in the slot under the wrong account.
+fn keep_kv(k: &str) -> bool { k == "live_quota" || k == "mcp:last_import" || k.starts_with("prompt:") }
 
 #[cfg(test)]
 mod keep_tests {
@@ -37,8 +35,47 @@ mod keep_tests {
 
     #[test]
     fn the_router_token_and_caches_stay_out_of_backups() {
-        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models", "journal:published_seq", "journal:backfilled", "computers:last"] { assert!(!keep_kv(k), "{k}"); }
-        for k in ["live_quota", "migrated:codex-timing", "mcp:last_import", "migrated:device"] { assert!(keep_kv(k), "{k}"); }
+        for k in ["router:token", "router:pid", "breaker:x", "apps:latest", "self:latest", "pricing:models", "journal:published_seq", "journal:backfilled", "computers:last",
+            "agy:active", "device:pubkey", "pairing:current", "migrated:device", "opencode:usage:work"] { assert!(!keep_kv(k), "{k}"); }
+        for k in ["live_quota", "mcp:last_import", "prompt:C:\\p\\AGENTS.md"] { assert!(keep_kv(k), "{k}"); }
+    }
+
+    #[test]
+    fn a_restore_does_not_say_who_owns_the_antigravity_login() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        ctx.db.kv_set("agy:active", "agy-main").unwrap();
+        // a backup made by a version that kept the owner, from a time another account had the login
+        let zip = t.path().join("b.zip");
+        zip_of(&zip, &[("profiles.json", "{}"), ("state.json", r#"{"kv": {"agy:active": "agy-work", "live_quota": "1"}}"#)]);
+        restore_file(&ctx, &zip).unwrap();
+        assert_eq!(ctx.db.kv_get("agy:active").unwrap().as_deref(), Some("agy-main"), "the owner is the one this computer recorded");
+        assert_eq!(ctx.db.kv_get("live_quota").unwrap().as_deref(), Some("1"), "a choice is put back");
+    }
+
+    /// A zip with these entries, named as given: what a backup made by another program can hold.
+    fn zip_of(path: &Path, entries: &[(&str, &str)]) {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, text) in entries {
+            z.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(text.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn a_skill_file_named_outside_its_folder_is_not_restored() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let (zip, elsewhere) = (t.path().join("b.zip"), t.path().join("elsewhere.txt"));
+        zip_of(&zip, &[("profiles.json", "{}"), ("skills/demo/SKILL.md", "ok"), ("skills/demo/..\\..\\up.txt", "x"), ("skills/demo/sub/..\\..\\..\\up.txt", "x"),
+            (&format!("skills/demo/{}", elsewhere.display()), "x")]);
+        restore_file(&ctx, &zip).unwrap();
+        let demo = crate::items::skill_store(&ctx).join("demo");
+        assert_eq!(std::fs::read_to_string(demo.join("SKILL.md")).unwrap(), "ok", "a plain name is restored");
+        let mut written = vec![];
+        crate::util::walk_files(t.path(), &|f| !f.starts_with(&ctx.data) && f != zip, &mut written);
+        assert!(written.iter().all(|f| f.starts_with(&demo)), "every restored file is in the skill's folder: {written:?}");
     }
 
     #[test]
@@ -463,11 +500,16 @@ pub fn restore_file(ctx: &Ctx, zip_path: &Path) -> Result<Value> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
     for i in 0..z.len() {
         let mut f = z.by_index(i)?;
-        let Some(rest) = f.name().ok().and_then(|n| n.strip_prefix("skills/").map(String::from)) else { continue };
-        let Some((skill, rel)) = rest.split_once('/') else { continue };
-        if !valid_name(skill) || rel.is_empty() || rel.split('/').any(|p| p == ".." || p.is_empty()) { continue; }
+        // the name as the zip library confines it: no part is `..`, a drive, or holds a separator or a stream
+        let Some(path) = f.enclosed_name() else { continue };
+        let Ok(rest) = path.strip_prefix("skills") else { continue };
+        let mut parts = rest.components();
+        let Some(skill) = parts.next().and_then(|c| c.as_os_str().to_str()) else { continue };
+        let rel = parts.as_path();
+        // and checked here too: every part is a plain name, so the file stays under the skill's folder
+        if !valid_name(skill) || rel.as_os_str().is_empty() || !rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) { continue; }
         if store.join(skill).exists() && !skills.contains(skill) { continue; }
-        let out = store.join(skill).join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let out = store.join(skill).join(rel);
         if let Some(p) = out.parent() { std::fs::create_dir_all(p)?; }
         let mut b = vec![];
         f.read_to_end(&mut b)?;
