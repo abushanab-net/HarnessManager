@@ -211,6 +211,22 @@ once its key is known, the signature, and applies them in order with a cursor pe
 An entry of a kind this version does not know stops that computer's merge just before it, and its card asks for
 an update. Names that arrive from another computer are checked before they become paths.
 
+Three rules sit on top of the entries:
+
+- **Tags:** the `tag_times` table keeps the time and computer of each item's last tag change. A merged change
+  applies only when it is later, and the computer's id decides between equal times, so two computers that tagged
+  the same item before syncing end with the same tags.
+- **Presence** is stamped with this computer's clock when it arrives, so "running on another computer" does not
+  depend on the other computer's clock.
+- **Missing entries:** a relay keeps the newest 50 MB of another computer's journal and the hub drops old
+  chunks. A chunk list that starts past the cursor is taken all the same, and the range passed is kept on that
+  computer's row; its card then says that part of its history is missing here.
+
+This computer's own chunk files are kept whole. Chunks older than the newest 100 are joined into files of up to
+1 MB, one run per publish; a reader skips the entries its cursor is past, so a reader of any version takes a
+joined file as an ordinary chunk. One writer changes a chunk list at a time (a named lock per origin), and a
+listed chunk whose file is gone is cut again from the outbox.
+
 **The shared folder** (`sync/folder.rs`): one folder per computer under `devices/<id>/`, holding its journal
 chunks and manifest, `device.json` and `presence.json`. Nothing in it is encrypted; the folder is the owner's.
 
@@ -330,8 +346,8 @@ request from a fork runs on GitHub-hosted runners instead, so outside code never
 
 `.github/workflows/release.yml` starts on a `vX.Y.Z` tag. It calls `ci.yml` first; only when that passes does it
 create a draft release and build Windows x64, Windows ARM64 (cross-compiled, allowed to fail), macOS (`.app`,
-then a `.dmg` made with `hdiutil`) and Linux (AppImage and deb) in parallel, with the version taken from the tag
-and the updater files signed. The hub's Docker image goes to `ghcr.io` from the `homek8-general` runner. The
+then a `.dmg` made with `hdiutil`) and Linux (AppImage and deb) one after the other, because each build rewrites
+the release's `latest.json`. The version is taken from the tag and the updater files are signed. The hub's Docker image goes to `ghcr.io` from the `homek8-general` runner. The
 release is then published with its `latest.json`, and all but the newest 2 releases are deleted (their tags
 stay). When a build fails or is cancelled, the draft is deleted.
 
