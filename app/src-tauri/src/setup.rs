@@ -203,7 +203,9 @@ pub fn prompt_live(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     let h = s(a, "harness")?;
     let p = reg.profiles.iter().find(|p| p.harness == h && p.main).or_else(|| reg.profiles.iter().find(|p| p.harness == h)).context("no profile for this tool")?;
     let f = harness::of(p).item_paths(ctx, p).prompt.context("this tool has no prompt file")?;
-    Ok(json!({"path": f, "body": std::fs::read_to_string(&f).unwrap_or_default()}))
+    // `own`: the text without the hrm block, which is what a saved prompt is compared with
+    let body = std::fs::read_to_string(&f).unwrap_or_default();
+    Ok(json!({"path": f, "own": items::strip_hint(&body), "body": body, "hint": ctx.settings.agent_hint}))
 }
 
 pub fn routing(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {

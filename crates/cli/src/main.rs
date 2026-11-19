@@ -62,7 +62,7 @@ enum Cmd {
     Overview { #[arg(long)] days: Option<i64>, #[arg(long)] harness: Option<String>, #[command(flatten)] j: Json },
     /// Every model response, newest first
     Requests { #[arg(long)] days: Option<i64>, #[arg(long)] harness: Option<String>, #[arg(long, default_value_t = 30)] limit: i64, #[command(flatten)] j: Json },
-    /// Limits of one account; --live asks Anthropic now (Claude subscription accounts)
+    /// Limits of one account; --live reads them now (Claude and Antigravity subscription accounts)
     Quota { name: String, #[arg(long)] live: bool, #[command(flatten)] j: Json },
     /// Sessions of every tool, grouped by project (or date, account, tool)
     Sessions {

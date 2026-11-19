@@ -1248,6 +1248,8 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
         if to.exists() { Registry::load(&to)?; } else { Registry::load(&from)?.save(&to).with_context(|| format!("could not put the account list at {}; it stays where it was", to.display()))?; }
     }
     fresh.save_settings()?;
+    // the block goes into every prompt file, or out of it, with the switch
+    if key == "agent_hint" { crate::items::apply_hint(&fresh, &fresh.registry()?)?; }
     Ok(fresh)
 }
 

@@ -2127,6 +2127,27 @@ description: Bulk skill ${i}
     await shot('13-prompts');
   });
 
+  await test('prompts: the switch adds a short block on using hrm to the end of every account\'s prompt file, and takes it out again; the text above it is not changed', async () => {
+    const agents = () => fs.readFileSync(path.join(home, '.codex', 'AGENTS.md'), 'utf8');
+    await nav('#prompts');
+    await click('[data-testid=prompt-tabs] [data-v=codex]');
+    await $('[data-testid=prompt-tabs] .active[data-v=codex]');
+    assert.equal(await exec("return document.querySelector('[data-testid=agent-hint]').checked"), false, 'off until asked for');
+    await click('[data-testid=agent-hint]');
+    await waitFor(() => agents().includes('<!-- hrm:accounts:start -->'), 'the block is in AGENTS.md');
+    const on = agents();
+    assert.ok(on.startsWith('Be brief and cite files.\n\n<!-- hrm:accounts:start -->') && on.includes('hrm list --refresh --json') && on.endsWith('<!-- hrm:accounts:end -->\n'), on);
+    assert.equal(hrm('settings', 'agent_hint').trim(), 'true');
+    // the enabled prompt is still the file's text: the block is not part of it
+    await nav('#home'); await nav('#prompts'); await drawn('prompts');
+    await waitFor(() => exec("return document.querySelector('[data-testid=agent-hint]').checked && /In the file/.test(document.querySelector('.b-prompt-list').textContent) && !/differs from the file/.test(document.querySelector('.b-prompt-list').textContent)"), 'the prompt reads as in the file');
+    assert.ok(JSON.parse(hrm('prompts', 'list', '--json')).every((p) => !p.body.includes('hrm:accounts')), 'no saved prompt holds the block');
+    await shot('13b-prompts-hrm-block');
+    await click('[data-testid=agent-hint]');
+    await waitFor(() => agents() === 'Be brief and cite files.', 'the file is the prompt alone again');
+    assert.equal(hrm('settings', 'agent_hint').trim(), 'false');
+  });
+
   await test('the list and setup pages keep the 1.10 rules: controls at least 28 px tall, one primary a screen, the head\'s actions on one row at 1280', async () => {
     // a prompt chosen in its editor, so System prompts is measured in the state with the most buttons
     await nav('#prompts');
