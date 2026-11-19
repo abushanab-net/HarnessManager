@@ -18,8 +18,8 @@
 .tool-group-header .sum { margin-left: auto; display: flex; gap: 16px; font-size: var(--fs-small); color: var(--ink-muted); min-width: 0; }
 .tool-group-header .sum b { font-weight: 650; }
 
-/* an account: 56 px, seven columns (ring, who, plan, limits, sparkline, usage, actions); nothing in it wraps */
-.acct-row { height: 56px; display: grid; grid-template-columns: 44px minmax(0, 1fr) 112px 240px 96px 112px 100px; gap: 14px; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line-subtle); cursor: pointer; white-space: nowrap; }
+/* an account: 56 px, eight columns (ring, who, plan, limits, the week's reset, sparkline, usage, actions); nothing in it wraps */
+.acct-row { height: 56px; display: grid; grid-template-columns: 44px minmax(0, 1fr) 112px 240px 176px 96px 112px 100px; gap: 14px; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line-subtle); cursor: pointer; white-space: nowrap; }
 .acct-row:last-child { border-bottom: 0; }
 .acct-row:hover { background: var(--bg-card-hover); }
 .acct-row:focus-visible { outline-offset: -2px; }
@@ -59,10 +59,31 @@
 .acct-row .btn.login { color: var(--warn); border-color: var(--warn-border); }
 .acct-row .btn.login:hover { background: var(--warn-soft); border-color: var(--warn); }
 .acct-row .btn[aria-expanded="true"] { background: var(--bg-card-hover); border-color: var(--line-strong); }
-/* a narrow window (or Large text at 1280) drops the sparkline: its numbers stay in the usage column */
+/* the week's reset: the time left and the date over the seven days from now (a line at every midnight, a mark at the
+   reset); under a day away it wears the accent. The days' names are once above the cards, over the same column */
+.acct-row .wk-reset .t { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; font-size: var(--fs-small); line-height: 16px; }
+.acct-row .wk-reset .t b { font-size: var(--fs-body); font-weight: 650; }
+.acct-row .wk-reset .t span { color: var(--ink-muted); }
+.acct-row .wk-reset.soon .t b { color: var(--ac); }
+.acct-row .wk-reset.none { font-size: var(--fs-small); color: var(--ink-muted); }
+svg.wk-track { display: block; width: 100%; height: 6px; margin-top: 4px; overflow: visible; border-radius: 3px; background: var(--track-bg); box-shadow: inset 0 0 0 1px var(--line-subtle); }
+.wk-track .till { fill: var(--ac-soft); }
+.wk-track .day { stroke: var(--line-strong); stroke-width: 1; }
+.wk-track .at { stroke: var(--ac); stroke-width: 3; stroke-linecap: round; }
+.wk-axis { display: grid; grid-template-columns: 44px minmax(0, 1fr) 112px 240px 176px 96px 112px 100px; column-gap: 14px; height: 16px; padding: 0 15px; }
+.wk-axis svg { grid-column: 5; display: block; width: 100%; height: 16px; overflow: visible; }
+.wk-axis text { font-family: var(--font-text); font-size: 12px; fill: var(--ink-dim); }
+/* a list with no room for the track (the window at its first size, 1280) keeps the reset's two texts, one over the
+   other, in the sparkline's place: the sparkline's numbers stay in the usage column */
+@container sheet (max-width: 1160px) {
+  .acct-row { grid-template-columns: 44px minmax(0, 1fr) 112px 240px 96px 112px 100px; }
+  .acct-row .wk-reset .t { flex-direction: column; align-items: flex-start; gap: 0; line-height: 17px; }
+  .acct-row .spark, svg.wk-track, .wk-axis { display: none; }
+}
+/* a narrow window (or Large text at 1280) drops the reset too: the Wk bar says it on hover */
 @container sheet (max-width: 960px) {
   .acct-row { grid-template-columns: 44px minmax(0, 1fr) 112px 240px 112px 100px; }
-  .acct-row .spark { display: none; }
+  .acct-row .wk-reset { display: none; }
 }
 
 /* ---- beside the pane (b-accounts.html): the drawn columns only (ring, who, limits, the range's usage, state) on

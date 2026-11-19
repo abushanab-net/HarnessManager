@@ -1166,7 +1166,8 @@ try {
   /** What the rows measure: each one's height, the lines of every piece of text in it, and whether a column runs into the next. */
   const rowFacts = () => exec(`const z = document.documentElement.currentCSSZoom || 1, out = { heights: [], wrapped: [], overlap: [] };
     for (const row of document.querySelectorAll('.acct-row')) {
-      const box = row.getBoundingClientRect(), kids = [...row.children];
+      // (a column the list's width drops, like the sparkline at 1280, is not measured)
+      const box = row.getBoundingClientRect(), kids = [...row.children].filter((k) => k.getClientRects().length);
       out.heights.push(Math.round(box.height / z));
       for (const el of row.querySelectorAll('*')) {
         if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
@@ -1194,7 +1195,7 @@ try {
       const w = await exec(`const row = document.querySelector(arguments[0]), lims = [...row.querySelectorAll('.lim')], cut = (e) => e.scrollWidth > e.clientWidth, plan = row.querySelector('.pill.plan');
         return { labels: lims.map((l) => l.querySelector('.t span').textContent), cut: lims.map((l) => cut(l.querySelector('.t span'))), titles: lims.map((l) => l.title.split(',')[0]),
           more: row.querySelector('.lim-more').textContent, moreTitle: row.querySelector('.lim-more').title, plan: [cut(plan), plan.title],
-          fits: row.querySelector('.lims').getBoundingClientRect().right <= row.querySelector('.spark').getBoundingClientRect().left };`, [row]);
+          fits: row.querySelector('.lims').getBoundingClientRect().right <= row.querySelector('.wk-reset').getBoundingClientRect().left };`, [row]);
       assert.deepEqual(w.labels, ['5h', 'Wk', 'Claude and GPT models'], 'three limits, by their short names');
       assert.deepEqual(w.cut, [false, false, true], 'the long name is cut with an ellipsis');
       assert.deepEqual(w.titles, ['5-hour session: 64% left (36% used)', 'Week: 41% left (59% used)', 'Week · Claude and GPT models: 35% left (65% used)'], 'each bar says the whole of it in its title');
@@ -1205,6 +1206,25 @@ try {
       const e = await rowFacts();
       assert.deepEqual([[...new Set(e.heights)], e.wrapped, e.overlap], [[56], [], []], 'the rows keep their height, and nothing wraps or overlaps');
       await shot('04b-accounts-long-labels');
+      // the week's reset: the time left and the date in every row; at 1280 as two texts in the sparkline's place
+      const resetOf = () => exec(`const c = document.querySelector('[data-testid=reset-work-max]'), shown = (e) => !!e && getComputedStyle(e).display !== 'none';
+        return { soon: c.classList.contains('soon'), left: c.querySelector('b').textContent, date: c.querySelector('.t span').textContent, title: c.title, track: shown(c.querySelector('.wk-track')), mark: c.querySelectorAll('.wk-track .at').length,
+          spark: shown(c.closest('.acct-row').querySelector('.spark')), axis: shown(document.querySelector('.wk-axis')), days: document.querySelectorAll('.wk-axis text').length,
+          none: [...document.querySelectorAll('.wk-reset.none')].map((n) => n.textContent + '|' + n.title) };`);
+      const at = new Date(soon), date = `${at.toLocaleDateString('en-US', { weekday: 'short' })} ${at.getDate()} ${at.toLocaleDateString('en-US', { month: 'short' })}`;
+      const narrow = await resetOf();
+      assert.ok(/^(3 h|2 h 59 m)$/.test(narrow.left) && narrow.date === date && narrow.soon, 'the time left and the date, in the accent under a day: ' + JSON.stringify(narrow));
+      assert.ok(narrow.title.startsWith(`Week resets ${date} at `), 'the clock time is in its title: ' + narrow.title);
+      assert.deepEqual([narrow.track, narrow.axis, narrow.spark], [false, false, false], 'at 1280: no track, no day names, no sparkline');
+      assert.ok(narrow.none.length && narrow.none.every((n) => n.split('|')[1]), 'an account with no open week says why on hover: ' + narrow.none);
+      await page.setViewportSize({ width: 1700, height: 800 });
+      try {
+        const wide = await resetOf(), f = await rowFacts();
+        assert.deepEqual([wide.track, wide.mark, wide.axis, wide.spark], [true, 1, true, true], 'in a wide window: the seven days with a mark at the reset, their names above, and the sparkline');
+        assert.ok(wide.days >= 6 && wide.days <= 8, 'a name for every day with room: ' + wide.days);
+        assert.deepEqual([[...new Set(f.heights)], f.wrapped, f.overlap], [[56], [], []], 'wide: the rows keep their height, and nothing wraps or overlaps');
+        await shot('04c-accounts-week-reset');
+      } finally { await page.setViewportSize({ width: 1280, height: 800 }); }
     });
     await reopenAccounts();
     // every control of the page is at least 28 px tall (a choice of a segmented control is 24 px inside its 30 px frame, as drawn)
@@ -1660,7 +1680,7 @@ try {
       return { cells: r.children.length, acts: [...r.querySelectorAll('.acts button')].map((b) => b.textContent.trim()), spark: !!r.querySelector('.spark'), height: Math.round(r.getBoundingClientRect().height / z),
         head: [...document.querySelectorAll('.page-head .actions .btn')].map((b) => b.textContent.trim() + (b.classList.contains('primary') ? ' (primary)' : '')), cols: [...document.querySelectorAll('.acct-cols .label')].map((l) => l.textContent) };`);
     const before = await rowOf();
-    assert.deepEqual([before.cells, before.acts, before.spark, before.height, before.cols], [7, ['Start', '⋯'], true, 56, []], 'the 1.10 row: ' + JSON.stringify(before));
+    assert.deepEqual([before.cells, before.acts, before.spark, before.height, before.cols], [8, ['Start', '⋯'], true, 56, []], 'the 1.10 row, with the week\'s reset: ' + JSON.stringify(before));
     assert.equal(before.head.at(-1), 'Add account (primary)');
     // the row's menu, to compare with the pane's
     await click('[data-testid=menu-codex-main]');
