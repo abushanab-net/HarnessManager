@@ -95,7 +95,32 @@ function limsLine(a, best, used, now, brief = false) {
   return `<div class="lims ${rest.length ? 'more' : ''}" ${best && a.id === best.id ? 'data-testid="best-note"' : ''} title="${esc(advice)}">${a.windows.slice(0, 3).map((w) => lim(w.kind === '5h' ? '5h' : w.kind === 'week' ? 'Wk' : w.label.split(' · ').pop(), title(w) + (advice ? '\n' + advice : ''), used ? w.used : w.left, w.left === 0 ? 'neg' : w.left <= 30 || w.outMs != null ? 'warn' : '', w.left === 0)).join('')}${rest.length ? `<span class="lim-more" title="${esc(rest.map(title).join('\n'))}">+${rest.length}</span>` : ''}</div>`;
 }
 
-/** One account, 56 px: ring, name and login, plan, limits, the range's sparkline, tokens and ≈ cost, ONE button for its state, ⋯.
+// ---- the week's reset, on the seven days from now ----
+const WEEK_MS = 7 * 86400e3, weekPct = (ms) => Math.min(100, Math.max(0, (ms / WEEK_MS) * 100)).toFixed(1);
+/** The seven midnights after `now`, each as its place (%) on the seven days from now and the day that starts there. */
+const midnights = (now) => { const t = new Date(now); return Array.from({ length: 7 }, (_, i) => { const d = new Date(t.getFullYear(), t.getMonth(), t.getDate() + i + 1); return { at: (d.getTime() - now) / WEEK_MS * 100, day: d.toLocaleDateString('en-US', { weekday: 'short' }) }; }); };
+/** The day names over the week tracks, once above the cards: each over its own day; a day with no
+ * room for its name (the part of today that is left, the part of the last day that is in) goes without. */
+function weekAxis(now) {
+  const days = [{ at: 0, day: new Date(now).toLocaleDateString('en-US', { weekday: 'short' }) }, ...midnights(now)];
+  // two letters, in the middle of the day: seven three-letter names touch each other on 176 px
+  return `<div class="wk-axis" aria-hidden="true"><svg>${days.map((d, i) => { const end = days[i + 1] ? days[i + 1].at : 100; return end - d.at < 10 ? '' : `<text x="${((d.at + end) / 2).toFixed(1)}%" y="12" text-anchor="middle">${d.day.slice(0, 2)}</text>`; }).join('')}</svg></div>`;
+}
+/** When an account's WEEK resets: the time left and the date, over a track of the seven days from now with a line at
+ * every midnight and a mark at the reset. An account with no week window gets a dash, with the reason on hover. */
+function weekReset(a, now) {
+  const w = a.needsLogin ? null : a.windows.find((x) => x.kind === 'week');
+  if (!w || !w.open) {
+    const [text, why] = !w ? ['—', a.needsLogin ? 'Log in to read its weekly reset' : 'No weekly limit to reset'] : w.resetsAt ? ['has reset', 'The week has reset; the next one starts with the next request'] : ['not started', 'No week is open; it starts with the next request'];
+    return `<div class="wk-reset none" title="${esc(why)}" data-testid="reset-${esc(a.id)}">${text}</div>`;
+  }
+  const t = new Date(w.resetsAt), date = `${t.toLocaleDateString('en-US', { weekday: 'short' })} ${t.getDate()} ${t.toLocaleDateString('en-US', { month: 'short' })}`;
+  const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`, at = weekPct(w.resetMs);
+  return `<div class="wk-reset ${w.resetMs < 86400e3 ? 'soon' : ''}" title="${esc(`${w.label} resets ${date} at ${hhmm}, in ${fmtDuration(w.resetMs)}`)}" data-testid="reset-${esc(a.id)}"><div class="t"><b>${esc(fmtDuration(w.resetMs))}</b><span>${esc(date)}</span></div>
+    <svg class="wk-track" aria-hidden="true"><rect class="till" width="${at}%" height="100%" rx="3"/>${midnights(now).map((d) => `<line class="day" x1="${d.at.toFixed(1)}%" x2="${d.at.toFixed(1)}%" y1="0" y2="6"/>`).join('')}<line class="at" x1="${at}%" x2="${at}%" y1="-2" y2="8"/></svg></div>`;
+}
+
+/** One account, 56 px: ring, name and login, plan, limits, the week's reset, the range's sparkline, tokens and ≈ cost, ONE button for its state, ⋯.
  * A click selects the row (pane.js); `sel` is the selected account. `paned`: the pane is open beside the list, so the
  * row is the drawn columns only (ring, who, limits, the range's usage, state) and its actions are the pane's. */
 function accountRow(a, best, now, used, pcs, sel = '', paned = false) {
@@ -118,6 +143,7 @@ function accountRow(a, best, now, used, pcs, sel = '', paned = false) {
     <div class="who" title="${esc([a.folder, a.added ? 'added ' + a.added : ''].filter(Boolean).join(' · '))}"><div class="row"><b class="trunc">${esc(a.name)}</b>${openNow ? `<span class="dot live" role="img" title="${esc(openNow)}" aria-label="${esc(openNow)}"></span>` : ''}${a.isMain ? `<span class="pill quiet" title="Main tool profile (${esc(a.folder)}): can be hidden, not deleted">main</span>` : ''}${a.mismatch ? '<span class="pill bad" title="Logged in as a different email than you entered">email differs</span>' : ''}</div>${under ? `<div class="small muted trunc">${esc(under)}</div>` : ''}</div>
     <div>${plan ? `<span class="pill plan" title="${esc(plan)}">${esc(plan)}</span>` : `<span class="unread" title="${a.needsLogin ? 'Log in to read its plan' : 'No plan'}">—</span>`}</div>
     ${limsLine(a, best, used, now)}
+    ${weekReset(a, now)}
     <div class="spark" title="${esc(au.days + ' days: ' + (vals.some(Boolean) ? vals.map((v) => fmt(v)).join(' · ') : 'no usage'))}">${sparkLine(vals)}<span>${au.days} days</span></div>
     ${use}
     <div class="acts">${a.needsLogin ? `<button class="btn sm login" data-act="login" data-name="${esc(a.id)}" title="${p.identity.logged_in ? 'Its login has expired' : 'Not logged in yet'}: sign in to start it" data-testid="login-${esc(a.id)}">Log in</button>` : `<button class="btn sm" data-act="start" data-name="${esc(a.id)}" data-testid="start-${esc(a.id)}">Start</button>`}<button class="btn sm icon" data-act="account-menu" data-name="${esc(a.id)}" data-home="${esc(a.folder)}" data-main="${a.isMain ? 1 : ''}" title="More actions" aria-label="More actions for ${esc(a.name)}" data-testid="menu-${esc(a.id)}">⋯</button></div></div>`;
@@ -180,7 +206,7 @@ function draw(sheet) {
     ${pageHead('accounts', status, `<button class="btn" data-act="acct-csv" data-testid="u-csv">Export CSV</button>${first && !paned ? `<button class="btn" data-act="start-in-folder" data-name="${esc(first.id)}" data-testid="start-best">Start in a folder…</button>` : ''}<button class="btn ${paned ? '' : 'primary'}" data-act="add-account" data-testid="add-account">Add account</button>`)}
     <div class="a-filters"><div class="seg" role="group" aria-label="Tool">${chip('', 'All', accts.length, 'chip-all')}${tools.map((h) => chip(h.id, toolIcon(h.id, 14) + (brief ? '' : esc(h.label)), accts.filter((a) => a.tool === h.id).length, 'chip-' + h.id, brief ? h.label : '')).join('')}</div>
       ${used ? '<span class="small muted" data-testid="used-note">Rings and bars show % used</span>' : ''}${seg('Range', [[7, '7 d'], [14, '14 d'], [30, '30 d']], au.days, (d) => `data-act="acct-days" data-v="${d}" data-testid="u-days-${d}"`)}</div>
-    <div class="a-groups" data-testid="accounts-table">${paned ? `<div class="acct-cols"><span></span><span class="label">Account</span><span class="label">Limits ${used ? 'used' : 'left'}</span><span class="label num">${au.days} days</span><span class="label">State</span></div>` : ''}${groups.map((h) => {
+    <div class="a-groups" data-testid="accounts-table">${paned ? `<div class="acct-cols"><span></span><span class="label">Account</span><span class="label">Limits ${used ? 'used' : 'left'}</span><span class="label num">${au.days} days</span><span class="label">State</span></div>` : accts.some((a) => !a.needsLogin && a.windows.some((w) => w.kind === 'week' && w.open)) ? weekAxis(now) : ''}${groups.map((h) => {
       const list = shown.filter((a) => a.tool === h.id).sort((a, b) => (eligible(b) - eligible(a)) || (b.measured - a.measured) || ((b.measured && a.measured) ? (wkof(b).left - wkof(a).left) : 0));
       const open = !folded.has(h.id), on = list.filter((a) => a.p.identity.logged_in).length, consoles = list.reduce((s, a) => s + a.openSessions, 0);
       const next = Math.min(...list.flatMap((a) => a.windows.filter((w) => w.open).map((w) => w.resetMs)).concat([Infinity]));
