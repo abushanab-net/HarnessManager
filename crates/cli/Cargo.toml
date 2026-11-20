@@ -18,6 +18,10 @@ serde = "1.0.229"
 serde_json = "1.0.154"
 tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 
+# already in the lock file through tauri-build; build.rs says why hrm.exe needs it
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3.7"
+
 [dev-dependencies]
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 tempfile = "3.27.0"

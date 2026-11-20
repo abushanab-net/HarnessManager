@@ -131,6 +131,23 @@ jobs:
             echo "APPLE_PASSWORD=$APW"
             echo "APPLE_TEAM_ID=$TEAM"
           } >> "$GITHUB_ENV"
+      # Authenticode signing when the repository variable WINDOWS_SIGNING is set; without it the Windows files are
+      # unsigned, and Defender's cloud model reported the unsigned hrm.exe of 1.11.3 as a trojan (19 Nov 2026).
+      # The variable holds the JSON Tauri takes under bundle.windows. For a certificate in the runner's store or
+      # on its token:
+      #   {"certificateThumbprint":"<sha1>","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}
+      # For a signing service: {"signCommand":{"cmd":"<tool>","args":["<its arguments>","%1"]}}
+      # Tauri then signs hrm.exe, the app, the uninstaller and the installer. What the tool needs to sign in
+      # (a token PIN, service credentials) is set on the runner, not here.
+      - name: Windows signing, when the variable is set
+        id: winsign
+        if: matrix.os == 'windows'
+        shell: bash
+        env: { SIGNING: '${{ vars.WINDOWS_SIGNING }}' }
+        run: |
+          if [ -z "$SIGNING" ]; then echo "no WINDOWS_SIGNING variable: the Windows files are not signed"; exit 0; fi
+          node -e 'require("fs").writeFileSync("app/src-tauri/tauri.sign.conf.json", JSON.stringify({ bundle: { windows: JSON.parse(process.env.SIGNING) } }))'
+          echo "args=--config src-tauri/tauri.sign.conf.json" >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -143,9 +160,21 @@ jobs:
             ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
             --config src-tauri/tauri.release.conf.json
             --config src-tauri/tauri.updater.conf.json
+            ${{ steps.winsign.outputs.args }}
           releaseId: ${{ needs.draft.outputs.id }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+      # a signature Windows does not accept (wrong certificate, missing chain) fails the release here, not on a
+      # user's computer. The app's own exe is not checked: the build log shows it signed before it is packed, and
+      # the file left in target/ is unsigned again afterwards (seen with tauri-cli 2.12.4)
+      - name: The installer and hrm.exe carry a valid signature
+        if: steps.winsign.outputs.args
+        shell: powershell
+        run: |
+          # target/ is kept between releases: only this version's installer counts
+          $files = @(Get-ChildItem target -Recurse -Filter "*_$($env:GITHUB_REF_NAME.TrimStart('v'))_*-setup.exe") + @(Get-ChildItem app/src-tauri/binaries -Filter "hrm-*${{ matrix.target || 'x86_64' }}*.exe")
+          if ($files.Count -lt 2) { throw "expected an installer and hrm.exe, found $($files.Count)" }
+          foreach ($f in $files) { $s = Get-AuthenticodeSignature -LiteralPath $f.FullName; "$($s.Status)  $($f.FullName)"; if ($s.Status -ne 'Valid') { exit 1 } }
       - name: .dmg (hdiutil, no Finder)
         if: matrix.os == 'macos'
         shell: bash
