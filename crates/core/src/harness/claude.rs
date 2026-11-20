@@ -246,6 +246,8 @@ impl Harness for Claude {
                 let (url, token) = crate::service::router_endpoint(ctx, p)?;
                 spec.env_set.push(("ANTHROPIC_BASE_URL".into(), url));
                 spec.env_set.push(("ANTHROPIC_AUTH_TOKEN".into(), token));
+                // a model Claude Code does not know is taken to have a million tokens of context: the endpoint's own number, when it gives one
+                if let Some(n) = crate::service::endpoint_context(p) { spec.env_set.push(("CLAUDE_CODE_MAX_CONTEXT_TOKENS".into(), n.to_string())); }
                 if let Some(m) = &p.model { spec.env_set.push(("ANTHROPIC_MODEL".into(), m.clone())); }
             }
         }

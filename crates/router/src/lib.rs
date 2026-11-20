@@ -262,10 +262,16 @@ async fn relay(st: Arc<AppState>, route_id: String, profile: String, headers: He
         let own_shape = || {
             let mut body = req.clone();
             body["model"] = json!(model);
-            // shortcut: an account's own endpoint that is not Anthropic's gets no `output_config` (Claude Code's effort):
-            // MirbadLLM answers 500 to an effort of high or more, and high is what Claude Code sends. Make this a
-            // setting of the endpoint when one wants the field.
-            if p.id.starts_with(OWN_ROUTE) && !base.contains("anthropic.com") { if let Some(o) = body.as_object_mut() { o.remove("output_config"); } }
+            // shortcut: an account's own endpoint that is not the vendor's gets no effort, neither Claude Code's
+            // `output_config` nor Codex's `reasoning.effort`: the values are the vendor's, and MirbadLLM answers 500
+            // and 400 to "high", which both tools send. The endpoint then uses its own default. Make this a setting
+            // of the endpoint when one wants the field.
+            if p.id.starts_with(OWN_ROUTE) && !base.contains("anthropic.com") && !base.contains("openai.com") {
+                if let Some(o) = body.as_object_mut() {
+                    o.remove("output_config");
+                    if let Some(r) = o.get_mut("reasoning").and_then(Value::as_object_mut) { r.remove("effort"); }
+                }
+            }
             body
         };
         let rb = if responses {

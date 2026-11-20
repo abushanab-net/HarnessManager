@@ -443,12 +443,13 @@ async fn an_api_key_account_with_its_own_endpoint_is_its_own_route_for_claude_co
     assert_eq!((&v["got"]["system"], &v["got"]["metadata"], v["beta"].as_str()), (&claude["system"], &claude["metadata"], Some("claude-code-20250219,interleaved-thinking-2025-05-14")));
 
     // Codex: Responses, passed on as they are; "" removes the intro
-    let codex = |stream: bool| json!({"model": "qwen", "stream": stream, "client_metadata": {"x-codex-installation-id": "i"}, "instructions": "You are Codex, based on GPT-5.
+    let codex = |stream: bool| json!({"model": "qwen", "stream": stream, "reasoning": {"effort": "high", "summary": "auto"}, "client_metadata": {"x-codex-installation-id": "i"}, "instructions": "You are Codex, based on GPT-5.
 Be exact.", "input": [
         {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}]});
     let v: Value = post("~/cdx/v1/responses", codex(false)).await.unwrap().json().await.unwrap();
     assert_eq!((v["auth"].as_str(), v["got"]["model"].as_str(), v["got"]["instructions"].as_str()), (Some("Bearer key-cdx"), Some("qwen"), Some("Be exact.")), "{v}");
     assert!(v["got"].get("client_metadata").is_none() && v["got"]["input"] == codex(false)["input"], "{v}");
+    assert_eq!(v["got"]["reasoning"], json!({"summary": "auto"}), "the vendor's effort values are not an endpoint's own");
     let text = post("~/cdx/v1/responses", codex(true)).await.unwrap().text().await.unwrap();
     assert!(text.starts_with("event: response.created") && text.contains("event: response.completed"), "the events come back as they were sent: {text}");
 

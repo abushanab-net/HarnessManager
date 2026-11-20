@@ -892,9 +892,15 @@ fn an_api_key_account_with_its_own_endpoint_or_an_intro_goes_through_the_router(
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
     e.ok(&["settings", "router_port", &port]);
     e.extra.push(("HRM_API_KEY".into(), "sk-own".into()));
-    e.ok(&["add", "gw", "--api-key", "--base-url", "http://gateway.example:8080", "--model", "local-m"]);
+    // the endpoint says how much context its model takes; the tool, which does not know the model, is told
+    const MODELS: &str = r#"{"object":"list","data":[{"id":"other","max_model_len":8192},{"id":"local-m","max_model_len":262144}]}"#;
+    let (gateway, asked) = mock_once(MODELS);
+    e.ok(&["add", "gw", "--api-key", "--base-url", &gateway, "--model", "local-m"]);
     e.ok(&["run", "gw"]);
+    let asked = asked.join().unwrap().to_lowercase();
+    assert!(asked.starts_with("get /api/oauth/usage/v1/models ") && asked.contains("authorization: bearer sk-own"), "{asked}");
     let run = e.runs().pop().unwrap();
+    assert_eq!(run["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "262144");
     assert_eq!(run["env"]["ANTHROPIC_BASE_URL"], format!("http://127.0.0.1:{port}/r/~/gw"));
     assert_eq!(run["env"]["ANTHROPIC_MODEL"], "local-m");
     assert!(run["env"].get("ANTHROPIC_API_KEY").is_none() && run["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap().len() == 64, "{run}");
@@ -906,6 +912,13 @@ fn an_api_key_account_with_its_own_endpoint_or_an_intro_goes_through_the_router(
     let args: Vec<&str> = run["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
     assert!(args.contains(&format!("model_providers.hrm.base_url=http://127.0.0.1:{port}/r/~/cx-gw/v1").as_str()) && args.ends_with(&["exec", "hi"]), "{args:?}");
     assert!(run["env"].get("OPENAI_API_KEY").is_none() && run["env"]["HRM_CODEX_KEY"].as_str().unwrap().len() == 64, "{run}");
+    // Codex with an endpoint of its own: asked at <base>/models, and the window goes in with the provider
+    let (gateway, asked) = mock_once(MODELS);
+    e.ok(&["add", "cx-own", "--harness", "codex", "--api-key", "--base-url", &gateway, "--model", "local-m"]);
+    e.ok(&["run", "cx-own"]);
+    assert!(asked.join().unwrap().to_lowercase().starts_with("get /api/oauth/usage/models "));
+    let run = e.runs().pop().unwrap();
+    assert!(run["args"].as_array().unwrap().iter().any(|a| a == "model_context_window=262144") && run["args"].as_array().unwrap().iter().any(|a| a == "model=local-m"), "{run}");
     // a subscription login never passes the router, so it has no intro to change
     assert!(e.fail(&["add", "sub", "--intro", "x", "--no-login"]).contains("never passes through the router"));
     e.ok(&["router", "stop"]);

@@ -1072,6 +1072,21 @@ pub fn router_endpoint(ctx: &Ctx, p: &Profile) -> Result<(String, String)> {
     Ok((format!("http://127.0.0.1:{port}/r/{route}/{}", p.name), token))
 }
 
+/// The context window an account's own endpoint reports for the account's model, in tokens: `GET <base>/models`,
+/// the entry with the model's id, its `max_model_len` (vLLM, MirbadLLM), `context_length` (OpenRouter) or
+/// `context_window`. None when the endpoint does not say, or does not answer in three seconds: the tool then
+/// assumes a window of its own (Claude Code a million tokens for a model it does not know).
+pub fn endpoint_context(p: &Profile) -> Option<u64> {
+    let (base, model) = (p.base_url.as_deref()?, p.model.as_deref()?);
+    let key = crate::secrets::get_key(&crate::secrets::key_target(&p.name))?;
+    // Claude Code's base URL stops before /v1, Codex's has it
+    let url = format!("{}{}/models", base.trim_end_matches('/'), if p.harness == "codex" { "" } else { "/v1" });
+    let v: serde_json::Value = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(3)).build().ok()?
+        .get(url).bearer_auth(&key).header("x-api-key", &key).send().ok()?.error_for_status().ok()?.json().ok()?;
+    let m = v["data"].as_array()?.iter().find(|m| m["id"] == model)?;
+    ["max_model_len", "context_length", "context_window"].iter().find_map(|k| m[*k].as_u64())
+}
+
 pub fn router_token(ctx: &Ctx) -> Result<String> {
     if let Some(t) = ctx.db.kv_get("router:token")? { return Ok(t); }
     let t = random_token();
