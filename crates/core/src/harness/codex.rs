@@ -158,6 +158,8 @@ impl Harness for Codex {
             let mut over = vec!["model_provider=hrm".to_string(), "model_providers.hrm.name=hrm".into(), format!("model_providers.hrm.base_url={url}/v1"),
                 "model_providers.hrm.env_key=HRM_CODEX_KEY".into(), "model_providers.hrm.wire_api=responses".into()];
             if let Some(m) = &p.model { over.push(format!("model={m}")); }
+            // Codex has no numbers for a model it does not know: the endpoint's own context window, when it gives one
+            if let Some(n) = crate::service::endpoint_context(p) { over.push(format!("model_context_window={n}")); }
             spec.args.splice(0..0, over.into_iter().flat_map(|o| ["-c".to_string(), o]));
             spec.env_set.push(("HRM_CODEX_KEY".into(), token));
         } else if p.kind == Kind::ApiKey {

@@ -199,6 +199,13 @@ the tool's own ids leave the request: Claude Code's billing line, `metadata` and
 `client_metadata` (`convert::scrub`). The rest of the instructions stays; the tool's own headers were never
 passed on. A provider that is not Anthropic's gets the key as a bearer token as well as `x-api-key`.
 
+An account's own endpoint that is not the vendor's gets no effort value, neither Claude Code's `output_config`
+nor Codex's `reasoning.effort`: the values are the vendor's, and an endpoint may refuse them (MirbadLLM refuses
+`high`, which both tools send). At launch the tool is also told the context window the endpoint reports for the
+account's model in `GET <base>/models` (`service::endpoint_context`: `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for
+Claude Code, `model_context_window` for Codex); without it Claude Code takes a model it does not know to have a
+million tokens.
+
 ## Across computers: the journal and three transports
 
 `crates/core/src/journal.rs` and `crates/core/src/sync/`. The sync mode in settings is `off`, `folder` or
