@@ -107,6 +107,12 @@ you are on. The **?** button replays the page's tour.
   OpenAI Chat Completions formats. Subscription logins never pass through it. DeepSeek is a built-in preset
   (`hrm provider list` shows the command that adds it): its OpenAI-format endpoint, its Anthropic-format one
   for Claude Code routes, both models and their list prices, with cache hits counted from the usage it returns.
+  Codex can be routed as well, to a provider that serves `/responses`: the router passes its requests on
+  unchanged. An API-key account of Claude Code or Codex that points at an endpoint of your own (a gateway, a
+  local model server) goes through the router by itself, with no provider or route to set up; a plain vendor
+  key still goes straight to the vendor. Such an account can have the line its tool names itself with ("You
+  are Claude Code, ...") removed or replaced. Only that line changes: the rest of the instructions stays,
+  because it tells the model how to use the tools.
 - **Backups:** automatic and manual, of the account list, settings, what Harness Manager wrote into each
   tool, and the skills it manages. Backups never hold keys, logins or MCP env and header values. A backup also
   holds the history: every request with the computer it ran on and the cost it was valued at, the sessions, the

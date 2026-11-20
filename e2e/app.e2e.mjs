@@ -584,6 +584,39 @@ try {
     assert.equal(readLines(runLog).pop().env.ANTHROPIC_API_KEY, 'sk-ant-e2e');
   });
 
+  await test('the line a tool names itself with: replaced in the add dialog, removed on the account page, and the account then goes through the router', async () => {
+    await nav('#accounts');
+    await click('[data-testid=add-account]');
+    await click('[data-testid=kind-api_key]');
+    await type('[data-testid=add-name]', 'team-plain');
+    await type('[data-testid=add-key]', 'sk-ant-e2e');
+    await select('[data-testid=ad-intro-mode]', 'replace');
+    // nothing typed: said in the dialog, and nothing is created
+    await click('[data-testid=add-create]');
+    await hasText('.modal-card .notice-bar', 'replacement line');
+    await type('[data-testid=ad-intro]', 'You are a coding assistant.');
+    await shot('02c-add-account-intro');
+    await click('[data-testid=add-create]');
+    await hasText('[data-testid=row-team-plain]', 'API key');
+    assert.equal(JSON.parse(hrm('show', 'team-plain', '--json')).intro, 'You are a coding assistant.');
+    // the tool gets the router's address and token, never the key
+    hrm('run', 'team-plain');
+    const ran = readLines(runLog).pop().env;
+    hrm('router', 'stop');
+    assert.ok(ran.ANTHROPIC_BASE_URL.endsWith('/r/~/team-plain') && !ran.ANTHROPIC_API_KEY, JSON.stringify(ran));
+    // on its page: the saved choice, changed to "Removed"
+    await nav('#account?name=team-plain');
+    await click('[data-testid=tab-settings]');
+    await $('[data-testid=pf-intro]');
+    assert.equal(await page.inputValue('[data-testid=pf-intro]'), 'You are a coding assistant.');
+    await shot('05e-account-intro');
+    await select('[data-testid=pf-intro-mode]', 'remove');
+    await click('[data-testid=intro-save]');
+    await waitFor(() => JSON.parse(hrm('show', 'team-plain', '--json')).intro === '', 'the line removed');
+    hrm('remove', 'team-plain', '--delete-home');
+    await nav('#accounts');
+  });
+
   await test('add a Codex account: sign-in opens in a terminal', async () => {
     await click('[data-testid=add-account]');
     await click('[data-testid=add-tool-codex]');

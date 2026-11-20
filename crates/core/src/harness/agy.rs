@@ -366,7 +366,7 @@ mod tests {
         use crate::harness::Harness;
         let t = tempfile::tempdir().unwrap();
         let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        let p = crate::registry::Profile { name: "agy-main".into(), label: None, harness: "agy".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let p = crate::registry::Profile { name: "agy-main".into(), label: None, harness: "agy".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
         let file = ctx.home.join(".gemini").join("antigravity-cli").join("conversations").join("conv-1.db");
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         let step = |idx: i64, kind: i64, text: &str| { let mut pb = vec![0x0a, text.len() as u8]; pb.extend_from_slice(text.as_bytes());
@@ -415,7 +415,7 @@ mod tests {
         use crate::registry::{Kind, Profile};
         let d = tempfile::tempdir().unwrap();
         let ctx = crate::Ctx::open_at(&d.path().join("data"), &d.path().join("home")).unwrap();
-        let acct = |name: &str, main| Profile { name: name.into(), label: None, harness: "agy".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let acct = |name: &str, main| Profile { name: name.into(), label: None, harness: "agy".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
         // no login was ever saved here, and the start is not held up by a swap
         super::Agy.activate(&ctx, &acct("agy-main", true)).unwrap();
         assert!(super::Agy.activate(&ctx, &acct("second", false)).unwrap_err().to_string().contains("on Windows only"));
@@ -423,7 +423,7 @@ mod tests {
         super::Agy.prepare_login(&ctx).unwrap();
         assert!(super::Agy.finish_login(&ctx, &acct("agy-main", true)).unwrap() && !super::Agy.unowned(&ctx));
         super::Agy.check_switch(&ctx, &acct("agy-main", true)).unwrap();
-        let add = crate::service::add_profile(&ctx, crate::service::AddRequest { name: "second".into(), harness: "agy".into(), kind: Kind::Subscription, email: None, api_key: None, base_url: None, model: None, route: None, main: false });
+        let add = crate::service::add_profile(&ctx, crate::service::AddRequest { name: "second".into(), harness: "agy".into(), kind: Kind::Subscription, email: None, api_key: None, base_url: None, model: None, route: None, intro: None, main: false });
         assert!(add.err().unwrap().to_string().contains("on Windows only"));
         assert!(ctx.registry().unwrap().profiles.is_empty());
     }

@@ -29,7 +29,7 @@ fn ctx(tools: &[&str]) -> (tempfile::TempDir, Ctx) {
     let ctx = Ctx::open_at(&dir.path().join("data"), &dir.path().join("home")).unwrap();
     let mut reg = ctx.registry().unwrap();
     for t in tools {
-        reg.add_profile(Profile { name: format!("{t}-main"), label: None, harness: t.to_string(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+        reg.add_profile(Profile { name: format!("{t}-main"), label: None, harness: t.to_string(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
     }
     ctx.save_registry(&reg).unwrap();
     (dir, ctx)

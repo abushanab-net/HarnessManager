@@ -1,6 +1,8 @@
 //! The local router: `http://127.0.0.1:<port>/r/<route>/<profile>`. API-key providers only; subscription
 //! logins never pass through it. Requests carry the launch token; failover uses a circuit breaker per
 //! provider; aggregate routes pick the provider from a `hm-<provider>--<model>` id and never fall back.
+//! Claude Code and Pi send Anthropic Messages (converted for an OpenAI-format provider); Codex sends OpenAI
+//! Responses, passed on as they are. An API-key account with an endpoint of its own is the route `~`.
 
 pub mod convert;
 
@@ -16,7 +18,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
-use hrm_core::registry::{Provider, Route};
+use hrm_core::registry::{Provider, Route, OWN_ROUTE};
 use hrm_core::Ctx;
 use serde_json::{json, Value};
 
@@ -83,6 +85,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/r/{route}/{profile}/v1/messages", post(messages))
+        .route("/r/{route}/{profile}/v1/responses", post(responses))
         .route("/r/{route}/{profile}/v1/messages/count_tokens", post(count_tokens))
         .route("/r/{route}/{profile}/v1/models", get(models))
         .layer(DefaultBodyLimit::max(64 * 1024 * 1024))
@@ -167,20 +170,64 @@ fn log(st: &AppState, route: &str, profile: &str, provider: &str, model: &str, s
     let _ = st.ctx.db.log_route(route, profile, provider, model, status as i64, started.elapsed().as_millis() as i64, first, tokens);
 }
 
-/// An Anthropic `usage` as (input, output, cache read, cache write): each apart, as they are priced.
+/// A `usage` as (input, output, cache read, cache write): each apart, as they are priced. The Responses API
+/// counts cached input inside `input_tokens`, the Messages API beside it.
 fn tokens_of(u: &Value) -> (i64, i64, i64, i64) {
     let n = |k: &str| u[k].as_i64().unwrap_or(0);
-    (n("input_tokens"), n("output_tokens"), n("cache_read_input_tokens"), n("cache_creation_input_tokens"))
+    let cached = u["input_tokens_details"]["cached_tokens"].as_i64().unwrap_or(0);
+    (n("input_tokens") - cached, n("output_tokens"), n("cache_read_input_tokens") + cached, n("cache_creation_input_tokens"))
+}
+
+/// The registry as one account's requests see it: an API-key account that goes through the router by itself
+/// has a route of its own (`~`) to one provider, its endpoint.
+fn registry_for(st: &AppState, profile: &str) -> Result<hrm_core::Registry> {
+    let mut reg = st.ctx.registry()?;
+    if let Some(p) = reg.profiles.iter().find(|p| p.name == profile && p.own_route()).map(|p| p.own_provider()) {
+        reg.routes.push(Route { id: OWN_ROUTE.into(), mode: "failover".into(), providers: vec![p.id.clone()], default_provider: None });
+        reg.providers.push(p);
+    }
+    Ok(reg)
+}
+
+/// A provider's key; an account's own endpoint (`~<account>`) has the account's.
+fn key_of(p: &Provider) -> Option<String> {
+    hrm_core::secrets::get_key(&match p.id.strip_prefix(OWN_ROUTE) { Some(account) => hrm_core::secrets::key_target(account), None => hrm_core::secrets::provider_target(&p.id) })
+}
+
+/// A call to an Anthropic-format provider, with its key and the tool's version and beta headers. `plain`: the
+/// account's intro is changed, so the beta that only says "Claude Code" is not passed on either.
+fn anthropic_call(st: &AppState, p: &Provider, key: &str, path: &str, headers: &HeaderMap, plain: bool) -> reqwest::RequestBuilder {
+    let base = p.base_url.trim_end_matches('/');
+    let mut b = st.client.post(format!("{base}{path}")).header("x-api-key", key).header("anthropic-version",
+        headers.get("anthropic-version").and_then(|v| v.to_str().ok()).unwrap_or("2023-06-01"));
+    // a gateway may read the key as a bearer token only (MirbadLLM does); Anthropic takes a bearer for a login, never for a key
+    if !base.contains("anthropic.com") { b = b.bearer_auth(key); }
+    let beta = headers.get("anthropic-beta").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let beta: Vec<&str> = beta.split(',').map(str::trim).filter(|t| !t.is_empty() && !(plain && t.starts_with("claude-code"))).collect();
+    if !beta.is_empty() { b = b.header("anthropic-beta", beta.join(",")); }
+    b
 }
 const NO_TOKENS: (i64, i64, i64, i64) = (0, 0, 0, 0);
 
 async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Path<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
+    relay(st, route_id, profile, headers, body, false).await
+}
+
+/// Codex's requests: OpenAI Responses, passed to an OpenAI-format provider and back as they are.
+async fn responses(State(st): State<Arc<AppState>>, Path((route_id, profile)): Path<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
+    relay(st, route_id, profile, headers, body, true).await
+}
+
+/// One request to the first provider of the route that answers. `responses`: it is in the Responses shape.
+async fn relay(st: Arc<AppState>, route_id: String, profile: String, headers: HeaderMap, body: Bytes, responses: bool) -> Response {
     if !authorized(&st, &headers) {
         return err(StatusCode::UNAUTHORIZED, "authentication_error", "missing or wrong router token");
     }
-    let Ok(req) = serde_json::from_slice::<Value>(&body) else { return err(StatusCode::BAD_REQUEST, "invalid_request_error", "body is not JSON") };
-    let reg = match st.ctx.registry() { Ok(r) => r, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "api_error", e.to_string()) };
+    let Ok(mut req) = serde_json::from_slice::<Value>(&body) else { return err(StatusCode::BAD_REQUEST, "invalid_request_error", "body is not JSON") };
+    let reg = match registry_for(&st, &profile) { Ok(r) => r, Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, "api_error", e.to_string()) };
     let Some(route) = reg.routes.iter().find(|r| r.id == route_id).cloned() else { return err(StatusCode::NOT_FOUND, "not_found_error", format!("no route {route_id}")) };
+    let intro = reg.profiles.iter().find(|p| p.name == profile).and_then(|p| p.intro.clone());
+    if let Some(i) = &intro { convert::scrub(&mut req, i); }
     // a daily spend cap: nothing more goes out today once it is reached (prices may be fetched, so off the async thread)
     if let Some(cap) = reg.profiles.iter().find(|p| p.name == profile).and_then(|p| p.daily_cap_usd) {
         let (c2, who) = (st.ctx.clone(), profile.clone());
@@ -206,20 +253,31 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
         }
         let started = Instant::now();
         // the registry syncs between computers, the keys do not
-        let Some(key) = hrm_core::secrets::get_key(&hrm_core::secrets::provider_target(&p.id)) else {
+        let Some(key) = key_of(&p) else {
             last_error = format!("no key for {} is saved on this computer; add it under API keys & routing", p.id);
             continue;
         };
         let base = p.base_url.trim_end_matches('/');
-        let rb = if p.format == "openai" {
-            st.client.post(format!("{base}/chat/completions")).bearer_auth(&key).json(&convert::anthropic_to_openai(&req, &model))
-        } else {
+        // the request in its own shape, with the model this provider serves
+        let own_shape = || {
             let mut body = req.clone();
             body["model"] = json!(model);
-            let mut b = st.client.post(format!("{base}/v1/messages")).header("x-api-key", &key).header("anthropic-version",
-                headers.get("anthropic-version").and_then(|v| v.to_str().ok()).unwrap_or("2023-06-01"));
-            if let Some(beta) = headers.get("anthropic-beta").and_then(|v| v.to_str().ok()) { b = b.header("anthropic-beta", beta); }
-            b.json(&body)
+            // shortcut: an account's own endpoint that is not Anthropic's gets no `output_config` (Claude Code's effort):
+            // MirbadLLM answers 500 to an effort of high or more, and high is what Claude Code sends. Make this a
+            // setting of the endpoint when one wants the field.
+            if p.id.starts_with(OWN_ROUTE) && !base.contains("anthropic.com") { if let Some(o) = body.as_object_mut() { o.remove("output_config"); } }
+            body
+        };
+        let rb = if responses {
+            if p.format != "openai" {
+                last_error = format!("{} takes the Anthropic format; Codex needs an OpenAI-format provider that serves /responses", p.id);
+                continue;
+            }
+            st.client.post(format!("{base}/responses")).bearer_auth(&key).json(&own_shape())
+        } else if p.format == "openai" {
+            st.client.post(format!("{base}/chat/completions")).bearer_auth(&key).json(&convert::anthropic_to_openai(&req, &model))
+        } else {
+            anthropic_call(&st, &p, &key, "/v1/messages", &headers, intro.is_some()).json(&own_shape())
         };
         let resp = match rb.send().await {
             Ok(r) => r,
@@ -250,12 +308,12 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
         }
         if stream {
             st.served(&p.id, &profile, &tried);
-            return stream_back(st.clone(), resp, p, model, route_id.clone(), profile.clone(), started);
+            return stream_back(st.clone(), resp, p, model, route_id.clone(), profile.clone(), started, !responses);
         }
         // a 200 whose body is no answer (not JSON, or an OpenAI-format error) is a failure like any other
         let answer = match resp.json::<Value>().await {
             Err(e) => Err(format!("sent a reply that is not JSON: {e}")),
-            Ok(v) if p.format == "openai" => match convert::failure(&v) { Some(why) => Err(format!("answered with an error: {why}")), None => Ok(convert::openai_to_anthropic(&v, &model)) },
+            Ok(v) if p.format == "openai" && !responses => match convert::failure(&v) { Some(why) => Err(format!("answered with an error: {why}")), None => Ok(convert::openai_to_anthropic(&v, &model)) },
             Ok(v) => Ok(v),
         };
         let out = match answer {
@@ -277,9 +335,11 @@ async fn messages(State(st): State<Arc<AppState>>, Path((route_id, profile)): Pa
     refused.unwrap_or_else(|| err(StatusCode::BAD_GATEWAY, "api_error", last_error))
 }
 
-/// Relay a streaming answer, converting OpenAI chunks to Anthropic events on the fly.
-fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: String, route: String, profile: String, started: Instant) -> Response {
-    let openai = p.format == "openai";
+/// Relay a streaming answer, converting OpenAI chunks to Anthropic events on the fly. `messages`: the tool asked
+/// in the Messages shape; an answer to a Responses request goes back as it comes.
+#[allow(clippy::too_many_arguments)]
+fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: String, route: String, profile: String, started: Instant, messages: bool) -> Response {
+    let openai = messages && p.format == "openai";
     let mut upstream = resp.bytes_stream();
     let s = async_stream_like(move |tx| async move {
         // bytes, cut at line ends only: a line, or a multi-byte character, split across chunks waits for its rest
@@ -306,6 +366,8 @@ fn stream_back(st: Arc<AppState>, resp: reqwest::Response, p: Provider, model: S
                     if let Ok(v) = serde_json::from_str::<Value>(data) {
                         if v["message"]["usage"].is_object() { tokens = tokens_of(&v["message"]["usage"]); }
                         if let Some(o) = v["usage"]["output_tokens"].as_i64() { tokens.1 = o; }
+                        // Responses: the numbers come once, with the last event
+                        if v["response"]["usage"].is_object() { tokens = tokens_of(&v["response"]["usage"]); }
                     }
                     continue;
                 }
@@ -350,24 +412,22 @@ where
     futures_util::stream::poll_fn(move |cx| rx.poll_recv(cx))
 }
 
-async fn count_tokens(State(st): State<Arc<AppState>>, Path((route_id, _profile)): Path<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
+async fn count_tokens(State(st): State<Arc<AppState>>, Path((route_id, profile)): Path<(String, String)>, headers: HeaderMap, body: Bytes) -> Response {
     if !authorized(&st, &headers) {
         return err(StatusCode::UNAUTHORIZED, "authentication_error", "missing or wrong router token");
     }
-    let reg = st.ctx.registry().unwrap_or_default();
+    let reg = registry_for(&st, &profile).unwrap_or_default();
     let mut req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    let intro = reg.profiles.iter().find(|p| p.name == profile).and_then(|p| p.intro.clone());
+    if let Some(i) = &intro { convert::scrub(&mut req, i); }
     let model = req["model"].as_str().unwrap_or("").to_string();
     // the first provider the route would send this model to, with that provider's own model id (aggregate
     // routes name models `hm-<provider>--<model>`, which no provider knows)
     let first = reg.routes.iter().find(|r| r.id == route_id).and_then(|r| candidates(&reg, r, &model).ok()).and_then(|c| c.into_iter().next());
     if let Some((p, m)) = first.filter(|(p, _)| p.format == "anthropic") {
         req["model"] = json!(m);
-        let key = hrm_core::secrets::get_key(&hrm_core::secrets::provider_target(&p.id)).unwrap_or_default();
-        let mut call = st.client.post(format!("{}/v1/messages/count_tokens", p.base_url.trim_end_matches('/'))).header("x-api-key", key)
-            .header("anthropic-version", headers.get("anthropic-version").and_then(|v| v.to_str().ok()).unwrap_or("2023-06-01"))
-            .header("content-type", "application/json").body(req.to_string());
-        if let Some(b) = headers.get("anthropic-beta").and_then(|v| v.to_str().ok()) { call = call.header("anthropic-beta", b); }
-        if let Ok(r) = call.send().await {
+        let key = key_of(&p).unwrap_or_default();
+        if let Ok(r) = anthropic_call(&st, &p, &key, "/v1/messages/count_tokens", &headers, intro.is_some()).json(&req).send().await {
             if r.status().is_success() {
                 if let Ok(v) = r.json::<Value>().await { return Json(v).into_response(); }
             }
@@ -377,11 +437,11 @@ async fn count_tokens(State(st): State<Arc<AppState>>, Path((route_id, _profile)
     Json(json!({"input_tokens": body.len() / 4})).into_response()
 }
 
-async fn models(State(st): State<Arc<AppState>>, Path((route_id, _profile)): Path<(String, String)>, headers: HeaderMap) -> Response {
+async fn models(State(st): State<Arc<AppState>>, Path((route_id, profile)): Path<(String, String)>, headers: HeaderMap) -> Response {
     if !authorized(&st, &headers) {
         return err(StatusCode::UNAUTHORIZED, "authentication_error", "missing or wrong router token");
     }
-    let reg = st.ctx.registry().unwrap_or_default();
+    let reg = registry_for(&st, &profile).unwrap_or_default();
     let Some(route) = reg.routes.iter().find(|r| r.id == route_id) else { return err(StatusCode::NOT_FOUND, "not_found_error", "no such route") };
     Json(json!({"data": model_list(&reg, route), "has_more": false})).into_response()
 }

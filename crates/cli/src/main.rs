@@ -42,6 +42,8 @@ enum Cmd {
         #[arg(long)] email: Option<String>,
         #[arg(long)] base_url: Option<String>,
         #[arg(long)] model: Option<String>,
+        /// API-key and routed accounts: replace the line the tool names itself with ("You are Claude Code, ...") by this text; "" removes it
+        #[arg(long)] intro: Option<String>,
         /// Create without starting the login
         #[arg(long)] no_login: bool,
         #[command(flatten)] j: Json,
@@ -414,10 +416,10 @@ fn real_main(cli: Cli) -> Result<i32> {
             println!("  tokens 7d  {}  ({} sessions)", fmt_tokens(v.tokens_7d), v.sessions_7d);
             for r in &v.running { println!("  open       pid {} {}", r.pid, r.cwd.clone().unwrap_or_default()); }
         }
-        Cmd::Add { name, harness: h, api_key, route, email, base_url, model, no_login, j } => {
+        Cmd::Add { name, harness: h, api_key, route, email, base_url, model, intro, no_login, j } => {
             let kind = if route.is_some() { Kind::Routed } else if api_key { Kind::ApiKey } else { Kind::Subscription };
             let key = if kind == Kind::ApiKey { Some(secret_input("API key: ")?) } else { None };
-            let v = service::add_profile(&ctx, AddRequest { name: name.clone(), harness: h, kind, email, api_key: key, base_url, model, route, main: false })?;
+            let v = service::add_profile(&ctx, AddRequest { name: name.clone(), harness: h, kind, email, api_key: key, base_url, model, route, intro, main: false })?;
             if j.json { print_json(&v)?; } else { println!("Added {} ({}) at {}", v.name, v.harness_label, v.home); }
             if kind == Kind::Subscription && !no_login {
                 return login(&ctx, &name);

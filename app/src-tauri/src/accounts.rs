@@ -61,7 +61,7 @@ pub fn add(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 pub fn remove(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { service::remove_profile(ctx, &s(a, "name")?, a["delete_home"] == true)?; Ok(json!(true)) }
 
 pub fn update(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
-    service::update_profile(ctx, &s(a, "name")?, opt(a, "email"), a["base_url"].as_str().map(String::from), a["model"].as_str().map(String::from))?;
+    service::update_profile(ctx, &s(a, "name")?, opt(a, "email"), a["base_url"].as_str().map(String::from), a["model"].as_str().map(String::from), a.get("intro").map(|v| v.as_str().map(String::from)))?;
     Ok(json!(true))
 }
 

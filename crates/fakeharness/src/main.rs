@@ -28,7 +28,7 @@ fn b64url(bytes: &[u8]) -> String {
 
 fn record(tool: &str, args: &[String]) {
     let Ok(log) = std::env::var("FAKE_RUN_LOG") else { return };
-    let vars = ["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CODEX_HOME", "OPENAI_API_KEY", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_TOKEN"];
+    let vars = ["CLAUDE_CONFIG_DIR", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "CODEX_HOME", "OPENAI_API_KEY", "HRM_CODEX_KEY", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_TOKEN"];
     let env: serde_json::Map<String, serde_json::Value> = vars.iter().filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), json!(v)))).collect();
     let line = json!({"tool": tool, "args": args, "cwd": std::env::current_dir().unwrap().display().to_string(), "env": env});
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap();

@@ -884,6 +884,33 @@ fn codex_api_key_profile_passes_the_key_in_the_environment() {
     assert!(e.fail(&["add", "oc-key", "--harness", "opencode", "--api-key"]).contains("does not take API keys"));
 }
 
+/// An API-key account with an endpoint of its own, or an intro to change, goes through the router by itself:
+/// the tool gets the router's address and token, and the key stays behind. A plain vendor key does not (above).
+#[test]
+fn an_api_key_account_with_its_own_endpoint_or_an_intro_goes_through_the_router() {
+    let mut e = Env::new();
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
+    e.ok(&["settings", "router_port", &port]);
+    e.extra.push(("HRM_API_KEY".into(), "sk-own".into()));
+    e.ok(&["add", "gw", "--api-key", "--base-url", "http://gateway.example:8080", "--model", "local-m"]);
+    e.ok(&["run", "gw"]);
+    let run = e.runs().pop().unwrap();
+    assert_eq!(run["env"]["ANTHROPIC_BASE_URL"], format!("http://127.0.0.1:{port}/r/~/gw"));
+    assert_eq!(run["env"]["ANTHROPIC_MODEL"], "local-m");
+    assert!(run["env"].get("ANTHROPIC_API_KEY").is_none() && run["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap().len() == 64, "{run}");
+    // Codex: the router is its provider for this launch, named before the tool's own arguments
+    e.ok(&["add", "cx-gw", "--harness", "codex", "--api-key", "--intro", ""]);
+    assert_eq!(e.profile("cx-gw")["intro"], "", "removed, which is not the same as unset");
+    e.ok(&["run", "cx-gw", "--", "exec", "hi"]);
+    let run = e.runs().pop().unwrap();
+    let args: Vec<&str> = run["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+    assert!(args.contains(&format!("model_providers.hrm.base_url=http://127.0.0.1:{port}/r/~/cx-gw/v1").as_str()) && args.ends_with(&["exec", "hi"]), "{args:?}");
+    assert!(run["env"].get("OPENAI_API_KEY").is_none() && run["env"]["HRM_CODEX_KEY"].as_str().unwrap().len() == 64, "{run}");
+    // a subscription login never passes the router, so it has no intro to change
+    assert!(e.fail(&["add", "sub", "--intro", "x", "--no-login"]).contains("never passes through the router"));
+    e.ok(&["router", "stop"]);
+}
+
 #[test]
 fn overview_and_request_log_price_tokens_from_the_catalog() {
     let mut e = Env::new();
