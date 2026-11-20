@@ -549,3 +549,78 @@ fn an_account_list_whose_skills_carry_a_hash_still_loads() {
     assert_eq!(reg.skills.len(), 1);
     assert_eq!((reg.skills[0].name.as_str(), reg.skills[0].source.as_str()), ("mine", "store"));
 }
+
+#[test]
+fn the_hrm_block_goes_in_and_out_of_a_prompt_file_and_the_owners_text_stays_to_the_byte() {
+    let (_dir, mut ctx) = ctx();
+    let mut reg = ctx.registry().unwrap();
+    for (n, h, main) in [("codex", "codex", true), ("codex-work", "codex", false), ("claude", "claude", true), ("oc", "opencode", true)] { reg.add_profile(profile(n, h, main)).unwrap(); }
+    let files: Vec<_> = reg.profiles.iter().map(|p| harness::of(p).item_paths(&ctx, p).prompt.unwrap()).collect();
+    // a file ending in a line end, one that does not, one with Windows line ends, and an account with no file yet
+    let own = ["main rules\n", "work rules", "# Mine\r\n\r\nline\r\n"];
+    for f in &files { std::fs::create_dir_all(f.parent().unwrap()).unwrap(); }
+    for (f, body) in files.iter().zip(own) { std::fs::write(f, body).unwrap(); }
+
+    // off: nothing is touched
+    assert!(items::apply_hint(&ctx, &reg).unwrap().is_empty());
+    assert!(!files[3].exists());
+
+    ctx.settings.agent_hint = true;
+    assert_eq!(items::apply_hint(&ctx, &reg).unwrap().len(), 4, "every account's file gets the block");
+    for (f, body) in files.iter().zip(own) {
+        let t = std::fs::read_to_string(f).unwrap();
+        assert!(t.starts_with(body) && t.contains("hrm list --refresh --json") && t.ends_with("<!-- hrm:accounts:end -->\n"), "{t:?}");
+        assert_eq!(t.matches("hrm:accounts:start").count(), 1);
+        assert_eq!(items::strip_hint(&t), body);
+    }
+    assert!(std::fs::read_to_string(&files[3]).unwrap().starts_with("<!-- hrm:accounts:start -->"), "a file is made for the account that had none");
+    assert!(items::apply_hint(&ctx, &reg).unwrap().is_empty(), "a second time changes nothing");
+
+    // an older wording between the marks is replaced where it stands, and text written after the block stays
+    let t = std::fs::read_to_string(&files[0]).unwrap();
+    let (a, b) = (t.find("<!-- hrm:accounts:start -->").unwrap(), t.find("<!-- hrm:accounts:end -->").unwrap());
+    std::fs::write(&files[0], format!("{}<!-- hrm:accounts:start -->\nold words\n{}", &t[..a], &t[b..])).unwrap();
+    assert_eq!(items::apply_hint(&ctx, &reg).unwrap().len(), 1);
+    assert_eq!(std::fs::read_to_string(&files[0]).unwrap(), t);
+
+    ctx.settings.agent_hint = false;
+    assert_eq!(items::apply_hint(&ctx, &reg).unwrap().len(), 4);
+    for (f, body) in files.iter().zip(own) { assert_eq!(std::fs::read_to_string(f).unwrap(), body, "the file is what its owner wrote"); }
+    assert!(!files[3].exists(), "the file that held only the block is gone with it");
+}
+
+#[test]
+fn a_prompt_enabled_with_the_hrm_block_on_is_written_with_it_and_never_saved_with_it() {
+    let (_dir, mut ctx) = ctx();
+    ctx.settings.agent_hint = true;
+    let mut reg = ctx.registry().unwrap();
+    reg.add_profile(profile("codex", "codex", true)).unwrap();
+    let f = harness::of(&reg.profiles[0]).item_paths(&ctx, &reg.profiles[0]).prompt.unwrap();
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, "my own rules").unwrap();
+    items::apply_hint(&ctx, &reg).unwrap();
+
+    let id = items::add_prompt(&mut reg, "codex", "Shared", "shared rules").unwrap();
+    items::enable_prompt(&ctx, &mut reg, &id).unwrap();
+    let t = std::fs::read_to_string(&f).unwrap();
+    assert!(t.starts_with("shared rules\n") && t.contains("hrm:accounts:start"), "{t:?}");
+    assert!(reg.prompts.iter().any(|p| p.body == "my own rules"), "the replaced file is in the library, without the block");
+    assert!(reg.prompts.iter().all(|p| !p.body.contains("hrm:accounts")), "no saved prompt holds the block");
+
+    // writing it again piles nothing up; an edit made in the file, above the block, updates the enabled prompt without the block
+    let n = reg.prompts.len();
+    items::enable_prompt(&ctx, &mut reg, &id).unwrap();
+    assert_eq!(reg.prompts.len(), n);
+    std::fs::write(&f, t.replace("shared rules", "edited outside")).unwrap();
+    let other = items::add_prompt(&mut reg, "codex", "Other", "other rules").unwrap();
+    items::enable_prompt(&ctx, &mut reg, &other).unwrap();
+    assert_eq!(reg.prompts.iter().find(|p| p.id == id).unwrap().body, "edited outside");
+
+    // the switch, as `hrm settings` and the window set it: the block leaves at once, the prompt stays
+    ctx.save_registry(&reg).unwrap();
+    let off = hrm_core::service::settings_set(&ctx, "agent_hint", serde_json::json!(false)).unwrap();
+    assert!(!off.settings.agent_hint);
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "other rules");
+    hrm_core::service::settings_set(&off, "agent_hint", serde_json::json!(true)).unwrap();
+    assert_eq!(items::strip_hint(&std::fs::read_to_string(&f).unwrap()), "other rules");
+}

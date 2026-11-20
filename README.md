@@ -98,6 +98,9 @@ you are on. The **?** button replays the page's tour.
 - **MCP servers, skills and prompts, kept once:** each MCP server is written into every tool you tick.
   Skills live once in `~/.agents/skills` and are linked into each tool; Discover installs skills from
   GitHub repositories. A ledger records what Harness Manager wrote, so it only ever removes its own entries.
+  A switch on System prompts (`hrm settings agent_hint true`; off by default) adds a short block to the end of
+  every account's prompt file, between Harness Manager's own marks: how an agent reads `hrm list`, and that it
+  uses another account only when you allow it. Off takes the block out; your own text is never changed.
 - **Apps:** every copy of each tool on this computer and how it was installed (the vendor's installer, npm,
   winget, Homebrew, Scoop or Chocolatey), its version and the newest one from its vendor, and install, update
   or remove a duplicate copy in a terminal you can watch.

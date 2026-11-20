@@ -303,6 +303,11 @@ pub fn sync(ctx: &Ctx, reg: &Registry) -> Result<SyncReport> {
             }
         }
     }
+    // the hrm block follows its setting in every prompt file (a new account gets it here)
+    match apply_hint(ctx, reg) {
+        Ok(files) => { let to = if ctx.settings.agent_hint { &mut rep.written } else { &mut rep.removed }; to.extend(files.into_iter().map(|f| format!("{f}: the hrm block"))); }
+        Err(e) => rep.skipped.push(format!("the hrm block: {e:#}")),
+    }
     // for Overview: whether the tools are in step with the shared MCP servers and skills
     let _ = ctx.db.kv_set("sync:last", &json!({"at": crate::util::now_ms(), "written": rep.written.len(), "removed": rep.removed.len(),
         "conflicts": rep.conflicts.len(), "skipped": rep.skipped.len()}).to_string());
@@ -763,7 +768,8 @@ pub fn enable_prompt(ctx: &Ctx, reg: &mut Registry, id: &str) -> Result<()> {
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
     let mut cur_taken = false;
     for (n, f) in files.iter().enumerate() {
-        let live = crate::util::read_or_empty(f)?;
+        // (the hrm block is Harness Manager's own: it is never part of a prompt, saved or compared)
+        let live = strip_hint(&crate::util::read_or_empty(f)?);
         let ours = ctx.db.kv_get(&format!("prompt:{}", f.display()))?.as_deref() == Some(live.as_str());
         if live.trim().is_empty() || ours || reg.prompts.iter().any(|p| p.harness == harness_id && p.body == live) { continue; }
         // an edit made outside the app: the first one updates the prompt that was enabled, unless that is the one being written
@@ -774,12 +780,61 @@ pub fn enable_prompt(ctx: &Ctx, reg: &mut Registry, id: &str) -> Result<()> {
         }
     }
     let body = reg.prompts.iter().find(|p| p.id == id).map(|p| p.body.clone()).unwrap();
+    let out = if ctx.settings.agent_hint { with_hint(&body) } else { body.clone() };
     for f in &files {
-        write_atomic(f, body.as_bytes())?;
+        write_atomic(f, out.as_bytes())?;
         ctx.db.kv_set(&format!("prompt:{}", f.display()), &body)?;
     }
     for p in reg.prompts.iter_mut().filter(|p| p.harness == harness_id) { p.enabled = p.id == id; }
     Ok(())
+}
+
+// ---------- the hrm block: how an agent uses the accounts, at the end of every prompt file ----------
+
+const HINT_START: &str = "<!-- hrm:accounts:start -->";
+const HINT_END: &str = "<!-- hrm:accounts:end -->";
+/// What the block says. `hrm list --json` gives each limit as the share used, which is why the block says so.
+const HINT_BODY: &str = "<!-- Written by Harness Manager; `hrm settings agent_hint false` removes it. -->\n\
+## Accounts (Harness Manager)\n\
+- When asked which account has room, run `hrm list --refresh --json` and compare the limit windows for the requested tool. The percentages are the share used, not left, and a missing limit means unknown, not free.\n\
+- Run work under another account only when the user has authorized that account for the task. See `hrm help run` for how to invoke it.";
+
+/// A prompt file's text without the hrm block: the text as its owner wrote it, to the byte. The block goes with
+/// the blank line put before it and the line end after it.
+pub fn strip_hint(text: &str) -> String {
+    let Some(a) = text.find(HINT_START) else { return text.to_string() };
+    let Some(len) = text[a..].find(HINT_END) else { return text.to_string() };
+    let (mut start, mut end) = (a, a + len + HINT_END.len());
+    if text[end..].starts_with("\r\n") { end += 2; } else if text[end..].starts_with('\n') { end += 1; }
+    for _ in 0..2 {
+        if text[..start].ends_with("\r\n") { start -= 2; } else if text[..start].ends_with('\n') { start -= 1; }
+    }
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// `base` (a text with no hrm block) with the block after it, a blank line between. `strip_hint` undoes it exactly.
+pub fn with_hint(base: &str) -> String {
+    if base.is_empty() { format!("{HINT_START}\n{HINT_BODY}\n{HINT_END}\n") } else { format!("{base}\n\n{HINT_START}\n{HINT_BODY}\n{HINT_END}\n") }
+}
+
+/// Put every account's prompt file in step with the `agent_hint` setting: on, the file ends with the block (added,
+/// or replaced where an older wording stands); off, the block is taken out. Nothing outside the marks changes, and
+/// a file that is already right is not written. Answers the files it changed. A file that held only the block is
+/// removed with it; an account whose folder is not made yet, and a file that cannot be read, are left alone.
+pub fn apply_hint(ctx: &Ctx, reg: &Registry) -> Result<Vec<String>> {
+    let (mut changed, mut seen) = (vec![], BTreeSet::new());
+    for h in reg.profiles.iter().map(|p| p.harness.as_str()).collect::<BTreeSet<_>>() {
+        for f in prompt_files(ctx, reg, h) {
+            if !seen.insert(f.clone()) || !f.parent().map(|d| d.is_dir()).unwrap_or(false) { continue; }
+            let live = match crate::util::read_or_empty(&f) { Ok(t) => t, Err(e) => { crate::log::info(&format!("the hrm block: {e:#}")); continue; } };
+            let base = strip_hint(&live);
+            let want = if ctx.settings.agent_hint { with_hint(&base) } else { base };
+            if want == live { continue; }
+            if want.is_empty() { std::fs::remove_file(&f).with_context(|| format!("could not remove {}", f.display()))?; } else { write_atomic(&f, want.as_bytes())?; }
+            changed.push(f.display().to_string());
+        }
+    }
+    Ok(changed)
 }
 
 pub fn add_prompt(reg: &mut Registry, harness_id: &str, title: &str, body: &str) -> Result<String> {
