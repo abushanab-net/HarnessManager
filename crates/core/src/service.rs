@@ -61,6 +61,7 @@ pub struct ProfileView {
     pub model: Option<String>,
     pub route: Option<String>,
     pub daily_cap_usd: Option<f64>,
+    pub intro: Option<String>,
     pub created_at: i64,
 }
 
@@ -128,6 +129,7 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
         model: p.model.clone(),
         route: p.route.clone(),
         daily_cap_usd: p.daily_cap_usd,
+        intro: p.intro.clone(),
         created_at: p.created_at,
     }
 }
@@ -243,6 +245,9 @@ pub struct AddRequest {
     pub model: Option<String>,
     #[serde(default)]
     pub route: Option<String>,
+    /// See `Profile::intro`: absent keeps the tool's own line, empty removes it, a text replaces it.
+    #[serde(default)]
+    pub intro: Option<String>,
     #[serde(default)]
     pub main: bool,
 }
@@ -255,6 +260,7 @@ pub fn add_profile(ctx: &Ctx, req: AddRequest) -> Result<ProfileView> {
         Kind::Routed if !caps.routable => bail!("{} cannot be routed", h.label()),
         Kind::ApiKey if req.api_key.as_deref().unwrap_or("").trim().is_empty() => bail!("enter the API key"),
         Kind::Routed if req.route.is_none() => bail!("choose a route"),
+        Kind::Subscription if req.intro.is_some() => bail!("{}", NO_INTRO),
         _ => {}
     }
     let _lock = ctx.lock_registry();
@@ -271,7 +277,7 @@ pub fn add_profile(ctx: &Ctx, req: AddRequest) -> Result<ProfileView> {
         name: req.name.trim().into(), label: None, harness: req.harness.clone(), kind: req.kind,
         email: req.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
         main: req.main, base_url: req.base_url.filter(|s| !s.is_empty()), model: req.model.filter(|s| !s.is_empty()),
-        route: req.route, daily_cap_usd: None, created_at: 0,
+        route: req.route, daily_cap_usd: None, intro: req.intro.map(|t| t.trim().to_string()), created_at: 0,
     };
     reg.add_profile(p.clone())?;
     if let Some(k) = req.api_key.filter(|k| !k.trim().is_empty()) {
@@ -309,13 +315,21 @@ pub fn remove_profile(ctx: &Ctx, name: &str, delete_home: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn update_profile(ctx: &Ctx, name: &str, email: Option<String>, base_url: Option<String>, model: Option<String>) -> Result<()> {
+/// Why a subscription account has no intro setting.
+const NO_INTRO: &str = "a subscription login never passes through the router, so the line its tool names itself with cannot be changed";
+
+/// `intro`: None leaves it as it is; Some(None) goes back to the tool's own line, Some("") removes the line, a text replaces it.
+pub fn update_profile(ctx: &Ctx, name: &str, email: Option<String>, base_url: Option<String>, model: Option<String>, intro: Option<Option<String>>) -> Result<()> {
     let _lock = ctx.lock_registry();
     let mut reg = ctx.registry()?;
     let p = reg.profiles.iter_mut().find(|p| p.name == name).context("no such profile")?;
     if let Some(e) = email { p.email = Some(e).filter(|e| !e.is_empty()); }
     if let Some(u) = base_url { p.base_url = Some(u).filter(|e| !e.is_empty()); }
     if let Some(m) = model { p.model = Some(m).filter(|e| !e.is_empty()); }
+    if let Some(i) = intro {
+        if i.is_some() && p.kind == Kind::Subscription { bail!("{}", NO_INTRO); }
+        p.intro = i.map(|t| t.trim().to_string());
+    }
     ctx.save_registry(&reg)
 }
 
@@ -1051,7 +1065,7 @@ pub fn login_cancel(id: &str) {
 
 /// The router address and launch token for a routed profile; starts the router if it is not running.
 pub fn router_endpoint(ctx: &Ctx, p: &Profile) -> Result<(String, String)> {
-    let route = p.route.clone().context("this profile has no route")?;
+    let route = if p.own_route() { crate::registry::OWN_ROUTE.to_string() } else { p.route.clone().context("this profile has no route")? };
     let token = router_token(ctx)?;
     let port = ctx.settings.router_port;
     ensure_router(ctx)?;
@@ -1545,7 +1559,7 @@ mod tests {
         let ctx = ctx(&t);
         let mut reg = ctx.registry().unwrap();
         for (name, harness, kind) in [("codex-1", "codex", Kind::Subscription), ("claude-key", "claude", Kind::ApiKey)] {
-            reg.add_profile(Profile { name: name.into(), label: None, harness: harness.into(), kind, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+            reg.add_profile(Profile { name: name.into(), label: None, harness: harness.into(), kind, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
         }
         ctx.save_registry(&reg).unwrap();
         for name in ["codex-1", "claude-key"] { assert!(refused(quota_live(&ctx, name)).contains("only available for Claude and Antigravity subscription accounts"), "{name}"); }
@@ -1592,7 +1606,7 @@ mod tests {
     fn two_codex_accounts(ctx: &Ctx) -> (PathBuf, PathBuf) {
         let mut reg = ctx.registry().unwrap();
         for (name, main) in [("codex-main", true), ("codex-work", false)] {
-            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
         }
         ctx.save_registry(&reg).unwrap();
         let skills = |name: &str| { let p = reg.get(name).unwrap(); harness::of(p).item_paths(ctx, p).skills.unwrap() };

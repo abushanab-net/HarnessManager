@@ -45,8 +45,34 @@ pub struct Profile {
     /// Routed profiles: the most the router spends for it in a day (at API list prices), in US dollars.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_cap_usd: Option<f64>,
+    /// The line the tool names itself with ("You are Claude Code, ...") as the router sends it on: unset keeps
+    /// it, empty removes it, a text replaces it. Set or empty, the tool's own ids (billing line, device and
+    /// session ids) are removed too. API-key and routed accounts only: a subscription login never passes the router.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intro: Option<String>,
     #[serde(default)]
     pub created_at: i64,
+}
+
+/// The route id of an API-key account that goes through the router by itself: its own endpoint and key.
+/// Not a valid route name, so no route of the user's can have it.
+pub const OWN_ROUTE: &str = "~";
+
+impl Profile {
+    /// An API-key account whose requests pass the router: one with an endpoint of its own, or with an intro
+    /// to change. A plain vendor key goes straight to the vendor, as it always has.
+    pub fn own_route(&self) -> bool { self.kind == Kind::ApiKey && (self.base_url.is_some() || self.intro.is_some()) }
+
+    /// The provider an own-route account stands for. Its id starts with `~`, which no provider id can.
+    pub fn own_provider(&self) -> Provider {
+        let (format, vendor) = if self.harness == "codex" { ("openai", "https://api.openai.com/v1") } else { ("anthropic", "https://api.anthropic.com") };
+        Provider {
+            id: format!("{OWN_ROUTE}{}", self.name), name: self.label.clone().unwrap_or_else(|| self.name.clone()), format: format.into(),
+            // an endpoint of its own knows its own models only: every request gets the account's model
+            models: self.base_url.as_ref().and(self.model.clone()).into_iter().collect(),
+            base_url: self.base_url.clone().unwrap_or_else(|| vendor.into()),
+        }
+    }
 }
 
 /// An upstream endpoint for routing: base URL, wire format and the models it serves.

@@ -187,6 +187,18 @@ provider from a `hm-<provider>--<model>` id and never fall back. Providers in Op
 converted to Chat Completions and the answer converted back, streams included. Subscription logins never pass
 through it.
 
+Codex asks in the OpenAI Responses format (`/v1/responses`): the router passes that on to an OpenAI-format
+provider and back as it is, with no conversion, so the provider must serve `/responses`. Codex gets the
+router as a provider named `hrm` through `-c` overrides at launch; nothing is written to its `config.toml`.
+
+An API-key account of Claude Code or Codex with a base URL of its own, or with an intro setting, goes through
+the router by itself, as the route `~` (`Profile::own_route`): its endpoint and its key, no provider or route
+to set up. A plain vendor key still goes straight to the vendor. The intro setting (`Profile::intro`, `hrm add
+--intro`) removes or replaces the line the tool names itself with ("You are Claude Code, ..."), and with it
+the tool's own ids leave the request: Claude Code's billing line, `metadata` and `claude-code-*` beta, Codex's
+`client_metadata` (`convert::scrub`). The rest of the instructions stays; the tool's own headers were never
+passed on. A provider that is not Anthropic's gets the key as a bearer token as well as `x-api-key`.
+
 ## Across computers: the journal and three transports
 
 `crates/core/src/journal.rs` and `crates/core/src/sync/`. The sync mode in settings is `off`, `folder` or

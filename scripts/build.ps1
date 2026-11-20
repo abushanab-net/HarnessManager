@@ -7,9 +7,16 @@ $triple = (rustc -vV | Select-String '^host: (.+)$').Matches[0].Groups[1].Value
 New-Item -ItemType Directory -Force app/src-tauri/binaries | Out-Null
 # the installer ships hrm.exe next to the app, so Start and the CLI use the same core
 Copy-Item target/release/hrm.exe "app/src-tauri/binaries/hrm-$triple.exe" -Force
+# WINDOWS_SIGNING, the variable the release workflow takes (release.yml says what it holds): when it is set, Tauri
+# signs the app, hrm.exe, the uninstaller and the installer
+$sign = @()
+if ($env:WINDOWS_SIGNING) {
+  Set-Content app/src-tauri/tauri.sign.conf.json "{`"bundle`":{`"windows`":$env:WINDOWS_SIGNING}}"
+  $sign = '--config', 'src-tauri/tauri.sign.conf.json'
+}
 Push-Location app
 if (-not (Test-Path node_modules)) { npm install; if ($LASTEXITCODE) { Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue; Pop-Location; exit 1 } }
-npx tauri build --config src-tauri/tauri.release.conf.json
+npx tauri build --config src-tauri/tauri.release.conf.json @sign
 $code = $LASTEXITCODE
 Pop-Location
 if ($code) { exit $code }

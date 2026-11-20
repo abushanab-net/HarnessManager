@@ -41,7 +41,7 @@ fn output(r: &mut Rng, bytes: usize) -> String {
 }
 
 fn profile(name: &str, harness: &str, main: bool) -> Profile {
-    Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }
+    Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }
 }
 
 fn claude_session(r: &mut Rng, id: &str, cwd: &str, end: i64, turns: u64) -> String {

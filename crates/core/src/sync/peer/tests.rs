@@ -290,7 +290,7 @@ fn paired_directly_with_no_folder_a_transcript_is_asked_of_the_computer_it_ran_o
     let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
     pair(&a, &b);
     let mut reg = a.ctx.registry().unwrap();
-    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
     a.ctx.save_registry(&reg).unwrap();
     let cwd = t.path().join("app");
     let f = a.ctx.home.join(".claude").join("projects").join(crate::harness::claude::project_dir_name(&cwd)).join("s1.jsonl");
@@ -327,7 +327,7 @@ fn a_transcript_comes_from_a_connected_peer_before_the_folder() {
         c.ctx = Arc::new(Ctx::open_at(&c.ctx.data, &c.ctx.home).unwrap());
     }
     let mut reg = a.ctx.registry().unwrap();
-    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
     a.ctx.save_registry(&reg).unwrap();
     let cwd = t.path().join("app");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -376,7 +376,7 @@ fn presence_and_transcripts_switched_off_are_not_served_to_a_paired_computer_eit
     let (a, b) = (computer(t.path(), "A"), computer(t.path(), "B"));
     pair(&a, &b);
     let mut reg = a.ctx.registry().unwrap();
-    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 }).unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
     a.ctx.save_registry(&reg).unwrap();
     let f = a.ctx.home.join(".claude").join("projects").join("app").join("s1.jsonl");
     std::fs::create_dir_all(f.parent().unwrap()).unwrap();

@@ -2123,6 +2123,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tauri-winres",
  "tempfile",
  "tokio",
  "zip",

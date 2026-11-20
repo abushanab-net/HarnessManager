@@ -124,7 +124,7 @@ impl Harness for Codex {
     fn id(&self) -> &'static str { "codex" }
     fn label(&self) -> &'static str { "Codex" }
     fn caps(&self) -> Caps {
-        Caps { parallel_accounts: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: false }
+        Caps { parallel_accounts: true, api_key: true, quota: true, usage: true, sessions: true, mcp: true, skills: true, prompts: true, routable: true }
     }
     fn binary(&self) -> &'static str { "codex" }
     fn default_home(&self, ctx: &Ctx) -> PathBuf { ctx.home.join(".codex") }
@@ -146,12 +146,21 @@ impl Harness for Codex {
 
     fn launch(&self, ctx: &Ctx, p: &Profile, args: &[String]) -> Result<LaunchSpec> {
         let mut spec = LaunchSpec { program: resolve_program(self.id(), self.binary())?, args: args.to_vec(), ..Default::default() };
-        spec.env_unset = vec!["CODEX_HOME".into(), "OPENAI_API_KEY".into()];
+        spec.env_unset = vec!["CODEX_HOME".into(), "OPENAI_API_KEY".into(), "HRM_CODEX_KEY".into()];
         base_env(ctx, &mut spec);
         if !p.main {
             spec.env_set.push(("CODEX_HOME".into(), self.home(ctx, p).display().to_string()));
         }
-        if p.kind == Kind::ApiKey {
+        if p.kind == Kind::Routed || p.own_route() {
+            // through the router, as a provider named for this launch only: nothing is written to config.toml.
+            // Codex reads a `-c` value that is not TOML as plain text, so none of these needs quoting.
+            let (url, token) = crate::service::router_endpoint(ctx, p)?;
+            let mut over = vec!["model_provider=hrm".to_string(), "model_providers.hrm.name=hrm".into(), format!("model_providers.hrm.base_url={url}/v1"),
+                "model_providers.hrm.env_key=HRM_CODEX_KEY".into(), "model_providers.hrm.wire_api=responses".into()];
+            if let Some(m) = &p.model { over.push(format!("model={m}")); }
+            spec.args.splice(0..0, over.into_iter().flat_map(|o| ["-c".to_string(), o]));
+            spec.env_set.push(("HRM_CODEX_KEY".into(), token));
+        } else if p.kind == Kind::ApiKey {
             let key = crate::secrets::get_key(&crate::secrets::key_target(&p.name))
                 .ok_or_else(|| anyhow::anyhow!("no API key saved for '{}'. Run `hrm key set {}`.", p.name, p.name))?;
             spec.env_set.push(("OPENAI_API_KEY".into(), key));
@@ -169,9 +178,9 @@ impl Harness for Codex {
     }
 
     fn identity(&self, ctx: &Ctx, p: &Profile) -> Identity {
-        if p.kind == Kind::ApiKey {
-            let has = crate::secrets::get_key(&crate::secrets::key_target(&p.name)).is_some();
-            return Identity { logged_in: has, plan: Some("API key".into()), ..Default::default() };
+        if p.kind != Kind::Subscription {
+            let has = crate::secrets::get_key(&crate::secrets::key_target(&p.name)).is_some() || p.kind == Kind::Routed;
+            return Identity { logged_in: has, plan: Some(if p.kind == Kind::Routed { "Routed".into() } else { "API key".into() }), ..Default::default() };
         }
         let Some(auth) = read_json(&self.home(ctx, p).join("auth.json")) else { return Identity::default() };
         if let Some(c) = id_claims(&auth) {
@@ -613,7 +622,7 @@ mod limits_tests {
         std::fs::write(t.path().join("pricing.json"), "{}").unwrap();
         std::env::set_var("HRM_PRICING_FILE", t.path().join("pricing.json"));
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
         let (main, other, none) = (p("codex-main", true), p("other", false), p("none", false));
         let week = |q: Option<Quota>| q.map(|q| (q.tier("week").unwrap().used, q.fetched_at.unwrap()));
         let file = |p: &Profile, name: &str, text: &str| { let f = Codex.home(&ctx, p).join("sessions").join(name); std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, text).unwrap(); f };

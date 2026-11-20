@@ -234,14 +234,15 @@ impl Harness for Claude {
         }
         match p.kind {
             Kind::Subscription => {}
-            Kind::ApiKey => {
+            Kind::ApiKey if !p.own_route() => {
                 let key = crate::secrets::get_key(&crate::secrets::key_target(&p.name))
                     .ok_or_else(|| anyhow::anyhow!("no API key saved for '{}'. Run `hrm key set {}`.", p.name, p.name))?;
                 spec.env_set.push(("ANTHROPIC_API_KEY".into(), key));
                 if let Some(u) = &p.base_url { spec.env_set.push(("ANTHROPIC_BASE_URL".into(), u.clone())); }
                 if let Some(m) = &p.model { spec.env_set.push(("ANTHROPIC_MODEL".into(), m.clone())); }
             }
-            Kind::Routed => {
+            // routed, or an API key that goes through the router by itself: the router holds the key
+            Kind::Routed | Kind::ApiKey => {
                 let (url, token) = crate::service::router_endpoint(ctx, p)?;
                 spec.env_set.push(("ANTHROPIC_BASE_URL".into(), url));
                 spec.env_set.push(("ANTHROPIC_AUTH_TOKEN".into(), token));
@@ -593,7 +594,7 @@ mod account_tests {
     fn the_login_and_the_cached_limits_follow_the_account_file_as_it_changes() {
         let t = tempfile::tempdir().unwrap();
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        let p = Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, created_at: 0 };
+        let p = Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
         let file = Claude.claude_json(&ctx, &p);
         let doc = |uuid: &str, email: &str| json!({"projects": {"C:\\work": {"history": ["one", "two"]}}, "oauthAccount": {"accountUuid": uuid, "emailAddress": email},
             "cachedUsageUtilization": {"accountUuid": "u1", "fetchedAtMs": 5, "utilization": {"seven_day": {"utilization": 12.0}}}}).to_string();

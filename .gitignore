@@ -7,6 +7,7 @@
 .DS_Store
 /app/src-tauri/binaries/
 /app/src-tauri/gen/
+/app/src-tauri/tauri.sign.conf.json
 .delegate/
 docs/design-committee-2026-11/shots/
 docs/design-committee-2026-11/implementation/shots/

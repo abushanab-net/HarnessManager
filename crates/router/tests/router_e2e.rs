@@ -56,6 +56,23 @@ async fn oai(State(h): State<Arc<Hits>>, headers: HeaderMap, Json(req): Json<Val
         "usage": {"prompt_tokens": 5, "completion_tokens": 4}})).into_response()
 }
 
+/// Answers with what arrived, so a test sees what the router sent on. A streamed Responses answer ends with its usage.
+async fn echo(headers: HeaderMap, Json(req): Json<Value>) -> Response {
+    let h = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let usage = json!({"input_tokens": 100, "output_tokens": 7, "input_tokens_details": {"cached_tokens": 60}});
+    if req["stream"] == true {
+        let done = json!({"type": "response.completed", "response": {"id": "resp_1", "usage": usage}});
+        return ([("content-type", "text/event-stream")], format!("event: response.created
+data: {{\"type\":\"response.created\"}}
+
+event: response.completed
+data: {done}
+
+")).into_response();
+    }
+    Json(json!({"usage": usage, "got": req, "auth": h("authorization"), "x_api_key": h("x-api-key"), "beta": h("anthropic-beta"), "agent": h("user-agent")})).into_response()
+}
+
 /// The tests share one credential namespace (an environment variable) and clear it when done: one at a time.
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -89,6 +106,8 @@ async fn setup() -> Setup {
         .route("/oaierr/chat/completions", post(oai_err))
         .route("/anth/v1/messages", post(anth))
         .route("/oai/chat/completions", post(oai))
+        .route("/own/v1/messages", post(echo))
+        .route("/own/responses", post(echo))
         .with_state(hits.clone());
     let ml = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let up = format!("http://{}", ml.local_addr().unwrap());
@@ -378,7 +397,7 @@ async fn a_daily_cap_stops_a_routed_account_for_the_day() {
     s.ctx.db.kv_set("pricing:at", &hrm_core::util::now_ms().to_string()).unwrap();
     let mut reg = s.ctx.registry().unwrap();
     reg.profiles.push(hrm_core::registry::Profile { name: "acct".into(), label: None, harness: "claude".into(), kind: hrm_core::registry::Kind::Routed, email: None, main: false,
-        base_url: None, model: None, route: Some("fo".into()), daily_cap_usd: Some(10.0), created_at: 0 });
+        base_url: None, model: None, route: Some("fo".into()), daily_cap_usd: Some(10.0), intro: None, created_at: 0 });
     s.ctx.save_registry(&reg).unwrap();
     // under the cap: it goes through
     assert_eq!(post_msg(&s, "fo", &body("claude-sonnet-5-5", false), Some(&s.token)).await.status(), 200);
@@ -390,4 +409,57 @@ async fn a_daily_cap_stops_a_routed_account_for_the_day() {
     assert!(r.text().await.unwrap().contains("daily cap of $10.00"));
     assert_eq!(s.hits.anth.load(Ordering::SeqCst), before);
     assert!(s.ctx.db.events(5).unwrap().iter().any(|e| e["kind"] == "cap"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_api_key_account_with_its_own_endpoint_is_its_own_route_for_claude_code_and_for_codex() {
+    use hrm_core::registry::{Kind, Profile};
+    let s = setup().await;
+    let mut reg = s.ctx.registry().unwrap();
+    let up = reg.providers[0].base_url.trim_end_matches("/fail").to_string();
+    let acct = |name: &str, harness: &str, model: Option<&str>, intro: Option<&str>| Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::ApiKey, email: None, main: false,
+        base_url: Some(format!("{up}/own")), model: model.map(String::from), route: None, daily_cap_usd: None, intro: intro.map(String::from), created_at: 0 };
+    reg.profiles.push(acct("mine", "claude", Some("local-m"), Some("You are the team's assistant.")));
+    reg.profiles.push(acct("cdx", "codex", None, Some("")));
+    reg.profiles.push(acct("asis", "claude", None, None));
+    s.ctx.save_registry(&reg).unwrap();
+    for n in ["mine", "cdx", "asis"] { hrm_core::secrets::set_key(&hrm_core::secrets::key_target(n), &format!("key-{n}")).unwrap(); }
+    let post = |path: &str, b: Value| reqwest::Client::new().post(format!("{}/r/{path}", s.base)).bearer_auth(&s.token)
+        .header("anthropic-beta", "claude-code-20250219,interleaved-thinking-2025-05-14").header("user-agent", "claude-cli/2.1.329 (external, cli)").json(&b).send();
+    let claude = json!({"model": "claude-haiku-5-5", "max_tokens": 9, "output_config": {"effort": "high"}, "metadata": {"user_id": "device"}, "messages": [{"role": "user", "content": "hi"}], "system": [
+        {"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.329; cc_entrypoint=cli;"},
+        {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."}, {"type": "text", "text": "Use the tools."}]});
+
+    // Claude Code: the account's endpoint, key (both ways: a gateway may take a bearer only) and model; its intro replaced, its own ids gone
+    let v: Value = post("~/mine/v1/messages", claude.clone()).await.unwrap().json().await.unwrap();
+    assert_eq!((v["auth"].as_str(), v["x_api_key"].as_str()), (Some("Bearer key-mine"), Some("key-mine")), "{v}");
+    assert_eq!(v["got"]["model"], "local-m", "its own endpoint knows its own model only");
+    assert_eq!(v["got"]["system"], json!([{"type": "text", "text": "You are the team's assistant."}, {"type": "text", "text": "Use the tools."}]));
+    assert!(v["got"].get("output_config").is_none(), "a field an endpoint of one's own may refuse: {v}");
+    assert!(v["got"].get("metadata").is_none() && v["beta"] == "interleaved-thinking-2025-05-14" && !v["agent"].as_str().unwrap().contains("claude"), "{v}");
+
+    // no intro setting: the request goes on as the tool wrote it
+    let v: Value = post("~/asis/v1/messages", claude.clone()).await.unwrap().json().await.unwrap();
+    assert_eq!((&v["got"]["system"], &v["got"]["metadata"], v["beta"].as_str()), (&claude["system"], &claude["metadata"], Some("claude-code-20250219,interleaved-thinking-2025-05-14")));
+
+    // Codex: Responses, passed on as they are; "" removes the intro
+    let codex = |stream: bool| json!({"model": "qwen", "stream": stream, "client_metadata": {"x-codex-installation-id": "i"}, "instructions": "You are Codex, based on GPT-5.
+Be exact.", "input": [
+        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}]});
+    let v: Value = post("~/cdx/v1/responses", codex(false)).await.unwrap().json().await.unwrap();
+    assert_eq!((v["auth"].as_str(), v["got"]["model"].as_str(), v["got"]["instructions"].as_str()), (Some("Bearer key-cdx"), Some("qwen"), Some("Be exact.")), "{v}");
+    assert!(v["got"].get("client_metadata").is_none() && v["got"]["input"] == codex(false)["input"], "{v}");
+    let text = post("~/cdx/v1/responses", codex(true)).await.unwrap().text().await.unwrap();
+    assert!(text.starts_with("event: response.created") && text.contains("event: response.completed"), "the events come back as they were sent: {text}");
+
+    // an account without an endpoint of its own has no such route, and Codex cannot ask an Anthropic-format provider
+    assert_eq!(post("~/acct/v1/messages", claude.clone()).await.unwrap().status(), 404);
+    let r = post("fo/acct/v1/responses", codex(false)).await.unwrap();
+    assert_eq!(r.status(), 502);
+    assert!(r.text().await.unwrap().contains("Codex needs an OpenAI-format provider"));
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let log = s.ctx.db.route_log(100).unwrap();
+    assert!(log.iter().any(|r| r["provider"] == "~mine" && r["model"] == "local-m" && r["status"] == 200), "{log:?}");
+    assert_eq!(log.iter().filter(|r| r["provider"] == "~cdx" && r["input"] == 100 && r["output"] == 7).count(), 2, "plain and streamed: {log:?}");
 }

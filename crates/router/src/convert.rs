@@ -86,6 +86,50 @@ pub fn anthropic_to_openai(req: &Value, model: &str) -> Value {
     out
 }
 
+/// How a line starts when a tool names itself in its instructions (Claude Code 2.1, its Agent SDK mode, Codex 0.171).
+const INTROS: &[&str] = &["You are Claude Code", "You are a Claude agent", "You are Codex", "You are a coding agent running in the Codex CLI"];
+/// Claude Code's billing line: its version and a per-request code, first in the system prompt.
+const BILLING: &str = "x-anthropic-billing-header:";
+
+fn reword(text: &str, intro: &str) -> String {
+    text.split_inclusive('\n').filter_map(|line| {
+        if line.starts_with(BILLING) { return None; }
+        if !INTROS.iter().any(|i| line.starts_with(i)) { return Some(line.to_string()); }
+        // the line's own ending stays, so the next line is not joined to this one
+        (!intro.is_empty()).then(|| format!("{intro}{}", &line[line.trim_end_matches(['\r', '\n']).len()..]))
+    }).collect()
+}
+
+/// Instructions as a text or as text blocks, reworded in place.
+fn reword_in(v: Option<&mut Value>, intro: &str) {
+    match v {
+        Some(Value::String(s)) => *s = reword(s, intro),
+        Some(Value::Array(parts)) => {
+            for b in parts.iter_mut() {
+                if let Some(t) = b.get("text").and_then(Value::as_str).map(|t| reword(t, intro)) { b["text"] = json!(t); }
+            }
+            // the Messages API refuses a text block left empty
+            parts.retain(|b| b.get("text").and_then(Value::as_str) != Some(""));
+        }
+        _ => {}
+    }
+}
+
+/// A request as an account with an intro setting sends it on: the line the tool names itself with becomes
+/// `intro` (or goes, when empty), and so do the tool's own ids: Claude Code's billing line and `metadata`,
+/// Codex's `client_metadata`. Both shapes: Anthropic Messages (`system`) and OpenAI Responses (`instructions`,
+/// developer messages). The rest of the instructions stays: it tells the model how to use the tools.
+pub fn scrub(req: &mut Value, intro: &str) {
+    let Some(o) = req.as_object_mut() else { return };
+    o.remove("metadata");
+    o.remove("client_metadata");
+    reword_in(o.get_mut("system"), intro);
+    reword_in(o.get_mut("instructions"), intro);
+    for m in o.get_mut("input").and_then(Value::as_array_mut).into_iter().flatten() {
+        if matches!(m["role"].as_str(), Some("developer" | "system")) { reword_in(m.get_mut("content"), intro); }
+    }
+}
+
 pub fn stop_reason(finish: &str) -> &'static str {
     match finish {
         "length" => "max_tokens",
@@ -297,6 +341,35 @@ mod tests {
         assert_eq!(failure(&json!({"error": "bad gateway"})).as_deref(), Some("\"bad gateway\""));
         assert!(failure(&json!({"id": "c", "choices": []})).is_some() && failure(&json!({"id": "c"})).is_some());
         assert_eq!(failure(&json!({"choices": [{"message": {"content": "ok"}}]})), None);
+    }
+
+    /// The shapes are the ones Claude Code 2.1.329 and Codex 0.171 sent to a listener.
+    #[test]
+    fn scrub_rewords_the_intro_and_removes_the_tools_own_ids() {
+        let claude = || json!({"model": "m", "metadata": {"user_id": "{\"device_id\":\"d\"}"}, "system": [
+            {"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.329.0a8; cc_entrypoint=cli;"},
+            {"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude.", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "\nYou are an agent working with the user.\nUse the tools."}],
+            "messages": [{"role": "user", "content": "You are Claude Code, aren't you?"}]});
+        let mut r = claude();
+        scrub(&mut r, "You are the team's coding assistant.");
+        assert_eq!(r["system"], json!([{"type": "text", "text": "You are the team's coding assistant.", "cache_control": {"type": "ephemeral"}},
+            {"type": "text", "text": "\nYou are an agent working with the user.\nUse the tools."}]));
+        assert!(r.get("metadata").is_none());
+        assert_eq!(r["messages"], claude()["messages"], "what the user wrote is theirs");
+        // removed: its block goes with it, as an empty one is refused
+        let mut r = claude();
+        scrub(&mut r, "");
+        assert_eq!(r["system"], json!([{"type": "text", "text": "\nYou are an agent working with the user.\nUse the tools."}]));
+
+        let mut r = json!({"model": "m", "client_metadata": {"x-codex-installation-id": "i"}, "prompt_cache_key": "k", "instructions": "You are Codex, based on GPT-5.\nBe exact.", "input": [
+            {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI.\r\n\r\nYour capabilities:\r\n"}]},
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "You are Codex?"}]}]});
+        scrub(&mut r, "You are a coding assistant.");
+        assert_eq!(r["instructions"], "You are a coding assistant.\nBe exact.");
+        assert_eq!(r["input"][0]["content"][0]["text"], "You are a coding assistant.\r\n\r\nYour capabilities:\r\n");
+        assert_eq!(r["input"][1]["content"][0]["text"], "You are Codex?");
+        assert!(r.get("client_metadata").is_none() && r["prompt_cache_key"] == "k");
     }
 
     #[test]
