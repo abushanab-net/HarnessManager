@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>An account with its own endpoint, through the local router</title>
+  <meta name="illustration-theme" content="harness-manager/light/remote">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #eff4f5;
+      --color-ink:     #131416;
+      --color-muted:   #5d5f60;
+      --color-accent:  #1b6c80;
+      --font-sans:     'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+      --font-serif:    'IBM Plex Serif', Georgia, serif;
+      --font-mono:     'IBM Plex Mono', Consolas, ui-monospace, monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 3rem 2rem; }
+    .frame { max-width: 1200px; width: 100%; }
+    .eyebrow { font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: var(--color-muted); margin-bottom: 0.5rem; }
+    h1 { font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem); font-weight: 400; letter-spacing: -0.02em; line-height: 1.15; color: var(--color-ink); margin-bottom: 1.5rem; }
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* min-width == viewBox width keeps the type ramp; this wrapper scrolls the diagram, not the page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · Illustrate</p>
+    <h1>An account with its own endpoint, through the local router</h1>
+
+    <div class="diagram-container">
+    <!-- Self-contained SVG: every visual property is a presentation attribute; no CSS outside the svg is needed. -->
+    <svg viewBox="0 0 960 456" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hmr-own-title hmr-own-desc">
+      <title id="hmr-own-title">An account with its own endpoint, through the local router</title>
+      <desc id="hmr-own-desc">Claude Code or Codex, started as an API-key account with an endpoint of its own, sends its requests to Harness Manager's local router with a local token; the router takes the gateway's key from the credential store, rewrites the tool's opening line and forwards the request to the model gateway.</desc>
+      <defs>
+        <marker id="hmr-own-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5d5f60"/></marker>
+        <marker id="hmr-own-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1b6c80"/></marker>
+        <marker id="hmr-own-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#3f8fa5"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#eff4f5"/>
+
+      <!-- Zone: everything that stays on this computer -->
+      <rect x="40" y="48" width="512" height="336" rx="8" fill="rgba(19,20,22,0.02)" stroke="rgba(19,20,22,0.10)" stroke-width="0.8"/>
+      <rect x="248" y="52" width="96" height="12" rx="2" fill="#eff4f5"/>
+      <text class="eyebrow" x="296" y="61" fill="rgba(19,20,22,0.40)" font-size="7" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.14em">THIS COMPUTER</text>
+
+      <!-- Arrows (before nodes) -->
+      <line x1="248" y1="272" x2="344" y2="272" stroke="#5d5f60" stroke-width="1.2" marker-end="url(#hmr-own-arrow)"/>
+      <line x1="520" y1="272" x2="712" y2="272" stroke="#1b6c80" stroke-width="1.2" marker-end="url(#hmr-own-arrow-accent)"/>
+      <line x1="432" y1="160" x2="432" y2="224" stroke="#5d5f60" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#hmr-own-arrow)"/>
+
+      <!-- Arrow labels -->
+      <rect x="260" y="250" width="72" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="296" y="259" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">LOCAL TOKEN</text>
+      <rect x="580" y="250" width="72" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="616" y="259" fill="#1b6c80" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">GATEWAY KEY</text>
+      <rect x="444" y="186" width="28" height="12" rx="2" fill="#eff4f5"/>
+      <text class="arrow-label" x="458" y="195" fill="#5d5f60" font-size="8" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle" letter-spacing="0.06em">KEY</text>
+
+      <!-- The tool -->
+      <rect x="72" y="224" width="176" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="72" y="224" width="176" height="96" rx="6" fill="#ffffff" stroke="#131416" stroke-width="1"/>
+      <text class="node-name" x="160" y="262" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">Claude Code or Codex</text>
+      <text class="sublabel" x="160" y="280" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">started as the account,</text>
+      <text class="sublabel" x="160" y="292" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">pointed at the router</text>
+
+      <!-- The local router (focal) -->
+      <rect x="344" y="224" width="176" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="344" y="224" width="176" height="96" rx="6" fill="rgba(27,108,128,0.10)" stroke="#1b6c80" stroke-width="1"/>
+      <text class="node-name" x="432" y="256" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">local router</text>
+      <text class="sublabel" x="432" y="274" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">127.0.0.1</text>
+      <text class="sublabel" x="432" y="286" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">rewrites the opening line,</text>
+      <text class="sublabel" x="432" y="298" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">adds the key</text>
+
+      <!-- The credential store -->
+      <rect x="344" y="96" width="176" height="64" rx="6" fill="#eff4f5"/>
+      <rect x="344" y="96" width="176" height="64" rx="6" fill="rgba(93,95,96,0.10)" stroke="#8a8c8d" stroke-width="1"/>
+      <text class="node-name" x="432" y="124" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">credential store</text>
+      <text class="sublabel" x="432" y="142" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">holds the gateway's key</text>
+
+      <!-- The gateway, outside this computer -->
+      <rect x="712" y="224" width="176" height="96" rx="6" fill="#eff4f5"/>
+      <rect x="712" y="224" width="176" height="96" rx="6" fill="rgba(19,20,22,0.05)" stroke="#5d5f60" stroke-width="1"/>
+      <text class="node-name" x="800" y="256" fill="#131416" font-size="12" font-weight="600" font-family="'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif" text-anchor="middle">your model gateway</text>
+      <text class="sublabel" x="800" y="274" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">/v1/messages</text>
+      <text class="sublabel" x="800" y="286" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">/v1/responses</text>
+      <text class="sublabel" x="800" y="298" fill="#5d5f60" font-size="9" font-family="'IBM Plex Mono', Consolas, ui-monospace, monospace" text-anchor="middle">/v1/models</text>
+
+      <!-- Callout -->
+      <path d="M432,410 V336" fill="none" stroke="rgba(19,20,22,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+      <circle cx="432" cy="332" r="2" fill="#131416"/>
+      <text class="callout" x="432" y="428" fill="#131416" font-size="14" font-style="italic" font-family="'IBM Plex Serif', Georgia, serif" text-anchor="middle">the tool never holds the gateway's key</text>
+    </svg>
+    </div>
+  </div>
+</body>
+</html>
