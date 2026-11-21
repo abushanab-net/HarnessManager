@@ -214,6 +214,7 @@ Accounts
   hrm list [--refresh]                       accounts with plan, limits, tokens and open consoles
   hrm show <account>                         one account in detail
   hrm add <name> [--harness codex] [--email alex@example.com] [--api-key | --route <id>] [--no-login]
+          [--base-url <url>] [--model <id>] [--intro <text>]   an API-key account's own endpoint (below)
   hrm login <account>                        sign an account in
   hrm remove <account> [--delete-home]       remove it, and with --delete-home its folder
   hrm key set|delete <account>               the API key of an API-key account
@@ -268,6 +269,31 @@ Upkeep
   hrm restore <zip|folder> [--adopt] [--preview]
   hrm archive status|now                     old transcripts into the archive
 ```
+
+### Example: Claude Code and Codex on a model gateway of your own
+
+Both accounts below run against a gateway on the local network that serves open models, such as
+[MirbadLLM](https://github.com/samykabu/MirbadLLM). The host and the model are examples; use your own.
+
+```sh
+# Claude Code. The address has no /v1, and the tool's opening line is replaced.
+hrm add mirbad-claude --api-key --base-url http://gateway.lan:8080         --model qwen3-coder --intro "You are a coding assistant."
+
+# Codex. The address ends in /v1, and the opening line is removed.
+hrm add mirbad-codex --harness codex --api-key --base-url http://gateway.lan:8080/v1         --model qwen3-coder --intro=""
+
+hrm run mirbad-claude
+hrm run mirbad-codex
+```
+
+- `hrm add` asks for the gateway's key. In a script, set `HRM_API_KEY` instead.
+- An API-key account with `--base-url` or `--intro` goes through the local router by itself. There is no
+  provider or route to add, and the router starts with the account.
+- `--intro "<text>"` replaces the line the tool names itself with ("You are Claude Code, ..."), and
+  `--intro=""` removes it. Without `--intro` the line stays as the tool sends it.
+- `--model` is the name the gateway lists under `/v1/models`. When the gateway reports the model's context
+  window there, the tool is told that size.
+- Without `--base-url` the account uses the vendor's API: Anthropic for Claude Code, OpenAI for Codex.
 
 ## FAQ
 
