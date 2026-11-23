@@ -1273,7 +1273,7 @@ try {
       assert.equal(says, `${rows} settings`, `${id}: the head counts its rows`);
       counts.push(rows);
     }
-    assert.deepEqual(counts, [5, 6, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too, Window and terminal has Session states, how long a request waits and the own terminal');
+    assert.deepEqual(counts, [5, 7, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too, Window and terminal has Session states, how long a request waits, the own terminal and hrm on the PATH');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {
