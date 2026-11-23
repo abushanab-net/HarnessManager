@@ -94,6 +94,9 @@ svg.ov-lane.none { background: none; box-shadow: none; }
 
 .ov-verdict { display: block; font-weight: 600; }
 .ov-verdict.plain { font-weight: 400; color: var(--ink-secondary); }
+.ov-verdict-note { display: block; }
+.ov-quota-chips { flex-wrap: wrap; gap: 3px 5px; }
+.ov-table .ov-quota-chips { padding: 1px 0; }
 
 /* the legend's rows, in the popover menu: the mark, then what it means */
 .ov-legend { display: flex; align-items: center; gap: 10px; }

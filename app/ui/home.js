@@ -7,6 +7,7 @@
 import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu, needsMark } from './core.js';
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
 import { accountViews, metricsOf, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
+import { creditText, freshCredits, freshReset, resetHint } from './limits.js';
 import { computersStatus, syncOn, computers, nameOf, scope, setScope } from './computers.js';
 import { pageHead, plural, seg } from './parts.js';
 
@@ -144,16 +145,26 @@ function verdictOf(a, w, now, today) {
   if (!w.open) return ['', 'Lasts until its reset', `${w.label}: no window is open; the next one starts with the next request`];
   return ['', `Lasts until ${clock(w.resetsAt, now)}`, `${w.label} resets ${fmtAbsoluteReset(w.resetsAt, now)}${w.forecastAtReset != null ? `; ≈ ${100 - w.forecastAtReset}% left then at this pace` : ''}`];
 }
+function quotaChips(a) {
+  if (a.needsLogin || a.mismatch || a.kind !== 'subscription') return '';
+  const { credits, unused_reset: reset } = a.p.quota || {}, now = Date.now();
+  const value = freshCredits(credits, now) ? creditText(credits, true) : '';
+  const creditChip = value ? `<span class="pill quiet" data-testid="quota-chip">${esc(a.tool === 'claude' ? 'Usage credits ' + value.toLowerCase() : value)}</span>` : '';
+  const resetChip = reset?.holds_unused_reset && freshReset(reset, now) ? '<span class="pill quiet" title="Unused reset reported" data-testid="quota-chip">Unused reset</span>' : '';
+  return creditChip || resetChip ? `<div class="row ov-quota-chips">${creditChip}${resetChip}</div>` : '';
+}
+
 /** One row of the runway: account | limits | lane | verdict | the one action that works in its state. */
 function runwayRow(a, sel, used, pcs, now, today) {
   const w = governing(a), [tone, text, tip] = verdictOf(a, w, now, today), lock = lockOf(a);
+  const hint = resetHint(a, w);
   const plan = a.needsLogin ? '' : a.kind === 'api_key' ? 'API key' : a.kind === 'routed' ? 'Routed' : a.p.identity.plan || '';
   const on = a.computers.map((id) => (pcs.find((c) => c.id === id) || {}).name || id);
   const where = a.openSessions ? `${plural(a.openSessions, 'session')} open${on.length ? ' on ' + on.join(', ') : ''}` : 'No session open';
   return `<tr class="${sel ? 'sel' : ''}" tabindex="0" data-act="home-select" data-name="${esc(a.id)}" data-key="lane-${esc(a.id)}" data-testid="lane-${esc(a.id)}" title="${esc(where)}">
-    <td><div class="row">${toolIcon(a.tool, 16)}<b class="trunc ov-name">${esc(a.name)}</b>${plan ? `<span class="pill ov-plan" title="${esc(a.kind === 'routed' ? a.plan : plan)}">${esc(plan)}</span>` : ''}${a.isMain ? `<span class="pill quiet" title="The tool's own profile (${esc(a.folder)})">main</span>` : ''}</div></td>
+    <td><div class="row">${toolIcon(a.tool, 16)}<b class="trunc ov-name">${esc(a.name)}</b>${plan ? `<span class="pill ov-plan" title="${esc(a.kind === 'routed' ? a.plan : plan)}">${esc(plan)}</span>` : ''}${a.isMain ? `<span class="pill quiet" title="The tool's own profile (${esc(a.folder)})">main</span>` : ''}</div>${quotaChips(a)}</td>
     <td>${limitsCell(a, used, now)}</td><td>${laneCell(a, w, now)}</td>
-    <td><span class="ov-verdict trunc ${tone}" title="${esc(tip)}" data-testid="verdict-${esc(a.id)}">${esc(text)}</span></td>
+    <td><span class="ov-verdict trunc ${tone}" title="${esc(tip)}" data-testid="verdict-${esc(a.id)}">${esc(text)}</span>${hint ? `<span class="small muted trunc ov-verdict-note" title="${esc(hint)}" data-testid="reset-hint">${esc(hint)}</span>` : ''}</td>
     <td>${a.needsLogin ? `<button class="btn sm" data-act="login" data-name="${esc(a.id)}" data-testid="lane-login-${esc(a.id)}">Log in</button>` : `<button class="btn sm" data-act="start" data-name="${esc(a.id)}" ${lock ? `disabled title="Used up · back ${esc(clock(lock.resetsAt, now))}"` : `title="Start ${esc(a.name)} in a terminal"`} data-testid="lane-start-${esc(a.id)}">Start</button>`}</td></tr>`;
 }
 
@@ -192,7 +203,8 @@ function attention(m, accts, d, now) {
     const risks = m.atRisk.filter((r) => r.acct === a), spent = risks.find((r) => r.win.left === 0), out = risks.find((r) => r.win.left > 0);
     if (!spent && !out && !a.needsLogin) continue;
     const all = [...risks.map((r) => (r.win.left === 0 ? `${r.win.label} used up, back ${fmtAbsoluteReset(r.win.resetsAt, now)}` : `${r.win.label} ≈ runs out ${fmtAbsoluteReset(r.win.outAt, now)}, ${fmtDuration(r.gapMs)} before its reset`)), ...(a.needsLogin ? [a.p.identity.needs_login ? 'The login expired, so its limits cannot be read' : 'Not logged in yet'] : [])];
-    items.push({ key: a.id, rank: a.needsLogin ? 2 : spent ? 0 : 1, at: spent ? spent.win.resetMs : out ? out.outMs : 0, icon: toolIcon(a.tool, 16), name: a.name, title: all.join('\n'),
+    const hint = resetHint(a, (spent || out)?.win);
+    items.push({ key: a.id, rank: a.needsLogin ? 2 : spent ? 0 : 1, at: spent ? spent.win.resetMs : out ? out.outMs : 0, icon: toolIcon(a.tool, 16), name: a.name, title: [...all, hint].filter(Boolean).join('\n'),
       tone: a.needsLogin || spent ? 'negT' : 'warnT', text: a.needsLogin ? (a.p.identity.needs_login ? 'Login expired' : 'Not logged in') : spent ? `${longName(spent.win)} used up · back ${clock(spent.win.resetsAt, now)}` : `≈ Out ${about(out.gapMs)} before reset`,
       btn: a.needsLogin ? `<button class="btn sm" data-act="login" data-name="${esc(a.id)}">Log in</button>` : open(`#account?name=${encodeURIComponent(a.id)}`) });
   }
@@ -296,7 +308,7 @@ function draw(sheet) {
   const useSeg = segOf('Recommend for', [['', 'Any', '', 'use-any'], ...useTools.map((h) => [h.id, toolIcon(h.id, 14) + (wide ? esc(h.label) : ''), h.label, 'use-' + h.id])], useTool, 'home-use-tool', 'tight');
   const useCard = `<section class="card" data-key="hero" data-testid="use-next" aria-label="Use next"><div class="card-head"><h2 class="section">Use next</h2>${useSeg}</div>
     <div class="ov-use">${next ? `<div class="row ov-who">${toolIcon(next.tool, 28)}<b class="trunc" data-testid="use-name">${esc(next.name)}</b>${next.measured && next.p.identity.plan ? `<span class="pill ov-plan" title="${esc(next.p.identity.plan)}">${esc(next.p.identity.plan)}</span>` : ''}${next.isMain ? '<span class="pill quiet">main</span>' : ''}</div>
-        <p class="ov-why trunc" title="${next.readAt ? 'Limits read ' + ago(now - next.readAt) : ''}" data-testid="use-why">${why}</p>`
+        <p class="ov-why trunc" title="${next.readAt ? 'Limits read ' + ago(now - next.readAt) : ''}" data-testid="use-why">${why}</p>${quotaChips(next)}`
       : `<div class="row ov-who"><b class="trunc">No ${esc(toolName ? toolName + ' ' : '')}account with measured room</b></div><p class="ov-why trunc">${plural(pool.length, 'account')} · ${pool.some((a) => a.needsLogin) ? 'log in, then ' : ''}refresh to read limits (—)</p>`}
       <div class="row">${next ? `<button class="btn primary" data-act="start" data-name="${esc(next.id)}" data-testid="start-best"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 1l7 4-7 4z" fill="currentColor"/></svg>Start</button><button class="btn" data-act="start-in-folder" data-name="${esc(next.id)}" title="Pick the folder, a recent one or any, and the flags" data-testid="start-folder">Start in folder…</button>` : '<button class="btn primary" data-act="refresh-now">Read limits</button>'}
         <button class="btn sm quiet ov-prefer ${st.preferExpiring ? 'on' : ''}" data-act="home-prefer" aria-pressed="${st.preferExpiring}" title="Prefer the account whose 5-hour window resets soonest and still has at least half its room" data-testid="use-prefer">${st.preferExpiring ? '✓ ' : ''}5h first</button></div>

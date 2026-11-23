@@ -4,9 +4,9 @@
 // eligibility rule, the ring renderer and the tray popup's rings are limits.js's (the Overview and the popup share them);
 // their names are still exported here.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize, confirmDialog } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon, ic } from './lib.js';
-import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack } from './limits.js';
+import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack, quotaSource, creditText, freshCredits, freshReset, resetHint } from './limits.js';
 import './sessions.js'; // nothing of it is used here: kept so the window's modules still load in the order they did
 import { syncOn, nameOf } from './computers.js';
 import { pageHead, detailHead, seg, needsAttention, plural } from './parts.js';
@@ -323,6 +323,56 @@ action('acct-fold', (el) => {
 });
 // ---------- account detail ----------
 const STARTED_WITH = { claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', opencode: 'XDG_CONFIG_HOME', agy: 'its own login', pi: 'PI_CODING_AGENT_DIR', omp: 'PI_CODING_AGENT_DIR' };
+const USAGE_PAGES = { codex: 'https://chatgpt.com/settings/usage', claude: 'https://claude.ai/settings/usage' };
+const quotaHandoffs = new Map();
+
+function quotaDetails(a, now, installed) {
+  const q = a.p.quota || {}, c = q.credits, r = q.unused_reset, codex = a.tool === 'codex';
+  if (a.kind !== 'subscription' || !USAGE_PAGES[a.tool] || (a.needsLogin && !a.measured && !c && !r)) return '';
+  const read = (source, at, stale = false) => `<small class="muted" ${at ? `title="${esc(new Date(at).toLocaleString())}"` : ''}>${esc(source || 'No matching reading')}${at ? ' · ' + agoText(at, now) : ''}${stale ? ' · Stale' : ''}</small>`;
+  const usageRead = c ? read(quotaSource(c.source), c.fetched_at, !freshCredits(c, now))
+    : q.source === 'elsewhere' ? read('', null) : read(quotaSource(q.source), a.readAt);
+  const resetRead = r ? read('Claude reset cache', r.checked_at, !freshReset(r, now)) : usageRead;
+  const reset = !r ? 'Not reported' : r.holds_unused_reset ? 'Unused reset reported' : 'No unused reset at check';
+  const facts = [
+    [codex ? 'Banked resets' : 'Saved resets', reset, resetRead],
+    ['Grant expiry', 'Unknown', resetRead],
+    ['Usage credits', creditText(c), usageRead],
+    ...(!codex ? [['Prepaid balance', 'Not reported', usageRead]] : []),
+  ];
+  const since = quotaHandoffs.get(a.id);
+  if (since && Math.max(a.readAt || 0, c?.fetched_at || 0, r?.checked_at || 0) > since.at) quotaHandoffs.delete(a.id);
+  const waiting = quotaHandoffs.get(a.id);
+  const button = (action, text, extra = '') => `<button class="btn sm${action === 'terminal' ? ' primary' : ''}" data-act="quota-handoff" data-kind="${action}" data-name="${esc(a.id)}" data-tool="${a.tool}" data-label="${esc(a.name)}" data-workspace="${esc([a.email, a.p.identity.org].filter(Boolean).join(' · '))}" data-testid="quota-${action}" ${extra}>${text}</button>`;
+  const terminal = a.needsLogin ? 'Log in to open Codex' : !installed ? 'Codex is not installed on this computer' : '';
+  return `<div class="quota-details" data-testid="quota-details">
+    <dl class="facts-grid">${facts.map(([label, value, source]) => `<dt>${label}</dt><dd>${esc(value)}${source}</dd>`).join('')}</dl>
+    <div class="row-actions quota-actions">
+      ${codex ? button('terminal', 'Open Codex /usage', terminal ? `disabled title="${esc(terminal)}"` : 'title="Enter /usage in the Codex terminal"') : ''}
+      ${button('usage', 'Open Usage page ↗')}${codex ? button('paid-reset', 'Review paid reset ↗') : ''}
+      ${button('credits', codex ? 'Manage credits ↗' : 'Manage usage credits ↗')}
+    </div>
+    <div class="muted small">${codex ? 'Paid resets and usage credits can cost money. Confirm any charges with OpenAI.' : 'Usage credits can cost money. Confirm any charges with Anthropic.'}</div>
+    <div role="status" class="muted small" data-testid="quota-handoff-status" ${waiting ? '' : 'hidden'}>${waiting?.terminal ? 'Enter /usage in Codex. ' : ''}Waiting for a newer reading.</div>
+  </div>`;
+}
+
+action('quota-handoff', async (el) => {
+  const { kind, tool, name, label, workspace } = el.dataset;
+  const terminal = kind === 'terminal', vendor = tool === 'codex' ? 'OpenAI' : 'Anthropic';
+  if (!terminal) {
+    const cost = kind === 'paid-reset' ? 'An instant reset costs money if offered.' : kind === 'credits' ? 'Buying or using credits can cost money.' : '';
+    const identity = workspace ? ` (${esc(workspace)})` : '';
+    if (!await confirmDialog(el.textContent.trim(), `Check that ${vendor} Usage shows <b>${esc(label)}</b>${identity} and the intended workspace. ${cost ? cost + ' Confirm any charges with ' + vendor + '.' : ''}`, 'Open Usage page', false)) return;
+  }
+  const at = Date.now();
+  const opened = await attempt(() => terminal ? call('start', { name }) : call('open_url', { url: USAGE_PAGES[tool] }));
+  if (opened) {
+    quotaHandoffs.set(name, { at, terminal });
+    render(true);
+  }
+});
+
 const sessionLine = (s, pcs) => `<div class="account-session" data-key="s-${esc(s.id)}" data-testid="session-${esc(s.id)}"><div><b><i class="session-dot ${s.open ? 'live' : s.failed ? 'bad' : ''}" ${s.failed ? `title="${s.failed} failed ${s.failed === 1 ? 'command' : 'commands'}"` : ''}></i>${esc(s.title || 'Untitled session')}</b><div class="session-meta"><span>${esc(s.project_name || (s.cwd || '').split(/[\\/]/).pop() || '')}</span>${syncOn(pcs) && s.device ? `<span>${esc(s.device_name || nameOf(pcs, s.device))}</span>` : ''}<span class="when ${s.open ? 'live' : ''}">${s.open ? 'live' : esc(when(s.last_active_at))}</span>${s.archived ? '<span class="plan-pill">archived</span>' : ''}</div></div>
   ${s.open ? `<button class="btn-follow" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Follow</button>` : `<button class="filter-chip" data-act="open-session" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}">Open</button>`}</div>`;
 
@@ -351,7 +401,8 @@ view('account', async (sheet, params) => {
       const pct = used ? t.used : t.left, at = t.forecastAtReset != null ? (used ? t.forecastAtReset : 100 - t.forecastAtReset) : null;
       const reset = !t.resetsAt ? 'no window open' : !t.open ? 'window has reset' : 'resets ' + (t.resetMs < 86400000 ? 'in ' + fmtDuration(t.resetMs) : fmtAbsoluteReset(t.resetsAt, now));
       const note = t.outAt ? ['≈ Runs out ' + fmtAbsoluteReset(t.outAt, now) + ' at this pace.', 'warn'] : t.forecastAtReset != null ? ['≈ Lasts until the reset at this pace.', ''] : t.left >= 60 ? ['Plenty left.', ''] : null;
-      return `<div class="account-limit" data-key="w-${esc(t.id)}"><div class="account-limit-head"><b>${esc(t.label)}</b><span class="${t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : ''}">${t.left === 0 ? 'Used up' : `${pct}% ${used ? 'used' : 'left'}`} · ${esc(reset)}</span></div>${winTrack(pct, t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : '', at)}${note ? `<span class="note ${note[1]}">${esc(note[0])}</span>` : ''}</div>`;
+      const hint = resetHint(a, t, now);
+      return `<div class="account-limit" data-key="w-${esc(t.id)}"><div class="account-limit-head"><b>${esc(t.label)}</b><span class="${t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : ''}">${t.left === 0 ? 'Used up' : `${pct}% ${used ? 'used' : 'left'}`} · ${esc(reset)}</span></div>${winTrack(pct, t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : '', at)}${note || hint ? `<span class="note ${note?.[1] || ''}">${esc([note?.[0], hint].filter(Boolean).join(' '))}</span>` : ''}</div>`;
     };
     const facts = [
       ['Login', p.kind !== 'subscription' ? (p.identity.logged_in ? 'Key saved' : '<span class="negT">No key</span>') : !p.identity.logged_in ? '<span class="negT">Not logged in</span>' : p.identity.needs_login ? '<span class="negT">Expired</span>' : '<span class="acT">Valid</span>'],
@@ -370,8 +421,8 @@ view('account', async (sheet, params) => {
       : !PLAN_TOOLS.includes(p.harness) ? [esc(p.harness_label) + ' has no plan limits to read: usage only.', '']
       : ['— Not read yet: limits show up after this account runs on this computer.', `<button class="btn" data-act="limits-refresh" data-name="${esc(name)}" data-testid="limits-fix">Refresh limits</button>`];
     body = `<section class="account-stats" aria-label="Account readouts">${stat('Tokens · 7 days', w ? fmt(w.tokens) : '—', w ? Math.round(w.hit * 100) + '% read from cache' : 'Cache share not read')}${stat('At list prices', w ? money(w.cost) : '—', p.kind === 'subscription' ? 'Subscription: not billed per token' : 'Billed per token')}${stat('First reply p95', w && w.p95 != null ? secs(w.p95) : '—', w && w.replies ? `p50 ${secs(w.p50)} · ${w.replies.toLocaleString()} replies` : 'No timed replies')}${stat('Sessions · 7 days', week.length, running ? `${running} running now` : 'None running now')}${stat('Busiest project', w && w.top_project ? Math.round(w.top_project.share * 100) + '%' : '—', w && w.top_project ? esc(w.top_project.name) : 'No usage this week')}</section>
-      <div class="account-columns ${a.windows.length ? '' : 'solo'}"><section class="panel-card" data-testid="limits-card">${a.windows.length ? `<div class="panel-head"><h2 class="panel-title">Limits</h2><span class="muted">read ${agoText(a.readAt, now)}</span></div>
-          ${a.windows.map(lim).join('')}<span class="muted">Bars: % ${used ? 'used' : 'left'} · dashed mark: ≈ level at reset.</span>` : `<div class="a-unread"><h2 class="panel-title">Limits</h2><span class="muted grow">${unread[0]}</span>${unread[1]}</div>`}</section>
+      <div class="account-columns ${a.windows.length ? '' : 'solo'}"><section class="panel-card" data-testid="limits-card">${a.windows.length ? `<div class="panel-head"><h2 class="panel-title">Limits</h2><span class="muted">${p.quota && quotaSource(p.quota.source) ? esc(quotaSource(p.quota.source)) + ' · ' : ''}read ${agoText(a.readAt, now)}</span></div>
+          ${a.windows.map(lim).join('')}<span class="muted">Bars: % ${used ? 'used' : 'left'} · dashed mark: ≈ level at reset.</span>` : `<div class="a-unread"><h2 class="panel-title">Limits</h2><span class="muted grow">${unread[0]}</span>${unread[1]}</div>`}${quotaDetails(a, now, tool.installed)}</section>
         <section class="panel-card"><h2 class="panel-title">Login and folder</h2><dl class="facts-grid">${facts.map(([t, v]) => `<dt>${t}</dt><dd>${v}</dd>`).join('')}</dl>${p.kind === 'subscription' && !a.needsLogin ? `<div><button class="btn-secondary" data-act="login" data-name="${esc(name)}">Log in again</button></div>` : ''}</section></div>
       <div class="account-columns"><section class="panel-card"><div class="panel-head"><h2 class="panel-title">Tokens per day · 30 days</h2><span class="muted">${k && per.some(Boolean) ? fmt(per.reduce((s, v) => s + v, 0)) + ' · ' + money(k.cost30) + ' at list prices' : '—'}</span></div>
           ${per.some(Boolean) ? `<div class="account-chart">${per.map((v, i) => `<div class="stack-col ${i === per.length - 1 ? 'today' : ''}" title="${esc(dayLabel(i))}: ${fmt(v)} tokens"><svg class="stack-bars" height="${Math.round((v / max) * 76)}" aria-hidden="true"><rect width="100%" height="100%" rx="2"/></svg><span class="stack-lbl">${i === 0 || i === 14 ? esc(dayLabel(i)) : i === per.length - 1 ? 'Today' : ''}</span></div>`).join('')}</div>` : '<span class="muted">No usage yet.</span>'}</section>

@@ -334,7 +334,8 @@ fn sessions_group_by_repository_across_claude_and_codex() {
         json!({"type": "response_item", "timestamp": ts, "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Bumped."}]}}),
         json!({"type": "token_usage_record", "timestamp": ts, "payload": {"response_id": "resp_1", "usage": {"input_tokens": 500, "cached_input_tokens": 400, "output_tokens": 20}}}),
         json!({"type": "event_msg", "timestamp": ts, "payload": {"type": "token_count", "info": {"total_token_usage": {"total_tokens": 520}},
-            "rate_limits": {"primary": {"used_percent": 21, "window_minutes": 10080, "resets_at": 4102444800i64}, "secondary": {"used_percent": 7, "window_minutes": 300, "resets_at": 4102444800i64}}}}),
+            "rate_limits": {"primary": {"used_percent": 21, "window_minutes": 10080, "resets_at": 4102444800i64}, "secondary": {"used_percent": 7, "window_minutes": 300, "resets_at": 4102444800i64},
+                "credits": {"has_credits": true, "unlimited": false, "balance": "13954.3588950000"}}}}),
     ]);
     let dir = e.home.join(".codex").join("sessions").join("2026").join("11").join("01");
     std::fs::create_dir_all(&dir).unwrap();
@@ -384,6 +385,11 @@ fn sessions_group_by_repository_across_claude_and_codex() {
     let q = e.json(&["quota", "codex-main"]);
     assert_eq!(q["tiers"].as_array().unwrap().iter().find(|t| t["id"] == "week").unwrap()["used"], 21.0);
     assert_eq!(q["tiers"].as_array().unwrap().iter().find(|t| t["id"] == "session").unwrap()["used"], 7.0);
+    assert_eq!(q["credits"]["balance"], 13954.358895);
+    assert_eq!(q["credits"]["fetched_at"], q["fetched_at"]);
+    assert_eq!(q["credits"]["source"], "codex");
+    assert!(e.ok(&["quota", "codex-main"]).contains("credits 13954.36, resets not reported"));
+    assert!(e.ok(&["list"]).lines().any(|l| l.starts_with("codex-main") && l.ends_with("credits 13954.36, resets not reported")));
     let u = e.json(&["usage", "--profile", "codex-main"]);
     assert_eq!(u["total"], 120, "input minus cached plus output");
 
@@ -840,7 +846,7 @@ fn mock_reply(status: &'static str, body: &'static str) -> (String, std::thread:
 fn live_claude_limits_use_the_saved_login_while_valid() {
     let mut e = Env::new();
     e.ok(&["add", "live1"]);
-    let (url, h) = mock_once(r#"{"five_hour":{"utilization":12,"resets_at":"2099-01-01T10:00:00+00:00"},"seven_day":{"utilization":3,"resets_at":"2099-01-05T10:00:00+00:00"}}"#);
+    let (url, h) = mock_once(r#"{"five_hour":{"utilization":12,"resets_at":"2099-01-01T10:00:00+00:00"},"seven_day":{"utilization":3,"resets_at":"2099-01-05T10:00:00+00:00"},"extra_usage":{"is_enabled":false}}"#);
     e.extra.push(("HRM_ANTHROPIC_USAGE_URL".into(), url));
     let q = e.json(&["quota", "live1", "--live"]);
     let req = h.join().unwrap().to_lowercase();
@@ -851,6 +857,10 @@ fn live_claude_limits_use_the_saved_login_while_valid() {
     // the live reading is newer than Claude Code's cache, so it is what the list shows
     let p = e.profile("live1");
     assert_eq!(p["quota"]["source"], "live");
+    assert_eq!(q["credits"]["enabled"], false);
+    assert_eq!(p["quota"]["credits"], q["credits"]);
+    assert!(p["quota"]["credits"].get("account_uuid").is_none());
+    assert!(e.ok(&["quota", "live1"]).contains("credits off, resets not reported"));
     assert_eq!(p["identity"]["needs_login"], false);
     // Anthropic refuses the saved login (signed out or revoked elsewhere): the account says it needs a new one
     let (url, h) = mock_reply("401 Unauthorized", r#"{"error":"invalid token"}"#);

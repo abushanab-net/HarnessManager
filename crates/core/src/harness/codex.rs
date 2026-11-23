@@ -70,7 +70,7 @@ fn window_label(minutes: i64) -> (String, String) {
     }
 }
 
-/// Codex `rate_limits` (from a token_count event) to tiers.
+/// Codex `rate_limits` (from a token_count event) to tiers and usage credits.
 pub fn parse_rate_limits(rl: &Value, at: i64) -> Quota {
     let mut tiers = vec![];
     for key in ["primary", "secondary"] {
@@ -79,7 +79,15 @@ pub fn parse_rate_limits(rl: &Value, at: i64) -> Quota {
         let (id, label) = window_label(w["window_minutes"].as_i64().unwrap_or(0));
         tiers.push(QuotaTier { id, label, used: w["used_percent"].as_f64().unwrap_or(0.0), resets_at: w["resets_at"].as_i64().map(|s| s * 1000) });
     }
-    Quota { tiers, fetched_at: Some(at), source: "codex".into() }
+    let c = &rl["credits"];
+    let has_credits = c["has_credits"].as_bool();
+    let unlimited = c["unlimited"].as_bool();
+    let balance = c["balance"].as_f64().or_else(|| c["balance"].as_str()?.parse().ok())
+        .filter(|n| n.is_finite() && *n >= 0.0);
+    let credits = (has_credits.is_some() || unlimited.is_some() || balance.is_some()).then(|| UsageCredits {
+        has_credits, unlimited, balance, fetched_at: Some(at), source: "codex".into(), ..Default::default()
+    });
+    Quota { tiers, fetched_at: Some(at), source: "codex".into(), credits, ..Default::default() }
 }
 
 /// The limits a rollout line carries (a token_count event with `rate_limits`), dated by the line.
@@ -198,10 +206,11 @@ impl Harness for Codex {
 
     /// The reading the usage import kept (it reads those lines anyway): one row, no file.
     fn quota(&self, ctx: &Ctx, p: &Profile) -> Option<Quota> {
-        if let Ok(Some(q)) = ctx.db.get_quota(&p.name) { return Some(q); }
-        // an account imported before readings were kept has none until its next turn: its newest rollouts are read for it, once
+        let kept = ctx.db.get_quota(&p.name).ok().flatten();
+        if kept.as_ref().is_some_and(|q| q.credits.is_some()) { return kept; }
+        // Read the newest rollouts once for older caches that could not have kept credits.
         let mark = limits_mark(&p.name);
-        if ctx.db.kv_get(&mark).ok().flatten().is_some() { return None; }
+        if ctx.db.kv_get(&mark).ok().flatten().as_deref() == Some("2") { return kept; }
         let mut files: Vec<(i64, PathBuf)> = self.rollouts(ctx, p).into_iter().map(|(f, m, _)| (m, f)).collect();
         files.sort_by(|a, b| b.0.cmp(&a.0));
         // the newest reading by when Codex took it: Codex rewrites old rollouts, so the newest file can hold an old one
@@ -212,9 +221,11 @@ impl Harness for Codex {
                 if best.as_ref().is_none_or(|b| q.fetched_at > b.fetched_at) { best = Some(q); }
             }
         }
-        if let Some(q) = &best { let _ = ctx.db.put_quota(&p.name, q); }
-        let _ = ctx.db.kv_set(&mark, "1");
-        best
+        if let Some(q) = &best {
+            if ctx.db.put_quota_if_newer(&p.name, q).is_err() { return kept.or(best); }
+        }
+        let _ = ctx.db.kv_set(&mark, "2");
+        ctx.db.get_quota(&p.name).ok().flatten().or(kept)
     }
 
     fn import_usage(&self, ctx: &Ctx, p: &Profile) -> Result<usize> {
@@ -313,7 +324,7 @@ impl Harness for Codex {
                 Ok(Some((rows, limits, cursor, (key, mtime, len)))) => {
                     stored += ctx.db.insert_usage(&rows, &prices)?;
                     // the account's reading is the newest by Codex's own time, whichever file it came from
-                    if let Some(q) = limits { if ctx.db.get_quota(&p.name)?.is_none_or(|kept| q.fetched_at > kept.fetched_at) { ctx.db.put_quota(&p.name, &q)?; } }
+                    if let Some(q) = limits { ctx.db.put_quota_if_newer(&p.name, &q)?; }
                     match cursor { Some(c) => c.save(ctx)?, None => ctx.db.set_cursor(&key, &p.name, len as i64, mtime, len as i64, "")? }
                 }
                 Ok(None) => {}
@@ -613,6 +624,22 @@ mod limits_tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn rollout_credits_distinguish_numeric_balance_unlimited_false_and_missing() {
+        let parse = |c| parse_rate_limits(&json!({"credits": c}), 1_234).credits;
+        let c = parse(json!({"has_credits": true, "unlimited": false, "balance": "13954.3588950000"})).unwrap();
+        assert_eq!((c.has_credits, c.unlimited, c.balance), (Some(true), Some(false), Some(13954.358895)));
+        assert_eq!((c.source.as_str(), c.fetched_at), ("codex", Some(1_234)));
+        let c = parse(json!({"has_credits": false, "balance": 0})).unwrap();
+        assert_eq!((c.has_credits, c.unlimited, c.balance), (Some(false), None, Some(0.0)));
+        let c = parse(json!({"unlimited": true, "balance": null})).unwrap();
+        assert_eq!((c.unlimited, c.balance), (Some(true), None));
+        assert!(parse_rate_limits(&json!({}), 1_234).credits.is_none());
+        for bad in [json!("NaN"), json!("inf"), json!("-1"), json!("not a number"), json!({})] {
+            assert!(parse(json!({"has_credits": "false", "unlimited": 1, "balance": bad})).is_none());
+        }
+    }
+
     fn reading(at: &str, week: f64) -> String {
         format!("{}\n", json!({"type": "event_msg", "timestamp": at, "payload": {"type": "token_count", "rate_limits": {"secondary": {"used_percent": week, "window_minutes": 10080, "resets_at": 4102444800i64}}}}))
     }
@@ -633,15 +660,22 @@ mod limits_tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         file(&main, "rollout-2026-10-01T10-00-00-b.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));
         let at = ts_ms("2026-11-01T10:00:00.000Z");
-        // read before any import (an account from an earlier version): the files give it, once, and the row answers after
+        // Before upgrading, the account cached only the windows of this exact rollout event.
+        ctx.db.put_quota(&main.name, &limits_of(&reading("2026-11-01T10:00:00.000Z", 21.0)).unwrap()).unwrap();
+        ctx.db.kv_set(&limits_mark(&main.name), "1").unwrap();
+        let mut event: Value = serde_json::from_str(&reading("2026-11-01T10:00:00.000Z", 21.0)).unwrap();
+        event["payload"]["rate_limits"]["credits"] = json!({"balance":"23.25"});
+        std::fs::write(&new, format!("{event}\n")).unwrap();
         assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
         assert_eq!(week(ctx.db.get_quota("codex-main").unwrap()), Some((21.0, at)));
+        assert_eq!(ctx.db.get_quota("codex-main").unwrap().unwrap().credits.unwrap().balance, Some(23.25));
         // the import keeps the newest reading it reads, and an older one never replaces it
         Codex.import_usage(&ctx, &main).unwrap();
         assert_eq!(week(Codex.quota(&ctx, &main)), Some((21.0, at)));
         std::fs::write(&new, format!("{}{}{}", reading("2026-11-01T10:00:00.000Z", 21.0), reading("2026-11-02T08:00:00.000Z", 30.0), reading("2026-11-02T09:00:00.000Z", 34.0))).unwrap();
         Codex.import_usage(&ctx, &main).unwrap();
         assert_eq!(week(Codex.quota(&ctx, &main)), Some((34.0, ts_ms("2026-11-02T09:00:00.000Z"))));
+        assert!(Codex.quota(&ctx, &main).unwrap().credits.is_none(), "the newer reading omitted credits");
         // an account whose first read is its import has the same reading
         file(&other, "rollout-2026-11-01T10-00-00-c.jsonl", &reading("2026-11-01T10:00:00.000Z", 21.0));
         file(&other, "rollout-2026-10-01T10-00-00-d.jsonl", &reading("2026-10-01T10:00:00.000Z", 99.0));

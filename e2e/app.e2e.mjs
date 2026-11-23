@@ -31,7 +31,7 @@ const home = path.join(sb, 'home'), data = path.join(sb, 'data'), bin = path.joi
 for (const d of [home, data, bin]) fs.mkdirSync(d, { recursive: true });
 for (const t of ['claude', 'codex', 'opencode', 'agy', 'pi', 'omp']) fs.copyFileSync(path.join(target, 'fakeharness.exe'), path.join(bin, `${t}.exe`));
 const prefix = `HRMTEST-app-${process.pid}`;
-const runLog = path.join(sb, 'runs.jsonl'), termLog = path.join(sb, 'terminal.jsonl');
+const runLog = path.join(sb, 'runs.jsonl'), termLog = path.join(sb, 'terminal.jsonl'), urlLog = path.join(sb, 'urls.jsonl');
 const pricing = path.join(sb, 'pricing.json');
 fs.writeFileSync(pricing, JSON.stringify({ anthropic: { models: { 'claude-opus-5-5': { cost: { input: 4, output: 20, cache_read: 0.2, cache_write: 5 } } } }, openai: { models: { 'gpt-6': { cost: { input: 1, output: 10, cache_read: 0.1 } } } } }));
 const write = (f, s) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, s); };
@@ -59,7 +59,7 @@ const env = {
   // Launch at sign-in writes here, never to the real Run key
   HRM_AUTOSTART_KEY: `Software\\HarnessManagerTest-${process.pid}\\Run`,
   HRM_HOME: data, HRM_PROFILES_HOME: home, HRM_CRED_PREFIX: prefix, HRM_AGY_CRED: `${prefix}-agylive`,
-  HRM_TERMINAL_LOG: termLog, HRM_PRICING_FILE: pricing, FAKE_RUN_LOG: runLog, FAKE_WAIT_CODE: '1', FAKE_EMAIL: 'alex@example.com',
+  HRM_TERMINAL_LOG: termLog, HRM_URL_LOG: urlLog, HRM_PRICING_FILE: pricing, FAKE_RUN_LOG: runLog, FAKE_WAIT_CODE: '1', FAKE_EMAIL: 'alex@example.com',
   ...(process.env.HRM_E2E_APP_DIR ? {} : { HRM_EXE: path.join(target, 'hrm.exe') }),
   HRM_BIN_CLAUDE: path.join(bin, 'claude.exe'), HRM_BIN_CODEX: path.join(bin, 'codex.exe'), HRM_BIN_OPENCODE: path.join(bin, 'opencode.exe'), HRM_BIN_AGY: path.join(bin, 'agy.exe'), HRM_BIN_PI: path.join(bin, 'pi.exe'), HRM_BIN_OMP: path.join(bin, 'omp.exe'),
 };
@@ -3994,6 +3994,134 @@ description: Bulk skill ${i}
         await palGone();
       }
     } finally { await look(was[0], was[1]); }
+  });
+
+  await test('limit resets and credits: Overview chips, account Limits, stale readings and vendor handoffs', async () => {
+    const cx = 'codex-reset-test', cl = 'claude-reset-test', uuid = 'claude-fixture-1';
+    const observed = Date.now(), nextWeek = observed + 3 * 86400e3;
+    const codexReading = (at, used, balance) => jl([{
+      type: 'event_msg', timestamp: new Date(at).toISOString(), payload: { type: 'token_count', rate_limits: {
+        primary: { used_percent: used, window_minutes: 10080, resets_at: Math.floor(nextWeek / 1000) },
+        credits: { has_credits: true, unlimited: false, balance },
+      } },
+    }]);
+    const card = '[data-testid=limits-card]', waiting = '[data-testid=quota-handoff-status]';
+    const cxLane = `[data-testid=lane-${cx}]`, clLane = `[data-testid=lane-${cl}]`;
+    const redraw = () => exec("return import('./core.js').then((c) => c.render(true))");
+    const openUsage = async (action, name, url) => {
+      const before = readLines(urlLog).length;
+      await click(`[data-testid=quota-${action}]`);
+      await hasText('[role=dialog]', name);
+      if (action !== 'usage') await hasText('[role=dialog]', action === 'paid-reset' ? 'costs money' : 'can cost money');
+      assert.equal(readLines(urlLog).length, before, 'opening the dialog does not open a browser');
+      await click('#confirm-ok');
+      await waitFor(() => readLines(urlLog).length > before, 'the browser opening request');
+      assert.equal(readLines(urlLog)[before], url);
+    };
+    try {
+      hrm('add', cx, '--harness', 'codex', '--no-login');
+      hrm('add', cl, '--no-login');
+      const cxHome = JSON.parse(hrm('show', cx, '--json')).home;
+      const clHome = JSON.parse(hrm('show', cl, '--json')).home;
+      write(path.join(cxHome, 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { id_token: `${b64({ alg: 'none' })}.${b64({ email: 'codex-reset@example.org', 'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' } })}.sig` } }));
+      write(path.join(clHome, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fixture', subscriptionType: 'max' } }));
+      const cxLog = path.join(cxHome, 'sessions', 'rollout-2026-11-23T10-00-00-credits.jsonl');
+      write(cxLog, codexReading(observed, 1, '13954.3588950000'));
+      const clDoc = (at, validUntil, enabled, used = 12) => JSON.stringify({
+        oauthAccount: { accountUuid: uuid, emailAddress: 'claude-reset@example.org', organizationName: 'Fixture Workspace' },
+        cachedUsageUtilization: { accountUuid: uuid, fetchedAtMs: at, utilization: {
+          seven_day: { utilization: used, resets_at: new Date(nextWeek).toISOString() },
+          extra_usage: { is_enabled: enabled, used_credits: 42, monthly_limit: 500 },
+        } },
+        unusedLimitResetStatusCache: { accountUuid: uuid, checkedAt: at, validUntil, holdsUnusedReset: true },
+      });
+      const clFile = path.join(clHome, '.claude.json');
+      const stale = observed - 86400e3;
+      write(clFile, clDoc(stale, stale + 3600e3, false, 100));
+      hrm('quota', cx);
+      await nav('#home');
+      await redraw();
+      await click('[data-testid=tool-all]');
+      await hasText(clLane, 'Used up');
+      assert.equal(await page.locator(`${clLane} [data-testid=quota-chip], ${clLane} [data-testid=reset-hint]`).count(), 0);
+
+      await nav(`#account?name=${cl}`);
+      await hasText(card, 'Stale');
+      await hasText(card, 'Off');
+      await hasText(card, 'Unused reset reported');
+      assert.ok(!(await text(card)).includes('Check reset coverage in Claude'));
+      await page.locator(card).screenshot({ path: path.join(shots, 'resets-stale-limits.png') });
+
+      write(clFile, clDoc(observed, observed + 3600e3, true));
+      await nav('#home');
+      await click('[data-act=refresh-now]');
+      await click('[data-testid=use-codex]');
+      await hasText(`${cxLane} [data-testid=quota-chip]`, 'Credits 13,954');
+      await hasText(clLane, 'Usage credits on');
+      await hasText(clLane, 'Unused reset');
+      assert.equal(await page.locator(clLane).evaluate((row) => row.getBoundingClientRect().height), 48);
+      await hasText('[data-testid=use-next] [data-testid=quota-chip]', 'Credits 13,954');
+      assert.equal(await page.locator(`${cxLane} [data-testid=reset-hint], ${clLane} [data-testid=reset-hint]`).count(), 0);
+      await shot('resets-overview-chip');
+
+      await nav(`#account?name=${cx}`);
+      await hasText(card, 'Banked resets');
+      await hasText(card, 'Not reported');
+      await hasText(card, 'Grant expiry');
+      await hasText(card, 'Unknown');
+      await hasText(card, '13,954.36 credits');
+      await hasText(card, 'Codex rollout');
+      await page.locator(card).screenshot({ path: path.join(shots, 'resets-codex-limits.png') });
+
+      const termBefore = readLines(termLog).length;
+      await click('[data-testid=quota-terminal]');
+      await waitFor(() => readLines(termLog).length > termBefore, 'the account terminal opening request');
+      assert.deepEqual(readLines(termLog)[termBefore].args, ['run', cx]);
+      await hasText(waiting, 'Enter /usage in Codex. Waiting for a newer reading.');
+      await openUsage('usage', cx, 'https://chatgpt.com/settings/usage');
+      const beforeCancel = readLines(urlLog).length;
+      await click('[data-testid=quota-paid-reset]');
+      await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+      assert.equal(readLines(urlLog).length, beforeCancel);
+      await openUsage('paid-reset', cx, 'https://chatgpt.com/settings/usage');
+      await openUsage('credits', cx, 'https://chatgpt.com/settings/usage');
+      await hasText(waiting, 'Waiting for a newer reading.');
+      assert.ok(await page.locator(waiting).isVisible());
+      assert.ok((await text(card)).includes('13,954.36 credits'), 'a handoff does not change the observation');
+      await sleep(20);
+      fs.appendFileSync(cxLog, codexReading(Date.now(), 100, '14000'));
+      await click('[data-act=refresh-now]');
+      await hasText(card, '14,000 credits');
+      await hasText(card, 'Check reset options in Codex');
+      assert.ok(!(await page.locator(waiting).isVisible()), 'a newer reading ends the wait');
+
+      await nav(`#account?name=${cl}`);
+      await hasText(card, 'Saved resets');
+      await hasText(card, 'Unused reset reported');
+      await hasText(card, 'Claude reset cache');
+      await hasText(card, 'Claude usage cache');
+      await hasText(card, 'Prepaid balance');
+      assert.match(await page.locator('[data-testid=quota-details] dd').nth(2).innerText(), /^On\n/);
+      await page.locator(card).screenshot({ path: path.join(shots, 'resets-claude-limits.png') });
+      await openUsage('usage', cl, 'https://claude.ai/settings/usage');
+      await openUsage('credits', cl, 'https://claude.ai/settings/usage');
+      assert.equal(await page.getByTestId('quota-paid-reset').count(), 0);
+
+      await sleep(20);
+      write(clFile, clDoc(Date.now(), Date.now() + 3600e3, false, 100));
+      await click('[data-act=refresh-now]');
+      await hasText(card, 'Off');
+      await hasText(card, 'Check reset coverage in Claude');
+      assert.ok(!(await page.locator(waiting).isVisible()), 'a newer Claude reading ends the wait');
+
+      await nav('#home');
+      await redraw();
+      await hasText(`${cxLane} [data-testid=reset-hint]`, 'Check reset options in Codex');
+      await hasText(`${clLane} [data-testid=reset-hint]`, 'Check reset coverage in Claude');
+      for (const name of [cl, cx]) assert.ok(await page.getByTestId(`lane-start-${name}`).isDisabled(), 'credits and saved resets do not extend included runway');
+    } finally {
+      for (const name of [cl, cx]) try { hrm('remove', name, '--delete-home'); } catch {}
+    }
   });
 
   exitCode =results.some((r) => r[1] !== 'ok') ? 1 : 0;

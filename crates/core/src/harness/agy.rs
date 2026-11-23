@@ -316,7 +316,7 @@ pub fn parse_usage(data: &Value, fetched_at: i64) -> Quota {
             tiers.push(QuotaTier { id, label, used: ((1.0 - left) * 100.0).clamp(0.0, 100.0), resets_at: b["reset_time"].as_str().map(super::parse::ts_ms).filter(|t| *t > 0) });
         }
     }
-    Quota { tiers, fetched_at: Some(fetched_at), source: "agy /usage".into() }
+    Quota { tiers, fetched_at: Some(fetched_at), source: "agy /usage".into(), ..Default::default() }
 }
 
 /// (id, title, preview, first workspace folder) from Antigravity's summaries database.
