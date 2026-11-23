@@ -1240,7 +1240,7 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
     assert_eq!(e.runs().last().unwrap()["args"], json!(["--settings", e.data.join("claude-hooks.json"), "two words", ""]));
 
     e.ok(&["settings", "own_terminal", "true"]);
-    for mode in ["paste", "plain"] {
+    for mode in ["paste", "plain", "win32"] {
         e.extra = vec![
             ("FAKE_TERMINAL".into(), mode.into()),
             ("FAKE_HOOK".into(), json!({"hook_event_name": "UserPromptSubmit", "session_id": "terminal-session"}).to_string()),
@@ -1258,7 +1258,13 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
         until(|| out().contains("fixture ready").then_some(()), trace);
         let id = run_id(owned.0.id()).unwrap();
         assert!(e.fail(&["reply", &id, "a\nb"]).contains("single line"));
-        owned.0.stdin.as_mut().unwrap().write_all(b"local\r").unwrap();
+        if mode == "win32" {
+            let local = b"local\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_\x1b[67;46;3;1;8;1_\x1b[67;46;3;0;8;1_";
+            owned.0.stdin.as_mut().unwrap().write_all(local).unwrap();
+            until(|| out().contains("fixture key=(67, 46, 3, 0, 8, 1)").then_some(()), trace);
+        } else {
+            owned.0.stdin.as_mut().unwrap().write_all(b"local\r").unwrap();
+        }
         until(|| out().contains("fixture line=\"local\"").then_some(()), trace);
         e.ok(&["reply", "terminal-session", "-réply"]);
         let sent = if mode == "paste" { "\x1b[200~-réply\x1b[201~" } else { "-réply" };
@@ -1267,6 +1273,16 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
         e.ok(&["stop", &id]);
         assert_eq!(until(|| owned.0.try_wait().unwrap(), trace).code(), Some(37), "{}", trace());
         assert!(out().contains("fixture interrupt"), "{}", trace());
+        if mode == "win32" {
+            let out = out();
+            let keys: Vec<_> = out.split("fixture key=").skip(1)
+                .map(|key| key.lines().next().unwrap()).collect();
+            let local = [
+                "(13, 28, 13, 1, 0, 1)", "(13, 28, 13, 0, 0, 1)",
+                "(67, 46, 3, 1, 8, 1)", "(67, 46, 3, 0, 8, 1)",
+            ];
+            assert_eq!(keys, [local, local].concat(), "{}", trace());
+        }
         assert!(run_id(owned.0.id()).is_none());
         assert!(e.fail(&["stop", &id]).contains("has no owned terminal"));
         let records = e.runs();

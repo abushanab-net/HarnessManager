@@ -254,8 +254,44 @@ fn terminal_fixture(name: &str, args: &[String], mode: &str) {
     if mode == "paste" {
         print!("\x1b[?2004h");
     }
+    if mode == "win32" {
+        print!("\x1b[?9001h");
+        assert_ne!(unsafe { SetConsoleMode(input.as_raw_handle(), 0) }, 0);
+    }
     println!("fixture ready");
     output.lock().flush().unwrap();
+    if mode == "win32" {
+        let mut release_count = 0;
+        let mut text = Vec::new();
+        loop {
+            let mut event = INPUT_RECORD::default();
+            let mut read = 0;
+            assert_ne!(unsafe { ReadConsoleInputW(input.as_raw_handle(), &mut event, 1, &mut read) }, 0);
+            if read == 0 || event.EventType != KEY_EVENT as u16 { continue; }
+            let key = unsafe { event.Event.KeyEvent };
+            let ch = unsafe { key.uChar.UnicodeChar };
+            match ch {
+                13 | 3 => {
+                    println!("fixture key={:?}", (key.wVirtualKeyCode, key.wVirtualScanCode, ch,
+                        key.bKeyDown, key.dwControlKeyState, key.wRepeatCount));
+                    if ch == 13 && key.bKeyDown != 0 {
+                        println!("fixture line={}", json!(String::from_utf16(&text).unwrap()));
+                        text.clear();
+                    }
+                    output.lock().flush().unwrap();
+                    if ch == 3 && key.bKeyDown == 0 {
+                        release_count += 1;
+                        if release_count == 2 {
+                            println!("fixture interrupt");
+                            std::process::exit(37);
+                        }
+                    }
+                }
+                _ if key.bKeyDown != 0 && ch != 0 => text.push(ch),
+                _ => {}
+            }
+        }
+    }
     let mut line = Vec::new();
     for byte in input.lock().bytes().map(Result::unwrap) {
         match byte {

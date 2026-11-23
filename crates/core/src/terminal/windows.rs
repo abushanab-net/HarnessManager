@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -23,6 +23,11 @@ use super::control::{Action, Control, Outcome};
 use crate::{launch::LaunchSpec, Ctx};
 
 const TICK: Duration = Duration::from_millis(40);
+const BRACKETED_PASTE: u8 = 1;
+const WIN32_INPUT: u8 = 2;
+// Win32 input records carry the virtual key, scan code, UTF-16 unit, down flag, modifiers and repeat.
+const WIN32_CTRL_C: &[u8] = b"\x1b[67;46;3;1;8;1_\x1b[67;46;3;0;8;1_";
+const WIN32_ENTER: &[u8] = b"\x1b[13;28;13;1;0;1_\x1b[13;28;13;0;0;1_";
 pub const SHIM_COMMAND: &str = "__terminal-shim";
 
 /// Batch launchers need Rust's Windows Command quoting, especially for metacharacters.
@@ -64,13 +69,13 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
     let (pty, reader, writer) = Pty::open(size)?;
     let relay = Arc::new(Relay {
         writer: Mutex::new(writer),
-        paste: AtomicBool::new(false),
+        modes: AtomicU8::new(0),
         closed: AtomicBool::new(false),
     });
     let display = {
         let relay = relay.clone();
         let console = output.is_some();
-        thread::Builder::new().spawn(move || relay_output(reader, &relay.paste, console))?
+        thread::Builder::new().spawn(move || relay_output(reader, &relay.modes, console))?
     };
 
     let mut keyboard = None;
@@ -126,7 +131,7 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
 
 struct Relay {
     writer: Mutex<File>,
-    paste: AtomicBool,
+    modes: AtomicU8,
     closed: AtomicBool,
 }
 
@@ -140,9 +145,33 @@ impl Relay {
         if self.closed.load(Relaxed) {
             return Outcome::Closed;
         }
-        match writer.write_all(&action.input(self.paste.load(Relaxed))) {
+        match write_remote_input(&mut *writer, action, self.modes.load(Relaxed)) {
             Ok(()) => Outcome::Sent,
             Err(_) => Outcome::Closed,
+        }
+    }
+}
+
+fn write_remote_input(mut writer: impl Write, action: Action<'_>, modes: u8) -> io::Result<()> {
+    let win32 = modes & WIN32_INPUT != 0;
+    match action {
+        Action::Stop => writer.write_all(if win32 { WIN32_CTRL_C } else { b"\x03" }),
+        Action::Reply(text) => {
+            let enter = if win32 { WIN32_ENTER } else { b"\r" };
+            let mut bytes = if modes & BRACKETED_PASTE != 0 {
+                [b"\x1b[200~", text.as_bytes(), b"\x1b[201~"].concat()
+            } else {
+                text.as_bytes().to_vec()
+            };
+            if win32 && !text.is_empty() {
+                writer.write_all(&bytes)?;
+                // shortcut: let Codex's 120 ms paste window expire, revisit if the tool exposes paste completion
+                thread::sleep(Duration::from_millis(180));
+                writer.write_all(enter)
+            } else {
+                bytes.extend_from_slice(enter);
+                writer.write_all(&bytes)
+            }
         }
     }
 }
@@ -205,10 +234,11 @@ fn relay_input(relay: &Relay, console: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn relay_output(mut reader: File, paste: &AtomicBool, console: bool) -> io::Result<()> {
+fn relay_output(mut reader: File, modes: &AtomicU8, console: bool) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     let mut buf = [0; 4096];
-    let mut mode = PasteMode::default();
+    let mut sequence = ModeSequence::default();
+    let mut active = 0;
     let mut carry = 0;
     loop {
         let n = match reader.read(&mut buf[carry..]) {
@@ -229,8 +259,9 @@ fn relay_output(mut reader: File, paste: &AtomicBool, console: bool) -> io::Resu
             len
         };
         for &b in &buf[..end] {
-            if let Some(enabled) = mode.byte(b) {
-                paste.store(enabled, Relaxed);
+            if let Some((mask, enabled)) = sequence.byte(b) {
+                active = if enabled { active | mask } else { active & !mask };
+                modes.store(active, Relaxed);
             }
         }
         stdout.write_all(&buf[..end])?;
@@ -241,44 +272,50 @@ fn relay_output(mut reader: File, paste: &AtomicBool, console: bool) -> io::Resu
 }
 
 #[derive(Default)]
-enum PasteMode {
+enum ModeSequence {
     #[default]
     Ground,
     Escape,
     Csi,
     Private {
         param: u16,
-        paste: bool,
+        mask: u8,
     },
 }
 
-impl PasteMode {
-    fn byte(&mut self, byte: u8) -> Option<bool> {
+impl ModeSequence {
+    fn byte(&mut self, byte: u8) -> Option<(u8, bool)> {
+        let mode_bit = |param| match param {
+            2004 => BRACKETED_PASTE,
+            9001 => WIN32_INPUT,
+            _ => 0,
+        };
         let mut changed = None;
         *self = match (&*self, byte) {
             (_, 0x1b) => Self::Escape,
             (Self::Escape, b'[') => Self::Csi,
             (Self::Escape, b'c') => {
-                changed = Some(false);
+                changed = Some((BRACKETED_PASTE | WIN32_INPUT, false));
                 Self::Ground
             }
             (Self::Csi, b'?') => Self::Private {
                 param: 0,
-                paste: false,
+                mask: 0,
             },
-            (Self::Private { param, paste }, b'0'..=b'9') => Self::Private {
+            (Self::Private { param, mask }, b'0'..=b'9') => Self::Private {
                 param: param
                     .saturating_mul(10)
                     .saturating_add(u16::from(byte - b'0')),
-                paste: *paste,
+                mask: *mask,
             },
-            (Self::Private { param, paste }, b';') => Self::Private {
+            (Self::Private { param, mask }, b';') => Self::Private {
                 param: 0,
-                paste: *paste || *param == 2004,
+                mask: *mask | mode_bit(*param),
             },
-            (Self::Private { param, paste }, b'h' | b'l') => {
-                if *paste || *param == 2004 {
-                    changed = Some(byte == b'h');
+            (Self::Private { param, mask }, b'h' | b'l') => {
+                let mask = *mask | mode_bit(*param);
+                if mask != 0 {
+                    changed = Some((mask, byte == b'h'));
                 }
                 Self::Ground
             }
@@ -542,16 +579,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn follows_bracketed_paste_toggles_across_reads() {
-        let mut state = PasteMode::default();
+    fn follows_input_mode_toggles_across_reads() {
+        let mut state = ModeSequence::default();
         let mut scan = |s: &[u8]| s.iter().filter_map(|&b| state.byte(b)).collect::<Vec<_>>();
         assert!(scan(b"hello\x1b[?1004;20").is_empty());
-        assert_eq!(scan(b"04h"), [true]);
+        assert_eq!(scan(b"04;9001h"), [(BRACKETED_PASTE | WIN32_INPUT, true)]);
         assert!(scan(b"2004l\x1b[?1999l").is_empty());
         assert_eq!(
-            scan(b"\x1b[?2004;1006l\x1b[?2004h\x1bc"),
-            [false, true, false]
+            scan(b"\x1b[?2004;1006l\x1b[?9001l\x1b[?2004h\x1bc"),
+            [
+                (BRACKETED_PASTE, false),
+                (WIN32_INPUT, false),
+                (BRACKETED_PASTE, true),
+                (BRACKETED_PASTE | WIN32_INPUT, false),
+            ]
         );
+    }
+
+    #[test]
+    fn encodes_paste_and_enter_independently() {
+        let input = |action, modes| {
+            let mut bytes = Vec::new();
+            write_remote_input(&mut bytes, action, modes).unwrap();
+            bytes
+        };
+        assert_eq!(input(Action::Reply("abc"), 0), b"abc\r");
+        assert_eq!(
+            input(Action::Reply("abc"), BRACKETED_PASTE),
+            b"\x1b[200~abc\x1b[201~\r"
+        );
+        assert_eq!(
+            input(Action::Reply("abc"), WIN32_INPUT),
+            [b"abc".as_slice(), WIN32_ENTER].concat()
+        );
+        assert_eq!(input(Action::Stop, BRACKETED_PASTE), b"\x03");
     }
 
     #[test]
@@ -559,7 +620,7 @@ mod tests {
         let (mut reader, writer) = pipe().unwrap();
         let relay = Relay {
             writer: Mutex::new(writer),
-            paste: AtomicBool::new(false),
+            modes: AtomicU8::new(0),
             closed: AtomicBool::new(false),
         };
         let first = relay.writer.lock().unwrap();
