@@ -58,14 +58,6 @@ impl<'a> Action<'a> {
         Action::parse(&bytes)?;
         Ok(bytes)
     }
-
-    pub(super) fn input(&self, paste: bool) -> Vec<u8> {
-        match self {
-            Self::Reply(text) if paste => [b"\x1b[200~", text.as_bytes(), b"\x1b[201~\r"].concat(),
-            Self::Reply(text) => [text.as_bytes(), b"\r"].concat(),
-            Self::Stop => vec![3],
-        }
-    }
 }
 
 #[repr(u8)]
@@ -319,9 +311,6 @@ mod tests {
             assert!(Action::parse(bytes).is_err());
         }
         assert!(Action::parse(&[b'r'; MAX_TEXT + 2]).is_err());
-        assert_eq!(Action::Reply("abc").input(false), b"abc\r");
-        assert_eq!(Action::Reply("abc").input(true), b"\x1b[200~abc\x1b[201~\r");
-        assert_eq!(Action::Stop.input(true), b"\x03");
     }
 
     #[test]
