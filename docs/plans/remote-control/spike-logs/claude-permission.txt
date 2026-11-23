@@ -1,0 +1,44 @@
+Claude Code 2.1.330 | interactive | temporary project
+Selected lines from the VT stream, hook log and loopback model log.
+
+Terminal Yes first, hook deny later
+[hook] PermissionRequest Bash entered
+[screen] Waiting for permission…
+[screen] Bash command
+[screen] echo fixture-shell-ok
+[screen] Do you want to proceed? 1. Yes  2. No
+[probe] Enter after the dialog had been visible for about 4 seconds
+[screen] fixture-result-seen
+[model] Claude tool result allowed
+[probe] Release file set to deny after the result
+[hook] PermissionRequest returned deny
+
+Terminal No first, hook allow later
+[hook] PermissionRequest Bash entered
+[screen] Do you want to proceed? 1. Yes  2. No
+[probe] Sent 2 after the dialog had been visible for about 4 seconds
+[screen] Did not run 1 call
+[screen] Interrupted · What should Claude do instead?
+[probe] Release file set to allow
+[hook] PermissionRequest returned allow
+
+Hook deny first
+[hook] PermissionRequest Bash entered
+[screen] Do you want to proceed? 1. Yes  2. No
+[probe] Release file set to deny with the dialog visible
+[hook] PermissionRequest returned deny
+[screen] Not run · permission denied
+[screen] Reason: fixture-hook-denied
+[screen] Denied by PermissionRequest hook
+[probe] Enter after denial
+[model] Claude tool result denied
+
+Timeout
+[hook] PermissionRequest Bash entered
+[screen] Do you want to proceed? 1. Yes  2. No
+[probe] 4-second hook timeout elapsed. No hook return marker.
+[screen] Do you want to proceed? 1. Yes  2. No
+[probe] Enter
+[model] Claude tool result allowed
+[replay] Released the waiting Python child after observing the timeout.
+[hook] PermissionRequest returned fallthrough

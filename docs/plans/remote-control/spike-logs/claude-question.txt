@@ -1,0 +1,12 @@
+Claude Code 2.1.330 | interactive | temporary project
+Selected lines from the VT stream, hook log and loopback model log.
+
+[probe] Typed question-probe and pressed Enter from a second process
+[screen] running PreToolUse hook
+[hook] PreToolUse AskUserQuestion entered
+[hook] PreToolUse returned allow Blue
+[screen] Answered Claude's questions:
+[screen] Which colour? → Blue
+[model] Claude tool result Blue
+[screen] fixture-result-seen
+[probe] No answer keystroke was sent during the turn.

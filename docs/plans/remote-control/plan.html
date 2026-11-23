@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harness Manager Remote Control Plan</title>
+<style>
+  /* Layout: one reading column; the decision first, then what to borrow, then phases. Same tokens as the other reports in docs/. */
+  :root { --bg: #0B1418; --panel: #10202A; --panel2: #0D1A22; --line: #203540; --line2: #182A33; --ink: #E6EEF1; --soft: #C6D4D9; --m: #8FA6AE; --ac: #3FD6CF; --orca: #7FB2FF; --t3: #F28FB0; --warn: #E0A84C; --neg: #F07A6A; --ok: #5BD08A; --sans: Inter, "Segoe UI", system-ui, sans-serif; --mono: "JetBrains Mono", Consolas, ui-monospace, monospace; color-scheme: dark; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #F4F8F9; --panel: #FFFFFF; --panel2: #EAF1F3; --line: #C9D8DD; --line2: #DEE8EB; --ink: #10202A; --soft: #2B3F48; --m: #55707A; --ac: #0F6E7A; --orca: #2A5DB0; --t3: #B02F68; --warn: #8F6210; --neg: #B5402F; --ok: #1F7A45; color-scheme: light; } }
+  :root[data-theme="light"] { --bg: #F4F8F9; --panel: #FFFFFF; --panel2: #EAF1F3; --line: #C9D8DD; --line2: #DEE8EB; --ink: #10202A; --soft: #2B3F48; --m: #55707A; --ac: #0F6E7A; --orca: #2A5DB0; --t3: #B02F68; --warn: #8F6210; --neg: #B5402F; --ok: #1F7A45; color-scheme: light; }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--ink); font: 15px/1.6 var(--sans); scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); padding-block: 28px 96px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  main { max-width: 1120px; margin: 0 auto; }
+  h1 { font-size: clamp(26px, 4vw, 34px); line-height: 1.2; margin: 6px 0 12px; text-wrap: balance; }
+  h2 { font-size: 23px; line-height: 1.25; margin: 56px 0 12px; padding-top: 18px; border-top: 1px solid var(--line); text-wrap: balance; }
+  h3 { font-size: 16.5px; margin: 24px 0 6px; }
+  p, li { max-width: 46rem; }
+  p { margin: 8px 0; }
+  a { color: var(--ac); }
+  a:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .muted { color: var(--m); }
+  .lede { font-size: 17px; color: var(--soft); max-width: 50rem; }
+  .toc { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: 16px 0 0; font-size: 14px; }
+  .toc a { text-decoration: none; }
+  .hm { color: var(--ac); font-weight: 600; } .orca { color: var(--orca); font-weight: 600; } .t3 { color: var(--t3); font-weight: 600; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .card h3 { margin: 0 0 6px; }
+  .card p, .card li { font-size: 14.5px; max-width: none; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; } .card li { margin: 4px 0; }
+  .card p.q { font-size: 12.5px; color: var(--m); letter-spacing: .04em; text-transform: uppercase; margin: 0 0 4px; }
+  .card p.a { font-size: 19px; font-weight: 650; margin: 0 0 6px; line-height: 1.3; }
+  .card p.a.yes { color: var(--ok); } .card p.a.mid { color: var(--warn); } .card p.a.no { color: var(--neg); }
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 8px; padding: 12px 16px; margin: 16px 0; font-size: 14.5px; }
+  .note.ac { border-left-color: var(--ac); } .note.neg { border-left-color: var(--neg); }
+  .note p { max-width: none; }
+  .tw { overflow-x: auto; margin: 10px 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; color: var(--m); font-weight: 600; font-size: 12.5px; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: bottom; background: var(--panel2); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--line2); vertical-align: top; min-width: 9rem; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; min-width: 10rem; }
+  .lead { white-space: nowrap; font-family: var(--mono); font-size: 12px; min-width: 0; }
+  .take { color: var(--ok); } .skip { color: var(--neg); } .later { color: var(--warn); }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; color: var(--m); white-space: nowrap; }
+  .tag.unv { color: var(--neg); border-color: var(--neg); } .tag.sz { color: var(--ac); border-color: var(--ac); }
+  ul.plain li, ol.plan li { margin: 7px 0; }
+  .phase { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+  .phase h3 { margin: 0 0 4px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .phase p, .phase li { max-width: none; font-size: 14.5px; }
+  .phase ul { margin: 6px 0; padding-left: 20px; }
+  .phase .acc { color: var(--soft); border-top: 1px solid var(--line2); margin-top: 10px; padding-top: 8px; }
+  .dia { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel2); margin: 12px 0; }
+  .dia svg { display: block; min-width: 860px; width: 100%; height: auto; }
+  .dia .b { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+  .dia .b.hmb { stroke: var(--ac); }
+  .dia text { fill: var(--ink); font: 600 13px var(--sans); }
+  .dia text.s { fill: var(--m); font: 400 11.5px var(--sans); }
+  .dia .ar { stroke: var(--m); stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+  .dia #ah path { fill: var(--m); }
+  .src li { margin: 4px 0; font-size: 13.5px; max-width: none; overflow-wrap: anywhere; }
+  /* walkthrough: low-fidelity sketches. The terminal stays dark in both themes. */
+  :root { --term: #060B0E; --termfg: #CFE3E8; --termdim: #7C939B; }
+  .from { display: inline-block; font-family: var(--mono); font-size: 11px; border: 1px solid currentColor; border-radius: 4px; padding: 0 6px; white-space: nowrap; margin: 2px 4px 2px 0; }
+  .from.o { color: var(--orca); } .from.t { color: var(--t3); } .from.h { color: var(--ac); } .from.v { color: var(--warn); }
+  .strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+  .strip figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px 10px; min-width: 0; }
+  .strip svg { display: block; width: 100%; height: auto; }
+  .strip figcaption { font-size: 12.5px; color: var(--soft); line-height: 1.4; }
+  .strip figcaption b { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--m); font-weight: 500; }
+  .sf { stroke: var(--ink); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .sf.thin { stroke: var(--m); stroke-width: 1.4; } .sf.good { stroke: var(--ok); stroke-width: 2.6; } .sf.alert { stroke: var(--warn); }
+  .strip text { fill: var(--warn); font: 600 10px var(--sans); }
+  .step { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 18px; align-items: start; margin: 26px 0; padding-top: 18px; border-top: 1px solid var(--line2); }
+  .step.wide { grid-template-columns: minmax(0, 1fr); }
+  .step > div { min-width: 0; }
+  .step h3 { margin: 0 0 6px; } .step .when { font-family: var(--mono); font-size: 12px; color: var(--m); }
+  .step p { font-size: 14.5px; }
+  .mocks { display: grid; gap: 12px; min-width: 0; }
+  .mocks.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mock { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); overflow: hidden; min-width: 0; font-size: 13px; }
+  .mock .bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel2); border-bottom: 1px solid var(--line); font-size: 11.5px; color: var(--m); }
+  .mock .bar i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+  .mock .bar span { margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mock .in { padding: 10px 12px; display: grid; gap: 8px; }
+  .mock.term { background: var(--term); }
+  .mock.term pre { margin: 0; padding: 10px 12px; color: var(--termfg); font: 12px/1.55 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .mock.term .dim { color: var(--termdim); } .mock.term .hl { color: var(--warn); } .mock.term .rem { color: var(--ac); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border: 1px solid var(--line2); border-radius: 8px; padding: 7px 10px; background: var(--panel2); }
+  .row b { font-weight: 600; } .row .sp { flex: 1; min-width: 8px; }
+  .need { border: 1px solid var(--warn); border-radius: 8px; padding: 9px 11px; display: grid; gap: 6px; background: var(--panel2); }
+  .need code { display: block; background: var(--term); color: var(--termfg); border-radius: 5px; padding: 5px 8px; overflow-wrap: anywhere; }
+  .lbl { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--m); }
+  .btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--line); border-radius: 6px; padding: 3px 10px; font-size: 12px; color: var(--ink); background: var(--panel); white-space: nowrap; }
+  .btn.ok { background: var(--ok); border-color: var(--ok); color: var(--bg); font-weight: 600; } .btn.no { border-color: var(--neg); color: var(--neg); } .btn.off { color: var(--m); border-style: dashed; }
+  .btn.on { background: var(--ac); border-color: var(--ac); color: var(--bg); font-weight: 600; }
+  .pill { display: inline-block; font-size: 11px; border-radius: 10px; padding: 0 8px; border: 1px solid currentColor; white-space: nowrap; }
+  .pill.wait { color: var(--warn); } .pill.work { color: var(--ac); } .pill.done { color: var(--ok); }
+  .phones { display: flex; gap: 10px; flex-wrap: wrap; }
+  .phone { width: 196px; overflow-wrap: anywhere; border: 2px solid var(--line); border-radius: 22px; background: var(--panel); padding: 8px 9px 12px; font-size: 12.5px; display: grid; gap: 8px; align-content: start; }
+  .phone::before { content: ""; width: 54px; height: 5px; border-radius: 3px; background: var(--line); justify-self: center; }
+  .phone .cap { text-align: center; font-size: 11px; color: var(--m); }
+  .push { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; background: var(--panel2); display: grid; gap: 2px; }
+  .say { border-left: 3px solid var(--ac); padding: 4px 10px; color: var(--soft); }
+  .reply { display: flex; gap: 6px; align-items: center; border: 1px solid var(--ac); border-radius: 8px; padding: 6px 8px; }
+  .reply span:first-child { flex: 1; min-width: 0; }
+  .dia text.n { fill: var(--ac); font: 600 11px var(--mono); }
+  @media (max-width: 860px) { .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .step, .mocks.two { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 860px) { .grid3, .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="mono muted">Harness Manager · plan · 23 November 2026 · revises issue #1, "Remote control for running sessions"</p>
+  <h1>Remote control for running sessions: what to take from T3 Code and Orca</h1>
+  <p class="lede">Issue #1 chose to run each tool in its programmatic mode and build a chat view on top, the way <span class="t3">T3 Code</span> does. Since it was written on 3 November, Claude Code and Codex have documented hooks that can answer a permission prompt from outside the terminal. That makes a cheaper design possible: leave the session in the tool's own terminal, as <span class="orca">Orca</span> does, and add a side channel for "needs you", approve, deny and reply. This plan takes the session model from Orca, the access and state rules from T3 Code, and carries both over the links <span class="hm">Harness Manager</span> already has between computers.</p>
+  <nav class="toc"><a href="#answer">The short answer</a><a href="#walk">A session, start to finish</a><a href="#moved">What changed since the issue</a><a href="#how">How the two do it</a><a href="#adapt">Take, adapt, skip</a><a href="#design">The design</a><a href="#phases">Phases</a><a href="#security">Security</a><a href="#questions">The issue's open questions</a><a href="#unknown">What is not known yet</a><a href="#sources">Sources</a></nav>
+
+  <h2 id="answer">The short answer</h2>
+  <div class="grid3">
+    <div class="card"><p class="q">Can it be done?</p><p class="a yes">Yes, for a narrow version</p>
+      <p>See what is waiting, approve or deny, reply and stop, from the app, another paired computer or a phone page. Harness Manager already has most of the transport: paired computers over mutual TLS, a hub that relays ciphertext, presence, and a transcript watcher.</p></div>
+    <div class="card"><p class="q">Like T3 Code?</p><p class="a mid">The remote, without the client</p>
+      <p>T3 Code replaces the agent's interface with its own threads. Matching that is a second product. The version that fits is a remote for the tools' own terminals: an inbox of requests and a reply box, with the full conversation staying where it is.</p></div>
+    <div class="card"><p class="q">What makes it worth building?</p><p class="a yes">One inbox for everything</p>
+      <p>Claude Code, Codex and OpenCode each have a first-party remote now, each for one vendor. Nothing shows every waiting agent across tools, accounts and computers in one list. Harness Manager already knows what runs where.</p></div>
+  </div>
+  <div class="note"><p><b>Where this sits against the positioning report.</b> That report says to freeze issue #1, because Orca and T3 Code are far ahead on remote control and the project has no outside users yet. I still think the distribution fixes come first. This plan is how I would build the feature if you decide to, cut so that it extends the one thing the report says is hard to copy: knowing what happens on every computer you own.</p></div>
+
+  <section id="walk-sec">
+  <h2 id="walk">A session, start to finish</h2>
+  <p>One morning with the feature built as this plan describes. The screens are sketches of things that do not exist yet, drawn only to show what you would see and do. Each step names where its idea comes from:</p>
+  <p><span class="from o">Orca</span> taken from Orca <span class="from t">T3 Code</span> taken from T3 Code <span class="from h">Harness Manager</span> already in the app today <span class="from v">vendor hook</span> a documented hook in Claude Code or Codex</p>
+
+  <div class="strip">
+    <figure><svg viewBox="0 0 200 120" aria-hidden="true">
+      <path class="sf thin" d="M96 96H192M172 96V84M160 84H184"/><rect class="sf thin" x="150" y="52" width="44" height="30" rx="3"/>
+      <circle class="sf" cx="62" cy="38" r="9"/><path class="sf" d="M62 47L64 80L88 82L90 108M63 58L98 76"/><path class="sf thin" d="M48 84H72M52 84V108"/>
+    </svg><figcaption><b>09:10 · desk</b>Start a session from the app. The tool opens in its own terminal.</figcaption></figure>
+    <figure><svg viewBox="0 0 200 120" aria-hidden="true">
+      <path class="sf thin" d="M96 96H192M172 96V84M160 84H184"/><rect class="sf thin" x="150" y="52" width="44" height="30" rx="3"/>
+      <rect class="sf alert" x="112" y="14" width="76" height="24" rx="6"/><path class="sf alert" d="M160 38L166 48L170 38"/><text x="122" y="30">needs you</text>
+      <circle class="sf" cx="62" cy="38" r="9"/><path class="sf" d="M62 47L64 80L88 82L90 108M63 58L104 62"/><path class="sf thin" d="M48 84H72M52 84V108"/>
+    </svg><figcaption><b>09:14 · desk</b>The agent asks to run a command. Answer in the app or in the terminal.</figcaption></figure>
+    <figure><svg viewBox="0 0 200 120" aria-hidden="true">
+      <path class="sf thin" d="M20 110H180"/>
+      <circle class="sf" cx="92" cy="30" r="9"/><path class="sf" d="M92 39V78L76 108M92 78L108 108M92 52L110 62L118 48M92 52L78 70"/>
+      <rect class="sf" x="114" y="32" width="10" height="17" rx="2"/><path class="sf alert" d="M130 30Q136 40 130 50M136 26Q146 40 136 54"/><text x="146" y="44">buzz</text>
+    </svg><figcaption><b>09:25 · away</b>A second request arrives as a notification. Approve it on the phone.</figcaption></figure>
+    <figure><svg viewBox="0 0 200 120" aria-hidden="true">
+      <path class="sf thin" d="M92 92H190M110 92V110M176 92V110"/><path class="sf" d="M112 92H146L158 66"/><rect class="sf thin" x="166" y="80" width="9" height="12" rx="1"/>
+      <circle class="sf" cx="60" cy="36" r="9"/><path class="sf" d="M60 45L62 78L86 80L88 108M61 56L112 84"/><path class="sf thin" d="M46 82H70M50 82V108"/>
+    </svg><figcaption><b>09:40 · laptop</b>Read what happened and type the next instruction from another computer.</figcaption></figure>
+    <figure><svg viewBox="0 0 200 120" aria-hidden="true">
+      <path class="sf thin" d="M96 96H192M172 96V84M160 84H184"/><rect class="sf thin" x="150" y="52" width="44" height="30" rx="3"/><path class="sf good" d="M162 67L169 74L182 60"/>
+      <circle class="sf" cx="70" cy="30" r="9"/><path class="sf" d="M70 39V78L60 108M70 78L82 108M70 52L96 46M70 52L56 70"/>
+    </svg><figcaption><b>Later · desk</b>The terminal shows all of it, as if you had typed it there.</figcaption></figure>
+  </div>
+
+  <div class="step"><div>
+    <p class="when">Once, before the first time</p>
+    <h3>Decide which device may do what</h3>
+    <p>The laptop is already paired with the desk PC through the six-digit code that exists today. The phone joins by scanning a QR code shown on a computer that is on your hub. Every device then gets one of three levels on the computer that runs the sessions: see, decide or type. A new device starts at see.</p>
+    <p><span class="from h">Harness Manager</span> pairing codes, device certificates, Forget <span class="from t">T3 Code</span> a level per device, a key that stays in the phone's browser, revocable one by one <span class="from o">Orca</span> one-time QR that expires</p>
+  </div><div class="mocks">
+    <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Harness Manager on DESK-PC · Computers</span></div><div class="in">
+      <div class="row"><b>LAPTOP</b> <span class="muted">direct · heard 4 s ago</span><span class="sp"></span><span class="btns"><span class="btn">See</span><span class="btn">Decide</span><span class="btn on">Type</span></span></div>
+      <div class="row"><b>Phone</b> <span class="muted">through your hub · paired today</span><span class="sp"></span><span class="btns"><span class="btn">See</span><span class="btn on">Decide</span><span class="btn">Type</span></span><span class="btn no">Revoke</span></div>
+      <div class="row"><span class="muted">Always allow from a phone</span><span class="sp"></span><span class="btn off">Off</span></div>
+    </div></div>
+  </div></div>
+
+  <div class="step"><div>
+    <p class="when">09:10 · at the desk</p>
+    <h3>1. Start the session</h3>
+    <p>The Overview says which account has room, as it does today. You press Start in folder and pick the project. A terminal opens with Claude Code, looking exactly as it always has.</p>
+    <p>What is different is out of sight. <code>hrm run</code> now owns that terminal, and it gave the session a private address that the tool's hooks report to. From this moment the app knows whether the agent is working, waiting or finished, without reading the log on a timer.</p>
+    <p><span class="from h">Harness Manager</span> Use next, Start in folder, <code>hrm run</code> <span class="from o">Orca</span> the session stays in a real terminal; hooks report working, waiting, done</p>
+  </div><div class="mocks">
+    <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Harness Manager · Overview</span></div><div class="in">
+      <div class="row"><span class="lbl">Use next</span> <b>claude-work</b> <span class="muted">room until 13:40</span><span class="sp"></span><span class="btn on">Start in folder…</span></div>
+      <div class="lbl">Running now</div>
+      <div class="row"><b>shop-api</b> <span class="muted">Claude Code · claude-work · this computer</span><span class="sp"></span><span class="pill work">working</span></div>
+      <div class="row"><b>refactor-auth</b> <span class="muted">Codex · codex-personal · on LAPTOP</span><span class="sp"></span><span class="pill work">working</span></div>
+    </div></div>
+    <div class="mock term"><div class="bar"><i></i><i></i><i></i><span>Claude Code · claude-work</span></div><pre><span class="dim">D:\Projects\shop-api</span>
+&gt; the cart total ignores the discount code, fix it and add a test
+
+● Reading src/cart/total.ts …</pre></div>
+  </div></div>
+
+  <div class="step"><div>
+    <p class="when">09:14 · at the desk</p>
+    <h3>2. The agent asks, and you answer where you are</h3>
+    <p>Claude Code wants to run the tests and stops at its usual prompt. At the same moment the hook tells Harness Manager, and a card appears on the Overview, with a mark on the tray icon. The card offers the same three choices the terminal offers, in the tool's own words.</p>
+    <p>Press Yes on the card and the terminal carries on. Press 1 in the terminal and the card closes. Whichever happens first is the answer.</p>
+    <p><span class="from v">vendor hook</span> <code>PermissionRequest</code> returns allow or deny <span class="from o">Orca</span> the "Needs you" list <span class="from t">T3 Code</span> the tool's own options, unchanged; every request can be declined</p>
+  </div><div class="mocks two">
+    <div class="mock term"><div class="bar"><i></i><i></i><i></i><span>Claude Code · claude-work</span></div><pre>● Bash(npm test)
+  <span class="dim">Run the test suite</span>
+
+<span class="hl">Do you want to proceed?</span>
+❯ 1. Yes
+  2. Yes, and don't ask again for
+     npm test commands
+  3. No, and tell Claude what to
+     do differently</pre></div>
+    <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Harness Manager · Overview</span></div><div class="in">
+      <div class="lbl">Needs you · 1</div>
+      <div class="need"><div><b>shop-api</b> <span class="muted">Claude Code · claude-work</span></div>
+        <div class="muted">wants to run</div><code>npm test</code>
+        <div class="btns"><span class="btn ok">Yes</span><span class="btn">Yes, and don't ask again for npm test</span><span class="btn no">No…</span></div></div>
+      <div class="row"><span class="muted">Show the terminal</span><span class="sp"></span><span class="pill wait">waiting 0:08</span></div>
+    </div></div>
+  </div></div>
+
+  <div class="step"><div>
+    <p class="when">09:25 · away from the desk</p>
+    <h3>3. A request reaches your phone</h3>
+    <p>You have left the room. The agent has fixed the bug and wants to push the branch. The desk PC seals the request with the key only your computers hold and hands it to your hub. The hub cannot read it. It forwards it, and the phone shows a notification.</p>
+    <p>The phone page opens on one list: everything that is waiting for you, on any computer, in any tool, under any account. You open the card, read the exact command, and approve it once. "Always allow" is not offered, because that switch is off for phones.</p>
+    <p><span class="from o">Orca</span> a phone inbox of approvals, a notification when an agent waits or finishes <span class="from t">T3 Code</span> pair by QR, the phone holds its own key, levels per device <span class="from h">Harness Manager</span> the hub you host, which stores only ciphertext</p>
+  </div><div class="mocks"><div class="phones">
+    <div class="phone"><div class="cap">09:25 · lock screen</div>
+      <div class="push"><b>Harness Manager</b><span>Claude Code needs you</span><span class="muted">shop-api on DESK-PC wants to run a command</span></div></div>
+    <div class="phone"><div class="cap">The inbox</div>
+      <div class="lbl">Needs you · 1</div>
+      <div class="need"><div><b>shop-api</b></div><div class="muted">Claude Code · claude-work · DESK-PC</div><code>git push origin feature/cart</code></div>
+      <div class="lbl">Working · 1</div>
+      <div class="row"><b>refactor-auth</b><span class="sp"></span><span class="pill work">12 min</span></div>
+      <div class="lbl">Finished today · 2</div>
+      <div class="row"><span class="muted">docs-site</span><span class="sp"></span><span class="pill done">done</span></div></div>
+    <div class="phone"><div class="cap">The request</div>
+      <div><b>shop-api</b> <span class="pill wait">waiting 0:40</span></div>
+      <div class="muted">Claude Code · claude-work<br>on DESK-PC · D:\Projects\shop-api</div>
+      <div class="lbl">Wants to run</div>
+      <div class="need"><code>git push origin feature/cart</code></div>
+      <div class="btns"><span class="btn ok">Approve once</span><span class="btn no">Deny</span></div>
+      <div class="btn off">Always allow is off for this phone</div>
+      <div class="muted">Read the session ›</div></div>
+  </div></div></div>
+
+  <div class="step wide"><div>
+    <h3>What happens between the tap and the terminal</h3>
+    <p>The same eight messages apply to a paired computer, with the direct link in place of the hub.</p>
+    <div class="dia"><svg viewBox="0 0 1000 350" role="img" aria-label="Sequence: Claude Code calls the permission hook; hrm run stores the request, shows it in the desktop app and sends it sealed to the hub; the hub pushes a notification to the phone; the phone sends a signed answer to the hub; the hub passes it to hrm run; hrm run returns allow to the hook and the terminal continues; the app closes the card and logs the action.">
+      <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" style="fill:var(--m)"/></marker></defs>
+      <g><rect class="b" x="20" y="14" width="150" height="34" rx="6"/><text x="34" y="36">Claude Code</text>
+      <rect class="b hmb" x="225" y="14" width="150" height="34" rx="6"/><text x="270" y="36">hrm run</text>
+      <rect class="b" x="430" y="14" width="150" height="34" rx="6"/><text x="462" y="36">Desktop app</text>
+      <rect class="b" x="635" y="14" width="150" height="34" rx="6"/><text x="678" y="36">Your hub</text>
+      <rect class="b" x="840" y="14" width="140" height="34" rx="6"/><text x="886" y="36">Phone</text></g>
+      <path class="sf thin" style="stroke-dasharray:3 5" d="M95 48V340M300 48V340M505 48V340M710 48V340M910 48V340"/>
+      <g style="marker-end:url(#ah2)" class="sf thin">
+        <path d="M95 80H298"/><path d="M300 114H503"/><path d="M300 148H708"/><path d="M710 182H908"/>
+        <path d="M910 216H712"/><path d="M710 250H302"/><path d="M300 284H97"/><path d="M300 318H503"/></g>
+      <text class="n" x="103" y="74">1</text><text class="s" x="118" y="74">hook: may I run git push?</text>
+      <text class="n" x="308" y="108">2</text><text class="s" x="323" y="108">stored, card shown</text>
+      <text class="n" x="308" y="142">3</text><text class="s" x="323" y="142">the request, sealed with the ring key</text>
+      <text class="n" x="718" y="176">4</text><text class="s" x="733" y="176">notification</text>
+      <text class="n" x="722" y="210">5</text><text class="s" x="737" y="210">approve once, signed</text>
+      <text class="n" x="312" y="244">6</text><text class="s" x="327" y="244">the answer, still sealed</text>
+      <text class="n" x="107" y="278">7</text><text class="s" x="122" y="278">hook returns: allow</text>
+      <text class="n" x="308" y="312">8</text><text class="s" x="323" y="312">card closes, action logged</text>
+    </svg></div>
+    <p>If the phone is out of reach, nothing breaks. The request stays stored on the desk PC until its expiry, and the terminal prompt is still there to answer by hand. <span class="from t">T3 Code</span> unanswered requests survive a reconnect</p>
+  </div></div>
+
+  <div class="step"><div>
+    <p class="when">09:40 · on the laptop</p>
+    <h3>4. Read it and type the next instruction</h3>
+    <p>On the laptop, the Sessions page shows the same session with "running on DESK-PC". Opening it gives the reading view the app has today: the steps, the commands, the changed files. The push you approved from the phone is marked as such.</p>
+    <p>The agent has finished its turn and asked a question, so the session shows as waiting. Because the laptop has the type level, there is a reply box. What you send is typed into the terminal on the desk PC. The box clears when the line shows up in the transcript, which is the proof that it arrived. Stop sends the interrupt key the same way.</p>
+    <p><span class="from h">Harness Manager</span> the reading view, the direct link between paired computers <span class="from o">Orca</span> typing into the live terminal from another device; the transcript confirms the send <span class="from t">T3 Code</span> a session has one driver at a time</p>
+  </div><div class="mocks">
+    <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Harness Manager on LAPTOP · Sessions · shop-api</span></div><div class="in">
+      <div class="row"><b>shop-api</b> <span class="muted">Claude Code · claude-work · running on DESK-PC</span><span class="sp"></span><span class="pill wait">waiting for you</span></div>
+      <div class="row"><span class="pill done">ran</span> <code>npm test</code> <span class="muted">42 passed</span></div>
+      <div class="row"><span class="pill done">edited</span> <code>src/cart/total.ts</code> <span class="muted">+18 −4</span></div>
+      <div class="row"><span class="pill done">ran</span> <code>git push origin feature/cart</code> <span class="muted">approved from Phone, 09:26</span></div>
+      <div class="say">Pushed. Do you want me to open a pull request now, or squash the three commits first?</div>
+      <div class="reply"><span>squash first, then open the PR</span><span class="btn on">Send</span><span class="btn no">Stop</span></div>
+      <div class="muted">Typed into the terminal on DESK-PC.</div>
+    </div></div>
+  </div></div>
+
+  <div class="step"><div>
+    <p class="when">Later · back at the desk</p>
+    <h3>5. The terminal has the whole story</h3>
+    <p>Nothing happened anywhere except in that terminal. The reply from the laptop is there as a typed line, and the agent's work follows it. You sit down and keep typing. The session can be resumed tomorrow like any other, and it would still be complete if Harness Manager were uninstalled.</p>
+    <p>The app keeps a list of what other devices did on this computer: which device, what it approved or typed, and when. Each entry was signed by the device that sent it.</p>
+    <p><span class="from o">Orca</span> the terminal is the session <span class="from h">Harness Manager</span> the tools' own history is the record; a signed log of remote actions</p>
+  </div><div class="mocks">
+    <div class="mock term"><div class="bar"><i></i><i></i><i></i><span>Claude Code · claude-work</span></div><pre>● Pushed. Do you want me to open a pull request
+  now, or squash the three commits first?
+
+&gt; squash first, then open the PR   <span class="rem">← typed from LAPTOP</span>
+
+● Bash(git rebase -i HEAD~3) …</pre></div>
+    <div class="mock"><div class="bar"><i></i><i></i><i></i><span>Harness Manager on DESK-PC · Remote actions today</span></div><div class="in">
+      <div class="row"><span class="mono muted">09:26</span> <b>Phone</b> approved once <code>git push origin feature/cart</code></div>
+      <div class="row"><span class="mono muted">09:40</span> <b>LAPTOP</b> typed a reply <span class="muted">31 characters · shop-api</span></div>
+    </div></div>
+  </div></div>
+
+  <div class="note"><p><b>Two parts of this story are not proven yet.</b> Step 2 assumes the terminal prompt and the card can both be answerable at once, and step 4 assumes Claude Code behaves correctly inside a terminal that <code>hrm run</code> owns on Windows. Both are Phase 0 spikes. If the first fails, the card gets a short time limit and the terminal takes over after it. If the second fails, the reply box can only start the next turn after the current one ends.</p></div>
+  </section>
+
+  <h2 id="moved">What changed since the issue was written</h2>
+  <p>The issue rejected a terminal-based design (its option D) because "the app only sees screen output, so it cannot tell a question from text". That was the right objection on 3 November. Four facts are different now, all from the vendors' current documentation.</p>
+  <div class="tw"><table>
+    <tr><th>Fact</th><th>What the docs say</th><th>What it changes</th></tr>
+    <tr><td>Claude Code hooks can decide</td><td>A <code>PermissionRequest</code> hook returns <code>decision.behavior</code> of <code>allow</code> or <code>deny</code>. A hook can be an HTTP endpoint (<code>"type": "http"</code>). The default timeout is 600 seconds. A <code>Notification</code> hook reports <code>permission_prompt</code>, <code>idle_prompt</code> and <code>agent_needs_input</code>; <code>Stop</code> carries the last assistant message</td><td>A session in the tool's own interactive terminal can report structured state and take an approval from outside. The issue's Phase 4 spike on <code>--permission-prompt-tool</code> is no longer needed</td></tr>
+    <tr><td>Codex hooks can decide too</td><td>Codex has <code>PermissionRequest</code> with the same <code>allow</code> / <code>deny</code> shape, plus <code>PreToolUse</code>, <code>Stop</code>, <code>SessionStart</code>. Handlers are commands or MCP tools. "Non-managed hooks must be reviewed and trusted before they run"</td><td>The same mechanism covers the two tools with limits and the most use. The user trusts the hook once per account</td></tr>
+    <tr><td>Questions can be answered by a hook</td><td>For <code>AskUserQuestion</code>, a <code>PreToolUse</code> hook returns <code>allow</code> with <code>updatedInput</code> containing <code>answers</code>. The page documents this for <code>-p</code> runs</td><td>Question cards are possible without the programmatic mode. Whether it works in an interactive session is not stated <span class="tag unv">spike</span></td></tr>
+    <tr><td>The terms question is sharper</td><td>Anthropic: OAuth "is designed to support ordinary use of Claude Code", and nothing prevents a user "signing in to the unmodified Claude Code binary with their own Claude subscription". T3 Code's FAQ says Anthropic's meter charged Agent SDK use about 1.7 times more than Claude Code until its 0.1.7</td><td>Driving <code>claude -p</code> from a third-party app on a subscription is still unconfirmed and was metered differently. Hooks on the interactive binary are a documented extension point of ordinary use</td></tr>
+  </table></div>
+  <p>So the issue's option C is no longer the only way to get structured events and real answers. For Claude Code and Codex there is a sixth option: the native terminal session plus hooks. It keeps "Stay native" without conditions, needs no chat client, and removes the need to ask Anthropic before shipping to subscription accounts.</p>
+
+  <h2 id="how">How T3 Code and Orca do it</h2>
+  <div class="grid2">
+    <div class="card"><h3 class="t3">T3 Code: the server owns the agent</h3>
+      <ul>
+        <li>A server process "owns provider processes, terminals, Git, checkpoints, durable state". Desktop (Electron), web and phone are clients over "authenticated RPC" on HTTP and WebSocket.</li>
+        <li>It never runs the tool's own interface. Claude goes "through Anthropic's Agent SDK", Codex through the app server, everything else through ACP.</li>
+        <li>State is event-sourced into SQLite. "Unanswered questions survive reconnects."</li>
+        <li>Access is by one-time pairing link or QR, with scopes such as <code>terminal:operate</code>, tokens bound to a client key, and short-lived tickets for sockets.</li>
+        <li>Away from home: Tailscale, or T3 Connect, which allocates a Cloudflare tunnel after sign-in. Whether traffic is encrypted end to end is not stated.</li>
+      </ul></div>
+    <div class="card"><h3 class="orca">Orca: the terminal stays, hooks report</h3>
+      <ul>
+        <li>Agents run in real terminals (xterm.js, a terminal daemon). A phone can type into one: "each typed character should go straight to the active terminal".</li>
+        <li>"Orca-managed hooks ... report working / waiting / done into the UI." The hook reads its endpoint from a file on every call, so a session that outlives the app still reaches it.</li>
+        <li>The phone has a "Needs you" list that "collects tool approvals and access requests", plus short replies such as <code>continue</code>.</li>
+        <li>It reads the tool's own transcript to confirm a sent message arrived, and will not send into a conversation another terminal may be writing to.</li>
+        <li>Pairing is a one-time code or QR; each client gets "a separate, revocable token". The phone is "a remote control for the desktop you already have running".</li>
+      </ul></div>
+  </div>
+  <p>Both are MIT licensed, so borrowing is allowed. Both are TypeScript on Electron, and Harness Manager is Rust on Tauri, so what transfers is design, protocol shape and rules. Very little code can be copied.</p>
+
+  <h2 id="adapt">Take, adapt, skip</h2>
+  <div class="tw"><table>
+    <tr><th>Idea</th><th>From</th><th>Verdict</th><th>How it lands in Harness Manager</th></tr>
+    <tr><td>Managed status hooks</td><td class="orca">Orca</td><td class="lead take">take</td><td>Write the hooks into each account's folder through the ledger, so they are removed cleanly. Go one step further than Orca's file: <code>hrm run</code> already starts the tool, so it can pass the endpoint and a per-session token in the tool's environment. Nothing secret is written to disk and a session not started by Harness Manager does nothing</td></tr>
+    <tr><td>Hooks that also decide</td><td>new in the vendors' docs</td><td class="lead take">take</td><td>The <code>PermissionRequest</code> hook holds the request open while the card waits. Answering in the terminal still works; whichever comes first wins</td></tr>
+    <tr><td>"Needs you" inbox</td><td class="orca">Orca</td><td class="lead take">take</td><td>One list of waiting requests across tools, accounts and computers, on the Overview, in the tray and on the phone page. Presence already travels between computers; add the waiting state to it</td></tr>
+    <tr><td>Typing into the real terminal</td><td class="orca">Orca</td><td class="lead take">adapt</td><td><code>hrm run</code> becomes the owner of a pseudo-terminal around the tool, and the local window is one viewer of it. A reply from elsewhere is typed into the same session. No terminal daemon: the wrapper that exists per session is enough</td></tr>
+    <tr><td>Transcript as the stream</td><td class="orca">Orca</td><td class="lead take">take</td><td>The folder watcher already indexes a changed transcript in about a second, and the reading view already renders steps. Use that as the remote view. No token-level streaming</td></tr>
+    <tr><td>One driver per session</td><td>both</td><td class="lead take">take</td><td>Already in the issue. Keep it</td></tr>
+    <tr><td>Pass native options through</td><td class="t3">T3 Code</td><td class="lead take">take</td><td>Their rule, word for word: "Never emulate missing permission modes. Pass native approval and question option IDs through unchanged, and ensure every request can be declined"</td></tr>
+    <tr><td>Pending requests survive</td><td class="t3">T3 Code</td><td class="lead take">take</td><td>Store open requests and their answers in <code>hm.db</code> with an id and an expiry, so a client that reconnects sees what is still waiting. Skip full event sourcing; the tools' transcripts are the record</td></tr>
+    <tr><td>Scopes per paired device</td><td class="t3">T3 Code</td><td class="lead take">adapt</td><td>Three levels on each paired computer or phone: see, decide, type. New devices start at see. Paired computers keep the mutual TLS they have, which is stronger than bearer tokens</td></tr>
+    <tr><td>Key-bound phone pairing</td><td class="t3">T3 Code</td><td class="lead take">adapt</td><td>A phone browser cannot do client certificates comfortably. Pair by QR, keep a key in the browser that cannot be exported, sign every action with it, list and revoke it in Settings</td></tr>
+    <tr><td>First route that answers</td><td class="t3">T3 Code</td><td class="lead take">already there</td><td>mDNS on the network, a fixed address, relay through a paired computer, or the hub</td></tr>
+    <tr><td>ACP as the general adapter</td><td class="t3">T3 Code</td><td class="lead later">later</td><td>One adapter for the tools that have no deciding hooks (OpenCode, Pi and others list ACP support) replaces the issue's one adapter per tool. Only when someone asks</td></tr>
+    <tr><td>The tool's programmatic mode with a chat view</td><td class="t3">T3 Code</td><td class="lead skip">skip</td><td>It is the largest piece of the issue, it turns the app into a chat client, and for Claude subscriptions it is the path with the open terms question</td></tr>
+    <tr><td>A hosted tunnel with sign-in</td><td class="t3">T3 Code</td><td class="lead skip">skip</td><td>Harness Manager hosts nothing. Use the hub you run yourself, or Tailscale</td></tr>
+    <tr><td>Native iOS and Android apps</td><td>both</td><td class="lead skip">skip</td><td>A phone page that installs to the home screen. Store apps bring review, signing and a push service to operate</td></tr>
+    <tr><td>Worktrees, PRs, bots, model switching</td><td>both</td><td class="lead skip">skip</td><td>Outside what Harness Manager is</td></tr>
+  </table></div>
+
+  <h2 id="design">The design</h2>
+  <div class="dia"><svg viewBox="0 0 1000 330" role="img" aria-label="The tool runs in its own terminal inside a pseudo-terminal owned by hrm run. Hooks report to hrm run, which stores state and pending requests. The desktop app, a paired computer and a phone page through your hub read that state and send answers back.">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker></defs>
+    <rect class="b" x="20" y="40" width="210" height="70" rx="8"/><text x="36" y="70">The tool's own terminal</text><text class="s" x="36" y="90">Claude Code or Codex, unmodified</text>
+    <rect class="b hmb" x="300" y="40" width="230" height="70" rx="8"/><text x="316" y="70">hrm run</text><text class="s" x="316" y="90">owns the terminal, receives the hooks</text>
+    <rect class="b hmb" x="600" y="40" width="170" height="70" rx="8"/><text x="616" y="70">hm.db</text><text class="s" x="616" y="90">state, waiting requests</text>
+    <path class="ar" d="M230 60H298"/><text class="s" x="238" y="52">hooks</text>
+    <path class="ar" d="M300 92H232"/><text class="s" x="246" y="108">keys</text>
+    <path class="ar" d="M530 75H598"/>
+    <rect class="b" x="600" y="170" width="170" height="60" rx="8"/><text x="616" y="196">Desktop app</text><text class="s" x="616" y="214">cards, toast, tray</text>
+    <path class="ar" d="M685 110V168"/>
+    <rect class="b" x="820" y="40" width="165" height="70" rx="8"/><text x="834" y="70">Paired computer</text><text class="s" x="834" y="90">mutual TLS, as today</text>
+    <path class="ar" d="M770 75H818"/>
+    <rect class="b" x="820" y="170" width="165" height="60" rx="8"/><text x="834" y="196">Your hub</text><text class="s" x="834" y="214">relays, cannot read</text>
+    <path class="ar" d="M770 100L820 172"/>
+    <rect class="b" x="820" y="260" width="165" height="56" rx="8"/><text x="834" y="284">Phone page</text><text class="s" x="834" y="302">cards, reply, notification</text>
+    <path class="ar" d="M902 230V258"/>
+    <text class="s" x="20" y="150">Answers travel the same paths back to hrm run, which returns the</text>
+    <text class="s" x="20" y="168">decision to the waiting hook or types the reply into the terminal.</text>
+  </svg></div>
+  <h3>Two channels per session</h3>
+  <ul class="plain">
+    <li><b>Hooks, for structure.</b> One small command, <code>hrm hook</code>, is registered for the events that matter: session start and end, permission request, notification, stop. It reads the event from standard input, forwards it to the session's <code>hrm run</code> using the address in its environment, and for a permission request waits for the answer. Claude Code and Codex use the same event shapes, so one command serves both.</li>
+    <li><b>The terminal, for input.</b> <code>hrm run</code> starts the tool inside a pseudo-terminal it owns and connects the local window to it. A reply sent from elsewhere is written into that terminal as if typed; Stop sends the interrupt key. The tool cannot tell the difference, and the user at the desk sees it happen.</li>
+  </ul>
+  <h3>Why the phone goes through the hub or Tailscale</h3>
+  <p>The issue plans a phone page served by the PC over home Wi-Fi first. That page would load, but a browser gives a plain <code>http://</code> address on the local network no service worker, no notifications and no cryptography API. A phone remote without notifications misses its main use. Both need a real certificate, and Harness Manager already has two places with one: the hub behind Caddy, and a Tailscale name. So the phone page is served from the hub you host (or over Tailscale HTTPS), and requests are sealed with the ring key before they leave the PC, as journals are today. The hub relays them and still cannot read or forge one.</p>
+  <p>Notifications use the browser's standard Web Push. The message goes through Apple's or Google's push service with an encrypted payload, and no Harness Manager server is involved. On an iPhone the page has to be added to the home screen first.</p>
+
+  <h2 id="phases">Phases</h2>
+  <p>Each phase ships on its own. Sizes are relative: S is a few focused changes in existing files, L is a new subsystem with its own tests.</p>
+  <div class="phase"><h3>Phase 0 · Four spikes <span class="tag sz">S</span></h3>
+    <p>Answer these before writing product code, and record the results in the issue.</p>
+    <ul>
+      <li>Claude Code: in an interactive session, does the terminal prompt stay answerable while a <code>PermissionRequest</code> hook is waiting, and what happens when both answer?</li>
+      <li>Claude Code: does a <code>PreToolUse</code> hook answer <code>AskUserQuestion</code> in an interactive session, or only under <code>-p</code>?</li>
+      <li>Codex: the same permission round trip, and what the one-time "review and trust" step looks like for a hook Harness Manager wrote.</li>
+      <li>Windows: run Claude Code and Codex inside a ConPTY owned by <code>hrm run</code>. Check resize, paste, mouse and colours against a direct start, then type a line into it from a second process.</li>
+    </ul>
+    <p class="acc">Done when each has a yes or no with a recording, and the plan below is adjusted to the answers.</p>
+    <p><b>Answered 23 Nov 2026</b> (<code>spikes.md</code>, Claude Code 2.1.330, Codex 0.171.0, installed tools against a local model fixture): 1. yes, both stay answerable and the first answer wins; 2. yes, also without <code>-p</code>; 3. partly, Codex hides its own prompt while the hook waits and shows it on the hook's timeout, and trust is per hook declaration, so a changed command or timeout asks for review again; 4. partly, typed input, resize, paste and interrupt from a second process work through direct ConPTY calls (<code>portable-pty</code> stalled), and mouse, colours and clipboard still need a side-by-side look in Windows Terminal.</p></div>
+  <div class="phase"><h3>Phase 1 · "Needs you" on this computer <span class="tag sz">S</span></h3>
+    <ul>
+      <li><code>hrm hook</code>, with the hook entries carried by each <code>hrm run</code> launch (<code>claude --settings &lt;file&gt;</code>), so no account file is written and a session started elsewhere is untouched. Codex follows once its one-time hook review is designed: the declaration must never change, and the per-session address travels in the environment.</li>
+      <li>Waiting, working and done per session in <code>hm.db</code>; shown on the session row, the Overview, the tray and a toast. A click brings the right terminal to the front.</li>
+      <li>The issue's Remote Control switch for Claude subscription accounts (<code>--remote-control</code>), as the stopgap it describes.</li>
+    </ul>
+    <p class="acc">Done when a session started from the app that reaches a permission prompt shows as waiting within two seconds with no log polling, a session started outside the app is unaffected, and removing the account removes the hooks.</p></div>
+  <div class="phase"><h3>Phase 2 · Approve and deny from the app <span class="tag sz">M</span></h3>
+    <ul>
+      <li>The permission hook holds the request; a card shows the tool, the command or file, and the tool's own options unchanged.</li>
+      <li>Open requests are stored with an id and an expiry. Past the expiry the hook steps aside and the terminal prompt stands.</li>
+      <li>Question cards for Claude Code (spike two said yes).</li>
+      <li>Codex hides its own prompt while the hook waits, so its cards get a short expiry, after which the hook releases without a decision and the terminal prompt appears. The hook command bounds its own wait as well, for both tools.</li>
+      <li>An answer that arrives after the terminal decided is dropped by request id.</li>
+    </ul>
+    <p class="acc">Done when a command is approved and another denied from the app with the terminal untouched, answering in the terminal first closes the card, and closing the app mid-request leaves the terminal prompt working.</p></div>
+  <div class="phase"><h3>Phase 3 · From another paired computer <span class="tag sz">M</span></h3>
+    <ul>
+      <li>Waiting state added to presence; requests and answers as new messages on the direct link, and as sealed blobs with an event on the hub.</li>
+      <li>The reading view follows a session that is still running on another computer: the growing end of the transcript travels over the same link.</li>
+      <li>A level per paired computer on the Computers page: see, decide, type. Existing pairs start at see.</li>
+      <li>Every remote answer is signed by the device that gave it and listed in a log on the computer that ran it.</li>
+    </ul>
+    <p class="acc">Done when a request raised on one test computer is approved from the second over the direct link and again over the hub, a computer at "see" is refused, and the hub's stored blob does not open without the ring key. These fit the existing <code>HRM_E2E_PEERS</code> and <code>HRM_E2E_HUB</code> runs.</p></div>
+  <div class="phase"><h3>Phase 4 · Reply and stop <span class="tag sz">L</span></h3>
+    <ul>
+      <li><code>hrm run</code> owns the pseudo-terminal, behind a setting until it has proved itself, because it sits between the user and every session.</li>
+      <li>A reply box and Stop on the session, here and on a paired computer with the "type" level. The reply is confirmed when it appears in the transcript.</li>
+      <li>Refused while another driver holds the session.</li>
+    </ul>
+    <p class="acc">Done when a follow-up typed on the second computer appears in the first computer's terminal and in the transcript, Stop interrupts a running turn, and with the setting off sessions start exactly as in 1.12.</p></div>
+  <div class="phase"><h3>Phase 5 · Phone page <span class="tag sz">L</span></h3>
+    <ul>
+      <li>A static page served by the hub: the inbox, a session's reading view, Approve and Deny, the reply box.</li>
+      <li>Pairing by QR from a computer on the hub; the phone's key is listed and revocable like a computer.</li>
+      <li>Web Push for "needs you" and "finished".</li>
+    </ul>
+    <p class="acc">Done when a paired phone on mobile data approves a request and sends a reply, a revoked phone gets nothing, and the notification arrives with the page closed.</p></div>
+  <div class="phase"><h3>Phase 6 · Tools without deciding hooks <span class="tag sz">M each</span></h3>
+    <p>OpenCode through its server (<code>permission.asked</code> events and a reply endpoint, with the tool's own interface attached to the same session), then others through ACP. Antigravity stays terminal-only, as the issue says. Build these when a user of that tool asks.</p></div>
+
+  <h2 id="security">Security rules for this feature</h2>
+  <p>Approving from another device runs code on the PC. These add to the rules in SECURITY.md.</p>
+  <ul class="plain">
+    <li><b>Nothing new listens beyond this computer.</b> The hook endpoint binds 127.0.0.1 with a token that exists only in the session's environment. Remote requests use the peer listener and the hub connection that exist today.</li>
+    <li><b>New devices can only look.</b> Deciding and typing are granted per device, by hand, on the computer that runs the sessions.</li>
+    <li><b>Every remote action is signed and logged.</b> A request carries an id and an expiry, an answer names the request and is signed by the device key, and a replayed or late answer is dropped.</li>
+    <li><b>The hub stays blind.</b> Requests contain commands and file paths. They are sealed with the ring key like journals, so the hub sees who sent how much and when, and nothing else.</li>
+    <li><b>Logins are not involved.</b> Only the unmodified tool runs, in its own terminal, under its own login. No token is read, stored or sent for this feature.</li>
+    <li><b>The app never widens a permission.</b> It offers the options the tool offered. "Always allow" from a phone is off unless the user turns it on.</li>
+  </ul>
+
+  <h2 id="questions">Answers to the issue's open questions</h2>
+  <div class="tw"><table>
+    <tr><th>Question in the issue</th><th>Answer</th></tr>
+    <tr><td>Go ahead with Phase 1 now?</td><td>Yes. It is small, uses the ledger, and is useful by itself: the app finally knows which session is waiting for you</td></tr>
+    <tr><td>Pilot the in-app chat on OpenCode, or go to Claude Code?</td><td>Neither as written. Start with Claude Code and Codex through hooks, with no in-app chat. OpenCode's server becomes Phase 6</td></tr>
+    <tr><td>Ask Anthropic about Claude in the app, or stay on Remote Control?</td><td>The question goes away. Hooks run inside the ordinary interactive program. Keep the Remote Control switch as an option for people who prefer Anthropic's own app</td></tr>
+    <tr><td>Phone on home Wi-Fi first, or away from home too?</td><td>Through the hub or Tailscale from the start. A plain local page cannot notify or encrypt, so the Wi-Fi-only step would be thrown away</td></tr>
+  </table></div>
+
+  <h2 id="unknown">What is not known yet</h2>
+  <ul class="plain">
+    <li>Whether a waiting hook and the terminal prompt can both be live in Claude Code and Codex. The whole of Phase 2 rests on it. If the terminal blocks while the hook waits, the card needs a short expiry and Phase 4's typed answer becomes the main path.</li>
+    <li>Whether questions can be answered by hook in an interactive session.</li>
+    <li>How faithful a ConPTY wrapper is on Windows for these two interfaces. If it is poor, Phase 4 changes to "reply by resuming the session with a prompt after the turn ends", which is weaker.</li>
+    <li>I did not read Codex's pages on remote connections and mobile, Orca's Relay design, or how T3 Code delivers phone notifications. None of them changes the plan, but the first may show Codex already offers a first-party remote like Claude's.</li>
+    <li>Rust crates exist for the pieces (a pseudo-terminal, ACP, Web Push). Versions and Windows behaviour are to be checked in the spikes.</li>
+  </ul>
+
+  <h2 id="sources">Sources</h2>
+  <p>Read on 23 November 2026. Quotes are from these pages; the code pointers are from this repository at 1.12.1.</p>
+  <ul class="src">
+    <li>Issue: <a href="https://github.com/abushanab-net/HarnessManager/issues/1">HarnessManager issue 1</a></li>
+    <li>Claude Code: <a href="https://code.claude.com/docs/en/hooks">hooks</a>, <a href="https://code.claude.com/docs/en/remote-control">Remote Control</a>, <a href="https://code.claude.com/docs/en/headless">headless</a>, <a href="https://code.claude.com/docs/en/legal-and-compliance">legal and compliance</a></li>
+    <li>Codex: <a href="https://learn.chatgpt.com/docs/hooks">hooks</a>, <a href="https://learn.chatgpt.com/docs/app-server">app-server</a></li>
+    <li>T3 Code: <code>docs/internals/01_architecture.md</code>, <code>03_providers.md</code>, <code>04_environment-auth.md</code>, <code>05_remote.md</code>, <code>06_t3-connect.md</code>, and <code>docs/user/remote-access.md</code>, <code>providers-acp.md</code>, <code>faq.md</code> in <a href="https://github.com/pingdotgg/t3code">pingdotgg/t3code</a></li>
+    <li>Orca: <a href="https://orca.dev/docs/agents/hooks-memory">hooks</a>, <a href="https://orca.dev/docs/mobile">mobile</a>, <a href="https://orca.dev/docs/remote-servers">remote servers</a>, <a href="https://orca.dev/docs/agents/native-chat">native chat</a>, <a href="https://orca.dev/docs/terminal">terminal</a>, <a href="https://orca.dev/docs/notifications">notifications</a></li>
+    <li>Protocols: <a href="https://agentclientprotocol.com/overview/introduction">Agent Client Protocol</a>, <a href="https://opencode.ai/docs/server/">OpenCode server</a></li>
+    <li>Harness Manager code: <code>crates/core/src/service.rs:383</code> (<code>start</code> opens a terminal running <code>hrm run</code>), <code>crates/core/src/launch.rs:104</code> (<code>open_terminal</code>), <code>crates/hub/src/lib.rs:96</code> (hub routes: presence, events, rendezvous), <code>crates/core/src/sync/peer/</code> (pairing and the direct link)</li>
+  </ul>
+</main>
+</body>
+</html>
