@@ -246,6 +246,11 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         // what each session hrm run started last reported through its hooks (hooks.rs)
         conn.execute_batch(crate::hooks::TABLE)?;
+        for (col, ty) in [("terminal_port", "integer"), ("terminal_token", "blob")] {
+            if !conn.prepare("select 1 from pragma_table_info('run_state') where name = ?")?.exists([col])? {
+                add_column(&conn, "run_state", col, ty)?;
+            }
+        }
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
         if !has {

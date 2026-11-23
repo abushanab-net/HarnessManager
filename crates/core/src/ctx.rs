@@ -82,6 +82,8 @@ pub struct Settings {
     /// How long a permission request or question from such a session waits for an answer in the app; after that the
     /// hook steps aside and only the terminal prompt answers it. 0: the app does not offer answers.
     pub request_seconds: u32,
+    /// Give `hrm run` its own terminal on Windows. Ignored on other platforms.
+    pub own_terminal: bool,
 }
 
 impl Default for Settings {
@@ -92,7 +94,7 @@ impl Default for Settings {
             moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
             hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
-            archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false, session_hooks: true, request_seconds: 300 }
+            archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false, session_hooks: true, request_seconds: 300, own_terminal: false }
     }
 }
 

@@ -210,6 +210,11 @@ fn main() {
     let name = me.file_stem().unwrap().to_string_lossy().to_lowercase();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if name == "claude" { fire_hook(&args); }
+    #[cfg(windows)]
+    if let Ok(mode) = std::env::var("FAKE_TERMINAL") {
+        terminal_fixture(&name, &args, &mode);
+        return;
+    }
     if let Some(ms) = std::env::var("FAKE_HOLD_MS").ok().and_then(|v| v.parse().ok()) { std::thread::sleep(std::time::Duration::from_millis(ms)); }
     // every real tool answers this, and it is not a run
     if args == ["--version"] { println!("1.0.0 (fake {name})"); return; }
@@ -220,4 +225,52 @@ fn main() {
         "agy" => agy(&args),
         other => { eprintln!("fakeharness: copy me as claude, codex, opencode or agy (got {other})"); std::process::exit(2); }
     }
+}
+
+#[cfg(windows)]
+fn terminal_fixture(name: &str, args: &[String], mode: &str) {
+    use std::io::Read;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Console::*;
+
+    record(name, args);
+    let input = std::io::stdin();
+    let output = std::io::stdout();
+    let mut flags = 0;
+    if mode == "inherit" {
+        assert_eq!(unsafe { GetConsoleMode(input.as_raw_handle(), &mut flags) }, 0);
+        assert_eq!(unsafe { GetConsoleMode(output.as_raw_handle(), &mut flags) }, 0);
+        println!("fixture inherited");
+        output.lock().flush().unwrap();
+        let mut line = String::new();
+        input.lock().read_line(&mut line).unwrap();
+        print!("inherited line={line}");
+        std::process::exit(19);
+    }
+    unsafe {
+        assert_ne!(SetConsoleMode(input.as_raw_handle(), ENABLE_VIRTUAL_TERMINAL_INPUT), 0);
+        assert_ne!(SetConsoleMode(output.as_raw_handle(), ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING | ENABLE_WRAP_AT_EOL_OUTPUT), 0);
+    }
+    if mode == "paste" {
+        print!("\x1b[?2004h");
+    }
+    println!("fixture ready");
+    output.lock().flush().unwrap();
+    let mut line = Vec::new();
+    for byte in input.lock().bytes().map(Result::unwrap) {
+        match byte {
+            3 => {
+                if mode == "paste" { print!("\x1b[?2004l"); }
+                println!("fixture interrupt");
+                std::process::exit(37);
+            }
+            b'\r' => {
+                println!("fixture line={}", json!(String::from_utf8(line).unwrap()));
+                output.lock().flush().unwrap();
+                line = Vec::new();
+            }
+            byte => line.push(byte),
+        }
+    }
+    panic!("terminal fixture lost its input");
 }
