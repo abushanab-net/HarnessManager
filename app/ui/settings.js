@@ -30,7 +30,7 @@ const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1,
 const stamp = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
 // ---------- the sections: [id, name, rows] ----------
-function sections(st, b, ar) {
+function sections(st, b, ar, path) {
   const s = st.settings;
   // the sign-in entry and the choice of terminal are Windows things; macOS opens Terminal
   const win = !st.os || st.os === 'windows';
@@ -44,7 +44,10 @@ function sections(st, b, ar) {
     ['window', win ? 'Window and terminal' : 'Window',
       row('tray', 'Close to the tray', info('tray', '<b>On (the default):</b> the window\'s X hides Harness Manager to the tray; usage and limits keep refreshing, and the tray icon opens it again. Quit from the tray menu.<br><b>Off:</b> the X quits.'), 'The window hides and the app keeps refreshing.', sw('close_to_tray', s.close_to_tray, 'Keep running in the tray', 'st-tray'))
       + (win ? row('auto', 'Launch at sign-in', info('auto', 'Starts Harness Manager in the tray when you sign in to Windows, so usage and limits are current when you open it.<br><b>Default: off.</b>'), 'Starts hidden in the tray.', `<label class="chk"><input type="checkbox" data-act="autostart" ${st.autostart ? 'checked' : ''} data-testid="st-autostart"> Start with Windows</label>`) : '')
-      + (win ? row('term', 'Terminal', info('term', '<b>Windows Terminal</b> (the default): Start and Resume open a new Windows Terminal window running the account.<br><b>Console window</b>: the classic console, for computers without Windows Terminal or if you prefer it.'), 'Where Start and Resume open a console.', pick('terminal', s.terminal, [['wt', 'Windows Terminal'], ['console', 'Console']], 'st-term')) : '')],
+      + (win ? row('term', 'Terminal', info('term', '<b>Windows Terminal</b> (the default): Start and Resume open a new Windows Terminal window running the account.<br><b>Console window</b>: the classic console, for computers without Windows Terminal or if you prefer it.'), 'Where Start and Resume open a console.', pick('terminal', s.terminal, [['wt', 'Windows Terminal'], ['console', 'Console']], 'st-term')) : '')
+      + row('cli-path', 'hrm on the PATH', '', !path ? 'Could not read the terminal PATH.' : path.on_path ? 'New terminals find this copy of hrm.' : 'New terminals do not find this copy of hrm.',
+        (path?.can_add ? btn('Add', 'cli-path', 'data-add="true" aria-label="Add hrm to the PATH"') : '')
+        + (path?.can_remove ? btn('Remove', 'cli-path', 'aria-label="Remove hrm from the PATH"') : ''))],
     ['updates', 'Updates',
       row('self', 'Harness Manager', info('self', 'New versions are looked for at launch and every hour; only signed updates are installed.<br><b>Default: checks at launch and every hour.</b>'), selfUpd && selfUpd.version ? `Version <b>${esc(selfUpd.version)}</b> is available; you have ${esc(st.version)}.${selfUpd.notes ? ' ' + esc(selfUpd.notes) : ''} Signed updates only.` : `Version ${esc(st.version)}${selfUpd ? ' · the newest' : ''}. Signed updates only.`,
         selfUpd && selfUpd.version ? '<button class="btn sm primary" data-act="self-install" data-testid="self-install">Update and restart…</button>' : btn('Check for updates', 'self-check', 'data-testid="self-check"'))
@@ -92,7 +95,7 @@ export async function settingRows() {
   if (!drawn.length) {
     const st = S.state || await loadState();
     const [b, ar] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null)]);
-    if (!drawn.length) drawn = sections(st, b, ar);
+    if (!drawn.length) drawn = sections(st, b, ar, null);
   }
   const t = document.createElement('template');
   return drawn.map(([id, title, body]) => {
@@ -116,8 +119,8 @@ view('settings', async (sheet, params) => {
   sheet.className = 'sheet';
   const st = await loadState();
   // (the sync folder's state, for the backup rows)
-  const [b, ar] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null), computersStatus().catch(() => null)]);
-  drawn = sections(st, b, ar);
+  const [b, ar, path] = await Promise.all([call('backups').catch(() => null), call('archive_status').catch(() => null), call('path_status').catch(() => null), computersStatus().catch(() => null)]);
+  drawn = sections(st, b, ar, path);
   // #settings?tab=updates (Apps › Settings › Updates): that section; an address without one, or with one this system lacks, opens the first
   chosen = drawn.some(([id]) => id === (params && params.tab)) ? params.tab : 'appearance';
   patch(sheet, `<div class="page-body b-page" data-b-page="settings">
@@ -193,6 +196,12 @@ action('backup-import', async () => {
   if (r) restored(r);
 });
 action('log-open', () => attempt(() => call('log_open'))); // open-folder is accounts.js's action, shared
+action('cli-path', async (el) => {
+  el.disabled = true;
+  try {
+    if (await attempt(() => call('path_set', { add: el.dataset.add === 'true' }))) render();
+  } finally { el.disabled = false; }
+});
 // Harness Manager's own update: found at launch (the self-update event) or by Check for updates
 let selfUpd = null;
 export function setSelfUpdate(v) { selfUpd = v; const dot = document.getElementById('settings-upd'); if (dot) dot.hidden = !(v && v.version); }

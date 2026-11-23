@@ -371,6 +371,10 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![call])
         .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            if let Err(e) = hrm_core::cli_path::appimage_start(&state.ctx()) {
+                hrm_core::log::warn(&format!("hrm on the PATH: {e:#}"));
+            }
             // background refresh: new usage and (opted-in) live limits, then tell the window
             let handle = app.handle().clone();
             let st = state.clone();
@@ -461,6 +465,10 @@ fn main() {
             }
             let w = win.build()?;
             if w.is_visible().unwrap_or(false) { w.set_focus()?; }
+            #[cfg(target_os = "macos")]
+            if let Err(e) = settings::offer_cli_path(&w, state.ctx()) {
+                hrm_core::log::warn(&format!("hrm on the PATH: {e:#}"));
+            }
             tray(app)?;
             watch_self_update(app.handle().clone());
             // newer versions of the tools, when asked to look at launch: the Apps item shows how many

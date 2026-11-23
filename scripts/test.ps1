@@ -22,14 +22,27 @@ if ($LASTEXITCODE -or -not $Installed) { exit $LASTEXITCODE }
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
 $setup = Get-ChildItem target/release/bundle/nsis/*setup.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $dir = Join-Path $env:TEMP "hrm-installed-$PID"
-Start-Process $setup.FullName -ArgumentList '/S', "/D=$dir" -Wait
+$pathKey = "Software\HarnessManager-PathTest-$([Guid]::NewGuid())"
+$priorHome = $env:HRM_HOME
+$priorKey = $env:HRM_PATH_TEST_KEY
+$env:HRM_HOME = Join-Path $dir 'test-data'
+$env:HRM_PATH_TEST_KEY = $pathKey
 try {
+  [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($pathKey).Dispose()
+  Start-Process $setup.FullName -ArgumentList '/S', "/D=$dir" -WindowStyle Hidden -Wait
   $env:HRM_E2E_APP_DIR = $dir
   Remove-Item Env:HRM_E2E_HUB # the installer carries no hrm-hub.exe: the hub runs on a server
   node e2e/app.e2e.mjs
   $code = $LASTEXITCODE
 } finally {
   Remove-Item Env:HRM_E2E_APP_DIR -ErrorAction SilentlyContinue
-  Start-Process (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -Wait
+  try {
+    $uninstall = Join-Path $dir 'uninstall.exe'
+    if (Test-Path -LiteralPath $uninstall) { Start-Process $uninstall -ArgumentList '/S' -WindowStyle Hidden -Wait }
+  } finally {
+    $env:HRM_HOME = $priorHome
+    $env:HRM_PATH_TEST_KEY = $priorKey
+    [Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($pathKey, $false)
+  }
 }
 exit $code

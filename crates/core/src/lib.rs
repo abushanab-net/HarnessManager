@@ -9,6 +9,7 @@ pub mod index;
 pub mod items;
 pub mod journal;
 pub mod launch;
+pub mod cli_path;
 pub mod model;
 pub mod pricing;
 pub mod procs;

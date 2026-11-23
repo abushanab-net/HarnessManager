@@ -26,6 +26,9 @@ struct Json {
 
 #[derive(Subcommand)]
 enum Cmd {
+    #[cfg(windows)]
+    #[command(hide = true)]
+    Path { #[command(subcommand)] cmd: PathCmd },
     /// List accounts with plan, limits, tokens and open consoles
     List { #[command(flatten)] j: Json, /// Import new usage first
         #[arg(long)] refresh: bool },
@@ -157,6 +160,10 @@ enum Cmd {
     /// The session index the pages read: its status, or a refresh now
     Index { #[command(subcommand)] cmd: IndexCmd },
 }
+
+#[cfg(windows)]
+#[derive(Subcommand)]
+enum PathCmd { Add, Remove }
 
 #[derive(Subcommand)]
 enum IndexCmd {
@@ -378,6 +385,12 @@ fn parse_pairs(items: &[String], sep: char) -> Result<std::collections::BTreeMap
 }
 
 fn real_main(cli: Cli) -> Result<i32> {
+    #[cfg(windows)]
+    if let Cmd::Path { cmd } = cli.cmd {
+        let exe = std::env::current_exe()?;
+        hrm_core::cli_path::windows::set(exe.parent().context("find install folder")?, matches!(cmd, PathCmd::Add))?;
+        return Ok(0);
+    }
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
@@ -388,6 +401,8 @@ fn real_main(cli: Cli) -> Result<i32> {
         if let Err(e) = hrm_core::import::first_run(&ctx) { eprintln!("first-run setup: {e:#}"); }
     }
     match cli.cmd {
+        #[cfg(windows)]
+        Cmd::Path { .. } => unreachable!(),
         Cmd::List { j, refresh } => {
             if refresh { service::import_usage(&ctx)?; }
             let views = service::list_views(&ctx)?;
@@ -633,8 +648,7 @@ fn real_main(cli: Cli) -> Result<i32> {
             }
         }
         Cmd::Open => {
-            // the bundle's binary beside hrm, named by mainBinaryName in tauri.conf.json on every system
-            let app = hrm_core::launch::hrm_exe().with_file_name(if cfg!(windows) { "HarnessManager.exe" } else { "HarnessManager" });
+            let app = hrm_core::cli_path::desktop_exe(&ctx)?;
             std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
         }
         Cmd::Computers { cmd } => {
