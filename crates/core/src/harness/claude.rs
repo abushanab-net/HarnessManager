@@ -255,8 +255,19 @@ impl Harness for Claude {
 
     fn launch(&self, ctx: &Ctx, p: &Profile, args: &[String]) -> Result<LaunchSpec> {
         let mut spec = LaunchSpec { program: resolve_program(self.id(), self.binary())?, args: args.to_vec(), ..Default::default() };
-        // the session-state hooks, from a file of Harness Manager's own: first, so `--remote-control` stays last
-        if let Some(s) = crate::hooks::settings_args(ctx, args)? { spec.args.splice(0..0, s); }
+        // Top-level commands from `claude --help`, including aliases and older CLI commands.
+        let subcommand = matches!(args.first().map(String::as_str), Some(
+            "agents" | "attach" | "auth" | "auto-mode" | "config" | "doctor" | "gateway" | "import" |
+            "install" | "kill" | "logs" | "mcp" | "migrate-installer" | "plugin" | "plugins" | "purge" |
+            "respawn" | "rm" | "setup-token" | "stop" | "ultrareview" | "update" | "upgrade"
+        ));
+        if !subcommand {
+            match crate::hooks::settings_args(ctx, args) {
+                Ok(Some(s)) => { spec.args.splice(0..0, s); }
+                Ok(None) => {}
+                Err(e) => crate::log::warn(&format!("{}: Claude Code hooks were skipped: {e:#}", p.name)),
+            }
+        }
         spec.env_unset = CONFLICTING.iter().chain(SESSION_MARKERS).map(|s| s.to_string()).collect();
         base_env(ctx, &mut spec);
         if !p.main {
@@ -264,7 +275,7 @@ impl Harness for Claude {
         }
         match p.kind {
             // last: `--remote-control [name]` would take a prompt after it as the session's name
-            Kind::Subscription => if p.remote_control { spec.args.push("--remote-control".into()); },
+            Kind::Subscription => if p.remote_control && !subcommand { spec.args.push("--remote-control".into()); },
             Kind::ApiKey if !p.own_route() => {
                 let key = crate::secrets::get_key(&crate::secrets::key_target(&p.name))
                     .ok_or_else(|| anyhow::anyhow!("no API key saved for '{}'. Run `hrm key set {}`.", p.name, p.name))?;

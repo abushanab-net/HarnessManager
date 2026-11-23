@@ -2,7 +2,7 @@ use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::path::Path;
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use chacha20poly1305::{
@@ -103,8 +103,9 @@ impl Control {
         match self.listener.accept() {
             Ok((stream, _)) if self.clients.len() < MAX_CLIENTS => {
                 let cipher = self.cipher.clone();
+                let deadline = Instant::now() + IO_TIMEOUT;
                 self.clients.push(thread::Builder::new().spawn(move || {
-                    let _ = serve(stream, &cipher, input);
+                    let _ = serve(stream, deadline, &cipher, input);
                 })?);
             }
             Ok(_) => {}
@@ -167,10 +168,34 @@ fn dpapi(bytes: &[u8], protect: bool) -> io::Result<Vec<u8>> {
     }
 }
 
-fn socket_timeout(stream: &TcpStream) -> io::Result<()> {
-    stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(IO_TIMEOUT))?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))
+struct ConnectionIo {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+impl ConnectionIo {
+    fn remaining(&self) -> io::Result<Duration> {
+        self.deadline.checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .map(|left| left.max(Duration::from_millis(1)))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "terminal connection deadline elapsed"))
+    }
+}
+
+impl Read for ConnectionIo {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.remaining()?))?;
+        self.stream.read(buf)
+    }
+}
+
+impl Write for ConnectionIo {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.remaining()?))?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> { self.stream.flush() }
 }
 
 fn seal(cipher: &XChaCha20Poly1305, nonce: [u8; 24], aad: &[u8], msg: &[u8]) -> Result<Vec<u8>> {
@@ -186,11 +211,13 @@ fn open(cipher: &XChaCha20Poly1305, nonce: [u8; 24], aad: &[u8], msg: &[u8]) -> 
 }
 
 fn serve(
-    mut stream: TcpStream,
+    stream: TcpStream,
+    deadline: Instant,
     cipher: &XChaCha20Poly1305,
     input: impl FnOnce(Action<'_>) -> Outcome,
 ) -> Result<()> {
-    socket_timeout(&stream)?;
+    stream.set_nonblocking(false)?;
+    let mut stream = ConnectionIo { stream, deadline };
     // A fresh challenge for each connection prevents replay and keeps the token off the wire.
     // Separate nonce spaces for the request and the authenticated result.
     let challenge = random::<16>()?;
@@ -205,6 +232,7 @@ fn serve(
         .read_to_end(&mut bytes)?;
     ensure!(bytes.len() <= MAX_FRAME, "terminal command is too large");
     let request = open(cipher, nonce, &challenge, &bytes)?;
+    stream.remaining()?;
     let outcome = input(Action::parse(&request)?);
     nonce[0] |= 0x80;
     stream.write_all(&seal(cipher, nonce, &challenge, &[outcome as u8])?)?;
@@ -260,9 +288,10 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>) -> Result<()> {
     let request = action.encode()?;
     let (port, cipher) = endpoint(data, run)?;
     let address = (Ipv4Addr::LOCALHOST, port).into();
-    let mut stream = TcpStream::connect_timeout(&address, IO_TIMEOUT)
+    let deadline = Instant::now() + IO_TIMEOUT;
+    let stream = TcpStream::connect_timeout(&address, IO_TIMEOUT)
         .with_context(|| format!("owned terminal for run '{run}' is no longer reachable"))?;
-    socket_timeout(&stream)?;
+    let mut stream = ConnectionIo { stream, deadline };
     let mut challenge = [0; 16];
     stream
         .read_exact(&mut challenge)
@@ -271,7 +300,7 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>) -> Result<()> {
     nonce[0] &= 0x7f;
     stream.write_all(&nonce)?;
     stream.write_all(&seal(&cipher, nonce, &challenge, &request)?)?;
-    stream.shutdown(Shutdown::Write)?;
+    stream.stream.shutdown(Shutdown::Write)?;
 
     let mut response = [0; 1 + TAG_LEN];
     stream
@@ -291,6 +320,15 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_elapsed_connection_deadline_applies_to_reads_and_writes() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let mut conn = ConnectionIo { stream, deadline: Instant::now() };
+        assert_eq!(conn.read_exact(&mut [0]).unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert_eq!(conn.write_all(&[0]).unwrap_err().kind(), io::ErrorKind::TimedOut);
+    }
 
     #[test]
     fn parses_only_a_single_line_or_stop() {

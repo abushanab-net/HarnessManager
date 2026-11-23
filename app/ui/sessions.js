@@ -467,7 +467,7 @@ async function sendAnswer(id, a, done) {
   if (ok === true) toast(done);
   else if (ok === false) toast('That request was answered in the terminal or has expired.');
 }
-action('ask-answer', (el) => sendAnswer(el.dataset.id, { behavior: el.dataset.behavior }, el.dataset.behavior === 'allow' ? 'Approved once.' : 'Denied.'));
+action('ask-answer', (el) => sendAnswer(el.dataset.id, { behavior: el.dataset.behavior }, 'Sent. If the terminal already answered, its answer stands.'));
 action('ask-send', (el) => {
   const r = (S.needs || []).find((x) => x.ask && x.ask.id === el.dataset.id);
   if (!r) return toast('That request was answered in the terminal or has expired.');

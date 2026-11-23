@@ -31,10 +31,16 @@ fn owned(markers: &str, hash: &str) -> bool { markers.split_whitespace().any(|s|
 fn markers(ctx: &crate::Ctx) -> Result<String> { Ok(ctx.db.kv_get("cli-path:appimage-hash")?.unwrap_or_default()) }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn installed_cli(ctx: &crate::Ctx) -> Option<PathBuf> {
+    let dest = destination(&ctx.home);
+    let hash = installed_hash(&dest).ok().flatten()?;
+    owned(&markers(ctx).ok()?, &hash).then_some(dest)
+}
+
+#[cfg(target_os = "linux")]
 pub(super) fn status(ctx: &crate::Ctx) -> Result<super::Status> {
     let dest = destination(&ctx.home);
-    let current = installed_hash(&dest).ok().flatten();
-    let owned = current.is_some_and(|hash| markers(ctx).is_ok_and(|m| owned(&m, &hash)));
+    let owned = installed_cli(ctx).is_some();
     Ok(super::Status {
         on_path: owned && super::on_terminal_path(&dest),
         can_add: matches!(dest.symlink_metadata(), Err(e) if e.kind() == std::io::ErrorKind::NotFound),
@@ -109,7 +115,13 @@ mod tests {
         let image = home.path().join("Harness Manager.AppImage");
         let dest = destination(home.path());
         std::fs::write(&src, b"old").unwrap();
+        assert_eq!(installed_cli(&ctx), None);
         install(&ctx, &src, &image).unwrap();
+        assert_eq!(installed_cli(&ctx), Some(dest.clone()));
+        let [_, settings] = crate::hooks::settings_args(&ctx, &[]).unwrap().unwrap();
+        let settings: serde_json::Value = serde_json::from_slice(&std::fs::read(settings).unwrap()).unwrap();
+        let hook = format!("{} hook", crate::launch::sh_quote(&dest.to_string_lossy()));
+        assert_eq!(settings["hooks"]["PermissionRequest"][0]["hooks"][0]["command"], hook);
         assert_eq!(std::fs::read(&dest).unwrap(), b"old");
         assert_ne!(dest.metadata().unwrap().permissions().mode() & 0o111, 0);
         std::fs::write(&src, b"new").unwrap();
@@ -119,6 +131,7 @@ mod tests {
         assert!(!dest.exists());
         assert_eq!(ctx.db.kv_get("cli-path:appimage-disabled").unwrap().as_deref(), Some("1"));
         std::os::unix::fs::symlink(&src, &dest).unwrap();
+        assert_eq!(installed_cli(&ctx), None);
         assert!(install(&ctx, &src, &image).is_err());
         assert!(set(&ctx, &src, &image, false).is_err());
         assert!(dest.symlink_metadata().unwrap().is_symlink());

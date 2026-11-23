@@ -9,6 +9,8 @@ use serde::Serialize;
 pub mod windows;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
+#[cfg(target_os = "linux")]
+pub(crate) use linux::installed_cli;
 #[cfg(any(target_os = "macos", test))]
 mod macos;
 

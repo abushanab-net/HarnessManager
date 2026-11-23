@@ -56,8 +56,8 @@ impl AppState {
 /// One page's data as last computed, and whether a fresher one is being computed now.
 struct Page { value: Value, at: Instant, stamp: Stamp, busy: bool }
 
-/// What the pages are computed from, as of now: the database (any commit, by anyone) and the account list and
-/// settings files. None when it cannot be told: nothing is kept then.
+/// What the pages are computed from, as of now: the database (tracked by the page cache generation) and the
+/// account list and settings files. None when it cannot be told: nothing is kept then.
 type Stamp = Option<(i64, Option<std::time::SystemTime>, Option<std::time::SystemTime>)>;
 fn stamp(st: &AppState) -> Stamp {
     let ctx = st.ctx();
@@ -326,6 +326,7 @@ fn watch_runs(app: tauri::AppHandle, st: Arc<AppState>) {
     std::thread::spawn(move || loop {
         hrm_core::log::round("session states", || {
             let ctx = st.ctx();
+            if let Err(e) = hrm_core::hooks::heartbeat(&ctx) { hrm_core::log::warn(&format!("session heartbeat: {e:#}")); }
             let Ok(now) = hrm_core::hooks::runs(&ctx) else { return };
             {
                 let mut last = RUNS.lock().unwrap_or_else(|e| e.into_inner());

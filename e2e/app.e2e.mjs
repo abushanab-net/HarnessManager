@@ -630,7 +630,7 @@ try {
           await shot('reply-disabled');
         }
         await click(`[data-testid=ask-card] [data-testid=ask-${behavior}]`);
-        await hasText('#toast', behavior === 'allow' ? 'Approved once.' : 'Denied.');
+        await hasText('#toast', 'Sent. If the terminal already answered, its answer stands.');
         const got = await waitFor(() => received().length > before && received().pop(), 'the decision at the tool');
         assert.equal(got.code, 0, JSON.stringify(got));
         assert.deepEqual(JSON.parse(got.stdout).hookSpecificOutput.decision.behavior, behavior);
