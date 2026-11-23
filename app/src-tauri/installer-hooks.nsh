@@ -24,6 +24,36 @@
   hrm_hook_done:
 !macroend
 
+!macro HRM_PATH action
+  Push $0
+  Push $1
+  nsExec::ExecToStack '"$INSTDIR\hrm.exe" path ${action}'
+  Pop $0
+  Pop $1
+  StrCmp $0 "0" hrm_path_done_${action}
+    DetailPrint "Could not ${action} hrm on the PATH ($0): $1"
+    IfSilent +2
+    ; a PATH entry left behind is harmless; an uninstaller that cannot finish is not, so this only warns
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Could not ${action} hrm on the PATH.$\r$\n$1"
+  hrm_path_done_${action}:
+  Pop $1
+  Pop $0
+!macroend
+
+!macro NSIS_HOOK_POSTINSTALL
+  IfFileExists "$INSTDIR\hrm.exe" 0 hrm_add_done
+    !insertmacro HRM_PATH add
+  hrm_add_done:
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
+  StrCmp $UpdateMode "1" hrm_remove_done
+  IfFileExists "$INSTDIR\hrm.exe" 0 hrm_remove_done
+    ; Tauri calls this again after the hook. Let the user cancel before PATH changes.
+    !ifmacrodef CheckIfAppIsRunning
+      !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+    !endif
+    !insertmacro HRM_PATH remove
+  hrm_remove_done:
   Delete "$INSTDIR\hrm.old-*.exe"
 !macroend

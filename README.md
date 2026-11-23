@@ -62,6 +62,22 @@ Silent install on Windows:
 The app updates itself: it checks for a new version at launch and every hour, and installs only updates
 signed by the release key.
 
+### Use hrm in a terminal
+
+- On **Windows**, Setup adds the install folder to your user PATH. Open a new terminal from the Start menu
+  and run `hrm --version`. Uninstall removes the entry added by Setup.
+- The **Linux .deb** installs `/usr/bin/hrm`. The package manager removes it with the app.
+- On the first **AppImage** launch, the app copies `hrm` to `~/.local/bin/hrm`. It refreshes the copy
+  when you start a different version. Most Linux distributions include `~/.local/bin` on PATH.
+  If your shell needs it, add that folder to its PATH. Use **Settings → Window → Remove** before
+  deleting the AppImage, or remove the copied file yourself.
+- On **macOS**, drag Harness Manager into Applications and open it there. The first time, choose **Add**
+  to link `/usr/local/bin/hrm` to the app. macOS asks for an administrator password. **Not now** skips
+  the offer. You can add or remove the link later in **Settings → Window**. If you already trashed the app,
+  check that `/usr/local/bin/hrm` points to Harness Manager, then run `sudo rm /usr/local/bin/hrm`.
+
+The **hrm on the PATH** row in Settings shows whether a new terminal finds this copy of `hrm`.
+
 ## Quick start
 
 1. **Start Harness Manager.** It adds a main account for each tool it finds installed.

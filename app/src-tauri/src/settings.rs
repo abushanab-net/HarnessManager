@@ -24,6 +24,37 @@ pub fn autostart_set(_: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
     Ok(json!(hrm_core::launch::autostart::get().is_some()))
 }
 
+pub fn path_status(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> {
+    Ok(json!(hrm_core::cli_path::status(ctx)?))
+}
+
+pub fn path_set(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
+    hrm_core::cli_path::set(ctx, a["add"].as_bool().context("choose Add or Remove")?)?;
+    Ok(json!(true))
+}
+
+#[cfg(target_os = "macos")]
+pub fn offer_cli_path(window: &tauri::WebviewWindow, ctx: Arc<Ctx>) -> Result<()> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    if !hrm_core::cli_path::status(&ctx)?.offer { return Ok(()); }
+    hrm_core::cli_path::dismiss_offer(&ctx)?;
+    let window = window.clone();
+    window.dialog().message("Add hrm to /usr/local/bin for use in new terminals? macOS will ask for an administrator password. You can also do this in Settings.")
+        .title("Add hrm to the PATH")
+        .parent(&window)
+        .buttons(MessageDialogButtons::OkCancelCustom("Add".into(), "Not now".into()))
+        .show(move |add| {
+            if add {
+                std::thread::spawn(move || {
+                    if let Err(e) = hrm_core::cli_path::set(&ctx, true) {
+                        window.dialog().message(format!("{e:#}")).title("Could not add hrm to the PATH").show(|_| {});
+                    }
+                });
+            }
+        });
+    Ok(())
+}
+
 pub fn import_ps(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { Ok(json!(service::import_powershell(ctx, opt(a, "path").map(PathBuf::from))?)) }
 
 pub fn detect(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(service::detect(ctx)?)) }

@@ -37,6 +37,8 @@ pub fn flags(name: &str) -> u8 { find(name).map_or(0, |o| o.flags) }
 pub static OPS: &[Op] = &[
     // accounts
     op("state", accounts::state, NO_LOCK | NO_CHANGE | PAGE),
+    op("path_status", settings::path_status, NO_LOCK | NO_CHANGE),
+    op("path_set", settings::path_set, NO_LOCK),
     op("detail", accounts::detail, NO_LOCK | NO_CHANGE),
     op("add", accounts::add, 0),
     op("remove", accounts::remove, 0),

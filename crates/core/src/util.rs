@@ -3,11 +3,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 /// Write via a temp file in the same folder and rename, so readers never see half a file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, false) }
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, 0o666) }
 
 /// `write_atomic` for a key or a token kept as a file: on unix the file is its owner's alone (mode 0600) from the
 /// moment it exists. On Windows it is a plain file, under the user's own profile.
-pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, true) }
+pub fn write_atomic_private(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, 0o600) }
+
+#[cfg(target_os = "linux")]
+pub(crate) fn write_atomic_executable(path: &Path, bytes: &[u8]) -> Result<()> { write_file(path, bytes, 0o755) }
 
 /// A key file an earlier version wrote for every user to read, made its owner's alone; nothing to do on Windows.
 pub fn make_private(path: &Path) {
@@ -17,7 +20,7 @@ pub fn make_private(path: &Path) {
     let _ = path;
 }
 
-fn write_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
+fn write_file(path: &Path, bytes: &[u8], mode: u32) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -25,18 +28,16 @@ fn write_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = path.with_extension(format!("hrm-tmp-{}-{n}", std::process::id()));
-    let written = (|| -> std::io::Result<()> {
-        use std::io::Write;
-        let mut o = std::fs::OpenOptions::new();
-        o.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        { if private { std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600); } }
-        #[cfg(not(unix))]
-        let _ = private;
-        let mut f = o.open(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()
-    })();
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    { std::os::unix::fs::OpenOptionsExt::mode(&mut o, mode); }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut f = o.open(&tmp).with_context(|| format!("create {}", tmp.display()))?;
+    let written = f.write_all(bytes).and_then(|_| f.sync_all());
+    drop(f);
     if let Err(e) = written.with_context(|| format!("write {}", tmp.display())).and_then(|_| {
         std::fs::rename(&tmp, path).with_context(|| format!("replace {}", path.display()))
     }) {
@@ -181,12 +182,16 @@ pub fn which(name: &str) -> Option<PathBuf> {
     if p.is_absolute() {
         return p.exists().then(|| p.to_path_buf());
     }
+    which_on(name, &std::env::var_os("PATH")?)
+}
+
+pub(crate) fn which_on(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
     let exts: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into()).split(';').map(|e| e.to_ascii_lowercase()).collect()
     } else {
         vec![String::new()]
     };
-    for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+    for dir in std::env::split_paths(path) {
         for ext in &exts {
             let cand = dir.join(format!("{name}{ext}"));
             if cand.is_file() {
@@ -204,7 +209,7 @@ pub fn which(name: &str) -> Option<PathBuf> {
 pub fn adopt_shell_path() {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = vec![];
-    if let Some(p) = login_shell_path() { dirs.extend(std::env::split_paths(&p)); }
+    if let Some(p) = terminal_path() { dirs.extend(std::env::split_paths(&p)); }
     if let Some(p) = std::env::var_os("PATH") { dirs.extend(std::env::split_paths(&p)); }
     if let Some(h) = &home {
         dirs.extend([".local/bin", ".npm-global/bin", ".bun/bin", ".opencode/bin", ".volta/bin"].map(|d| h.join(d)));
@@ -215,13 +220,23 @@ pub fn adopt_shell_path() {
     if let Ok(p) = std::env::join_paths(dirs) { std::env::set_var("PATH", p); }
 }
 
+#[cfg(not(windows))]
+pub(crate) fn terminal_path() -> Option<std::ffi::OsString> {
+    // A desktop app can add its own tool folders below. Don't pass that augmented PATH to the login shell.
+    static INHERITED: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+    let inherited = INHERITED.get_or_init(|| std::env::var_os("PATH"));
+    login_shell_path(inherited.as_deref()).map(Into::into).or_else(|| inherited.clone())
+}
+
 /// PATH as the user's shell has it. Interactive too: nvm and most PATH lines live in .zshrc or .bashrc.
 #[cfg(not(windows))]
-fn login_shell_path() -> Option<String> {
+fn login_shell_path(inherited: Option<&std::ffi::OsStr>) -> Option<String> {
     use std::io::Read;
     const MARK: &str = "__HRM_PATH__";
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = std::process::Command::new(shell).args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/sh".into() });
+    let mut cmd = std::process::Command::new(shell);
+    if let Some(path) = inherited { cmd.env("PATH", path); } else { cmd.env_remove("PATH"); }
+    let mut child = cmd.args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
         .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
     // a shell profile that waits for something must not stop the app from starting
     let start = std::time::Instant::now();
