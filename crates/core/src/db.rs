@@ -14,6 +14,7 @@ pub struct Db {
     /// Read-only connections, opened on first use: the pages read side by side, and never wait behind a write
     /// or the watcher's import (WAL lets readers run while one connection writes).
     readers: [OnceLock<Option<Mutex<Connection>>>; 3],
+    version_conn: OnceLock<Option<Mutex<Connection>>>,
     /// This computer's id: every row written here carries it.
     pub device: String,
     /// Sync is on: every change is also written to the outbox for the other computers.
@@ -246,9 +247,14 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         // what each session hrm run started last reported through its hooks (hooks.rs)
         conn.execute_batch(crate::hooks::TABLE)?;
-        for (col, ty) in [("terminal_port", "integer"), ("terminal_token", "blob")] {
-            if !conn.prepare("select 1 from pragma_table_info('run_state') where name = ?")?.exists([col])? {
-                add_column(&conn, "run_state", col, ty)?;
+        for (table, col, ty) in [
+            ("run_state", "terminal_port", "integer"),
+            ("run_state", "terminal_token", "blob"),
+            ("run_ask", "hook_pid", "integer not null default 0"),
+            ("run_ask", "hook_started", "integer not null default 0"),
+        ] {
+            if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
+                add_column(&conn, table, col, ty)?;
             }
         }
         // reply timings came later: add the columns, and read every log once more so older requests get them
@@ -334,7 +340,7 @@ impl Db {
         if !conn.prepare("select 1 from kv where k = 'migrated:usage_day'")?.exists([])? {
             if let Err(e) = conn.execute_batch(USAGE_DAY_FILL) { let _ = conn.execute_batch("rollback"); return Err(e.into()); }
         }
-        Ok(Db { conn: Mutex::new(conn), path: path.to_path_buf(), readers: Default::default(), device: device.into(), journal })
+        Ok(Db { conn: Mutex::new(conn), path: path.to_path_buf(), readers: Default::default(), version_conn: Default::default(), device: device.into(), journal })
     }
 
     /// Rows without a cost (from before costs were frozen, or a catalog that lacked their model) priced now, by model.
@@ -369,12 +375,27 @@ impl Db {
         }).as_ref()
     }
 
-    /// A number that changes whenever any connection (this process's writer, the CLI, another process) commits a
-    /// change to the database; always read on the same connection, as SQLite requires. None without a reader.
+    fn version_connection(&self) -> Option<&Mutex<Connection>> {
+        self.version_conn.get_or_init(|| {
+            let c = Connection::open_with_flags(&self.path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE).ok()?;
+            c.busy_timeout(std::time::Duration::from_millis(500)).ok()?;
+            Some(Mutex::new(c))
+        }).as_ref()
+    }
+
+    /// Page cache generation. SQLite ignores writes made by the observing connection itself.
     pub fn data_version(&self) -> Option<i64> {
-        let m = self.reader(0)?;
+        let m = self.version_connection()?;
         let c = m.lock().unwrap_or_else(|e| e.into_inner());
         c.query_row("pragma data_version", [], |r| r.get(0)).ok()
+    }
+
+    pub(crate) fn set_app_heartbeat(&self, value: &str) -> Result<()> {
+        // A tick does not change page data and should not invalidate every cached page.
+        let m = self.version_connection().ok_or_else(|| anyhow::anyhow!("open session heartbeat connection"))?;
+        let c = m.lock().unwrap_or_else(|e| e.into_inner());
+        c.execute("insert or replace into kv values(?,?)", [crate::hooks::APP_HEARTBEAT, value])?;
+        Ok(())
     }
 
     /// A query on a read-only connection: a free one if there is, else the first one's turn. It sees what was

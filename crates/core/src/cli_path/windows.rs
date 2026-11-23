@@ -58,6 +58,13 @@ fn check(code: u32) -> Result<()> {
     Ok(())
 }
 
+fn trim_registry_string(buf: &mut Vec<u16>) -> Result<()> {
+    ensure!(buf.pop() == Some(0), "invalid registry string");
+    while buf.last() == Some(&0) { buf.pop(); }
+    ensure!(!buf.contains(&0), "invalid registry string");
+    Ok(())
+}
+
 fn read(key: &[u16], name: &[u16]) -> Result<Option<(u32, Vec<u16>)>> {
     let mut size = 0;
     let mut kind = 0;
@@ -77,7 +84,7 @@ fn read(key: &[u16], name: &[u16]) -> Result<Option<(u32, Vec<u16>)>> {
         check(code)?;
         ensure!(size >= 2 && size % 2 == 0, "invalid registry string");
         buf.truncate(size as usize / 2);
-        ensure!(buf.pop() == Some(0) && !buf.contains(&0), "invalid registry string");
+        trim_registry_string(&mut buf)?;
         return Ok(Some((kind, buf)));
     }
 }
@@ -221,6 +228,17 @@ fn fresh_path() -> Result<OsString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_path_accepts_extra_terminators_but_refuses_an_embedded_nul() {
+        let path: Vec<_> = r"%USERPROFILE%\bin;C:\tools".encode_utf16().collect();
+        let mut terminated = path.clone();
+        terminated.extend([0, 0, 0]);
+        trim_registry_string(&mut terminated).unwrap();
+        assert_eq!(terminated, path);
+        assert!(trim_registry_string(&mut vec![65, 0, 66, 0]).is_err());
+        assert!(trim_registry_string(&mut vec![65]).is_err());
+    }
 
     #[test]
     fn add_and_remove_keep_every_other_code_unit() {

@@ -1120,8 +1120,7 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     let home = e.home.join(".claude-work");
     let ev = json!({"hook_event_name": "PermissionRequest", "session_id": "s-1", "cwd": "D:/w", "tool_name": "Bash", "tool_input": {"command": "npm test"}}).to_string();
     e.extra = vec![("FAKE_HOOK".into(), ev.clone()), ("FAKE_HOLD_MS".into(), "4000".into())];
-    // nobody answers in the app: the hook waits one second, then steps aside
-    e.ok(&["settings", "request_seconds", "1"]);
+    // The app is absent: the hook reports the terminal state without creating a hold.
     let mut run = e.cmd(&["run", "work"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap();
     let rows = || -> Vec<(i64, String, String, String, String)> {
         let Ok(c) = rusqlite::Connection::open(e.data.join("hm.db")) else { return vec![] };
@@ -1131,8 +1130,10 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while rows().is_empty() && std::time::Instant::now() < end { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert_eq!(rows(), vec![(run.id() as i64, "work".into(), "claude".into(), "waiting".into(), "Bash: npm test".into())], "the row hrm run made, with the hook's state");
+    let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
+    assert_eq!(c.query_row("select count(*) from run_ask", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     assert!(run.wait().unwrap().success());
-    // past its wait the hook said nothing the tool would read as a decision
+    // The hook said nothing the tool would read as a decision.
     let hook = e.runs().into_iter().find(|r| r["hook"] == "PermissionRequest").unwrap();
     assert_eq!((hook["code"].clone(), hook["stdout"].clone()), (json!(0), json!("")));
     assert!(rows().is_empty(), "gone with the hrm run that made it");
@@ -1147,7 +1148,6 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
         .env_remove("HRM_RUN").output().unwrap();
     assert!(fake.status.success());
     assert!(e.runs()[n..].iter().all(|r| r.get("hook").is_none()), "no hook ran");
-    let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
     assert_eq!(c.query_row("select count(*) from run_state", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
 }
 
@@ -1163,6 +1163,7 @@ fn a_permission_request_and_a_question_are_answered_from_the_app_and_the_termina
     let open = || -> hrm_core::hooks::Ask {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
         loop {
+            hrm_core::hooks::heartbeat(&ctx).unwrap();
             if let Some(a) = hrm_core::hooks::runs(&ctx).unwrap().into_iter().find_map(|r| r.ask) { return a; }
             assert!(std::time::Instant::now() < end, "no open request");
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1170,7 +1171,12 @@ fn a_permission_request_and_a_question_are_answered_from_the_app_and_the_termina
     };
     // the decision the fake Claude Code received from its last hook of that event
     let received = |name: &str| { let h = e.runs().into_iter().rfind(|r| r["hook"] == name).unwrap(); assert_eq!(h["code"], 0); h["stdout"].as_str().unwrap().trim().to_string() };
-    let run = |extra: Vec<(String, String)>| { let mut e2 = e.cmd(&["run", "work"]); for (k, v) in extra { e2.env(k, v); } e2.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap() };
+    let run = |extra: Vec<(String, String)>| {
+        hrm_core::hooks::heartbeat(&ctx).unwrap();
+        let mut e2 = e.cmd(&["run", "work"]);
+        for (k, v) in extra { e2.env(k, v); }
+        e2.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap()
+    };
 
     for behavior in ["allow", "deny"] {
         let mut r = run(vec![("FAKE_HOOK".into(), bash.to_string())]);
@@ -1206,6 +1212,51 @@ fn a_permission_request_and_a_question_are_answered_from_the_app_and_the_termina
 
 #[cfg(windows)]
 #[test]
+fn claude_subcommands_keep_their_args_and_a_hooks_file_error_does_not_block_launch() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 1;
+
+    let e = Env::new();
+    e.ok(&["add", "work", "--no-login"]);
+    let ctx = hrm_core::Ctx::open_at(&e.data, &e.home).unwrap();
+    hrm_core::service::set_remote_control(&ctx, "work", true).unwrap();
+    let hooks = e.data.join("claude-hooks.json");
+    for args in [["mcp", "list"], ["plugins", "list"], ["config", "--help"]] {
+        e.ok(&["run", "work", "--", args[0], args[1]]);
+        assert_eq!(e.runs().last().unwrap()["args"], json!(args));
+    }
+    assert!(!hooks.exists());
+
+    std::fs::write(&hooks, "{}").unwrap();
+    let file = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(&hooks).unwrap();
+    let out = e.cmd(&["run", "work", "--", "Review this"]).output().unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Claude Code hooks were skipped: replace"));
+    assert_eq!(e.runs().last().unwrap()["args"], json!(["Review this", "--remote-control"]));
+    assert_eq!(std::fs::read_to_string(&hooks).unwrap(), "{}");
+
+    drop(file);
+    e.ok(&["run", "work", "--", "Review this"]);
+    assert_eq!(e.runs().last().unwrap()["args"],
+        json!(["--settings", hooks.display().to_string(), "Review this", "--remote-control"]));
+}
+
+#[cfg(windows)]
+#[test]
+fn an_unregistered_owned_run_uses_the_inherited_console() {
+    let mut e = Env::new();
+    e.ok(&["add", "work", "--no-login"]);
+    e.ok(&["settings", "own_terminal", "true"]);
+    let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
+    c.execute_batch("create trigger fail_run before insert on run_state begin select raise(abort, 'fixture'); end;").unwrap();
+    e.extra.push(("FAKE_TERMINAL".into(), "inherit".into()));
+    let out = e.cmd(&["run", "work"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(19), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("fixture inherited"));
+}
+
+#[cfg(windows)]
+#[test]
 fn owned_terminal_replies_and_interrupts_from_another_process() {
     use std::io::Write;
     use std::process::Stdio;
@@ -1225,8 +1276,10 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
     let db = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
     db.execute_batch(hrm_core::hooks::TABLE).unwrap();
     db.execute("insert into run_state(run, pid, started, profile, harness) values('legacy', 0, 0, 'work', 'claude')", []).unwrap();
+    db.execute("insert into run_ask(id, run, kind, tool, created, expires) values('legacy', 'legacy', 'permission', 'Bash', 0, 1)", []).unwrap();
     e.ok(&["add", "work", "--no-login"]);
     assert!(db.query_row("select terminal_port is null and terminal_token is null from run_state where run = 'legacy'", [], |row| row.get::<_, bool>(0)).unwrap());
+    assert!(db.query_row("select hook_pid = 0 and hook_started = 0 from run_ask where id = 'legacy'", [], |row| row.get::<_, bool>(0)).unwrap());
     assert_eq!(e.ok(&["settings", "own_terminal"]).trim(), "false");
     let project = e._dir.path();
     let capture = project.join("stdout");

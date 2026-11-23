@@ -5,9 +5,10 @@
 //!
 //! A permission request or a question (`AskUserQuestion`) is also held open for an answer from the app: `hrm hook`
 //! stores it in `run_ask` and polls the row; the app writes the answer there (Phase 3 will write remote answers the
-//! same way). The terminal prompt stays answerable meanwhile and the first answer wins: a later event of the session
-//! closes the request, so does the hook's own expiry, and then the hook exits 0 printing nothing. Every other event
-//! prints nothing and exits 0, so the tool behaves as without it.
+//! same way). A permission prompt stays answerable in the terminal, while a question appears there after the hook
+//! exits. A later event or the hook's expiry closes the request and the hook exits 0 printing nothing.
+
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -22,6 +23,19 @@ use crate::Ctx;
 pub const RUN_VAR: &str = "HRM_RUN";
 /// Set by `hrm run` beside `RUN_VAR`: how many seconds a request waits for the app (`request_seconds`).
 pub const WAIT_VAR: &str = "HRM_REQUEST_SECONDS";
+
+const QUESTION_SECONDS: u32 = 15;
+pub(crate) const APP_HEARTBEAT: &str = "hooks:app-heartbeat";
+
+/// The desktop's session watcher calls this every second while it can offer answers.
+pub fn heartbeat(ctx: &Ctx) -> Result<()> {
+    ctx.db.set_app_heartbeat(&now_ms().to_string())
+}
+
+fn app_is_present(c: &Connection) -> rusqlite::Result<bool> {
+    let beat: Option<String> = c.query_row("select v from kv where k = ?", [APP_HEARTBEAT], |r| r.get(0)).optional()?;
+    Ok(beat.and_then(|v| v.parse::<i64>().ok()).is_some_and(|beat| (0..=3000).contains(&now_ms().saturating_sub(beat))))
+}
 
 /// The events Claude Code reports. PostToolUse: a tool ran (after an approval too), so the session works again.
 /// Besides these, PreToolUse for `AskUserQuestion` only (see `settings`).
@@ -81,21 +95,21 @@ pub fn hook(input: &str) -> Result<Option<String>> {
     let v: Value = serde_json::from_str(input).context("the hook's input is not JSON")?;
     // not Ctx::open: no migrations, no settings, on every tool call; hm.db is there, hrm run opened it
     let c = Connection::open_with_flags(crate::ctx::data_dir().join("hm.db"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    c.busy_timeout(std::time::Duration::from_secs(2))?;
-    let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u64);
-    Ok(handle(&c, &run, &v, std::time::Duration::from_secs(secs))?.map(|d| d.to_string()))
+    c.busy_timeout(Duration::from_secs(2))?;
+    let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u32);
+    Ok(handle(&c, &run, &v, Duration::from_secs(secs.into()))?.map(|d| d.to_string()))
 }
 
 /// The event for run `run`: later events close what the terminal answered, the state is recorded, and a request
 /// waits up to `wait` for the app's answer. Answers the decision for the tool, or None: no decision, the terminal
 /// prompt stands.
-pub fn handle(c: &Connection, run: &str, v: &Value, wait: std::time::Duration) -> Result<Option<Value>> {
+pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Option<Value>> {
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let input = v["tool_input"].to_string();
     // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
-    // A tool ran: the request for that very call. A notification comes while the prompt still shows: none
+    // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
     match v["hook_event_name"].as_str().unwrap_or("") {
-        "Notification" => {}
+        "Notification" if v["notification_type"] != "idle_prompt" => {}
         "PostToolUse" => { c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?; }
         _ => { c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?; }
     }
@@ -104,15 +118,19 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: std::time::Duration) -
             state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms()])?;
     }
     let Some(kind) = kind_of(v) else { return Ok(None) };
+    let wait = if kind == "question" { wait.min(Duration::from_secs(QUESTION_SECONDS.into())) } else { wait };
     // only for a session hrm run started, and while the app offers answers
-    if wait.is_zero() || c.query_row("select 1 from run_state where run = ?", [run], |_| Ok(())).optional()?.is_none() { return Ok(None); }
+    if wait.is_zero() || !app_is_present(c)? || c.query_row("select 1 from run_state where run = ?", [run], |_| Ok(())).optional()?.is_none() { return Ok(None); }
+    let pid = std::process::id();
+    let Some(started) = crate::procs::start_ms(pid) else { return Ok(None) };
     let what = if kind == "question" { question_text(v) } else {
         v["tool_input"]["command"].as_str().or(v["tool_input"]["file_path"].as_str()).unwrap_or("").to_string()
     };
     let (id, created) = (crate::util::uuid4(), now_ms());
     let expires = created + wait.as_millis() as i64;
-    c.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires) values(?,?,?,?,?,?,?,?,?)",
-        params![id, run, s("session_id"), kind, s("tool_name"), what, input, created, expires])?;
+    let deadline = Instant::now() + wait;
+    c.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started) values(?,?,?,?,?,?,?,?,?,?,?)",
+        params![id, run, s("session_id"), kind, s("tool_name"), what, input, created, expires, pid, started])?;
     loop {
         // a busy database is waited out: leaving would strand an answer the app then reports as given
         let row: rusqlite::Result<Option<(String, String)>> = c.query_row("select state, answer from run_ask where id = ?", [&id], |r| Ok((r.get(0)?, r.get(1)?))).optional();
@@ -124,9 +142,12 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: std::time::Duration) -
             Ok(Some(("open", _))) | Err(_) => {}
             Ok(_) => return Ok(None), // closed, or gone with its run
         }
-        // the expiry and an answer are one update each on the open row: whichever lands first wins
-        if now_ms() >= expires && c.execute("update run_ask set state = 'closed' where id = ? and state = 'open'", [&id]).unwrap_or(0) == 1 { return Ok(None); }
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        // The close and an answer both update only an open row.
+        if (Instant::now() >= deadline || now_ms() >= expires || matches!(app_is_present(c), Ok(false)))
+            && c.execute("update run_ask set state = 'closed' where id = ? and state = 'open'", [&id])? == 1 {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(250));
     }
 }
 
@@ -142,12 +163,22 @@ pub fn decision(kind: &str, tool_input: &Value, answer: &str) -> Value {
     json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": d}})
 }
 
+fn hook_is_live(pid: u32, started: i64) -> bool {
+    if started == 0 { return false; }
+    #[cfg(windows)]
+    if !crate::procs::alive(pid) { return false; }
+    crate::procs::start_ms(pid) == Some(started)
+}
+
 /// The app's answer to request `id`: `{"behavior": "allow" | "deny"}` for a permission, `{"answers": {question:
 /// [label, ...]}}` for a question, with one of each question's own options (several where it allows several).
 /// False when the request is no longer open (the terminal answered, or it expired): the answer is dropped.
 pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
-    let row: Option<(String, String)> = ctx.db.read(|c| Ok(c.query_row("select kind, input from run_ask where id = ?", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?))?;
-    let Some((kind, input)) = row else { return Ok(false) };
+    let row: Option<(String, String, u32, i64)> = ctx.db.read(|c| Ok(c.query_row(
+        "select kind, input, hook_pid, hook_started from run_ask where id = ?1 and state = 'open' and expires > ?2",
+        params![id, now_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?))?;
+    let Some((kind, input, pid, started)) = row else { return Ok(false) };
+    if !hook_is_live(pid, started) { return Ok(false); }
     let answer = if kind == "question" {
         let input: Value = serde_json::from_str(&input)?;
         let mut out = Map::new();
@@ -164,7 +195,10 @@ pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
     } else {
         match a["behavior"].as_str() { Some(b @ ("allow" | "deny")) => b.to_string(), _ => bail!("the answer is allow or deny") }
     };
-    Ok(ctx.db.with(|c| Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3", params![id, answer, now_ms()])?))? == 1)
+    ctx.db.with(|c| {
+        if !hook_is_live(pid, started) { return Ok(false); }
+        Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3", params![id, answer, now_ms()])? == 1)
+    })
 }
 
 /// `hrm run`, before the tool starts: its row, and the variables that let the tool's hooks find it. Answers the run
@@ -232,10 +266,14 @@ pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
         let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
             cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
-        let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires from run_ask where state = 'open' and expires > ? order by created")?;
-        let a: Vec<(String, Ask)> = st.query_map([now_ms()], |r| Ok((r.get(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
-            input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? })))?.collect::<rusqlite::Result<_>>()?;
-        for (run, a) in a { if let Some((r, _)) = v.iter_mut().find(|(r, _)| r.run == run) { r.ask = Some(a); } }
+        let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires, hook_pid, hook_started from run_ask where state = 'open' and expires > ? order by created")?;
+        let asks = st.query_map([now_ms()], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
+            input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? }, r.get::<_, u32>(8)?, r.get::<_, i64>(9)?)))?;
+        for ask in asks {
+            let (run, ask, pid, started) = ask?;
+            if !hook_is_live(pid, started) { continue; }
+            if let Some((r, _)) = v.iter_mut().find(|(r, _)| r.run == run) { r.ask = Some(ask); }
+        }
         Ok(v)
     })?;
     // the start time tells the hrm run that made the row from a later process given the same pid
@@ -260,12 +298,18 @@ pub fn command() -> String {
 }
 
 /// The settings Claude Code is started with: only our hook entries, one group under each of `EVENTS`, and one for
-/// PreToolUse of `AskUserQuestion`. The two that wait for the app get a timeout past `wait` seconds, so the hook
-/// ends its own wait first.
-fn settings(wait: u32) -> Value {
-    let (entry, held) = (|timeout: u32| json!({"type": "command", "command": command(), "timeout": timeout}), wait.saturating_add(30));
+/// PreToolUse of `AskUserQuestion`. Permission hooks can outlast their own wait, but questions have a short
+/// timeout because Claude draws the terminal question only after the hook exits.
+fn settings(ctx: &Ctx) -> Value {
+    #[cfg(not(target_os = "linux"))]
+    let command = command();
+    #[cfg(target_os = "linux")]
+    let command = crate::cli_path::installed_cli(ctx)
+        .map(|exe| format!("{} hook", crate::launch::sh_quote(&exe.to_string_lossy())))
+        .unwrap_or_else(command);
+    let (entry, held) = (|timeout: u32| json!({"type": "command", "command": command, "timeout": timeout}), ctx.settings.request_seconds.saturating_add(30));
     let mut hooks: Map<String, Value> = EVENTS.iter().map(|e| (e.to_string(), json!([{"hooks": [entry(if *e == "PermissionRequest" { held } else { 10 })]}]))).collect();
-    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(held)]}]));
+    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(QUESTION_SECONDS)]}]));
     json!({"hooks": hooks})
 }
 
@@ -275,7 +319,7 @@ pub fn settings_args(ctx: &Ctx, user_args: &[String]) -> Result<Option<[String; 
     // Claude Code takes one --settings: the user's wins, and that session is not tracked
     if !ctx.settings.session_hooks || user_args.iter().any(|a| a == "--settings" || a.starts_with("--settings=")) { return Ok(None); }
     let path = ctx.data.join("claude-hooks.json");
-    let want = serde_json::to_string_pretty(&settings(ctx.settings.request_seconds))?;
+    let want = serde_json::to_string_pretty(&settings(ctx))?;
     if crate::util::read_or_empty(&path)? != want { write_atomic(&path, want.as_bytes())?; }
     Ok(Some(["--settings".into(), path.display().to_string()]))
 }
@@ -330,6 +374,7 @@ mod tests {
     fn hold(ctx: &Ctx, run: &str, ev: &str, wait_ms: u64) -> (std::thread::JoinHandle<Option<Value>>, Ask) {
         let open = || runs(ctx).unwrap().into_iter().find(|r| r.run == run).and_then(|r| r.ask);
         let before = open().map(|a| a.id);
+        heartbeat(ctx).unwrap();
         let (c, run2, v): (Connection, String, Value) = (conn(ctx), run.to_string(), serde_json::from_str(ev).unwrap());
         let h = std::thread::spawn(move || handle(&c, &run2, &v, std::time::Duration::from_millis(wait_ms)).unwrap());
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -377,6 +422,13 @@ mod tests {
         assert_eq!(h.join().unwrap(), None, "no decision: the terminal's stands");
         assert!(runs(&ctx).unwrap()[0].ask.is_none());
         assert!(!answer(&ctx, &a.id, &json!({"behavior": "deny"})).unwrap(), "dropped by request id");
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let idle = json!({"hook_event_name": "Notification", "notification_type": "idle_prompt"});
+        assert_eq!(handle(&conn(&ctx), &run, &idle, Duration::ZERO).unwrap(), None);
+        assert_eq!(h.join().unwrap(), None);
+        let r = &runs(&ctx).unwrap()[0];
+        assert_eq!((r.state.as_str(), r.ask.is_none()), ("done", true));
+        assert!(!answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap());
         // the terminal denied, then the next prompt; a new request; the turn's end
         for next in ["UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"] {
             let (h, _) = hold(&ctx, &run, BASH, 20_000);
@@ -391,6 +443,47 @@ mod tests {
                 assert_eq!(h.join().unwrap(), None, "{next}");
             }
         }
+    }
+
+    #[test]
+    fn a_stale_heartbeat_skips_both_holds_and_releases_an_open_hold() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        let version = ctx.db.data_version().unwrap();
+        heartbeat(&ctx).unwrap();
+        assert_eq!(ctx.db.data_version(), Some(version), "heartbeats leave the page cache valid");
+        assert!(app_is_present(&c).unwrap(), "the hook's connection sees the heartbeat");
+        ctx.db.kv_set("test:page-data", "changed").unwrap();
+        heartbeat(&ctx).unwrap();
+        assert_ne!(ctx.db.data_version(), Some(version), "a heartbeat does not hide a regular commit");
+        let stale = || ctx.db.kv_set(APP_HEARTBEAT, &(now_ms() - 4000).to_string()).unwrap();
+        stale();
+        let bash: Value = serde_json::from_str(BASH).unwrap();
+        let ask = json!({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Which colour?"}]}});
+        for event in [bash, ask] {
+            assert_eq!(handle(&c, &run, &event, Duration::from_millis(500)).unwrap(), None);
+            assert!(!c.prepare("select 1 from run_ask").unwrap().exists([]).unwrap());
+        }
+        let (h, a) = hold(&ctx, &run, BASH, 5000);
+        stale();
+        assert_eq!(h.join().unwrap(), None);
+        assert!(now_ms() < a.expires, "the app disappeared before expiry");
+        assert!(!answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap());
+    }
+
+    #[test]
+    fn missing_or_reused_hook_processes_cannot_receive_answers() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        let pid = std::process::id();
+        let started = crate::procs::start_ms(pid).unwrap();
+        for (id, pid, started) in [("gone", i32::MAX as u32, started), ("reused", pid, started - 1000), ("legacy", 0, 0)] {
+            c.execute("insert into run_ask(id, run, kind, tool, created, expires, hook_pid, hook_started) values(?, ?, 'permission', 'Bash', ?, ?, ?, ?)",
+                params![id, run, now_ms(), now_ms() + 30_000, pid, started]).unwrap();
+            assert!(!answer(&ctx, id, &json!({"behavior": "allow"})).unwrap());
+        }
+        c.execute("update run_state set state = 'waiting' where run = ?", [&run]).unwrap();
+        assert!(runs(&ctx).unwrap()[0].ask.is_none());
     }
 
     #[test]
@@ -420,6 +513,7 @@ mod tests {
         let ev = json!({"hook_event_name": "PreToolUse", "session_id": "s-1", "tool_name": "AskUserQuestion", "tool_input": {"questions": questions}}).to_string();
         let (h, a) = hold(&ctx, &run, &ev, 20_000);
         assert_eq!((a.kind.as_str(), a.what.as_str()), ("question", "Which colour? / Which sizes?"));
+        assert_eq!(a.expires - a.created, 15_000);
         assert_eq!(runs(&ctx).unwrap()[0].reason, "Question: Which colour? / Which sizes?");
         for bad in [json!({"answers": {"Which colour?": ["Green"], "Which sizes?": ["S"]}}), json!({"answers": {"Which colour?": ["Blue", "Red"], "Which sizes?": ["S"]}}), json!({"answers": {"Which colour?": ["Blue"]}})] {
             assert!(answer(&ctx, &a.id, &bad).is_err(), "{bad}");
@@ -441,9 +535,9 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(v.as_object().unwrap().keys().collect::<Vec<_>>(), ["hooks"]);
         for e in EVENTS { assert_eq!(v["hooks"][e][0]["hooks"][0]["command"], json!(command()), "{e}"); }
-        // the two that wait for the app outlast the hook's own wait; questions only for PreToolUse
+        // PermissionRequest outlasts its wait. PreToolUse gets its own shorter cap.
         assert_eq!(v["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], json!(ctx.settings.request_seconds + 30));
-        assert_eq!(v["hooks"]["PreToolUse"], json!([{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command(), "timeout": ctx.settings.request_seconds + 30}]}]));
+        assert_eq!(v["hooks"]["PreToolUse"], json!([{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command(), "timeout": 15}]}]));
         let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         settings_args(&ctx, &["fix it".into()]).unwrap().unwrap();
