@@ -459,7 +459,7 @@ function askCard(r) {
     return `<section class="a-ask ask" data-key="ask:${esc(a.id)}" data-testid="ask-card" aria-label="A question for you">${head('Asks you')}${(a.input.questions || []).map((q, i) => `<fieldset class="ask-q" data-q="${i}"><legend>${esc(q.question)}</legend>${(q.options || []).map((o) => `<label class="chk"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="ask-${esc(a.id)}-${i}" value="${esc(o.label)}"> <span><b>${esc(o.label)}</b>${o.description ? ` <span class="muted">${esc(o.description)}</span>` : ''}</span></label>`).join('')}</fieldset>`).join('')}
       <div class="row-actions"><button class="btn" data-act="ask-send" data-id="${esc(a.id)}" data-testid="ask-send">Send answer</button></div></section>`;
   }
-  return `<section class="a-ask ask" data-key="ask:${esc(a.id)}" data-testid="ask-card" aria-label="A permission request">${head(`Wants to use ${esc(a.tool)}`)}<pre class="ask-what mono" tabindex="0" data-testid="ask-what">${esc(a.what || a.tool)}</pre>${a.input.description ? `<p class="small muted" data-testid="ask-desc">${esc(a.input.description)}</p>` : ''}
+  return `<section class="a-ask ask" data-key="ask:${esc(a.id)}" data-testid="ask-card" aria-label="A permission request">${head(`Wants to use ${esc(a.tool)}`)}<pre class="ask-what mono" tabindex="0" data-testid="ask-what">${esc(a.what || a.tool)}</pre>${a.input.description ? `<p class="small muted" data-testid="ask-desc">${esc(a.input.description)}</p>` : ''}${/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(a.tool) ? '<p class="small muted" data-testid="ask-change">Only the file is named here; the change itself is shown in the terminal.</p>' : ''}
     <div class="row-actions"><button class="btn" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="allow" data-testid="ask-allow">Approve once</button><button class="btn" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="deny" data-testid="ask-deny">Deny</button></div></section>`;
 }
 async function sendAnswer(id, a, done) {
@@ -486,14 +486,18 @@ function replyBar(r) {
   // only while a turn runs or a prompt waits: at the idle prompt Ctrl+C exits Codex, and asks Claude Code to exit
   const busy = r.state === 'working' || r.state === 'waiting';
   const stopAttr = on && busy ? 'title="Press Ctrl+C in the session"' : `disabled title="${on ? 'Nothing to stop: the session is at its prompt' : 'Needs Harness Manager’s own terminal'}"`;
+  // a line typed while a request waits lands in the tool's own dialog, where Enter picks its highlighted "Yes"
+  const sendAttr = !on ? 'disabled' : r.state === 'waiting' ? 'disabled title="Answer the request above or in the terminal first"' : '';
   return `<div class="a-reply" data-key="reply" data-testid="reply-bar"><div class="a-reply-row">
       <textarea id="reply-text" rows="2" aria-label="Reply to the session" placeholder="${on ? 'Reply to the session · Enter sends one line' : 'Replies need Harness Manager’s own terminal'}" ${dis} data-testid="reply-text"></textarea>
-      <div class="a-reply-acts"><button class="btn" data-act="reply-send" data-run="${esc(r.run)}" ${dis} data-testid="reply-send">Send</button><button class="btn" data-act="reply-stop" data-run="${esc(r.run)}" ${stopAttr} data-testid="reply-stop">Stop</button>${termBtn(r, 'reply-terminal', 'btn')}</div></div>
+      <div class="a-reply-acts"><button class="btn" data-act="reply-send" data-run="${esc(r.run)}" ${sendAttr} data-testid="reply-send">Send</button><button class="btn" data-act="reply-stop" data-run="${esc(r.run)}" ${stopAttr} data-testid="reply-stop">Stop</button>${termBtn(r, 'reply-terminal', 'btn')}</div></div>
     ${on ? '' : `<p class="a-reply-off small muted" data-testid="reply-off">Replies need Harness Manager’s own terminal; this session started without it.${S.state && S.state.settings.own_terminal ? ' It is on for the next start.' : ' <button class="btn sm" data-act="own-terminal-on" data-testid="own-terminal-on">Turn it on for the next start</button>'}</p>`}</div>`;
 }
 async function sendReply(run) {
   const box = document.getElementById('reply-text'), text = box ? box.value.trim() : '';
   if (!text) return;
+  // Enter in the box bypasses the disabled Send: the same rule as the button
+  if ((S.needs || []).some((x) => x.run === run && x.state === 'waiting')) return toast('Answer the request above or in the terminal first.', true);
   if ((await attempt(() => call('reply', { run, text }))) !== true) return;
   box.value = '';
   clearNotice(); // an earlier refusal (several lines) is answered

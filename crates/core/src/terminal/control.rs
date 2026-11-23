@@ -38,6 +38,8 @@ impl<'a> Action<'a> {
                     !text.chars().any(char::is_control),
                     "a reply must be a single line of text without control characters"
                 );
+                // a bare Enter would answer an open dialog with its highlighted choice
+                ensure!(!text.trim().is_empty(), "a reply needs some text");
                 Ok(Self::Reply(text))
             }
             _ => bail!("invalid terminal command"),
@@ -299,7 +301,8 @@ mod tests {
             Action::Reply("éply")
         );
         assert_eq!(Action::parse(b"s").unwrap(), Action::Stop);
-        assert_eq!(Action::parse(b"r").unwrap(), Action::Reply(""));
+        assert!(Action::parse(b"r").is_err(), "an empty reply would press Enter in an open dialog");
+        assert!(Action::parse(b"r  ").is_err());
         for bytes in [
             b"stop".as_slice(),
             b"x",
