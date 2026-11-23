@@ -34,6 +34,31 @@ const planOf = (p) => (p.kind === 'api_key' ? ['API key', 'warn'] : p.kind === '
 /** The setting: limits as what is left (the default) or what is used. */
 export const showUsed = () => !!(S.state && S.state.settings && S.state.settings.quota_display === 'used');
 
+export const quotaSource = (source) => ({ codex: 'Codex rollout', 'claude-code': 'Claude usage cache', live: 'Claude live reading', elsewhere: 'Limits history' })[source] || '';
+const freshLimitRead = (at, now) => at > 0 && at <= now && now - at <= (S.state?.settings?.quota_max_age_minutes ?? 10) * 60000;
+export const freshCredits = (c, now) => !!c && freshLimitRead(c.fetched_at, now);
+export const freshReset = (r, now) => !!r && r.checked_at <= now && now < r.valid_until;
+export function creditText(c, short = false) {
+  if (!c) return 'Not reported';
+  if (c.enabled != null) return c.enabled ? 'On' : 'Off';
+  if (c.unlimited === true) return 'Unlimited credits';
+  if (c.balance != null) {
+    const n = c.balance.toLocaleString(undefined, { maximumFractionDigits: short && c.balance >= 1 ? 0 : 2 });
+    return short ? `Credits ${n}` : `${n} credits`;
+  }
+  return c.has_credits === false ? 'No credits' : 'Balance not reported';
+}
+
+/** A cache flag alone cannot say which window a reset covers. Point to the offer only when it may matter soon. */
+export function resetHint(a, w, now = Date.now()) {
+  if (a.needsLogin || a.mismatch || a.kind !== 'subscription' || !w?.open || w.resetsAt <= now) return '';
+  const untilOut = w.left === 0 ? 0 : w.outAt == null ? null : w.outAt - now;
+  if (untilOut == null || untilOut > 3600000) return '';
+  if (a.tool === 'codex' && a.p.quota?.source === 'codex' && freshLimitRead(a.readAt, now)) return 'Check reset options in Codex';
+  const r = a.p.quota?.unused_reset;
+  return r?.holds_unused_reset && freshReset(r, now) && now + Math.max(0, untilOut) < r.valid_until ? 'Check reset coverage in Claude' : '';
+}
+
 /** An account as every page draws it: the profile with its windows (left, used, reset, the forecast), its cap, and
  * where it runs; x is limits_extra (forecast, caps), pcs the computers (for sessions elsewhere). */
 export function acctView(p, x = {}, now = Date.now(), pcs = null) {

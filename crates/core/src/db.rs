@@ -467,6 +467,20 @@ impl Db {
         })
     }
 
+    /// Codex imports and one-time backfills can race across processes. Keep the newest reading, or fill in
+    /// credits when rereading the same event from before credits were parsed.
+    pub fn put_quota_if_newer(&self, profile: &str, q: &Quota) -> Result<()> {
+        self.with(|c| {
+            c.execute("insert into quota values(?,?,?) on conflict(profile) do update set json=excluded.json, updated_at=excluded.updated_at
+                where case when json_valid(quota.json) then
+                    coalesce(json_extract(quota.json, '$.fetched_at'), -1) < ?4 or
+                    (json_extract(quota.json, '$.fetched_at') = ?4 and ?5 and json_extract(quota.json, '$.credits') is null)
+                else 1 end",
+                params![profile, serde_json::to_string(q)?, crate::util::now_ms(), q.fetched_at, q.credits.is_some()])?;
+            Ok(())
+        })
+    }
+
     pub fn get_quota(&self, profile: &str) -> Result<Option<Quota>> {
         self.read(|c| {
             let s: Option<String> = c.query_row("select json from quota where profile=?", [profile], |r| r.get(0)).optional()?;

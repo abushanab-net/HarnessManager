@@ -157,7 +157,7 @@ pub fn newer_elsewhere(ctx: &Ctx, profile: &str, account: Option<&str>, here: Op
     let label = |id: &str| here.as_ref().and_then(|q| q.tier(id)).map(|t| t.label.clone())
         .unwrap_or_else(|| match id { "session" => "5-hour session".into(), "week" => "Week".into(), other => other.into() });
     Some(Quota { tiers: rows.iter().map(|(id, used, resets_at, _)| QuotaTier { id: id.clone(), label: label(id), used: *used, resets_at: *resets_at }).collect(),
-        fetched_at: Some(at), source: "elsewhere".into() })
+        fetched_at: Some(at), source: "elsewhere".into(), ..here.unwrap_or_default() })
 }
 
 pub fn list_views(ctx: &Ctx) -> Result<Vec<ProfileView>> {

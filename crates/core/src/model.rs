@@ -46,6 +46,33 @@ pub struct Quota {
     /// When the harness last measured these numbers (epoch ms).
     pub fetched_at: Option<i64>,
     pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credits: Option<UsageCredits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_reset: Option<UnusedReset>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UsageCredits {
+    pub has_credits: Option<bool>,
+    pub unlimited: Option<bool>,
+    pub balance: Option<f64>,
+    pub enabled: Option<bool>,
+    pub fetched_at: Option<i64>,
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) account_uuid: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnusedReset {
+    pub holds_unused_reset: bool,
+    pub checked_at: i64,
+    pub valid_until: i64,
+}
+
+impl UnusedReset {
+    pub fn is_fresh(&self, now: i64) -> bool { self.checked_at <= now && now < self.valid_until }
 }
 
 impl Quota {

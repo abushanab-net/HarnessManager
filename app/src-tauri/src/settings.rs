@@ -135,6 +135,12 @@ pub fn open_folder(_: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
 pub fn open_url(_: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
     let url = s(a, "url")?;
     if !url.starts_with("https://") { bail!("only https links open"); }
+    if let Some(log) = hrm_core::testenv::var("HRM_URL_LOG") {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log)?;
+        writeln!(f, "{}", json!(url))?;
+        return Ok(json!(true));
+    }
     // explorer opens a folder window for a link it does not take as one (the long sign-in link); the URL handler hands any to the browser
     #[cfg(windows)]
     std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn()?;

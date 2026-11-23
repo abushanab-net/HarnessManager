@@ -241,7 +241,7 @@ fn importing_mcp_never_claims_a_different_server_of_the_same_name() {
 fn a_limit_window_whose_reset_time_passed_is_empty() {
     use hrm_core::model::{Quota, QuotaTier};
     let tier = |id: &str, used: f64, resets_at: Option<i64>| QuotaTier { id: id.into(), label: id.into(), used, resets_at };
-    let q = Quota { tiers: vec![tier("session", 64.0, Some(1_000)), tier("week", 21.0, Some(9_000)), tier("week:opus", 5.0, None)], fetched_at: Some(500), source: "cache".into() };
+    let q = Quota { tiers: vec![tier("session", 64.0, Some(1_000)), tier("week", 21.0, Some(9_000)), tier("week:opus", 5.0, None)], fetched_at: Some(500), source: "cache".into(), ..Default::default() };
     let q = q.as_of(2_000);
     assert_eq!((q.tiers[0].used, q.tiers[0].resets_at), (0.0, None), "the 5-hour window reset at 1000");
     assert_eq!((q.tiers[1].used, q.tiers[1].resets_at), (21.0, Some(9_000)), "the week is still open");

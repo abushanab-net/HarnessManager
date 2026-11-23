@@ -101,6 +101,7 @@ you are on. The **?** button replays the page's tour.
   the saved login while it is valid. Codex limits come from its session logs. Antigravity's come from `agy -p /usage`, which
   reports only the account signed in now; the other Antigravity accounts keep their last reading. The Overview
   draws when every limit frees up, and an API-key account can have a daily spending cap.
+- **Resets and credits:** see what Codex and Claude Code report in Limits, and open the tool or its Usage page to manage them.
 - **Usage, on Accounts:** each account's tokens per day, its tokens and cost for the last 7, 14 or 30 days
   beside its limits, the split by model, and a CSV export; the Overview adds a year of activity and the latest
   replies, with the request log behind a button. Each account's own logs are read once and counted once.

@@ -1156,7 +1156,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let ctx = Ctx::open_at(&t.path().join("A"), &t.path().join("home")).unwrap();
         let tier = |id: &str, used: f64| crate::model::QuotaTier { id: id.into(), label: "Week here".into(), used, resets_at: Some(9_000) };
-        let here = crate::model::Quota { tiers: vec![tier("week", 0.0)], fetched_at: Some(1_000), source: "codex".into() };
+        let here = crate::model::Quota { tiers: vec![tier("week", 0.0)], fetched_at: Some(1_000), source: "codex".into(), ..Default::default() };
         let me = Some("me@work.com");
         let ours = |c: &rusqlite::Connection, used: f64, at: i64, account: Option<&str>| crate::db::quota_point_in(c, "work", "week", used, Some(9_500), at, Some("other"), account);
         // nothing newer anywhere: this computer's own reading

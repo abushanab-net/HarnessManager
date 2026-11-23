@@ -389,6 +389,32 @@ fn fmt_reset(ms: Option<i64>) -> String {
     }
 }
 
+fn quota_notes(harness: &str, kind: Kind, quota: Option<&hrm_core::model::Quota>, max_age_minutes: u32) -> String {
+    if kind != Kind::Subscription || !matches!(harness, "codex" | "claude") { return String::new(); }
+    let now = hrm_core::util::now_ms();
+    let credits = quota.and_then(|q| q.credits.as_ref());
+    let value = match credits {
+        Some(c) if c.unlimited == Some(true) => "unlimited".into(),
+        Some(hrm_core::model::UsageCredits { balance: Some(balance), .. }) => format!("{balance:.2}"),
+        Some(c) if c.has_credits == Some(false) => "none".into(),
+        Some(c) if c.enabled == Some(true) => "on".into(),
+        Some(c) if c.enabled == Some(false) => "off".into(),
+        Some(_) => "balance not reported".into(),
+        None => "not reported".into(),
+    };
+    let credit_age = if credits.is_some_and(|c| !c.fetched_at.is_some_and(|at| at > 0 && at <= now && now - at <= i64::from(max_age_minutes) * 60_000)) {
+        " (stale)"
+    } else { "" };
+    let reset = match quota.and_then(|q| q.unused_reset.as_ref()) {
+        Some(r) if !r.is_fresh(now) && r.holds_unused_reset => "unused reported (stale)",
+        Some(r) if !r.is_fresh(now) => "none reported at check (stale)",
+        Some(r) if r.holds_unused_reset => "unused reported",
+        Some(_) => "none reported at check",
+        None => "not reported",
+    };
+    format!("credits {value}{credit_age}, resets {reset}")
+}
+
 fn secret_input(prompt: &str) -> Result<String> {
     if let Ok(k) = std::env::var("HRM_API_KEY") { return Ok(k); }
     let k = rpassword::prompt_password(prompt)?;
@@ -442,12 +468,13 @@ fn real_main(cli: Cli) -> Result<i32> {
             if refresh { service::import_usage(&ctx)?; }
             let views = service::list_views(&ctx)?;
             if j.json { return print_json(&views).map(|_| 0); }
-            println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}", "ACCOUNT", "TOOL", "PLAN", "5-HOUR", "WEEK", "TOKENS 7D", "OPEN");
+            println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}  CREDITS / RESETS", "ACCOUNT", "TOOL", "PLAN", "5-HOUR", "WEEK", "TOKENS 7D", "OPEN");
             for v in views {
                 let tier = |id: &str| v.quota.as_ref().and_then(|q| q.tier(id)).map(|t| format!("{:.0}%", t.used)).unwrap_or_else(|| "-".into());
                 let plan = v.identity.plan.clone().unwrap_or_else(|| if v.identity.logged_in { "?".into() } else { "not logged in".into() });
                 // a long plan (OpenCode lists every signed-in provider) is cut to its column
-                println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}", v.name, v.harness_label, hrm_core::util::truncate(&plan, 13), tier("session"), tier("week"), fmt_tokens(v.tokens_7d), v.running.len());
+                let notes = quota_notes(&v.harness, v.kind, v.quota.as_ref(), ctx.settings.quota_max_age_minutes);
+                println!("{:<24} {:<12} {:<14} {:>8} {:>8} {:>9} {:>5}  {}", v.name, v.harness_label, hrm_core::util::truncate(&plan, 13), tier("session"), tier("week"), fmt_tokens(v.tokens_7d), v.running.len(), notes);
             }
         }
         Cmd::Show { name, j } => {
@@ -548,10 +575,12 @@ fn real_main(cli: Cli) -> Result<i32> {
             if !live && p.harness == "codex" { if let Err(e) = harness::of(p).import_usage(&ctx, p) { eprintln!("usage import: {e:#}"); } }
             let q = if live { Some(service::quota_live(&ctx, &name)?) } else { harness::of(p).quota(&ctx, p) };
             if j.json { return print_json(&q).map(|_| 0); }
+            let notes = quota_notes(&p.harness, p.kind, q.as_ref(), ctx.settings.quota_max_age_minutes);
             match q {
-                Some(q) => for t in q.tiers { println!("{:<16} {:>3.0}%  resets {}", t.label, t.used, fmt_reset(t.resets_at)) },
-                None => println!("No limits known yet for {name}"),
+                Some(q) if !q.tiers.is_empty() => for t in q.tiers { println!("{:<16} {:>3.0}%  resets {}", t.label, t.used, fmt_reset(t.resets_at)) },
+                _ => println!("No limits known yet for {name}"),
             }
+            if !notes.is_empty() { println!("{notes}"); }
         }
         Cmd::Sessions { group, harness: h, profile, days, search, open, project, tag, j } => {
             fresh_index(&ctx)?;

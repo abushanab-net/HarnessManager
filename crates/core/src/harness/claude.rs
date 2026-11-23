@@ -53,13 +53,33 @@ impl Claude {
     }
 }
 
-/// The two parts of `.claude.json` the account views read; the rest is skipped unparsed.
+/// The parts of `.claude.json` the account views read; the rest is skipped unparsed.
 #[derive(Clone, Default, serde::Deserialize)]
 struct AccountDoc {
     #[serde(default, rename = "oauthAccount")]
     account: Value,
     #[serde(default, rename = "cachedUsageUtilization")]
     usage: Value,
+    #[serde(default, rename = "unusedLimitResetStatusCache")]
+    unused_reset: Value,
+}
+
+impl AccountDoc {
+    fn uuid(&self) -> Option<&str> { self.account["accountUuid"].as_str().filter(|id| !id.is_empty()) }
+
+    fn matches(&self, cache: &Value) -> bool {
+        self.uuid().is_some_and(|id| cache["accountUuid"].as_str() == Some(id))
+    }
+
+    fn unused_reset(&self) -> Option<UnusedReset> {
+        let cache = &self.unused_reset;
+        if !self.matches(cache) { return None; }
+        let checked_at = cache["checkedAt"].as_i64()?;
+        let valid_until = cache["validUntil"].as_i64()?;
+        (checked_at > 0 && valid_until > checked_at).then_some(UnusedReset {
+            holds_unused_reset: cache["holdsUnusedReset"].as_bool()?, checked_at, valid_until,
+        })
+    }
 }
 
 /// When Anthropic last refused an account's login (epoch ms).
@@ -70,6 +90,7 @@ impl Claude {
     /// Live limits from Anthropic, using the access token Claude Code saved on this computer. Opt-in;
     /// only while that token is valid: Harness Manager never refreshes, copies or stores it.
     pub fn live_quota(&self, ctx: &Ctx, p: &Profile) -> Result<Quota> {
+        let account_uuid = self.account_doc(ctx, p).and_then(|doc| doc.uuid().map(str::to_owned));
         let creds = self.creds(ctx, p).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
         let token = str_at(&creds, &["claudeAiOauth", "accessToken"]).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
         if i64_at(&creds, &["claudeAiOauth", "expiresAt"]) < now_ms() + 60_000 {
@@ -88,8 +109,12 @@ impl Claude {
             bail!("Anthropic refused this account's login: log in again");
         }
         let v: Value = r.error_for_status()?.json()?;
-        let q = parse_utilization(&v, Some(now_ms()), "live");
+        let mut q = parse_utilization(&v, Some(now_ms()), "live");
+        if let Some(c) = &mut q.credits {
+            c.account_uuid = account_uuid.filter(|id| self.account_doc(ctx, p).is_some_and(|doc| doc.uuid() == Some(id)));
+        }
         ctx.db.put_quota(&p.name, &q)?;
+        if let Some(c) = &mut q.credits { c.account_uuid = None; }
         Ok(q)
     }
 
@@ -195,7 +220,10 @@ pub fn parse_utilization(v: &Value, fetched_at: Option<i64>, source: &str) -> Qu
             }
         }
     }
-    Quota { tiers, fetched_at, source: source.into() }
+    let credits = v["extra_usage"]["is_enabled"].as_bool().map(|enabled| UsageCredits {
+        enabled: Some(enabled), fetched_at, source: source.into(), ..Default::default()
+    });
+    Quota { tiers, fetched_at, source: source.into(), credits, ..Default::default() }
 }
 
 impl Harness for Claude {
@@ -303,15 +331,21 @@ impl Harness for Claude {
         }
         let doc = self.account_doc(ctx, p)?;
         let cache = &doc.usage;
-        let mut q = if cache.is_object() && cache["accountUuid"] == doc.account["accountUuid"] {
+        let mut q = if doc.matches(cache) {
             Some(parse_utilization(&cache["utilization"], cache["fetchedAtMs"].as_i64(), "claude-code"))
         } else {
             None
         };
-        if let Ok(Some(live)) = ctx.db.get_quota(&p.name) {
+        if let Ok(Some(mut live)) = ctx.db.get_quota(&p.name) {
             if live.fetched_at > q.as_ref().and_then(|q| q.fetched_at) {
+                if let Some(c) = &mut live.credits {
+                    if c.account_uuid.take().as_deref().is_none_or(|id| doc.uuid() != Some(id)) { live.credits = None; }
+                }
                 q = Some(live);
             }
+        }
+        if let Some(reset) = doc.unused_reset() {
+            q.get_or_insert_with(|| Quota { source: "claude-reset".into(), ..Default::default() }).unused_reset = Some(reset);
         }
         q
     }
@@ -594,6 +628,36 @@ fn clean_prompt(raw: &str) -> Option<String> {
 mod account_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn usage_credit_status_comes_only_from_an_explicit_usage_boolean() {
+        let parse = |v| parse_utilization(&v, Some(42), "claude-code").credits;
+        for enabled in [true, false] {
+            let c = parse(json!({"extra_usage":{"is_enabled":enabled,"used_credits":82,"monthly_limit":500}})).unwrap();
+            assert_eq!((c.enabled, c.balance, c.fetched_at, c.source.as_str()), (Some(enabled), None, Some(42), "claude-code"));
+        }
+        for payload in [json!({}), json!({"extra_usage":null}), json!({"extra_usage":{"is_enabled":"false"}})] {
+            assert!(parse(payload).is_none());
+        }
+    }
+
+    #[test]
+    fn the_unused_reset_flag_requires_a_matching_account_and_valid_times() {
+        let read = |uuid, holds, checked, valid| AccountDoc {
+            account: json!({"accountUuid":"correct"}),
+            unused_reset: json!({"accountUuid":uuid,"holdsUnusedReset":holds,"checkedAt":checked,"validUntil":valid}),
+            ..Default::default()
+        }.unused_reset();
+        let r = read("correct", json!(true), 50, 100).unwrap();
+        assert!(r.holds_unused_reset && r.is_fresh(99));
+        assert!(!r.is_fresh(100) && !r.is_fresh(49), "stale or future-dated readings cannot imply current availability");
+        assert!(!read("correct", json!(false), 50, 100).unwrap().holds_unused_reset);
+        assert!(read("wrong", json!(true), 50, 100).is_none());
+        assert!(read("correct", json!(null), 50, 100).is_none());
+        assert!(read("correct", json!("true"), 50, 100).is_none());
+        assert!(read("correct", json!(true), 100, 100).is_none());
+        assert!(AccountDoc::default().unused_reset().is_none());
+    }
 
     #[test]
     fn the_login_and_the_cached_limits_follow_the_account_file_as_it_changes() {
