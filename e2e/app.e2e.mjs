@@ -573,15 +573,21 @@ try {
     await waitFor(() => readLines(termLog).some((t) => JSON.stringify(t.args) === JSON.stringify(['run', 'work-max'])), 'terminal launch');
   });
 
-  await test('needs you: a session hrm run started that reaches a permission prompt shows as waiting within two seconds, with a card that approves once or denies; the tool receives the decision, and answering in the terminal first closes the card', async () => {
+  await test('needs you: a session hrm run started that reaches a permission prompt shows as waiting within two seconds, as one line on the Overview and an amber row; its page shows the request in full and approves once or denies; the tool receives the decision, and answering in the terminal first closes the card', async () => {
+    // the session's own transcript, so its page opens; gone again at the end
+    const tfile = path.join(home, '.claude', 'projects', 'p', 'needs-1.jsonl');
+    write(tfile, jl([{ type: 'user', sessionId: 'needs-1', cwd: repo, timestamp: now, message: { role: 'user', content: 'Run the test suite' } },
+      { type: 'assistant', sessionId: 'needs-1', cwd: repo, timestamp: now, message: { id: 'n1', model: 'claude-opus-5-5', usage: { input_tokens: 5, output_tokens: 5 }, content: [{ type: 'text', text: 'I will run npm test.' }] } }]));
     await nav('#home');
     await drawn('the Overview');
     // the fake Claude Code sends the event through the hook entries hrm run passed it, and records what the hook printed
     const bash = { hook_event_name: 'PermissionRequest', session_id: 'needs-1', cwd: repo, tool_name: 'Bash', tool_input: { command: 'npm test', description: 'Run the tests' } };
     const needs = () => exec("return import('./core.js').then((c) => (c.S.needs || []).find((r) => r.session_id === 'needs-1') || null)");
     const received = () => readLines(runLog).filter((l) => l.hook === 'PermissionRequest');
-    const start = (hook, extra = {}) => spawn(path.join(appDir, 'hrm.exe'), ['run', 'claude-main'], { env: { ...env, FAKE_HOOK: JSON.stringify(hook), FAKE_HOLD_MS: '1000', ...extra }, stdio: 'ignore' });
-    const card = '[data-testid=attention] [data-testid=ask-allow]';
+    const start = (hook, extra = {}, stdio = 'ignore') => spawn(path.join(appDir, 'hrm.exe'), ['run', 'claude-main'], { env: { ...env, FAKE_HOOK: JSON.stringify(hook), FAKE_HOLD_MS: '1000', ...extra }, stdio });
+    const card = '[data-testid=ask-card] [data-testid=ask-allow]';
+    const onPage = () => waitFor(async () => (await exec('return location.hash')) === '#session?profile=claude-main&id=needs-1', 'the session page');
+    try {
     for (const behavior of ['allow', 'deny']) {
       const before = received().length;
       const run = start(bash);
@@ -591,39 +597,67 @@ try {
           assert.ok(r.lag < 2000, `seen ${r.lag} ms after the hook reported it`);
           assert.equal(r.reason, 'Bash: npm test', 'reason');
           assert.equal(r.profile, 'claude-main');
+          assert.equal(r.terminal, false, 'started without its own terminal');
           await hasText('#toast', 'needs you: Bash: npm test');
           assert.equal(await text('[data-testid=notice-act]'), 'Show');
           await hasText('[data-testid=nav-live]', '1 waiting');
+          // the Overview: one line, and Open; the request itself is answered on the session's page
+          await hasText('[data-testid=attention]', 'needs you: Bash · npm test');
+          assert.deepEqual(await exec(`return [...document.querySelector('[data-testid="att-run-${r.run}"]').querySelectorAll('button')].map((b) => b.textContent)`), ['Open']);
+          assert.ok(!(await page.$('[data-testid=attention] [data-testid=ask-allow]')), 'no card on the Overview');
+          await shot('needs-overview-line');
+          await click('[data-testid=attention] [data-testid=att-open]');
+        } else {
+          // the list: the row's amber mark opens the session at its request
+          await nav('#sessions');
+          await $('[data-testid=needs-needs-1].pill.warn');
+          assert.ok(await exec("const row = document.querySelector('[data-testid=session-needs-1]'); return getComputedStyle(row).boxShadow.includes('inset')"), 'the row has its amber edge');
+          await shot('needs-session-list');
+          await click('[data-testid=needs-needs-1]');
         }
-        // the card: the tool, its command, and only Approve once and Deny beside Show
-        await hasText('[data-testid=attention]', 'Wants to use Bash');
-        await hasText('[data-testid=attention] .ask-what', 'npm test');
-        await hasText('[data-testid=attention]', 'Run the tests');
-        assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=attention] .ov-item.ask button')].map((b) => b.textContent)"), ['Approve once', 'Deny', 'Show']);
-        if (behavior === 'allow') await shot('needs-permission-card');
-        await click(`[data-testid=attention] [data-testid=ask-${behavior}]`);
+        await onPage();
+        // the request in full at the end of the conversation: the tool, its command, the description, then the choices
+        await hasText('[data-testid=ask-card]', 'Wants to use Bash');
+        assert.equal(await text('[data-testid=ask-card] [data-testid=ask-what]'), 'npm test');
+        await hasText('[data-testid=ask-card]', 'Run the tests');
+        assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=ask-card] button')].map((b) => b.textContent)"), ['Terminal', 'Approve once', 'Deny']);
+        assert.ok(await exec("const c = document.getElementById('chat'), a = document.querySelector('[data-testid=ask-card]'); return c.lastElementChild.previousElementSibling === a && a.getBoundingClientRect().width > c.clientWidth - 40"), 'the last thing in the conversation, its full width');
+        if (behavior === 'allow') {
+          await shot('needs-permission-inline');
+          // no terminal of its own: the reply box is there, off, and says why; Settings' switch is one click away
+          assert.ok(await exec("return document.querySelector('[data-testid=reply-text]').disabled && document.querySelector('[data-testid=reply-stop]').disabled"), 'reply and Stop are off');
+          await hasText('[data-testid=reply-off]', 'Replies need Harness Manager’s own terminal');
+          await shot('reply-disabled');
+        }
+        await click(`[data-testid=ask-card] [data-testid=ask-${behavior}]`);
         await hasText('#toast', behavior === 'allow' ? 'Approved once.' : 'Denied.');
         const got = await waitFor(() => received().length > before && received().pop(), 'the decision at the tool');
         assert.equal(got.code, 0, JSON.stringify(got));
         assert.deepEqual(JSON.parse(got.stdout).hookSpecificOutput.decision.behavior, behavior);
-        // answered: the session works again and its entry goes; hrm run removes its row when the tool exits
-        await waitFor(async () => !(await page.$('[data-testid=attention] [data-act=show-run]')), 'the entry gone', 20000);
+        // answered: the session works again and its card goes; hrm run removes its row when the tool exits
+        await waitFor(async () => !(await page.$('[data-testid=ask-card]')), 'the card gone', 20000);
         await waitFor(async () => (await needs()) === null, 'the row gone with the session', 20000);
+        await waitFor(async () => !(await page.$('[data-testid=reply-bar]')), 'the reply box gone with it');
       } finally { run.kill(); }
     }
     // a question: its own options, and the answer comes back to the tool in updatedInput
     {
+      await nav('#home');
       const questions = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Blue', description: 'calm' }, { label: 'Red', description: 'loud' }] }];
       const asked = () => readLines(runLog).filter((l) => l.hook === 'PreToolUse');
       const run = start({ hook_event_name: 'PreToolUse', session_id: 'needs-1', cwd: repo, tool_name: 'AskUserQuestion', tool_input: { questions } });
       try {
-        await hasText('[data-testid=attention]', 'Asks you');
-        await hasText('[data-testid=attention] .ask-q legend', 'Which colour?');
-        await shot('needs-question-card');
-        await click('[data-testid=attention] [data-testid=ask-send]');
+        await hasText('[data-testid=attention]', 'needs you: Question · Which colour?');
+        await click('[data-testid=attention] [data-testid=att-open]');
+        await onPage();
+        await hasText('[data-testid=ask-card]', 'Asks you');
+        await hasText('[data-testid=ask-card] .ask-q legend', 'Which colour?');
+        await hasText('[data-testid=ask-card] .ask-q', 'loud');
+        await shot('needs-question-inline');
+        await click('[data-testid=ask-card] [data-testid=ask-send]');
         await hasText('#toast', 'Choose an answer for "Which colour?"');
-        await click('[data-testid=attention] .ask-q input[value=Red]');
-        await click('[data-testid=attention] [data-testid=ask-send]');
+        await click('[data-testid=ask-card] .ask-q input[value=Red]');
+        await click('[data-testid=ask-card] [data-testid=ask-send]');
         await hasText('#toast', 'Answer sent.');
         const got = await waitFor(() => asked().pop(), 'the answer at the tool');
         assert.deepEqual(JSON.parse(got.stdout).hookSpecificOutput, { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { questions, answers: { 'Which colour?': 'Red' } } });
@@ -631,14 +665,71 @@ try {
       } finally { run.kill(); }
     }
     // the terminal answers first: the tool runs, its PostToolUse closes the request, the card goes and the hook prints nothing
-    const before = received().length;
-    const run = start([bash, { ...bash, hook_event_name: 'PostToolUse' }], { FAKE_HOOK_GAP_MS: '4000' });
-    try {
-      await $(card);
-      await waitFor(async () => !(await page.$(card)), 'the card closed by the terminal answer', 15000);
-      const got = await waitFor(() => received().length > before && received().pop(), 'the hook ended');
-      assert.equal(got.stdout, '', JSON.stringify(got));
-    } finally { run.kill(); }
+    {
+      const before = received().length;
+      const run = start([bash, { ...bash, hook_event_name: 'PostToolUse' }], { FAKE_HOOK_GAP_MS: '4000' });
+      try {
+        await $(card);
+        await waitFor(async () => !(await page.$(card)), 'the card closed by the terminal answer', 15000);
+        const got = await waitFor(() => received().length > before && received().pop(), 'the hook ended');
+        assert.equal(got.stdout, '', JSON.stringify(got));
+      } finally { run.kill(); }
+    }
+    // the reply box: off without its own terminal, and its button turns the setting on for the next start
+    const working = { hook_event_name: 'UserPromptSubmit', session_id: 'needs-1', cwd: repo };
+    {
+      const run = start(working, { FAKE_HOLD_MS: '8000' });
+      try {
+        await waitFor(async () => { const r = await needs(); return r && r.state === 'working'; }, 'the session working');
+        await $('[data-testid=reply-bar] [data-testid=own-terminal-on]');
+        await click('[data-testid=own-terminal-on]');
+        await hasText('#toast', 'own terminal is on from the next start');
+        assert.equal(hrm('settings', 'own_terminal').trim(), 'true');
+        await hasText('[data-testid=reply-off]', 'It is on for the next start.');
+      } finally { run.kill(); }
+      await waitFor(async () => (await needs()) === null, 'the row gone with the session', 20000);
+    }
+    // with it: a line typed here reaches the tool and stays pending until the transcript has it; Stop is Ctrl+C
+    {
+      const out = path.join(sb, 'owned.out');
+      const fd = fs.openSync(out, 'w');
+      const said = () => (fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '');
+      const run = start(working, { FAKE_TERMINAL: 'plain' }, ['pipe', fd, fd]);
+      const exited = new Promise((res) => run.on('exit', (code) => res(code)));
+      try {
+        await waitFor(async () => { const r = await needs(); return r && r.terminal; }, 'the run owns its terminal', 20000);
+        await waitFor(() => said().includes('fixture ready'), 'the tool ready for input');
+        await waitFor(async () => exec("const t = document.querySelector('[data-testid=reply-text]'); return !!t && !t.disabled"), 'the reply box on');
+        assert.ok(!(await page.$('[data-testid=reply-off]')), 'no line about the terminal');
+        // several lines are refused, as the terminal refuses them
+        await page.fill('[data-testid=reply-text]', 'one\ntwo');
+        await click('[data-testid=reply-send]');
+        await hasText('#notice', 'single line');
+        await page.fill('[data-testid=reply-text]', 'run the tests');
+        await page.press('[data-testid=reply-text]', 'Enter');
+        await waitFor(() => said().includes('fixture line="run the tests"'), 'the line at the tool: ' + said());
+        await hasText('[data-testid=reply-pending]', 'run the tests');
+        assert.equal(await exec("return document.querySelector('[data-testid=reply-text]').value"), '', 'the box is empty again');
+        await shot('reply-enabled');
+        // a narrow window: the box over its buttons, nothing wider than the conversation's panel
+        await page.setViewportSize({ width: 860, height: 800 });
+        try {
+          await sleep(300);
+          assert.ok(await exec("const p = document.querySelector('[data-testid=conv-panel]').getBoundingClientRect(); return [...document.querySelectorAll('[data-testid=reply-bar] *')].every((e) => e.getBoundingClientRect().right <= p.right + 1) && document.querySelector('#sheet').scrollWidth <= document.querySelector('#sheet').clientWidth"), 'the reply box fits a narrow window');
+          await shot('reply-enabled-narrow');
+        } finally { await page.setViewportSize({ width: 1280, height: 800 }); }
+        // the tool writes the prompt to its transcript: the pending one becomes the conversation's own
+        fs.appendFileSync(tfile, jl([{ type: 'user', sessionId: 'needs-1', cwd: repo, timestamp: new Date().toISOString(), message: { role: 'user', content: 'run the tests' } }]));
+        await waitFor(async () => !(await page.$('[data-testid=reply-pending]')), 'the reply confirmed by the transcript', 20000);
+        assert.ok(await exec("return [...document.querySelectorAll('#chat .a-msg.you .a-tx')].some((t) => t.textContent === 'run the tests')"), 'in the conversation');
+        await click('[data-testid=reply-stop]');
+        await hasText('#toast', 'Ctrl+C sent to the session.');
+        assert.equal(await exited, 37, said());
+        assert.ok(said().includes('fixture interrupt'), said());
+        await waitFor(async () => !(await page.$('[data-testid=reply-bar]')), 'the reply box gone with the session', 20000);
+      } finally { run.kill(); fs.closeSync(fd); hrm('settings', 'own_terminal', 'false'); }
+    }
+    } finally { fs.rmSync(tfile, { force: true }); }
     await nav('#accounts');
     await drawn('Accounts');
   });
@@ -1182,7 +1273,7 @@ try {
       assert.equal(says, `${rows} settings`, `${id}: the head counts its rows`);
       counts.push(rows);
     }
-    assert.deepEqual(counts, [5, 4, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too, Window and terminal has Session states');
+    assert.deepEqual(counts, [5, 6, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too, Window and terminal has Session states, how long a request waits and the own terminal');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {

@@ -215,6 +215,24 @@ a.a-tag:hover { filter: brightness(1.12); }
 .a-toend { position: sticky; bottom: 4px; display: flex; justify-content: center; margin-top: auto; pointer-events: none; }
 .a-toend[hidden] { display: none; }
 .a-toend .btn { pointer-events: auto; background: var(--bg-elevated); border-color: var(--line-strong); box-shadow: var(--shadow-lg); }
+/* a session that waits for you: its request in full at the end of the conversation, the width of the panel */
+.a-ask { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--warn-border); border-left: 3px solid var(--warn); border-radius: var(--radius-card); background: var(--warn-soft); min-width: 0; }
+.a-askh { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.a-ask .ask-what { margin: 0; font-size: var(--fs-small); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; padding: 6px 8px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--line-subtle); }
+.a-ask .ask-q { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.a-ask .ask-q legend { padding: 0 0 2px; font-weight: 600; white-space: normal; }
+.a-ask .ask-q .chk { align-items: flex-start; }
+.a-ask .row-actions { margin-top: 0; flex-wrap: wrap; }
+.a-msg.pending .a-tx { opacity: 0.65; border-style: dashed; }
+/* the reply box under the conversation of a session hrm run started */
+.a-reply { border-top: 1px solid var(--line-subtle); padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.a-reply-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.a-reply textarea { flex: 1; min-width: 0; resize: none; padding: 6px 10px; border-radius: var(--radius-control); background: var(--bg-input); border: 1px solid var(--line-default); font-size: var(--fs-body); line-height: 1.4; }
+.a-reply textarea:disabled { opacity: 0.6; }
+.a-reply-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.a-reply-off { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0; }
+/* a row whose session waits for you: an amber edge, as its "needs you" mark is filled in place (core.js drawNeeds) */
+.a-srow:has(.needs-mark .pill.warn) { box-shadow: inset 3px 0 0 var(--warn); background: var(--warn-soft); }
 .a-sbody .account-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .a-sbody .account-stat { padding: 8px 12px; }
 .a-sbody .account-stat > b { font-size: 18px; }
@@ -271,4 +289,8 @@ svg.a-track rect { fill: var(--ac); }
   .a-srow .a-acct small { display: none; }
   .a-msg { max-width: 82%; }
   .a-sb { grid-template-columns: 16px 84px minmax(0, 1fr) 88px 56px; }
+}
+/* a narrow window: the reply box over its buttons */
+@container sheet (max-width: 720px) {
+  .a-reply-row { flex-direction: column; align-items: stretch; }
 }

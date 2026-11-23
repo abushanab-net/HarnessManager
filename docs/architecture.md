@@ -213,11 +213,15 @@ the states are read. Codex's events have the same names and the mapping reads th
 hooks yet, so its requests are not held.
 
 The app reads the table every second and emits `needs` when it changes: the Overview lists the sessions that wait,
-with a card for a held request (the tool, the command or file, Approve once and Deny; or the questions with their
-options and Send answer),
-their rows get a mark, the sidebar counts them, a toast says when one starts waiting, and the tray's tooltip and
-menu name them. Show brings the console window `hrm run` recorded to the front; in Windows Terminal that is the
-window, not the tab.
+one line each, their rows (and a folded group's head) get an amber mark, the sidebar counts them, a toast says when
+one starts waiting, and the tray's tooltip and menu name them. The Overview's Open, the row's mark and the toast's
+Show open the session's page, where a held request sits at the end of the conversation (the tool, the whole command
+or file and its description, Approve once and Deny; or the questions with their options and Send answer). Terminal
+brings the console window `hrm run` recorded to the front; in Windows Terminal that is the window, not the tab.
+
+Under the conversation of such a session is a reply box: Enter sends one line with `terminal::reply`, and Stop is
+`terminal::stop` (Ctrl+C). `Run::terminal` says whether the run owns its terminal (`own_terminal` when it started);
+without it the box is off and says so. A line sent shows as pending until the transcript has it as a prompt.
 
 A Claude subscription account can also start with Claude Code's own `--remote-control` (`Profile::remote_control`).
 

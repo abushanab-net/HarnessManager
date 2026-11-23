@@ -5,7 +5,7 @@
 // the drawing's zone 3); its page stays one step away. The tags shared with Projects and Accounts live here too.
 // Every redraw goes through patch(), so a live arrival keeps the reader's scroll, focus and open folds.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown, needsMark } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown, needsMark, needsGroupMark, runOf, clearNotice } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, nameOf, cdot } from './computers.js';
 import { resumeData, reasonShort, canResume } from './resume.js';
@@ -91,7 +91,7 @@ function sessionRow(s, pcs, running, sel = '', paned = false) {
     : `<button class="btn sm" data-act="resume" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}">Resume</button>`;
   const at = running ? when(s.started_at) : far ? 'running on ' + far : s.open ? 'live' : when(s.last_active_at);
   return `<div class="a-srow" ${rowAttrs(key, sessionHash(s, pcs), key === sel)} data-key="row:${esc(s.profile)}/${esc(s.id)}" data-testid="session-${esc(s.id)}"><i class="${s.open ? 'live-pulse-dot' : 'a-dot' + (s.failed ? ' bad' : '')}" aria-hidden="true"></i>
-    <div class="a-tcell"><button class="a-title" data-sel-title ${key === sel ? 'aria-current="true"' : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}</b></button>${s.open && !remote ? needsMark(s.profile, s.id) : ''}${s.failed ? `<span class="a-fail" title="${plural(s.failed, 'failed command')}">${s.failed} failed</span>` : ''}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}${s.continued_from ? `<span class="a-pill arch" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span>` : ''}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}${paned ? '' : `<span class="a-where" title="${esc(plural(s.messages, 'message') + (s.cwd ? ' · ' + s.cwd : ''))}"><span class="a-wtx">${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}</span></span>`}</div>
+    <div class="a-tcell"><button class="a-title" data-sel-title ${key === sel ? 'aria-current="true"' : ''} data-testid="read-${esc(s.id)}" title="${esc(s.cwd || 'No folder')}"><b>${esc(s.title || 'Untitled session')}</b></button>${remote ? '' : needsMark(s.profile, s.id)}${s.failed ? `<span class="a-fail" title="${plural(s.failed, 'failed command')}">${s.failed} failed</span>` : ''}${s.archived ? `<span class="a-pill arch" data-testid="archived-${esc(s.id)}">archived</span>` : ''}${s.continued_from ? `<span class="a-pill arch" data-testid="continued-${esc(s.id)}">continued from ${esc(s.continued_from)}</span>` : ''}${tagsHtml(s.tags, 'session', s.profile + '/' + s.id, s.title || 'this session')}${paned ? '' : `<span class="a-where" title="${esc(plural(s.messages, 'message') + (s.cwd ? ' · ' + s.cwd : ''))}"><span class="a-wtx">${plural(s.messages, 'msg')}${path ? ` · <span class="mono">${esc(path)}</span>` : ''}</span></span>`}</div>
     <span class="a-acct" title="${esc((TOOL[s.harness] || s.harness) + ' · ' + s.profile + (mail ? ' · logged in as ' + mail : ''))}" data-testid="acct-${esc(s.id)}">${toolIcon(s.harness, 16)}<span class="a-acctwho"><span>${esc(acctName(s.profile))}</span>${mail && !paned ? `<small>${esc(mail)}</small>` : ''}</span></span>${sync ? `<span class="a-pc" title="Ran on ${esc(device)}">${cdot(pcs, s.device, device, 'on')}<span>${esc(device)}</span></span>` : ''}
     <span class="num">${fmt(s.tokens)}</span><span class="a-when ${!running && (s.open || far) ? 'live' : ''}" title="${esc(at)}">${esc(at)}</span>${paned ? '' : `<span class="a-act">${act}</span>`}</div>`;
 }
@@ -173,7 +173,7 @@ function draw(sheet) {
     const k = group + ':' + g.key, open = !sFold.has(k), n = g.total || g.sessions.length;
     const p = byProject && g.key ? plist.find((x) => x.key === g.key) : null, hint = byProject ? apart.get(g.key).hint : '';
     return `<div class="a-sec ${open ? '' : 'shut'}" data-key="grp:${esc(k)}" data-testid="group"><div class="a-gh"><button class="a-fold" data-act="s-fold" data-k="${esc(k)}" aria-expanded="${open}" aria-label="${open ? 'Fold' : 'Open'} ${esc(g.name)}">${open ? '▾' : '▸'}</button>
-      <h2 class="a-gname">${group === 'tag' && g.key ? `<span class="a-tag ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${hint ? `<span class="a-path mono" title="${esc(g.root || g.remote)}" data-testid="group-hint">${esc(hint)}</span>` : ''}
+      <h2 class="a-gname">${group === 'tag' && g.key ? `<span class="a-tag ${tagColor(g.key)}">${esc(g.name)}</span>` : esc(g.name)}</h2>${hint ? `<span class="a-path mono" title="${esc(g.root || g.remote)}" data-testid="group-hint">${esc(hint)}</span>` : ''}${open ? '' : needsGroupMark(g.sessions.map((x) => x.profile + '/' + x.id))}
       <span class="a-tot">${plural(n, 'session')} · ${fmt(g.tokens)} tokens${p && p.cost != null ? ' · ' + money(p.cost) + ' ≈' : ''}</span><span class="grow"></span>
       ${byProject && g.root ? `<button class="btn sm quiet" data-act="project-new" data-dir="${esc(g.root)}" data-name="${esc(g.name)}" data-profile="${esc(g.sessions[0] ? g.sessions[0].profile : '')}" data-testid="project-new">New session</button>` : ''}${byProject && g.key ? `<button class="a-ib" data-act="project-menu" data-key="${esc(g.key)}" data-name="${esc(g.name)}" data-pinned="${p && p.pinned ? 1 : ''}" aria-label="Open, pin, rename or merge ${esc(g.name)}" aria-haspopup="menu">${ic.dots}</button>` : ''}</div>
       ${open ? g.sessions.map((s) => sessionRow(s, pcs, false, sel, paned)).join('') + (g.sessions.length < n ? `<div class="a-more-row"><button class="btn sm quiet" data-act="s-more" data-k="${esc(k)}" data-testid="s-more-${esc(g.key)}">Show all ${plural(n, 'session')}</button></div>` : '') : ''}</div>`;
@@ -341,7 +341,7 @@ action('pane-transcript', (el) => { Object.assign(rv, { sessionKey: el.dataset.k
 // a header, five numbers, and the conversation as a chat with each turn's steps (folded) where they happened;
 // Changes and Failed list only those steps. open: the steps unfolded; more: the long runs shown in full;
 // follow: stay at the end of the conversation as a live session grows
-const rv = { mode: 'all', open: new Set(), more: new Set(), sessionKey: '', follow: false };
+const rv = { mode: 'all', open: new Set(), more: new Set(), sessionKey: '', follow: false, pending: [] };
 const secsOf = (ms) => (ms >= 1000 ? (ms / 1000).toFixed(1) + ' s' : ms + ' ms');
 const diffHtml = (d) => `<div class="a-diff mono">${String(d || '').split('\n').map((l) => `<span class="${l[0] === '+' ? 'a-add' : l[0] === '-' ? 'a-del' : l.startsWith('@@') ? 'a-hunk' : ''}">${esc(l) || ' '}</span>`).join('')}</div>`;
 /** The terminal a session resumes in, as its button says it. */
@@ -357,11 +357,13 @@ view('session', async (sheet, params) => {
   const [t, ss, tl] = await Promise.all([call('transcript', { profile: params.profile, id: params.id, device: params.device }), call('session_stats', { profile: params.profile, id: params.id }).catch(() => null), S.cache.tags ? null : call('tag_list').catch(() => [])]);
   if (tl) S.cache.tags = tl;
   if (!S.state) await loadState();
-  if (rv.sessionKey !== key) { rv.sessionKey = key; rv.open = new Set(); rv.more = new Set(); rv.follow = !!t.meta.open; rv.mode = 'all'; }
+  const run = !params.device && runOf(params.profile, params.id);
+  if (rv.sessionKey !== key) { rv.sessionKey = key; rv.open = new Set(); rv.more = new Set(); rv.follow = !!t.meta.open || !!run; rv.mode = 'all'; }
   read = { t, ss, params };
   S.cache.transcript = t;
   drawSession(sheet);
-  watchLive(t.meta);
+  // a session hrm run started is running, whatever the consoles say
+  watchLive({ ...t.meta, open: t.meta.open || !!run });
 });
 
 // what the session page last read: unfolding a step, showing a long run in full or choosing All, Changes or Failed
@@ -374,6 +376,11 @@ function showSession() {
 function drawSession(sheet) {
   const { t, ss, params } = read;
   const m = t.meta, pcs = S.cache.computers;
+  // the run hrm run started for it (hooks.rs): its request at the end of the conversation, and the reply box under it
+  const r = params.device ? null : runOf(m.profile, m.id), live = m.open || !!r;
+  // a reply sent is pending until its prompt shows in the transcript
+  rv.pending = rv.pending.filter((p) => p.key !== rv.sessionKey || said(t, p.text) <= p.n);
+  const pending = rv.pending.filter((p) => p.key === rv.sessionKey).map((p, i) => `<div class="a-msg you pending" data-key="pend:${i}" data-testid="reply-pending"><span class="a-who">YOU · sending…</span><div class="a-tx">${esc(p.text)}</div></div>`).join('');
   const steps = t.turns.flatMap((x) => x.steps).filter((st) => st.kind !== 'thinking');
   const changes = steps.filter((st) => st.change), failed = steps.filter((st) => st.status === 'error'), files = new Set(changes.map((st) => st.change.path)).size;
   const win = !S.state || !S.state.os || S.state.os === 'windows';
@@ -413,18 +420,18 @@ function drawSession(sheet) {
   const local = !m.archived && !params.device;
   const primary = m.archived ? '<span class="muted" data-testid="resume-reason">archived: it can be read, not resumed</span>'
     : params.device ? (canResume(m.resumable) ? `<button class="btn primary" data-act="resume-here" data-s="${resumeData(m)}" data-testid="resume-here">Resume here</button>` : `<span class="muted" title="${esc(m.resumable || '')}" data-testid="resume-reason">${esc(reasonShort(m.resumable))}</span>`)
-    : m.open ? '<button class="btn primary" data-act="follow-end" data-testid="follow-live">Follow live</button>'
+    : live ? '<button class="btn primary" data-act="follow-end" data-testid="follow-live">Follow live</button>'
     : `<span class="a-split"><button class="btn primary" data-act="resume" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-testid="resume">Resume in ${termName()}</button>${win ? `<button class="btn primary" data-act="terminal-menu" aria-label="Choose terminal" aria-haspopup="menu">▾</button>` : ''}</span>`;
   const stat = (title, value, cls = '') => `<div class="account-stat"><span>${title}</span><b class="${cls}">${value}</b><span></span></div>`;
   patch(sheet, `<div class="page-body a-sbody" data-tour="session">${detailHead({ back: ['#sessions', 'Sessions · ' + project], title: esc(m.title || 'Untitled session'), titleAttrs: 'data-testid="session-title"',
-      status: `<div class="a-meta">${m.open ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${toolIcon(m.harness, 14)} ${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
+      status: `<div class="a-meta">${live ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${toolIcon(m.harness, 14)} ${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
         ${params.device ? `<span data-testid="session-from">${cdot(pcs, params.device, m.device_name, 'on')} ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
         <span>started ${esc(when(m.started_at))} · ${plural(t.turns.length, 'turn')}</span><span>${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · ' + money(ss.cost) + ' ≈' : ''}</span></div>`,
-      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${primary}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-resume="${local && m.open ? 1 : ''}" aria-label="More" aria-haspopup="menu" data-testid="session-menu">⋯</button>` })}
+      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${primary}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-resume="${local && live ? 1 : ''}" aria-label="More" aria-haspopup="menu" data-testid="session-menu">⋯</button>` })}
     <section class="account-stats" aria-label="Session readouts">${stat('Tokens', fmt(m.tokens))}${stat('Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—')}${stat('First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—')}${stat('Failed commands', String(failed.length), failed.length ? 'a-neg' : '')}${stat('Files changed', String(files))}</section>
     <section class="panel-card a-conv" data-testid="conv-panel" data-tour="conversation"><div class="panel-head"><h2 class="panel-title">Conversation<span class="muted">${plural(t.turns.length, 'turn')} · ${steps.length.toLocaleString()} steps · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed</span></h2>
         <span data-tour="modes">${seg('Show', [['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']], rv.mode, (v) => `data-act="rv-mode" data-v="${v}" data-testid="mode-${v}"`)}</span></div>
-      <div class="a-chat" id="chat" data-testid="chat" tabindex="0" aria-label="Conversation; scroll to read">${body || '<div class="a-empty">This session has no messages yet.</div>'}<div class="a-toend" id="toend" hidden><button class="btn" data-act="follow-end" data-testid="follow-end">↓ Latest${m.open ? ' · follow live' : ''}</button></div></div></section></div>`);
+      <div class="a-chat" id="chat" data-testid="chat" tabindex="0" aria-label="Conversation; scroll to read">${body || (pending || r ? '' : '<div class="a-empty">This session has no messages yet.</div>')}${pending}${r && r.state === 'waiting' ? askCard(r) : ''}<div class="a-toend" id="toend" hidden><button class="btn" data-act="follow-end" data-testid="follow-end">↓ Latest${live ? ' · follow live' : ''}</button></div></div>${r ? replyBar(r) : ''}</section></div>`);
   // a live session opens at its end, following; a redraw keeps the reader's place (patch), or the end while following
   const chat = document.getElementById('chat');
   if (rv.follow) chat.scrollTop = chat.scrollHeight;
@@ -432,7 +439,81 @@ function drawSession(sheet) {
   const show = () => { document.getElementById('toend').hidden = atEnd(); };
   chat.onscroll = () => { rv.follow = atEnd(); show(); };
   show();
+  const box = document.getElementById('reply-text');
+  // one line a message: Enter sends it (a pasted text of several lines is refused by the terminal, which says so)
+  if (box) box.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sendReply(r.run); } };
 }
+
+// ---------- a session that waits for you, and the reply box (the run's hook and its own terminal) ----------
+/** How many of the transcript's prompts are this text. */
+const said = (t, text) => t.turns.filter((x) => (x.prompt || '').trim() === text).length;
+const termBtn = (r, tid, cls = 'btn sm') => `<button class="${cls}" data-act="show-run" data-run="${esc(r.run)}" title="Bring its terminal to the front" data-testid="${tid}">Terminal</button>`;
+/** The request the session's hook holds, in full, at the end of the conversation: for a permission the tool, its
+ * whole command or file and the tool's description, then Approve once or Deny (once, never "always"); for a question
+ * each question with only its own options. The terminal prompt stays answerable too, and the first answer wins. */
+function askCard(r) {
+  const a = r.ask;
+  const head = (title) => `<div class="a-askh"><b class="warnT">${title}</b><span class="grow"></span>${termBtn(r, 'ask-terminal')}</div>`;
+  if (!a) return `<section class="a-ask" data-key="ask:none" data-testid="ask-card" aria-label="Waiting for you">${head('Waiting for you')}<p class="small">${esc(r.reason || 'It waits for an answer in its terminal.')}</p></section>`;
+  if (a.kind === 'question') {
+    return `<section class="a-ask ask" data-key="ask:${esc(a.id)}" data-testid="ask-card" aria-label="A question for you">${head('Asks you')}${(a.input.questions || []).map((q, i) => `<fieldset class="ask-q" data-q="${i}"><legend>${esc(q.question)}</legend>${(q.options || []).map((o) => `<label class="chk"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="ask-${esc(a.id)}-${i}" value="${esc(o.label)}"> <span><b>${esc(o.label)}</b>${o.description ? ` <span class="muted">${esc(o.description)}</span>` : ''}</span></label>`).join('')}</fieldset>`).join('')}
+      <div class="row-actions"><button class="btn" data-act="ask-send" data-id="${esc(a.id)}" data-testid="ask-send">Send answer</button></div></section>`;
+  }
+  return `<section class="a-ask ask" data-key="ask:${esc(a.id)}" data-testid="ask-card" aria-label="A permission request">${head(`Wants to use ${esc(a.tool)}`)}<pre class="ask-what mono" tabindex="0" data-testid="ask-what">${esc(a.what || a.tool)}</pre>${a.input.description ? `<p class="small muted" data-testid="ask-desc">${esc(a.input.description)}</p>` : ''}
+    <div class="row-actions"><button class="btn" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="allow" data-testid="ask-allow">Approve once</button><button class="btn" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="deny" data-testid="ask-deny">Deny</button></div></section>`;
+}
+async function sendAnswer(id, a, done) {
+  const ok = await attempt(() => call('answer', { id, ...a }));
+  if (ok === true) toast(done);
+  else if (ok === false) toast('That request was answered in the terminal or has expired.');
+}
+action('ask-answer', (el) => sendAnswer(el.dataset.id, { behavior: el.dataset.behavior }, el.dataset.behavior === 'allow' ? 'Approved once.' : 'Denied.'));
+action('ask-send', (el) => {
+  const r = (S.needs || []).find((x) => x.ask && x.ask.id === el.dataset.id);
+  if (!r) return toast('That request was answered in the terminal or has expired.');
+  const box = el.closest('.ask'), answers = {};
+  for (const [i, q] of (r.ask.input.questions || []).entries()) {
+    const picked = [...box.querySelectorAll(`[data-q="${i}"] input:checked`)].map((x) => x.value);
+    if (!picked.length) return toast(`Choose an answer for "${q.question}".`, true);
+    answers[q.question] = picked;
+  }
+  return sendAnswer(r.ask.id, { answers }, 'Answer sent.');
+});
+/** Under the conversation of a session hrm run started: a line to type into it, Stop (Ctrl+C) and its terminal. Only
+ * a run that owns its terminal (the own_terminal setting, when it started) takes them; else the box says why. */
+function replyBar(r) {
+  const on = r.terminal, dis = on ? '' : 'disabled';
+  // only while a turn runs or a prompt waits: at the idle prompt Ctrl+C exits Codex, and asks Claude Code to exit
+  const busy = r.state === 'working' || r.state === 'waiting';
+  const stopAttr = on && busy ? 'title="Press Ctrl+C in the session"' : `disabled title="${on ? 'Nothing to stop: the session is at its prompt' : 'Needs Harness Manager’s own terminal'}"`;
+  return `<div class="a-reply" data-key="reply" data-testid="reply-bar"><div class="a-reply-row">
+      <textarea id="reply-text" rows="2" aria-label="Reply to the session" placeholder="${on ? 'Reply to the session · Enter sends one line' : 'Replies need Harness Manager’s own terminal'}" ${dis} data-testid="reply-text"></textarea>
+      <div class="a-reply-acts"><button class="btn" data-act="reply-send" data-run="${esc(r.run)}" ${dis} data-testid="reply-send">Send</button><button class="btn" data-act="reply-stop" data-run="${esc(r.run)}" ${stopAttr} data-testid="reply-stop">Stop</button>${termBtn(r, 'reply-terminal', 'btn')}</div></div>
+    ${on ? '' : `<p class="a-reply-off small muted" data-testid="reply-off">Replies need Harness Manager’s own terminal; this session started without it.${S.state && S.state.settings.own_terminal ? ' It is on for the next start.' : ' <button class="btn sm" data-act="own-terminal-on" data-testid="own-terminal-on">Turn it on for the next start</button>'}</p>`}</div>`;
+}
+async function sendReply(run) {
+  const box = document.getElementById('reply-text'), text = box ? box.value.trim() : '';
+  if (!text) return;
+  if ((await attempt(() => call('reply', { run, text }))) !== true) return;
+  box.value = '';
+  clearNotice(); // an earlier refusal (several lines) is answered
+  rv.pending.push({ key: rv.sessionKey, text, n: read ? said(read.t, text) : 0 });
+  rv.follow = true;
+  showSession();
+}
+action('reply-send', (el) => sendReply(el.dataset.run));
+action('reply-stop', (el) => attempt(() => call('stop', { run: el.dataset.run }), 'Ctrl+C sent to the session.'));
+action('own-terminal-on', () => mutate(() => call('settings_set', { key: 'own_terminal', value: true }), 'Harness Manager’s own terminal is on from the next start.'));
+// the Overview's line, a row's "needs you" and the message's Show: the session's page at its request; the run's
+// console when it has not said which session it is yet
+action('open-run', async (el) => {
+  const r = (S.needs || []).find((x) => x.run === el.dataset.run);
+  if (!r) return toast('That session has ended.');
+  if (!r.session_id) { const ok = await attempt(() => call('show_window', { pid: r.pid, hwnd: r.hwnd })); if (ok === false) toast('That session is in another window; switch to it from the taskbar.'); return; }
+  rv.follow = true;
+  const p = S.route.params;
+  if (S.route.view === 'session' && p.profile === r.profile && p.id === r.session_id && !p.device) showSession(); else go('session', { profile: r.profile, id: r.session_id });
+});
 
 // an open session redraws while its tool writes to it: the log file's size and time are checked every 2 s.
 // One watch at a time: the session on its page, or the one in the Sessions pane (`alive` says whether it is still shown)
@@ -441,6 +522,8 @@ function watchFile(m, alive, changed) {
   clearInterval(liveTimer);
   if (!m.open || !m.source_path) return;
   let seen = null;
+  // the stamp of what was just read, at once: a change in the first 2 s is a change too (a reply's prompt)
+  call('file_stamp', { path: m.source_path }).then((s) => { if (seen === null) seen = JSON.stringify(s); }).catch(() => {});
   liveTimer = setInterval(async () => {
     if (!alive()) return clearInterval(liveTimer);
     if (document.visibilityState !== 'visible') return; // minimized: nothing is looked at

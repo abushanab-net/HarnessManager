@@ -86,6 +86,12 @@ pub fn needs(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(hrm
 /// open (answered in the terminal, or expired), and the answer was dropped.
 pub fn answer(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { Ok(json!(hrm_core::hooks::answer(ctx, &s(a, "id")?, a)?)) }
 
+/// One line typed into a session that owns its terminal (`{run, text}`); a text of several lines is refused there.
+pub fn reply(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::terminal::reply(&ctx.data, &s(a, "run")?, &s(a, "text")?)?; Ok(json!(true)) }
+
+/// Ctrl+C in a session that owns its terminal (`{run}`).
+pub fn stop(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::terminal::stop(&ctx.data, &s(a, "run")?)?; Ok(json!(true)) }
+
 pub fn session_stats(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::dash::session_stats(ctx, &s(a, "profile")?, &s(a, "id")?) }
 
 // resume here (phase 3): a session from another computer as a fork in this computer's clone

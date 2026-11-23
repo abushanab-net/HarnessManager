@@ -204,6 +204,8 @@ pub struct Run {
     pub state: String,
     pub reason: String,
     pub ts: i64,
+    /// It owns its terminal (`own_terminal`), so `terminal::reply` and `terminal::stop` reach it.
+    pub terminal: bool,
     /// The request its hook holds open for an answer, if any.
     pub ask: Option<Ask>,
 }
@@ -227,9 +229,9 @@ pub struct Ask {
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
     let rows: Vec<(Run, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started from run_state order by ts")?;
+        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
-            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires from run_ask where state = 'open' and expires > ? order by created")?;
         let a: Vec<(String, Ask)> = st.query_map([now_ms()], |r| Ok((r.get(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
             input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? })))?.collect::<rusqlite::Result<_>>()?;
@@ -350,6 +352,9 @@ mod tests {
         assert_eq!(h.join().unwrap(), Some(json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}})));
         let r = &runs(&ctx).unwrap()[0];
         assert_eq!((r.state.as_str(), r.ask.is_none()), ("working", true), "answered: the card goes, the session works");
+        assert!(!r.terminal, "no owned terminal: the app's reply box says so");
+        ctx.db.with(|c| Ok(c.execute("update run_state set terminal_port = 1 where run = ?", [&run])?)).unwrap();
+        assert!(runs(&ctx).unwrap()[0].terminal);
         assert!(!answer(&ctx, &a.id, &json!({"behavior": "deny"})).unwrap(), "a second answer is dropped");
 
         let (h, a) = hold(&ctx, &run, BASH, 20_000);

@@ -311,22 +311,28 @@ function markHtml(profile, id) {
   const r = runOf(profile, id);
   if (!r || !STATE[r.state]) return '';
   return r.state === 'waiting'
-    ? `<button class="pill warn" data-act="show-run" data-run="${esc(r.run)}" title="${esc(r.reason || 'Waiting for you')}. Brings its terminal to the front." data-testid="needs-${esc(id)}">needs you</button>`
+    ? `<button class="pill warn" data-act="open-run" data-run="${esc(r.run)}" title="${esc(r.reason || 'Waiting for you')}. Opens the session at the request." data-testid="needs-${esc(id)}">needs you</button>`
     : `<span class="pill ${r.state === 'working' ? 'ok' : 'quiet'}" title="${r.state === 'working' ? 'Working' : 'Finished its turn'}" data-testid="needs-${esc(id)}">${STATE[r.state]}</span>`;
 }
 /** A session row's state mark; filled again in place by drawNeeds, so a change shows without redrawing the page. */
 export const needsMark = (profile, id) => `<span class="needs-mark" data-needs="${esc(profile)}/${esc(id)}">${markHtml(profile, id)}</span>`;
+// a folded group's mark: how many of its sessions ("profile/id" keys) wait for you
+const groupHtml = (keys) => { const n = keys.filter((k) => { const i = k.indexOf('/'), r = runOf(k.slice(0, i), k.slice(i + 1)); return r && r.state === 'waiting'; }).length;
+  return n ? `<span class="pill warn" title="Open the group to answer" data-testid="group-needs">${n} ${n === 1 ? 'needs' : 'need'} you</span>` : ''; };
+export const needsGroupMark = (keys) => `<span class="needs-mark" data-needs-any="${esc(JSON.stringify(keys))}">${groupHtml(keys)}</span>`;
 /** A new list of states: the marks, the sidebar count, and a toast for each session that starts waiting. `redraw`
- * runs when the set of waiting sessions or their requests changed (the Overview lists them, with the request). */
+ * runs when a session's state, its request or its terminal changed (the Overview lists the waiting ones; a
+ * session's page shows its request and its reply box). */
 export function drawNeeds(list, redraw) {
   const before = Object.fromEntries((S.needs || []).map((r) => [r.run, r.state]));
-  const waitingNow = (l) => l.filter((r) => r.state === 'waiting').map((r) => r.run + (r.ask ? ':' + r.ask.id : '')).join();
-  const changed = waitingNow(S.needs || []) !== waitingNow(list);
+  const sig = (l) => l.map((r) => [r.run, r.session_id, r.state, r.ask ? r.ask.id : '', r.terminal].join(':')).join();
+  const changed = sig(S.needs || []) !== sig(list);
   S.needs = list;
   for (const el of document.querySelectorAll('[data-needs]')) { const i = el.dataset.needs.indexOf('/'); el.innerHTML = markHtml(el.dataset.needs.slice(0, i), el.dataset.needs.slice(i + 1)); }
+  for (const el of document.querySelectorAll('[data-needs-any]')) el.innerHTML = groupHtml(JSON.parse(el.dataset.needsAny));
   redrawLive();
   const fresh = list.filter((r) => r.state === 'waiting' && before[r.run] !== 'waiting').pop();
-  if (fresh) toast(`${acctName(fresh.profile)} needs you${fresh.reason ? ': ' + fresh.reason : ''}`, false, { label: 'Show', act: 'show-run', data: { run: fresh.run } });
+  if (fresh) toast(`${acctName(fresh.profile)} needs you${fresh.reason ? ': ' + fresh.reason : ''}`, false, { label: 'Show', act: 'open-run', data: { run: fresh.run } });
   if (changed && redraw) redraw();
 }
 
