@@ -1,0 +1,48 @@
+Codex CLI 0.171.0 | interactive | temporary project
+Selected lines from the VT stream, hook log and loopback model log.
+
+Enter during a blocked hook
+[hook] PermissionRequest Bash entered
+[screen] Running hook
+[probe] Enter. Approval choices absent.
+[probe] Release file set to deny
+[hook] PermissionRequest returned deny
+[screen] Blocked by hook
+[screen] fixture-hook-denied
+[model] Codex tool result denied
+
+Hook deny first
+[hook] PermissionRequest Bash entered
+[screen] Running hook
+[probe] Release file set to deny
+[screen] Blocked by hook
+[screen] fixture-hook-denied
+[probe] Enter after the denial. The completed request stayed denied.
+
+Timeout
+[hook] PermissionRequest Bash entered
+[screen] Running hook
+[screen] Hook failed
+[screen] hook timed out after 6s
+[screen] Would you like to run the following command?
+[screen] 1. Yes, proceed (y)
+[probe] Enter
+[screen] You approved codex to run echo fixture-shell-ok this time
+[model] Codex tool result allowed
+[replay] Released the Python hook after the terminal prompt appeared.
+[hook] PermissionRequest returned fallthrough
+[replay] The terminal accepted Escape and cleanup completed.
+
+Trust
+[screen] Trust this folder?
+[screen] 1. Trust and continue
+[screen] 1 hook is new or changed.
+[screen] 1. Review hooks
+[screen] 2. Trust all and continue
+[screen] 3. Continue without trusting (hooks won't run)
+[review] Event PermissionRequest, Installed 1, Active 0, Review 1
+[probe] Selected Trust all and continue on the disposable project.
+[probe] Restart after same: hook review = False
+[probe] Restart after script-only: hook review = False
+[probe] Restart after metadata: hook review = False
+[probe] Restart after handler-timeout: hook review = True

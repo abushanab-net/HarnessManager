@@ -1,0 +1,41 @@
+Windows 11 build 26300 | Claude Code 2.1.330 | Codex CLI 0.171.0
+Selected lines from the console, VT stream and loopback model log.
+
+Hidden native console
+[direct Claude] Win32 keyboard events → native-direct-probe → fixture-text-seen
+[relayed Claude] Win32 keyboard events → native-direct-probe → fixture-text-seen
+[direct Codex, --no-daemon] Win32 keyboard events → native-direct-probe → fixture-text-seen
+[relayed Codex] Win32 keyboard events → native-direct-probe → fixture-text-seen
+[native console] Both direct and relayed captures used multiple colour attributes.
+[native console] Requested viewport 72 × 22. Reported viewport stayed 120 × 30.
+[relayed Codex, --no-alt-screen] Outer viewport changed to 72 × 22.
+[relayed Codex, --no-alt-screen] Hooks browser switched to its compact Active/Installed column.
+
+Claude through the ConPTY probe
+[probe] Output grew after resize from 1380 to 1754 bytes
+[probe] Injected the bracketed bytes for probe-first, probe-second and probe-third.
+[probe] No model request before Enter.
+[model] Claude prompt multiline
+[probe] Injected interrupt-probe and Enter.
+[model] Claude interrupt request started
+[probe] Sent Ctrl+C while the loopback response was delayed.
+[screen] ❯ interrupt-probe
+[probe] Session alive after injected Ctrl+C = True
+[VT] Bracketed paste and SGR mouse mode enabled. Truecolour SGR present.
+
+Codex through the ConPTY probe
+[probe] Output grew after resize from 10338 to 10796 bytes
+[probe] Injected the same bracketed bytes. No model request before Enter.
+[model] Codex prompt multiline
+[probe] Injected interrupt-probe and Enter.
+[model] Codex interrupt request started
+[probe] Sent Ctrl+C while the loopback response was delayed.
+[screen] Conversation interrupted
+[probe] Session alive after injected Ctrl+C = True
+[VT] Bracketed paste enabled. Truecolour SGR present. SGR mouse mode absent in the capture.
+
+Probe shell smoke test
+[control] Rejected an invalid token.
+[child] mode con reported Lines 30, Columns 100 at startup.
+[child] mode con reported Lines 22, Columns 72 after injected resize.
+[probe] Stop waited for the job to empty and exited with code 0.
