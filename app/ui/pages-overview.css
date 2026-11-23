@@ -40,6 +40,12 @@
 .ov-item .btn { width: 62px; justify-content: center; flex: none; }
 .ov-item .meta { font-size: var(--fs-small); color: var(--ink-muted); white-space: nowrap; }
 .ov-item .pc-dot { width: 7px; height: 7px; flex: none; }
+/* a request held for an answer: the command or the questions under the name, then the choices */
+.ov-item.ask { height: auto; align-items: flex-start; padding: 8px 12px; }
+.ov-item.ask .row-actions .btn { width: auto; }
+.ov-item .ask-what { display: block; margin-top: 4px; font-family: var(--font-mono); font-size: var(--fs-small); white-space: pre-wrap; word-break: break-all; max-height: 64px; overflow-y: auto; }
+.ov-item .ask-q { border: 0; padding: 0; margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 0 12px; }
+.ov-item .ask-q legend { padding: 0; font-weight: 600; white-space: normal; }
 .ov-empty { padding: 12px 14px; font-size: var(--fs-small); color: var(--ink-muted); line-height: 18px; }
 /* the counts in the Running now head: with sessions on another computer, a count shows that computer's alone */
 .ov-counts { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

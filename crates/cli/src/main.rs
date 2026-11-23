@@ -55,7 +55,8 @@ enum Cmd {
     /// Run the harness as an account in this console; arguments after -- go to the harness
     Run { name: String, #[arg(last = true)] args: Vec<String> },
     /// Called by Claude Code's hooks: records whether a session hrm run started is working, waiting for you or done.
-    /// Reads the event on standard input, prints nothing and always succeeds; outside hrm run it does nothing
+    /// Reads the event on standard input and always succeeds; a permission request or question waits for an answer
+    /// from the app and prints it, else nothing is printed; outside hrm run it does nothing
     Hook,
     /// Open a new terminal running the account
     Start { name: String, #[arg(long)] cwd: Option<PathBuf>, #[arg(last = true)] args: Vec<String> },
@@ -337,10 +338,14 @@ fn main() {
         // outside hrm run there is nothing to record, and nothing is read
         if std::env::var_os(hrm_core::hooks::RUN_VAR).is_some() {
             let mut input = String::new();
-            let r = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).map_err(anyhow::Error::from).and_then(|_| hrm_core::hooks::record(&input));
-            if let Err(e) = r {
-                hrm_core::log::init(&hrm_core::ctx::data_dir(), true, "info");
-                hrm_core::log::info(&format!("hrm hook: {e:#}"));
+            let r = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).map_err(anyhow::Error::from).and_then(|_| hrm_core::hooks::hook(&input));
+            match r {
+                Ok(Some(decision)) => println!("{decision}"),
+                Ok(None) => {}
+                Err(e) => {
+                    hrm_core::log::init(&hrm_core::ctx::data_dir(), true, "info");
+                    hrm_core::log::info(&format!("hrm hook: {e:#}"));
+                }
             }
         }
         std::process::exit(0);

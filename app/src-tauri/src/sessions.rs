@@ -82,6 +82,10 @@ pub fn focus_console(hwnd: i64, pid: u32) -> bool {
 /// The sessions hrm run started, as their hooks last reported (see `hrm_core::hooks`).
 pub fn needs(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(hrm_core::hooks::runs(ctx)?)) }
 
+/// The answer to a request a session's hook holds (`{id, behavior}` or `{id, answers}`); false: it was no longer
+/// open (answered in the terminal, or expired), and the answer was dropped.
+pub fn answer(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { Ok(json!(hrm_core::hooks::answer(ctx, &s(a, "id")?, a)?)) }
+
 pub fn session_stats(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::dash::session_stats(ctx, &s(a, "profile")?, &s(a, "id")?) }
 
 // resume here (phase 3): a session from another computer as a fork in this computer's clone

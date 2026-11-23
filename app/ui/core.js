@@ -292,8 +292,9 @@ export function redrawLive() {
   const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
   const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
   const live = running.length + elsewhere, where = `${running.length} on this computer · ${elsewhere} elsewhere`;
-  const waiting = (S.needs || []).filter((r) => r.state === 'waiting').length, wait = waiting ? ` · ${waiting} waiting` : '';
-  badge('n-live', live || waiting ? `<i class="live-dot"></i>${live} live${wait}` : '', live || waiting ? `The sessions running now: ${where}${waiting ? `; ${waiting} waiting for you` : ''}` : '');
+  // the sidebar has room for one short count: waiting sessions win, the full line is in the tooltip
+  const waiting = (S.needs || []).filter((r) => r.state === 'waiting').length;
+  badge('n-live', waiting ? `<i class="live-dot"></i>${waiting} waiting` : live ? `<i class="live-dot"></i>${live} live` : '', live || waiting ? `The sessions running now: ${where}${waiting ? `; ${waiting} waiting for you` : ''}` : '');
   const strip = document.getElementById('live-strip');
   if (strip) {
     strip.hidden = !live;
@@ -316,10 +317,10 @@ function markHtml(profile, id) {
 /** A session row's state mark; filled again in place by drawNeeds, so a change shows without redrawing the page. */
 export const needsMark = (profile, id) => `<span class="needs-mark" data-needs="${esc(profile)}/${esc(id)}">${markHtml(profile, id)}</span>`;
 /** A new list of states: the marks, the sidebar count, and a toast for each session that starts waiting. `redraw`
- * runs when the set of waiting sessions changed (the Overview lists them). */
+ * runs when the set of waiting sessions or their requests changed (the Overview lists them, with the request). */
 export function drawNeeds(list, redraw) {
   const before = Object.fromEntries((S.needs || []).map((r) => [r.run, r.state]));
-  const waitingNow = (l) => l.filter((r) => r.state === 'waiting').map((r) => r.run).join();
+  const waitingNow = (l) => l.filter((r) => r.state === 'waiting').map((r) => r.run + (r.ask ? ':' + r.ask.id : '')).join();
   const changed = waitingNow(S.needs || []) !== waitingNow(list);
   S.needs = list;
   for (const el of document.querySelectorAll('[data-needs]')) { const i = el.dataset.needs.indexOf('/'); el.innerHTML = markHtml(el.dataset.needs.slice(0, i), el.dataset.needs.slice(i + 1)); }

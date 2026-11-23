@@ -70,6 +70,7 @@ pub static OPS: &[Op] = &[
     op("export_markdown", sessions::export_markdown, NO_LOCK | NO_CHANGE),
     op("show_window", sessions::show_window, NO_LOCK | NO_CHANGE),
     op("needs", sessions::needs, NO_LOCK | NO_CHANGE),
+    op("answer", sessions::answer, NO_LOCK | NO_CHANGE),
     op("session_stats", sessions::session_stats, NO_LOCK | NO_CHANGE),
     op("session_resume_here", sessions::session_resume_here, NO_LOCK),
     op("transcripts_status", sessions::transcripts_status, NO_LOCK | NO_CHANGE),

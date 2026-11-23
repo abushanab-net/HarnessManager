@@ -573,26 +573,71 @@ try {
     await waitFor(() => readLines(termLog).some((t) => JSON.stringify(t.args) === JSON.stringify(['run', 'work-max'])), 'terminal launch');
   });
 
-  await test('needs you: a session hrm run started that reaches a permission prompt shows as waiting within two seconds, on the Overview, in the sidebar and in a toast', async () => {
+  await test('needs you: a session hrm run started that reaches a permission prompt shows as waiting within two seconds, with a card that approves once or denies; the tool receives the decision, and answering in the terminal first closes the card', async () => {
     await nav('#home');
     await drawn('the Overview');
-    // the fake Claude Code sends the event through the hook entries hrm run wrote into the account's settings.json
-    const ev = JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'needs-1', cwd: repo, tool_name: 'Bash', tool_input: { command: 'npm test' } });
-    const run = spawn(path.join(appDir, 'hrm.exe'), ['run', 'claude-main'], { env: { ...env, FAKE_HOOK: ev, FAKE_HOLD_MS: '8000' }, stdio: 'ignore' });
+    // the fake Claude Code sends the event through the hook entries hrm run passed it, and records what the hook printed
+    const bash = { hook_event_name: 'PermissionRequest', session_id: 'needs-1', cwd: repo, tool_name: 'Bash', tool_input: { command: 'npm test', description: 'Run the tests' } };
+    const needs = () => exec("return import('./core.js').then((c) => (c.S.needs || []).find((r) => r.session_id === 'needs-1') || null)");
+    const received = () => readLines(runLog).filter((l) => l.hook === 'PermissionRequest');
+    const start = (hook, extra = {}) => spawn(path.join(appDir, 'hrm.exe'), ['run', 'claude-main'], { env: { ...env, FAKE_HOOK: JSON.stringify(hook), FAKE_HOLD_MS: '1000', ...extra }, stdio: 'ignore' });
+    const card = '[data-testid=attention] [data-testid=ask-allow]';
+    for (const behavior of ['allow', 'deny']) {
+      const before = received().length;
+      const run = start(bash);
+      try {
+        const r = await waitFor(async () => { const r = await needs(); return r && r.state === 'waiting' && r.ask && { ...r, lag: (await exec('return Date.now()')) - r.ts }; }, 'the waiting state in the window', 15000);
+        if (behavior === 'allow') {
+          assert.ok(r.lag < 2000, `seen ${r.lag} ms after the hook reported it`);
+          assert.equal(r.reason, 'Bash: npm test', 'reason');
+          assert.equal(r.profile, 'claude-main');
+          await hasText('#toast', 'needs you: Bash: npm test');
+          assert.equal(await text('[data-testid=notice-act]'), 'Show');
+          await hasText('[data-testid=nav-live]', '1 waiting');
+        }
+        // the card: the tool, its command, and only Approve once and Deny beside Show
+        await hasText('[data-testid=attention]', 'Wants to use Bash');
+        await hasText('[data-testid=attention] .ask-what', 'npm test');
+        await hasText('[data-testid=attention]', 'Run the tests');
+        assert.deepEqual(await exec("return [...document.querySelectorAll('[data-testid=attention] .ov-item.ask button')].map((b) => b.textContent)"), ['Approve once', 'Deny', 'Show']);
+        if (behavior === 'allow') await shot('needs-permission-card');
+        await click(`[data-testid=attention] [data-testid=ask-${behavior}]`);
+        await hasText('#toast', behavior === 'allow' ? 'Approved once.' : 'Denied.');
+        const got = await waitFor(() => received().length > before && received().pop(), 'the decision at the tool');
+        assert.equal(got.code, 0, JSON.stringify(got));
+        assert.deepEqual(JSON.parse(got.stdout).hookSpecificOutput.decision.behavior, behavior);
+        // answered: the session works again and its entry goes; hrm run removes its row when the tool exits
+        await waitFor(async () => !(await page.$('[data-testid=attention] [data-act=show-run]')), 'the entry gone', 20000);
+        await waitFor(async () => (await needs()) === null, 'the row gone with the session', 20000);
+      } finally { run.kill(); }
+    }
+    // a question: its own options, and the answer comes back to the tool in updatedInput
+    {
+      const questions = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Blue', description: 'calm' }, { label: 'Red', description: 'loud' }] }];
+      const asked = () => readLines(runLog).filter((l) => l.hook === 'PreToolUse');
+      const run = start({ hook_event_name: 'PreToolUse', session_id: 'needs-1', cwd: repo, tool_name: 'AskUserQuestion', tool_input: { questions } });
+      try {
+        await hasText('[data-testid=attention]', 'Asks you');
+        await hasText('[data-testid=attention] .ask-q legend', 'Which colour?');
+        await shot('needs-question-card');
+        await click('[data-testid=attention] [data-testid=ask-send]');
+        await hasText('#toast', 'Choose an answer for "Which colour?"');
+        await click('[data-testid=attention] .ask-q input[value=Red]');
+        await click('[data-testid=attention] [data-testid=ask-send]');
+        await hasText('#toast', 'Answer sent.');
+        const got = await waitFor(() => asked().pop(), 'the answer at the tool');
+        assert.deepEqual(JSON.parse(got.stdout).hookSpecificOutput, { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { questions, answers: { 'Which colour?': 'Red' } } });
+        await waitFor(async () => (await needs()) === null, 'the row gone with the session', 20000);
+      } finally { run.kill(); }
+    }
+    // the terminal answers first: the tool runs, its PostToolUse closes the request, the card goes and the hook prints nothing
+    const before = received().length;
+    const run = start([bash, { ...bash, hook_event_name: 'PostToolUse' }], { FAKE_HOOK_GAP_MS: '4000' });
     try {
-      const needs = () => exec("return import('./core.js').then((c) => (c.S.needs || []).find((r) => r.session_id === 'needs-1') || null)");
-      const r = await waitFor(async () => { const r = await needs(); return r && r.state === 'waiting' && { ...r, lag: (await exec('return Date.now()')) - r.ts }; }, 'the waiting state in the window', 15000);
-      assert.ok(r.lag < 2000, `seen ${r.lag} ms after the hook reported it`);
-      assert.equal(r.reason, 'Bash: npm test');
-      assert.equal(r.profile, 'claude-main');
-      await hasText('[data-testid=attention]', 'Needs you · Bash: npm test');
-      await $('[data-testid=attention] [data-act=show-run]');
-      await hasText('#toast', 'needs you: Bash: npm test');
-      assert.equal(await text('[data-testid=notice-act]'), 'Show');
-      await hasText('[data-testid=nav-live]', '1 waiting');
-      // hrm run removes its row when the tool exits: the entry goes
-      await waitFor(async () => !(await page.$('[data-testid=attention] [data-act=show-run]')), 'the entry gone with the session', 20000);
-      assert.equal(await needs(), null);
+      await $(card);
+      await waitFor(async () => !(await page.$(card)), 'the card closed by the terminal answer', 15000);
+      const got = await waitFor(() => received().length > before && received().pop(), 'the hook ended');
+      assert.equal(got.stdout, '', JSON.stringify(got));
     } finally { run.kill(); }
     await nav('#accounts');
     await drawn('Accounts');

@@ -6,7 +6,10 @@
 //! FAKE_WAIT_CODE  when set, `auth login` waits for a pasted code on stdin before finishing
 //! FAKE_HOLD_MS    keep running this long first, like a console the user left open
 //! FAKE_HOOK       claude: a hook event (JSON) sent first, as Claude Code does, to each command the `--settings` file
-//!                 has for that event; each run is recorded in FAKE_RUN_LOG with its exit code and output
+//!                 has for that event (and whose matcher, if any, names its tool); each run is recorded in FAKE_RUN_LOG
+//!                 with its exit code and output, which is the decision the tool receives. A JSON array: each event in
+//!                 turn, FAKE_HOOK_GAP_MS apart (default 0), without waiting for the earlier hooks to finish, as a
+//!                 terminal answer arrives while a hook still waits; all have finished before the tool goes on
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -40,19 +43,31 @@ fn record(tool: &str, args: &[String]) {
 fn fire_hook(args: &[String]) {
     let Ok(ev) = std::env::var("FAKE_HOOK") else { return };
     let v: serde_json::Value = serde_json::from_str(&ev).unwrap();
+    let events = if let Some(a) = v.as_array() { a.clone() } else { vec![v] };
+    let gap = std::env::var("FAKE_HOOK_GAP_MS").ok().and_then(|g| g.parse().ok()).unwrap_or(0);
     let file = args.windows(2).find(|w| w[0] == "--settings").map(|w| PathBuf::from(&w[1]));
     let s: serde_json::Value = file.and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
-    let name = v["hook_event_name"].as_str().unwrap_or("");
-    for cmd in s["hooks"][name].as_array().into_iter().flatten().flat_map(|g| g["hooks"].as_array().cloned().unwrap_or_default()).filter_map(|h| h["command"].as_str().map(String::from)) {
-        let mut c = if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", &cmd]); c } else { let mut c = std::process::Command::new("sh"); c.args(["-c", &cmd]); c };
-        let mut child = c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
-        child.stdin.take().unwrap().write_all(ev.as_bytes()).unwrap();
-        let out = child.wait_with_output().unwrap();
-        if let Ok(log) = std::env::var("FAKE_RUN_LOG") {
-            let line = json!({"hook": name, "command": cmd, "code": out.status.code(), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr)});
-            std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap().write_all(format!("{line}\n").as_bytes()).unwrap();
+    let mut running = vec![];
+    for (i, v) in events.into_iter().enumerate() {
+        if i > 0 { std::thread::sleep(std::time::Duration::from_millis(gap)); }
+        let name = v["hook_event_name"].as_str().unwrap_or("").to_string();
+        let groups = s["hooks"][&name].as_array().cloned().unwrap_or_default();
+        let fits = |g: &serde_json::Value| g["matcher"].as_str().is_none_or(|m| m.is_empty() || m == "*" || v["tool_name"].as_str() == Some(m));
+        for cmd in groups.iter().filter(|g| fits(g)).flat_map(|g| g["hooks"].as_array().cloned().unwrap_or_default()).filter_map(|h| h["command"].as_str().map(String::from)) {
+            let (ev, name) = (v.to_string(), name.clone());
+            running.push(std::thread::spawn(move || {
+                let mut c = if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", &cmd]); c } else { let mut c = std::process::Command::new("sh"); c.args(["-c", &cmd]); c };
+                let mut child = c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+                child.stdin.take().unwrap().write_all(ev.as_bytes()).unwrap();
+                let out = child.wait_with_output().unwrap();
+                if let Ok(log) = std::env::var("FAKE_RUN_LOG") {
+                    let line = json!({"hook": name, "command": cmd, "code": out.status.code(), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr)});
+                    std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap().write_all(format!("{line}\n").as_bytes()).unwrap();
+                }
+            }));
         }
     }
+    for h in running { h.join().unwrap(); }
 }
 
 fn email(args: &[String]) -> String {

@@ -4,7 +4,7 @@
 // action); then the selected route, the 53-week year clock and the latest replies with the request log behind a button.
 // Measured numbers are plain; estimates carry ≈; — means not read. No tokens-per-second on this page.
 
-import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu, needsMark } from './core.js';
+import { S, call, view, render, attempt, toast, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu, needsMark } from './core.js';
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
 import { accountViews, metricsOf, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, scope, setScope } from './computers.js';
@@ -179,11 +179,39 @@ function readApps(n) {
     show();
   }).catch(() => {});
 }
+// a request a session's hook holds (hooks.rs): what the tool asks, with only the tool's own choices; once, never
+// "always". The terminal prompt stays answerable too, and the first answer wins.
+function askHtml(a) {
+  if (a.kind === 'question') {
+    return `${(a.input.questions || []).map((q, i) => `<fieldset class="ask-q" data-q="${i}"><legend>${esc(q.question)}</legend>${(q.options || []).map((o) => `<label class="chk" title="${esc(o.description || '')}"><input type="${q.multiSelect ? 'checkbox' : 'radio'}" name="ask-${esc(a.id)}-${i}" value="${esc(o.label)}"> ${esc(o.label)}</label>`).join('')}</fieldset>`).join('')}
+      <div class="row-actions"><button class="btn sm" data-act="ask-send" data-id="${esc(a.id)}" data-testid="ask-send">Send answer</button></div>`;
+  }
+  return `<code class="ask-what" title="${esc(a.what)}">${esc(a.what || a.tool)}</code>${a.input.description ? `<span class="small muted">${esc(a.input.description)}</span>` : ''}
+    <div class="row-actions"><button class="btn sm" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="allow" data-testid="ask-allow">Approve once</button><button class="btn sm" data-act="ask-answer" data-id="${esc(a.id)}" data-behavior="deny" data-testid="ask-deny">Deny</button></div>`;
+}
+async function sendAnswer(id, a, done) {
+  const ok = await attempt(() => call('answer', { id, ...a }));
+  if (ok === true) toast(done);
+  else if (ok === false) toast('That request was answered in the terminal or has expired.');
+}
+action('ask-answer', (el) => sendAnswer(el.dataset.id, { behavior: el.dataset.behavior }, el.dataset.behavior === 'allow' ? 'Approved once.' : 'Denied.'));
+action('ask-send', (el) => {
+  const r = (S.needs || []).find((x) => x.ask && x.ask.id === el.dataset.id);
+  if (!r) return toast('That request was answered in the terminal or has expired.');
+  const box = el.closest('.ask'), answers = {};
+  for (const [i, q] of (r.ask.input.questions || []).entries()) {
+    const picked = [...box.querySelectorAll(`[data-q="${i}"] input:checked`)].map((x) => x.value);
+    if (!picked.length) return toast(`Choose an answer for "${q.question}".`, true);
+    answers[q.question] = picked;
+  }
+  return sendAnswer(r.ask.id, { answers }, 'Answer sent.');
+});
 function attention(m, accts, d, now) {
   const items = [], open = (href) => `<a class="btn sm" href="${href}">Open</a>`;
-  // a session started here that waits for you (its hooks said so): first, oldest first
+  // a session started here that waits for you (its hooks said so): first, oldest first, with its request when the hook holds one
   for (const r of (S.needs || []).filter((x) => x.state === 'waiting')) items.push({ key: 'run-' + r.run, rank: -1, at: r.ts, icon: toolIcon(r.harness, 16), name: acctName(r.profile), tone: 'warnT',
-    title: [r.reason || 'Waiting for you', r.cwd].filter(Boolean).join('\n'), text: `Needs you${r.reason ? ' · ' + r.reason : ''}`, btn: `<button class="btn sm" data-act="show-run" data-run="${esc(r.run)}" title="Bring its terminal to the front">Show</button>` });
+    title: [r.reason || 'Waiting for you', r.cwd].filter(Boolean).join('\n'), text: r.ask ? (r.ask.kind === 'question' ? 'Asks you' : `Wants to use ${r.ask.tool}`) : `Needs you${r.reason ? ' · ' + r.reason : ''}`,
+    body: r.ask ? askHtml(r.ask) : '', btn: `<button class="btn sm" data-act="show-run" data-run="${esc(r.run)}" title="Bring its terminal to the front">Show</button>` });
   for (const a of accts) {
     const risks = m.atRisk.filter((r) => r.acct === a), spent = risks.find((r) => r.win.left === 0), out = risks.find((r) => r.win.left > 0);
     if (!spent && !out && !a.needsLogin) continue;
@@ -201,7 +229,7 @@ function attention(m, accts, d, now) {
   if (upd && !updates.length) items.push({ key: 'updates', rank: 4, at: 0, icon: '<span class="dot"></span>', name: 'Tool updates', tone: 'muted', title: 'Apps installs the newer version', text: `${plural(upd, 'tool has', 'tools have')} a newer version`, btn: open('#apps') });
   items.sort((x, y) => x.rank - y.rank || x.at - y.at);
   return `<section class="card" aria-label="Needs attention" data-key="attention" data-testid="attention"><div class="card-head"><h2 class="section">Needs attention</h2>${items.length ? `<span class="pill warn" title="${plural(items.length, 'entry', 'entries')} to act on" data-testid="attention-count">${items.length}</span>` : '<span class="small muted">Nothing</span>'}</div>
-    <div class="ov-list" ${items.length > 4 ? 'tabindex="0" aria-label="Everything that needs attention; scroll for more"' : ''}>${items.map((i) => `<div class="ov-item" data-key="att-${esc(i.key)}" data-testid="att-${esc(i.key)}" title="${esc(i.title)}">${i.icon}<div class="two"><b class="trunc">${esc(i.name)}</b><span class="small trunc ${i.tone}">${esc(i.text)}</span></div>${i.btn}</div>`).join('') || '<div class="ov-empty">Every limit lasts until its reset at this pace, every login is valid, no provider is paused.</div>'}</div></section>`;
+    <div class="ov-list" ${items.length > 4 ? 'tabindex="0" aria-label="Everything that needs attention; scroll for more"' : ''}>${items.map((i) => `<div class="ov-item${i.body ? ' ask' : ''}" data-key="att-${esc(i.key)}" data-testid="att-${esc(i.key)}" title="${esc(i.title)}">${i.icon}<div class="two"><b class="trunc">${esc(i.name)}</b><span class="small trunc ${i.tone}">${esc(i.text)}</span>${i.body || ''}</div>${i.btn}</div>`).join('') || '<div class="ov-empty">Every limit lasts until its reset at this pace, every login is valid, no provider is paused.</div>'}</div></section>`;
 }
 
 // ---------- the latest replies and the request log ----------

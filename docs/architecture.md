@@ -67,7 +67,7 @@ when set.
 |---|---|---|
 | `profiles.json` | The account list: accounts, providers, routes, MCP servers, skills, skill repositories, prompts, targets, project names. Format version 2. Each MCP env and header value is written as `null` once the credential store holds it. The file can live elsewhere (`registry_path` in settings), for example a OneDrive folder | `registry.rs` |
 | `settings.json` | This computer's settings: terminal, refresh pace, router port, theme, text size, backups, the log, the computer's id, name and incarnation, the sync mode, folder and hub address, the archive | `ctx.rs` (`Settings`) |
-| `hm.db` | SQLite: usage rows and read cursors, limits and their history, the session index (`sessions`, `sessions_fts`), the ledger, tags, the router's log, the journal outbox, the other computers and their cursors, the state of each session `hrm run` started (`run_state`) | `db.rs`, `hooks.rs` |
+| `hm.db` | SQLite: usage rows and read cursors, limits and their history, the session index (`sessions`, `sessions_fts`), the ledger, tags, the router's log, the journal outbox, the other computers and their cursors, the state of each session `hrm run` started and the requests its hooks hold (`run_state`, `run_ask`) | `db.rs`, `hooks.rs` |
 | `backups/` | One zip per backup | `backup.rs` |
 | `logs/harness-manager.log` | The diagnostic log, rolled over at 2 MB | `log.rs` |
 | `secrets.json` | Off Windows only, when no system credential store answers; see Secrets | `secrets.rs` |
@@ -182,8 +182,8 @@ sync removes only those; a hand-made entry with the same name is reported as a c
 
 `crates/core/src/hooks.rs`. While `session_hooks` is on (the default), the Claude Code launch spec starts with
 `--settings <data>/claude-hooks.json`, ahead of the user's arguments. The file holds only one hook group per event
-(`UserPromptSubmit`, `PermissionRequest`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd`) running `hrm hook`
-by its full path, and is written when its content changes. No account's files change, and a session started
+(`UserPromptSubmit`, `PermissionRequest`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd`, and `PreToolUse`
+with the matcher `AskUserQuestion`) running `hrm hook` by its full path, and is written when its content changes. No account's files change, and a session started
 outside Harness Manager is not touched at all. When the user's own arguments carry `--settings`, ours is left out
 and that session is not tracked.
 
@@ -191,12 +191,30 @@ and that session is not tracked.
 `HRM_RUN=<pid>:<start ms>` in the tool's environment. `hrm hook` reads the event on standard input and, when
 `HRM_RUN` names a row, sets the session's state: `waiting` (a permission request, or a notification of a permission
 prompt or a question), `working` (a prompt sent, a tool ran) or `done` (the turn ended, or the tool waits for the
-next message). It prints nothing and always
-exits 0, so the tool behaves as without it; without `HRM_RUN` it does nothing. `hrm run` deletes its row when the
-tool exits, and a row whose `hrm run` is gone is deleted the next time the states are read. Codex's events have
-the same names and the mapping reads them, but Codex is not started with hooks yet.
+next message). For every other event it prints nothing and exits 0, so the tool behaves as without it; without
+`HRM_RUN` it does nothing.
+
+A permission request, or a `PreToolUse` of `AskUserQuestion`, is also held for an answer from the app. `hrm hook`
+stores it in `run_ask` (id, run, tool, the command or file or the questions, the tool's input, created, expires,
+state `open`) and polls the row every 250 ms. The app writes the answer into the row (`hooks::answer`, the `answer`
+operation): allow or deny once for a permission, or one of each question's own options. Nothing wider is offered
+or accepted. The hook then prints the decision Claude Code reads (`hookSpecificOutput.decision.behavior`, or
+`permissionDecision: "allow"` with `updatedInput.answers`) and exits 0. The terminal prompt stays answerable
+meanwhile, and the first answer wins. A later event of the same run closes the request: a `PostToolUse` of the
+same tool and input (the terminal approved), or `UserPromptSubmit`, `Stop`, `SessionEnd` or a new request. Past
+`request_seconds` (default 300; `HRM_REQUEST_SECONDS` in the tool's environment) the hook closes it itself. In both
+cases the hook exits 0 printing nothing, so the terminal's answer stands. The hook entries for these two events
+have a timeout 30 seconds past that wait. An answer, an expiry and a close are each one update of the open row, so
+an answer for a request that is no longer open is dropped by its id. Closing the app leaves the hook to expire on
+its own.
+
+`hrm run` deletes its rows when the tool exits, and the rows of an `hrm run` that is gone are deleted the next time
+the states are read. Codex's events have the same names and the mapping reads them, but Codex is not started with
+hooks yet, so its requests are not held.
 
 The app reads the table every second and emits `needs` when it changes: the Overview lists the sessions that wait,
+with a card for a held request (the tool, the command or file, Approve once and Deny; or the questions with their
+options and Send answer),
 their rows get a mark, the sidebar counts them, a toast says when one starts waiting, and the tray's tooltip and
 menu name them. Show brings the console window `hrm run` recorded to the front; in Windows Terminal that is the
 window, not the tab.

@@ -1110,6 +1110,8 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     let home = e.home.join(".claude-work");
     let ev = json!({"hook_event_name": "PermissionRequest", "session_id": "s-1", "cwd": "D:/w", "tool_name": "Bash", "tool_input": {"command": "npm test"}}).to_string();
     e.extra = vec![("FAKE_HOOK".into(), ev.clone()), ("FAKE_HOLD_MS".into(), "4000".into())];
+    // nobody answers in the app: the hook waits one second, then steps aside
+    e.ok(&["settings", "request_seconds", "1"]);
     let mut run = e.cmd(&["run", "work"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap();
     let rows = || -> Vec<(i64, String, String, String, String)> {
         let Ok(c) = rusqlite::Connection::open(e.data.join("hm.db")) else { return vec![] };
@@ -1119,10 +1121,10 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while rows().is_empty() && std::time::Instant::now() < end { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert_eq!(rows(), vec![(run.id() as i64, "work".into(), "claude".into(), "waiting".into(), "Bash: npm test".into())], "the row hrm run made, with the hook's state");
-    // the hook said nothing the tool would read as a decision
+    assert!(run.wait().unwrap().success());
+    // past its wait the hook said nothing the tool would read as a decision
     let hook = e.runs().into_iter().find(|r| r["hook"] == "PermissionRequest").unwrap();
     assert_eq!((hook["code"].clone(), hook["stdout"].clone()), (json!(0), json!("")));
-    assert!(run.wait().unwrap().success());
     assert!(rows().is_empty(), "gone with the hrm run that made it");
     // the tool was started with our settings file; nothing went into the account's folder
     let launch = e.runs().into_iter().find(|r| r["tool"] == "claude").unwrap();
@@ -1137,4 +1139,57 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     assert!(e.runs()[n..].iter().all(|r| r.get("hook").is_none()), "no hook ran");
     let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
     assert_eq!(c.query_row("select count(*) from run_state", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
+fn a_permission_request_and_a_question_are_answered_from_the_app_and_the_terminal_answering_first_closes_them() {
+    let e = Env::new();
+    e.ok(&["add", "work", "--no-login"]);
+    let bash = json!({"hook_event_name": "PermissionRequest", "session_id": "s-2", "cwd": "D:/w", "tool_name": "Bash", "tool_input": {"command": "npm test"}});
+    let questions = json!([{"question": "Which colour?", "header": "Colour", "multiSelect": false, "options": [{"label": "Blue", "description": ""}, {"label": "Red", "description": ""}]}]);
+    let ask = json!({"hook_event_name": "PreToolUse", "session_id": "s-2", "tool_name": "AskUserQuestion", "tool_input": {"questions": questions}});
+    // what the app does: the open request of the session, and the answer written for it (hooks::answer)
+    let ctx = hrm_core::Ctx::open_at(&e.data, &e.home).unwrap();
+    let open = || -> hrm_core::hooks::Ask {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            if let Some(a) = hrm_core::hooks::runs(&ctx).unwrap().into_iter().find_map(|r| r.ask) { return a; }
+            assert!(std::time::Instant::now() < end, "no open request");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
+    // the decision the fake Claude Code received from its last hook of that event
+    let received = |name: &str| { let h = e.runs().into_iter().rfind(|r| r["hook"] == name).unwrap(); assert_eq!(h["code"], 0); h["stdout"].as_str().unwrap().trim().to_string() };
+    let run = |extra: Vec<(String, String)>| { let mut e2 = e.cmd(&["run", "work"]); for (k, v) in extra { e2.env(k, v); } e2.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap() };
+
+    for behavior in ["allow", "deny"] {
+        let mut r = run(vec![("FAKE_HOOK".into(), bash.to_string())]);
+        let a = open();
+        assert_eq!((a.kind.as_str(), a.tool.as_str(), a.what.as_str()), ("permission", "Bash", "npm test"));
+        assert!(hrm_core::hooks::answer(&ctx, &a.id, &json!({"behavior": behavior})).unwrap());
+        assert!(r.wait().unwrap().success());
+        let d: Value = serde_json::from_str(&received("PermissionRequest")).unwrap();
+        assert_eq!(d["hookSpecificOutput"]["hookEventName"], "PermissionRequest");
+        assert_eq!(d["hookSpecificOutput"]["decision"]["behavior"], behavior);
+        assert!(!hrm_core::hooks::answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap(), "the run is over: dropped");
+    }
+
+    // the question: its answer comes back in updatedInput
+    let mut r = run(vec![("FAKE_HOOK".into(), ask.to_string())]);
+    let a = open();
+    assert_eq!(a.kind, "question");
+    assert!(hrm_core::hooks::answer(&ctx, &a.id, &json!({"answers": {"Which colour?": ["Red"]}})).unwrap());
+    assert!(r.wait().unwrap().success());
+    let d: Value = serde_json::from_str(&received("PreToolUse")).unwrap();
+    assert_eq!(d["hookSpecificOutput"]["permissionDecision"], "allow");
+    assert_eq!(d["hookSpecificOutput"]["updatedInput"], json!({"questions": questions, "answers": {"Which colour?": "Red"}}));
+
+    // the terminal approved first: the tool ran, its PostToolUse closes the request and the hook steps aside
+    let mut ran = bash.clone();
+    ran["hook_event_name"] = json!("PostToolUse");
+    let mut r = run(vec![("FAKE_HOOK".into(), json!([bash, ran]).to_string()), ("FAKE_HOOK_GAP_MS".into(), "2500".into())]);
+    let a = open();
+    assert!(r.wait().unwrap().success());
+    assert_eq!(received("PermissionRequest"), "", "no decision: the terminal's stands");
+    assert!(!hrm_core::hooks::answer(&ctx, &a.id, &json!({"behavior": "deny"})).unwrap());
 }

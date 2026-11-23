@@ -99,7 +99,9 @@ you are on. The **?** button replays the page's tour.
   or done, through a hook it is started with (`hrm settings session_hooks false` turns it off). The hook comes
   from a file in Harness Manager's own folder: no account's files change, and sessions started elsewhere are not
   touched. A session that waits for a permission or an answer shows on the Overview, on its row, in the tray and
-  in a message, and Show brings its terminal to the front. A Claude subscription account can also start with
+  in a message, and Show brings its terminal to the front. A permission request or a question can be answered on
+  the Overview (approve once, deny, or one of the question's options) while the terminal prompt stays answerable;
+  after `request_seconds` (5 minutes) only the terminal answers it. A Claude subscription account can also start with
   Claude Code's own Remote Control.
 - **MCP servers, skills and prompts, kept once:** each MCP server is written into every tool you tick.
   Skills live once in `~/.agents/skills` and are linked into each tool; Discover installs skills from
