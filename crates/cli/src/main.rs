@@ -54,6 +54,13 @@ enum Cmd {
     Remove { name: String, #[arg(long)] delete_home: bool },
     /// Run the harness as an account in this console; arguments after -- go to the harness
     Run { name: String, #[arg(last = true)] args: Vec<String> },
+    /// Send a line to a local run that owns its terminal
+    Reply { run: String, #[arg(allow_hyphen_values = true)] text: String },
+    /// Send Ctrl+C to a local run that owns its terminal
+    Stop { run: String },
+    #[cfg(windows)]
+    #[command(name = hrm_core::terminal::SHIM_COMMAND, hide = true)]
+    TerminalShim { #[arg(last = true, required = true, num_args = 1..)] argv: Vec<std::ffi::OsString> },
     /// Called by Claude Code's hooks: records whether a session hrm run started is working, waiting for you or done.
     /// Reads the event on standard input, prints nothing and always succeeds; outside hrm run it does nothing
     Hook,
@@ -394,6 +401,13 @@ fn parse_pairs(items: &[String], sep: char) -> Result<std::collections::BTreeMap
 }
 
 fn real_main(cli: Cli) -> Result<i32> {
+    match &cli.cmd {
+        Cmd::Reply { run, text } => return hrm_core::terminal::reply(&hrm_core::ctx::data_dir(), run, text).map(|_| 0),
+        Cmd::Stop { run } => return hrm_core::terminal::stop(&hrm_core::ctx::data_dir(), run).map(|_| 0),
+        #[cfg(windows)]
+        Cmd::TerminalShim { argv } => return hrm_core::terminal::run_shim(argv),
+        _ => {}
+    }
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
@@ -449,10 +463,13 @@ fn real_main(cli: Cli) -> Result<i32> {
         Cmd::Run { name, args } => {
             let mut spec = service::launch_spec(&ctx, &name, &args)?;
             let run = hrm_core::hooks::start_run(&ctx, ctx.registry()?.get(&name)?, &mut spec.env_set);
-            let code = spec.run();
+            let code = spec.run_session(&ctx, run.as_deref());
             if let Some(r) = run { hrm_core::hooks::end_run(&ctx, &r); }
             return code;
         }
+        Cmd::Reply { .. } | Cmd::Stop { .. } => unreachable!("answered before opening the context"),
+        #[cfg(windows)]
+        Cmd::TerminalShim { .. } => unreachable!("answered before opening the context"),
         Cmd::Hook => unreachable!("answered in main"),
         Cmd::Start { name, cwd, args } => {
             service::start(&ctx, &name, cwd, &args)?;

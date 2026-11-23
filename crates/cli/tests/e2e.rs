@@ -1119,10 +1119,10 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while rows().is_empty() && std::time::Instant::now() < end { std::thread::sleep(std::time::Duration::from_millis(100)); }
     assert_eq!(rows(), vec![(run.id() as i64, "work".into(), "claude".into(), "waiting".into(), "Bash: npm test".into())], "the row hrm run made, with the hook's state");
+    assert!(run.wait().unwrap().success());
     // the hook said nothing the tool would read as a decision
     let hook = e.runs().into_iter().find(|r| r["hook"] == "PermissionRequest").unwrap();
     assert_eq!((hook["code"].clone(), hook["stdout"].clone()), (json!(0), json!("")));
-    assert!(run.wait().unwrap().success());
     assert!(rows().is_empty(), "gone with the hrm run that made it");
     // the tool was started with our settings file; nothing went into the account's folder
     let launch = e.runs().into_iter().find(|r| r["tool"] == "claude").unwrap();
@@ -1137,4 +1137,90 @@ fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_
     assert!(e.runs()[n..].iter().all(|r| r.get("hook").is_none()), "no hook ran");
     let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
     assert_eq!(c.query_row("select count(*) from run_state", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_terminal_replies_and_interrupts_from_another_process() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    fn until<T>(mut check: impl FnMut() -> Option<T>, message: impl Fn() -> String) -> T {
+        let end = Instant::now() + Duration::from_secs(15);
+        loop {
+            if let Some(result) = check() { return result; }
+            assert!(Instant::now() < end, "{}", message());
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
+
+    let mut e = Env::new();
+    std::fs::create_dir_all(&e.data).unwrap();
+    let db = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
+    db.execute_batch(hrm_core::hooks::TABLE).unwrap();
+    db.execute("insert into run_state(run, pid, started, profile, harness) values('legacy', 0, 0, 'work', 'claude')", []).unwrap();
+    e.ok(&["add", "work", "--no-login"]);
+    assert!(db.query_row("select terminal_port is null and terminal_token is null from run_state where run = 'legacy'", [], |row| row.get::<_, bool>(0)).unwrap());
+    assert_eq!(e.ok(&["settings", "own_terminal"]).trim(), "false");
+    let project = e._dir.path();
+    let capture = project.join("stdout");
+    let errors = project.join("stderr");
+    let out = || std::fs::read_to_string(&capture).unwrap_or_default();
+    let trace = || format!("stdout: {}\nstderr: {}", out(), std::fs::read_to_string(&errors).unwrap_or_default());
+    let run_id = |pid| db.query_row("select run from run_state where pid = ?", [pid], |row| row.get::<_, String>(0)).ok();
+    let start = |e: &Env, args: &[&str]| KillOnDrop(e.cmd(args).current_dir(project).stdin(Stdio::piped())
+        .stdout(std::fs::File::create(&capture).unwrap()).stderr(std::fs::File::create(&errors).unwrap()).spawn().unwrap());
+
+    e.extra.push(("FAKE_TERMINAL".into(), "inherit".into()));
+    let mut inherited = start(&e, &["run", "work", "--", "two words", ""]);
+    until(|| out().contains("fixture inherited").then_some(()), trace);
+    let id = run_id(inherited.0.id()).unwrap();
+    for args in [vec!["reply", &id, "remote"], vec!["stop", &id]] {
+        assert!(e.fail(&args).contains("has no owned terminal"));
+    }
+    inherited.0.stdin.take().unwrap().write_all(b"local input\n").unwrap();
+    assert_eq!(until(|| inherited.0.try_wait().unwrap(), trace).code(), Some(19), "{}", trace());
+    assert_eq!(out().replace("\r\n", "\n"), "fixture inherited\ninherited line=local input\n");
+    assert_eq!(e.runs().last().unwrap()["args"], json!(["--settings", e.data.join("claude-hooks.json"), "two words", ""]));
+
+    e.ok(&["settings", "own_terminal", "true"]);
+    for mode in ["paste", "plain"] {
+        e.extra = vec![
+            ("FAKE_TERMINAL".into(), mode.into()),
+            ("FAKE_HOOK".into(), json!({"hook_event_name": "UserPromptSubmit", "session_id": "terminal-session"}).to_string()),
+            ("ANTHROPIC_AUTH_TOKEN".into(), "must-be-unset".into()),
+        ];
+        let args = if mode == "plain" {
+            let shim = e.bin.join("tool launcher.cmd");
+            std::fs::write(&shim, "@echo off\r\n\"%~dp0claude.exe\" %*\r\n").unwrap();
+            e.extra.push(("HRM_BIN_CLAUDE".into(), shim.display().to_string()));
+            vec!["run", "work", "--", "two words"]
+        } else {
+            vec!["run", "work", "--", "two words", "", r#"one"quote"#, r"with space\"]
+        };
+        let mut owned = start(&e, &args);
+        until(|| out().contains("fixture ready").then_some(()), trace);
+        let id = run_id(owned.0.id()).unwrap();
+        assert!(e.fail(&["reply", &id, "a\nb"]).contains("single line"));
+        owned.0.stdin.as_mut().unwrap().write_all(b"local\r").unwrap();
+        until(|| out().contains("fixture line=\"local\"").then_some(()), trace);
+        e.ok(&["reply", "terminal-session", "-réply"]);
+        let sent = if mode == "paste" { "\x1b[200~-réply\x1b[201~" } else { "-réply" };
+        let received = format!("fixture line={}", json!(sent));
+        until(|| out().contains(&received).then_some(()), trace);
+        e.ok(&["stop", &id]);
+        assert_eq!(until(|| owned.0.try_wait().unwrap(), trace).code(), Some(37), "{}", trace());
+        assert!(out().contains("fixture interrupt"), "{}", trace());
+        assert!(run_id(owned.0.id()).is_none());
+        assert!(e.fail(&["stop", &id]).contains("has no owned terminal"));
+        let records = e.runs();
+        let launch = records.last().unwrap();
+        let passed = launch["args"].as_array().unwrap();
+        assert_eq!(passed[0], "--settings");
+        assert_eq!(passed[2..], args[3..].iter().map(|a| json!(a)).collect::<Vec<_>>());
+        assert_eq!(launch["cwd"], json!(project));
+        assert!(launch["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+        assert_eq!(launch["env"]["CLAUDE_CONFIG_DIR"], json!(e.home.join(".claude-work")));
+    }
 }

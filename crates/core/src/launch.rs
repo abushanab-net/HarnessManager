@@ -38,6 +38,17 @@ impl LaunchSpec {
             .status().with_context(|| format!("start {}", self.program.display()))?;
         Ok(status.code().unwrap_or(1))
     }
+
+    /// Opt-in launch from `hrm run`. Sign-in and other callers keep using the inherited console.
+    pub fn run_session(&self, ctx: &crate::Ctx, run: Option<&str>) -> Result<i32> {
+        #[cfg(windows)]
+        if ctx.settings.own_terminal {
+            return crate::terminal::run(ctx, run.context("could not register the terminal run")?, self);
+        }
+        // Other platforms continue using the inherited terminal.
+        let _ = (ctx, run);
+        self.run()
+    }
 }
 
 #[cfg(windows)]
