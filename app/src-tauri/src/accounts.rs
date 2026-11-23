@@ -70,6 +70,8 @@ pub fn quota_live(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { Ok(json
 
 pub fn set_cap(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { service::set_daily_cap(ctx, &s(a, "name")?, a["cap"].as_f64())?; Ok(json!(true)) }
 
+pub fn set_remote_control(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { service::set_remote_control(ctx, &s(a, "name")?, a["on"] == true)?; Ok(json!(true)) }
+
 pub fn set_label(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { service::set_label(ctx, &s(a, "name")?, a["label"].as_str().unwrap_or(""))?; Ok(json!(true)) }
 
 pub fn set_key(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { service::set_api_key(ctx, &s(a, "name")?, &s(a, "key")?)?; Ok(json!(true)) }

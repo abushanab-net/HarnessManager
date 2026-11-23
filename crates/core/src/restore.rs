@@ -348,7 +348,7 @@ mod tests {
             Ok(())
         }).unwrap();
         let mut reg = ctx.registry().unwrap();
-        reg.add_profile(crate::registry::Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+        reg.add_profile(crate::registry::Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
         ctx.save_registry(&reg).unwrap();
         ctx
     }

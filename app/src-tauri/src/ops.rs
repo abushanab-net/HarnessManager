@@ -44,6 +44,7 @@ pub static OPS: &[Op] = &[
     // asks Anthropic, or runs Antigravity for up to 30 s; the registry is only read
     op("quota_live", accounts::quota_live, NO_LOCK),
     op("set_cap", accounts::set_cap, 0),
+    op("set_remote_control", accounts::set_remote_control, 0),
     op("set_label", accounts::set_label, 0),
     op("set_key", accounts::set_key, 0),
     op("start", accounts::start, NO_LOCK),
@@ -68,6 +69,7 @@ pub static OPS: &[Op] = &[
     op("resume", sessions::resume, NO_LOCK),
     op("export_markdown", sessions::export_markdown, NO_LOCK | NO_CHANGE),
     op("show_window", sessions::show_window, NO_LOCK | NO_CHANGE),
+    op("needs", sessions::needs, NO_LOCK | NO_CHANGE),
     op("session_stats", sessions::session_stats, NO_LOCK | NO_CHANGE),
     op("session_resume_here", sessions::session_resume_here, NO_LOCK),
     op("transcripts_status", sessions::transcripts_status, NO_LOCK | NO_CHANGE),

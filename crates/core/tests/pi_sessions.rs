@@ -25,7 +25,7 @@ fn ctx() -> (tempfile::TempDir, Ctx, Profile, Profile) {
     copy_tree(&fixtures().join("pi"), &home.join(".pi").join("agent").join("sessions"));
     copy_tree(&fixtures().join("omp"), &home.join(".omp").join("agent").join("sessions"));
     let ctx = Ctx::open_at(&dir.path().join("data"), &home).unwrap();
-    let p = |name: &str, h: &str| Profile { name: name.into(), label: None, harness: h.into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
+    let p = |name: &str, h: &str| Profile { name: name.into(), label: None, harness: h.into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
     (dir, ctx, p("pi-main", "pi"), p("omp-main", "omp"))
 }
 

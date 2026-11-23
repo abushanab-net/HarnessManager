@@ -397,7 +397,7 @@ async fn a_daily_cap_stops_a_routed_account_for_the_day() {
     s.ctx.db.kv_set("pricing:at", &hrm_core::util::now_ms().to_string()).unwrap();
     let mut reg = s.ctx.registry().unwrap();
     reg.profiles.push(hrm_core::registry::Profile { name: "acct".into(), label: None, harness: "claude".into(), kind: hrm_core::registry::Kind::Routed, email: None, main: false,
-        base_url: None, model: None, route: Some("fo".into()), daily_cap_usd: Some(10.0), intro: None, created_at: 0 });
+        base_url: None, model: None, route: Some("fo".into()), daily_cap_usd: Some(10.0), intro: None, remote_control: false, created_at: 0 });
     s.ctx.save_registry(&reg).unwrap();
     // under the cap: it goes through
     assert_eq!(post_msg(&s, "fo", &body("claude-sonnet-5-5", false), Some(&s.token)).await.status(), 200);
@@ -418,7 +418,7 @@ async fn an_api_key_account_with_its_own_endpoint_is_its_own_route_for_claude_co
     let mut reg = s.ctx.registry().unwrap();
     let up = reg.providers[0].base_url.trim_end_matches("/fail").to_string();
     let acct = |name: &str, harness: &str, model: Option<&str>, intro: Option<&str>| Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::ApiKey, email: None, main: false,
-        base_url: Some(format!("{up}/own")), model: model.map(String::from), route: None, daily_cap_usd: None, intro: intro.map(String::from), created_at: 0 };
+        base_url: Some(format!("{up}/own")), model: model.map(String::from), route: None, daily_cap_usd: None, intro: intro.map(String::from), remote_control: false, created_at: 0 };
     reg.profiles.push(acct("mine", "claude", Some("local-m"), Some("You are the team's assistant.")));
     reg.profiles.push(acct("cdx", "codex", None, Some("")));
     reg.profiles.push(acct("asis", "claude", None, None));

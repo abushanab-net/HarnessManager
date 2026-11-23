@@ -62,6 +62,7 @@ pub struct ProfileView {
     pub route: Option<String>,
     pub daily_cap_usd: Option<f64>,
     pub intro: Option<String>,
+    pub remote_control: bool,
     pub created_at: i64,
 }
 
@@ -130,6 +131,7 @@ pub fn profile_view(ctx: &Ctx, p: &Profile) -> ProfileView {
         route: p.route.clone(),
         daily_cap_usd: p.daily_cap_usd,
         intro: p.intro.clone(),
+        remote_control: p.remote_control,
         created_at: p.created_at,
     }
 }
@@ -277,7 +279,7 @@ pub fn add_profile(ctx: &Ctx, req: AddRequest) -> Result<ProfileView> {
         name: req.name.trim().into(), label: None, harness: req.harness.clone(), kind: req.kind,
         email: req.email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty()),
         main: req.main, base_url: req.base_url.filter(|s| !s.is_empty()), model: req.model.filter(|s| !s.is_empty()),
-        route: req.route, daily_cap_usd: None, intro: req.intro.map(|t| t.trim().to_string()), created_at: 0,
+        route: req.route, daily_cap_usd: None, intro: req.intro.map(|t| t.trim().to_string()), remote_control: false, created_at: 0,
     };
     reg.add_profile(p.clone())?;
     if let Some(k) = req.api_key.filter(|k| !k.trim().is_empty()) {
@@ -330,6 +332,17 @@ pub fn update_profile(ctx: &Ctx, name: &str, email: Option<String>, base_url: Op
         if i.is_some() && p.kind == Kind::Subscription { bail!("{}", NO_INTRO); }
         p.intro = i.map(|t| t.trim().to_string());
     }
+    ctx.save_registry(&reg)
+}
+
+/// Claude Code's `--remote-control` at every start of a Claude subscription account, so the session can be
+/// followed in Anthropic's own app.
+pub fn set_remote_control(ctx: &Ctx, name: &str, on: bool) -> Result<()> {
+    let _lock = ctx.lock_registry();
+    let mut reg = ctx.registry()?;
+    let p = reg.profiles.iter_mut().find(|p| p.name == name).context("no such profile")?;
+    if on && !(p.harness == "claude" && p.kind == Kind::Subscription) { bail!("Remote Control is for Claude Code accounts that sign in with a subscription"); }
+    p.remote_control = on;
     ctx.save_registry(&reg)
 }
 
@@ -1576,7 +1589,7 @@ mod tests {
         let ctx = ctx(&t);
         let mut reg = ctx.registry().unwrap();
         for (name, harness, kind) in [("codex-1", "codex", Kind::Subscription), ("claude-key", "claude", Kind::ApiKey)] {
-            reg.add_profile(Profile { name: name.into(), label: None, harness: harness.into(), kind, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+            reg.add_profile(Profile { name: name.into(), label: None, harness: harness.into(), kind, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
         }
         ctx.save_registry(&reg).unwrap();
         for name in ["codex-1", "claude-key"] { assert!(refused(quota_live(&ctx, name)).contains("only available for Claude and Antigravity subscription accounts"), "{name}"); }
@@ -1623,7 +1636,7 @@ mod tests {
     fn two_codex_accounts(ctx: &Ctx) -> (PathBuf, PathBuf) {
         let mut reg = ctx.registry().unwrap();
         for (name, main) in [("codex-main", true), ("codex-work", false)] {
-            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+            reg.add_profile(Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
         }
         ctx.save_registry(&reg).unwrap();
         let skills = |name: &str| { let p = reg.get(name).unwrap(); harness::of(p).item_paths(ctx, p).skills.unwrap() };

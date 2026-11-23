@@ -317,18 +317,61 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
     let _ = w.set_focus();
 }
 
-/// The tray icon: a click shows the limits, a double-click the window; its menu opens the window or quits.
+/// The sessions' states as last read (hooks.rs), for the tray's entries.
+static RUNS: Mutex<Vec<hrm_core::hooks::Run>> = Mutex::new(Vec::new());
+
+/// "Needs you": the few rows `hrm hook` writes, read every second; on a change the window is told and the tray
+/// says how many sessions wait, with an entry for each that brings its console to the front.
+fn watch_runs(app: tauri::AppHandle, st: Arc<AppState>) {
+    std::thread::spawn(move || loop {
+        hrm_core::log::round("session states", || {
+            let ctx = st.ctx();
+            let Ok(now) = hrm_core::hooks::runs(&ctx) else { return };
+            {
+                let mut last = RUNS.lock().unwrap_or_else(|e| e.into_inner());
+                if *last == now { return; }
+                *last = now.clone();
+            }
+            let _ = app.emit("needs", &now);
+            let Some(t) = app.tray_by_id("main") else { return };
+            let waiting: Vec<&hrm_core::hooks::Run> = now.iter().filter(|r| r.state == "waiting").collect();
+            let _ = t.set_tooltip(Some(match waiting.len() { 0 => "Harness Manager".to_string(), 1 => "Harness Manager · 1 session needs you".into(), n => format!("Harness Manager · {n} sessions need you") }));
+            match tray_menu(&app, &ctx, &waiting) { Ok(m) => { let _ = t.set_menu(Some(m)); } Err(e) => hrm_core::log::warn(&format!("tray: {e:#}")) }
+        });
+        std::thread::sleep(Duration::from_secs(1));
+    });
+}
+
+/// The tray's menu: a line per session waiting for you, then Open and Quit.
+fn tray_menu<M: Manager<tauri::Wry>>(app: &M, ctx: &Ctx, waiting: &[&hrm_core::hooks::Run]) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    let reg = ctx.registry().ok();
+    let label = |n: &str| reg.as_ref().and_then(|r| r.get(n).ok()).and_then(|p| p.label.clone()).unwrap_or_else(|| n.to_string());
+    let mut items: Vec<Box<dyn IsMenuItem<tauri::Wry>>> = vec![];
+    for r in waiting {
+        let text = hrm_core::util::truncate(&format!("{} needs you{}", label(&r.profile), if r.reason.is_empty() { String::new() } else { format!(": {}", r.reason) }), 60);
+        items.push(Box::new(MenuItem::with_id(app, format!("run:{}", r.run), text, true, None::<&str>)?));
+    }
+    if !waiting.is_empty() { items.push(Box::new(PredefinedMenuItem::separator(app)?)); }
+    items.push(Box::new(MenuItem::with_id(app, "open", "Open Harness Manager", true, None::<&str>)?));
+    items.push(Box::new(PredefinedMenuItem::separator(app)?));
+    items.push(Box::new(MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?));
+    Menu::with_items(app, &items.iter().map(|b| b.as_ref()).collect::<Vec<_>>())
+}
+
+/// The tray icon: a click shows the limits, a double-click the window; its menu opens the window or quits, and
+/// brings a session that waits for you to the front.
 fn tray(app: &tauri::App) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-    let open = MenuItem::with_id(app, "open", "Open Harness Manager", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = tray_menu(app, &app.state::<Arc<AppState>>().ctx(), &[])?;
     let mut t = TrayIconBuilder::with_id("main").tooltip("Harness Manager").menu(&menu).show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id().as_ref() {
             "open" => show_main(app),
             "quit" => app.exit(0),
-            _ => {}
+            id => if let Some(run) = id.strip_prefix("run:") {
+                let r = RUNS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|r| r.run == run).cloned();
+                if let Some(r) = r { if !sessions::focus_console(r.hwnd, r.pid) { show_main(app); } }
+            },
         })
         .on_tray_icon_event(|t, e| match e {
             TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, position, rect, .. } => limits_popup(t.app_handle(), position, rect),
@@ -462,6 +505,7 @@ fn main() {
             let w = win.build()?;
             if w.is_visible().unwrap_or(false) { w.set_focus()?; }
             tray(app)?;
+            watch_runs(app.handle().clone(), state.clone());
             watch_self_update(app.handle().clone());
             // newer versions of the tools, when asked to look at launch: the Apps item shows how many
             let (handle, st) = (app.handle().clone(), state.clone());

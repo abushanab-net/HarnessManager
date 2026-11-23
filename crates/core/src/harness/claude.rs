@@ -227,13 +227,16 @@ impl Harness for Claude {
 
     fn launch(&self, ctx: &Ctx, p: &Profile, args: &[String]) -> Result<LaunchSpec> {
         let mut spec = LaunchSpec { program: resolve_program(self.id(), self.binary())?, args: args.to_vec(), ..Default::default() };
+        // the session-state hooks, from a file of Harness Manager's own: first, so `--remote-control` stays last
+        if let Some(s) = crate::hooks::settings_args(ctx, args)? { spec.args.splice(0..0, s); }
         spec.env_unset = CONFLICTING.iter().chain(SESSION_MARKERS).map(|s| s.to_string()).collect();
         base_env(ctx, &mut spec);
         if !p.main {
             spec.env_set.push(("CLAUDE_CONFIG_DIR".into(), self.home(ctx, p).display().to_string()));
         }
         match p.kind {
-            Kind::Subscription => {}
+            // last: `--remote-control [name]` would take a prompt after it as the session's name
+            Kind::Subscription => if p.remote_control { spec.args.push("--remote-control".into()); },
             Kind::ApiKey if !p.own_route() => {
                 let key = crate::secrets::get_key(&crate::secrets::key_target(&p.name))
                     .ok_or_else(|| anyhow::anyhow!("no API key saved for '{}'. Run `hrm key set {}`.", p.name, p.name))?;
@@ -596,7 +599,7 @@ mod account_tests {
     fn the_login_and_the_cached_limits_follow_the_account_file_as_it_changes() {
         let t = tempfile::tempdir().unwrap();
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        let p = Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
+        let p = Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
         let file = Claude.claude_json(&ctx, &p);
         let doc = |uuid: &str, email: &str| json!({"projects": {"C:\\work": {"history": ["one", "two"]}}, "oauthAccount": {"accountUuid": uuid, "emailAddress": email},
             "cachedUsageUtilization": {"accountUuid": "u1", "fetchedAtMs": 5, "utilization": {"seven_day": {"utilization": 12.0}}}}).to_string();

@@ -50,6 +50,9 @@ pub struct Profile {
     /// session ids) are removed too. API-key and routed accounts only: a subscription login never passes the router.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intro: Option<String>,
+    /// Claude subscription accounts: start Claude Code with `--remote-control`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_control: bool,
     #[serde(default)]
     pub created_at: i64,
 }

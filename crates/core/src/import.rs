@@ -26,7 +26,7 @@ pub fn detect_main_profiles(ctx: &Ctx, reg: &mut Registry, rep: &mut ImportRepor
         if !h.default_home(ctx).exists() { continue; }
         let name = format!("{}-main", h.id());
         if reg.profile(&name).is_some() { continue; }
-        let p = Profile { name: name.clone(), label: None, harness: h.id().into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
+        let p = Profile { name: name.clone(), label: None, harness: h.id().into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
         if reg.add_profile(p).is_ok() { rep.main_profiles.push(name); }
     }
 }
@@ -42,7 +42,7 @@ pub fn import_powershell(reg: &mut Registry, path: &Path, rep: &mut ImportReport
     for a in v["accounts"].as_array().cloned().unwrap_or_default() {
         let Some(name) = a["name"].as_str() else { continue };
         if reg.profile(name).is_some() { rep.skipped.push(format!("{name}: already exists")); continue; }
-        let p = Profile { name: name.into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: a["email"].as_str().map(String::from).filter(|e| !e.is_empty()), main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
+        let p = Profile { name: name.into(), label: None, harness: "claude".into(), kind: Kind::Subscription, email: a["email"].as_str().map(String::from).filter(|e| !e.is_empty()), main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
         match reg.add_profile(p) {
             Ok(()) => rep.accounts.push(name.into()),
             Err(e) => rep.skipped.push(format!("{name}: {e}")),
@@ -67,7 +67,7 @@ pub fn import_powershell(reg: &mut Registry, path: &Path, rep: &mut ImportReport
             rep.skipped.push(format!("key {raw}: {e:#}"));
             continue;
         }
-        reg.add_profile(Profile { name: name.clone(), label: None, harness: "claude".into(), kind: Kind::ApiKey, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 })?;
+        reg.add_profile(Profile { name: name.clone(), label: None, harness: "claude".into(), kind: Kind::ApiKey, email: None, main: false, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 })?;
         rep.keys.push(name);
     }
     Ok(())

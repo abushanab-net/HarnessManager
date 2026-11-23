@@ -4,6 +4,7 @@ pub mod ctx;
 pub mod dash;
 pub mod db;
 pub mod harness;
+pub mod hooks;
 pub mod import;
 pub mod index;
 pub mod items;

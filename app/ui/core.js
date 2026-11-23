@@ -86,9 +86,10 @@ function bar(text, { warn = false, toast: isToast = false, act = null, id } = {}
   clearTimeout(toastTimer);
   el.innerHTML = `<div class="notice-bar ${warn ? 'warn' : ''} ${isToast ? 'toast' : ''}" role="${warn ? 'alert' : 'status'}"><span id="${id}">${esc(text)}</span>${act ? `<button class="filter-chip notice-act" data-act="${esc(act.act)}" ${Object.entries(act.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} data-testid="notice-act">${esc(act.label)}</button>` : ''}<button class="filter-chip" data-act="notice-close" aria-label="Dismiss">Dismiss</button></div>`;
 }
-/** A short confirmation after an action, or an error; it stays long enough to read (about 60 ms a character), then goes. */
-export function toast(msg, isErr = false) {
-  bar(msg, { warn: isErr, toast: true, id: 'toast' });
+/** A short confirmation after an action, or an error; it stays long enough to read (about 60 ms a character), then goes.
+ * `act` ({ label, act, data }) adds a button, as a notice has. */
+export function toast(msg, isErr = false, act = null) {
+  bar(msg, { warn: isErr, toast: true, act, id: 'toast' });
   toastTimer = setTimeout(clearNotice, Math.max(isErr ? 7000 : 3500, msg.length * 60));
 }
 /** A failure that stays on screen until dismissed, with an optional offer beside it; the next failure replaces it. */
@@ -291,13 +292,41 @@ export function redrawLive() {
   const running = S.state.profiles.flatMap((p) => p.running.map((r) => ({ ...r, profile: p.name })));
   const elsewhere = ((S.cache.computers || {}).peers || []).reduce((a, p) => a + (p.running || []).length, 0);
   const live = running.length + elsewhere, where = `${running.length} on this computer · ${elsewhere} elsewhere`;
-  badge('n-live', live ? `<i class="live-dot"></i>${live} live` : '', live ? `The sessions running now: ${where}` : '');
+  const waiting = (S.needs || []).filter((r) => r.state === 'waiting').length, wait = waiting ? ` · ${waiting} waiting` : '';
+  badge('n-live', live || waiting ? `<i class="live-dot"></i>${live} live${wait}` : '', live || waiting ? `The sessions running now: ${where}${waiting ? `; ${waiting} waiting for you` : ''}` : '');
   const strip = document.getElementById('live-strip');
   if (strip) {
     strip.hidden = !live;
     strip.querySelector('.live-n').textContent = `${live} live`;
     strip.title = where;
   }
+}
+
+// ---------- "needs you": what each session hrm run started last reported through its hooks (hooks.rs) ----------
+/** The run a session row stands for, by its account and session id. */
+export const runOf = (profile, id) => (id && (S.needs || []).find((r) => r.profile === profile && r.session_id === id)) || null;
+const STATE = { waiting: 'needs you', working: 'working', done: 'done' };
+function markHtml(profile, id) {
+  const r = runOf(profile, id);
+  if (!r || !STATE[r.state]) return '';
+  return r.state === 'waiting'
+    ? `<button class="pill warn" data-act="show-run" data-run="${esc(r.run)}" title="${esc(r.reason || 'Waiting for you')}. Brings its terminal to the front." data-testid="needs-${esc(id)}">needs you</button>`
+    : `<span class="pill ${r.state === 'working' ? 'ok' : 'quiet'}" title="${r.state === 'working' ? 'Working' : 'Finished its turn'}" data-testid="needs-${esc(id)}">${STATE[r.state]}</span>`;
+}
+/** A session row's state mark; filled again in place by drawNeeds, so a change shows without redrawing the page. */
+export const needsMark = (profile, id) => `<span class="needs-mark" data-needs="${esc(profile)}/${esc(id)}">${markHtml(profile, id)}</span>`;
+/** A new list of states: the marks, the sidebar count, and a toast for each session that starts waiting. `redraw`
+ * runs when the set of waiting sessions changed (the Overview lists them). */
+export function drawNeeds(list, redraw) {
+  const before = Object.fromEntries((S.needs || []).map((r) => [r.run, r.state]));
+  const waitingNow = (l) => l.filter((r) => r.state === 'waiting').map((r) => r.run).join();
+  const changed = waitingNow(S.needs || []) !== waitingNow(list);
+  S.needs = list;
+  for (const el of document.querySelectorAll('[data-needs]')) { const i = el.dataset.needs.indexOf('/'); el.innerHTML = markHtml(el.dataset.needs.slice(0, i), el.dataset.needs.slice(i + 1)); }
+  redrawLive();
+  const fresh = list.filter((r) => r.state === 'waiting' && before[r.run] !== 'waiting').pop();
+  if (fresh) toast(`${acctName(fresh.profile)} needs you${fresh.reason ? ': ' + fresh.reason : ''}`, false, { label: 'Show', act: 'show-run', data: { run: fresh.run } });
+  if (changed && redraw) redraw();
 }
 
 /** Beside Accounts in the sidebar: how many accounts of the tools shown need attention (a login to renew, a limit used up). */

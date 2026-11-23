@@ -390,6 +390,7 @@ view('account', async (sheet, params) => {
       ${p.kind === 'api_key' ? `<section class="panel-card"><h2 class="panel-title">API key</h2>${row(field('pf-key', 'New API key', '', 'password', 'placeholder="Paste a new key"'), 'save-key', 'Replace key')}<span class="muted">Kept in ${esc(keyStore())}, never in the account list.</span>${row(field('pf-url', 'Base URL', p.base_url || '') + field('pf-model', 'Model', p.model || ''), 'save-endpoint')}<span class="muted">Leave empty to use the vendor's own API and default model.</span></section>` : ''}
       ${p.kind === 'routed' ? `<section class="panel-card"><h2 class="panel-title">Daily spend cap</h2>${row(field('pf-cap', 'Cap in USD', p.daily_cap_usd ?? '', 'number', 'min="0" step="0.5" placeholder="no cap" data-testid="cap-input"'), 'save-cap', 'Save', 'cap-save')}<span class="muted">The most the router spends for this account in a day, at API list prices. At the cap it stops answering for it until midnight. Empty: no cap.</span></section>` : ''}
       ${p.kind !== 'subscription' && INTRO_TOOLS.includes(p.harness) ? `<section class="panel-card"><h2 class="panel-title">How the tool names itself</h2>${row(introFields('pf-intro', p.intro), 'save-intro', 'Save', 'intro-save')}<span class="muted">${esc(INTRO_NOTE)}</span></section>` : ''}
+      ${p.harness === 'claude' && p.kind === 'subscription' ? `<section class="panel-card"><h2 class="panel-title">Remote Control</h2><span>${p.remote_control ? 'On: Claude Code starts with Remote Control.' : 'Off.'}</span><span class="muted">Adds <span class="mono">--remote-control</span> at every start, so the session can also be followed and answered in Anthropic's Claude app.</span><div><button class="btn-secondary" data-act="set-remote-control" data-name="${esc(name)}" data-on="${p.remote_control ? '' : '1'}" data-testid="remote-control">${p.remote_control ? 'Turn off' : 'Turn on'}</button></div></section>` : ''}
       ${p.harness === 'claude' && !p.main ? `<section class="panel-card"><h2 class="panel-title">Shared with the main profile</h2><span>CLAUDE.md, rules, skills, plugins and MCP servers follow the main profile. Login, history and usage stay with this account.</span><div><button class="btn-secondary" data-act="sync-now">Sync now</button></div></section>` : ''}
       <section class="panel-card"><h2 class="panel-title">${p.main ? 'Hide main profile' : 'Remove account'}</h2><span class="muted">${p.main ? "Stops managing the tool's own profile. Its folder and login are never deleted." : 'Removes it from Harness Manager. Its folder stays unless you choose to delete it.'}</span><div><button class="btn-secondary negT" data-act="remove-account" data-name="${esc(name)}" data-main="${p.main ? 1 : ''}" data-testid="remove-account">${p.main ? 'Hide main profile…' : 'Remove account…'}</button></div></section></div>`;
   }
@@ -477,11 +478,19 @@ function newInProject(dir, project, preferred) {
 }
 action('project-new', (el) => newInProject(el.dataset.dir, el.dataset.name, el.dataset.profile));
 action('session-new', () => newInProject('', ''));
+// a session that reported its state (hooks.rs): its console window, which hrm run recorded
+action('show-run', async (el) => {
+  const r = (S.needs || []).find((x) => x.run === el.dataset.run);
+  if (!r) return toast('That session has ended.');
+  const ok = await attempt(() => call('show_window', { pid: r.pid, hwnd: r.hwnd }));
+  if (ok === false) toast('That session is in another window; switch to it from the taskbar.');
+});
 action('show-window', async (el) => { const ok = await attempt(() => call('show_window', { pid: +el.dataset.pid })); if (ok === false) toast('That console is in another window; switch to it from the taskbar.'); });
 action('open-folder', (el) => attempt(() => call('open_folder', { path: el.dataset.path })));
 action('open-session', (el) => go('session', { profile: el.dataset.profile, id: el.dataset.id, ...(el.dataset.device ? { device: el.dataset.device } : {}) }));
 action('resume', (el) => attempt(() => call('resume', { profile: el.dataset.profile, id: el.dataset.id, cwd: el.dataset.cwd }), 'Resumed in a new terminal'));
 action('sync-now', () => mutate(() => call('sync', {}), 'Accounts are in step'));
+action('set-remote-control', (el) => { const on = !!el.dataset.on; mutate(() => call('set_remote_control', { name: el.dataset.name, on }), on ? 'Remote Control is on from the next start.' : 'Remote Control is off from the next start.'); });
 action('save-cap', (el) => { const v = document.getElementById('pf-cap').value.trim(); mutate(() => call('set_cap', { name: el.dataset.name, cap: v === '' ? null : +v }), 'Saved'); });
 action('save-email', (el) => mutate(() => call('update', { name: el.dataset.name, email: document.getElementById('pf-email').value }), 'Saved'));
 action('save-label', (el) => mutate(() => call('set_label', { name: el.dataset.name, label: document.getElementById('pf-label').value }), 'Renamed'));

@@ -1,6 +1,6 @@
 // Starts the window: icons, navigation, search, and live refresh after background imports.
 
-import { S, render, go, call, setAppUpdates, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown } from './core.js';
+import { S, render, go, call, setAppUpdates, setFresh, loadState, toast, drawPins, restoreFolds, editing, shown, onShown, drawNeeds } from './core.js';
 import { brandMark } from './lib.js';
 import './accounts.js';
 import './home.js';
@@ -80,6 +80,12 @@ if (ev) ev.listen('self-update', (e) => {
 
 // open consoles change without any file being written; look again every minute on the accounts list
 setInterval(async () => { if (S.route.view === 'accounts' && !document.getElementById('dialog-root').innerHTML && await shown()) render(true); }, 60000);
+
+// the sessions' states from their hooks: the backend reads them every second and says when one changes; the
+// Overview lists the ones waiting, so it is drawn again when that set changes
+const needsRedraw = () => { if (S.route.view === 'home' && !editing()) render(true); };
+call('needs').then((l) => drawNeeds(l, needsRedraw)).catch(() => {});
+if (ev) ev.listen('needs', (e) => drawNeeds(e.payload, needsRedraw));
 
 // the limits popup by the tray icon opens this window at an account
 if (ev) ev.listen('navigate', (e) => { location.hash = e.payload; });

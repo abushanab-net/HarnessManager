@@ -411,7 +411,7 @@ fn transcripts_go_to_the_hub_sealed_and_are_fetched_on_demand() {
     let t = tempfile::tempdir().unwrap();
     let (a, b) = joined(t.path(), &url);
     let mut reg = a.ctx.registry().unwrap();
-    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
     a.ctx.save_registry(&reg).unwrap();
     let cwd = t.path().join("app");
     std::fs::create_dir_all(&cwd).unwrap();

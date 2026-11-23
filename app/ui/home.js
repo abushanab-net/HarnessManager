@@ -4,7 +4,7 @@
 // action); then the selected route, the 53-week year clock and the latest replies with the request log behind a button.
 // Measured numbers are plain; estimates carry ≈; — means not read. No tokens-per-second on this page.
 
-import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu } from './core.js';
+import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu, needsMark } from './core.js';
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
 import { accountViews, metricsOf, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
 import { computersStatus, syncOn, computers, nameOf, scope, setScope } from './computers.js';
@@ -181,6 +181,9 @@ function readApps(n) {
 }
 function attention(m, accts, d, now) {
   const items = [], open = (href) => `<a class="btn sm" href="${href}">Open</a>`;
+  // a session started here that waits for you (its hooks said so): first, oldest first
+  for (const r of (S.needs || []).filter((x) => x.state === 'waiting')) items.push({ key: 'run-' + r.run, rank: -1, at: r.ts, icon: toolIcon(r.harness, 16), name: acctName(r.profile), tone: 'warnT',
+    title: [r.reason || 'Waiting for you', r.cwd].filter(Boolean).join('\n'), text: `Needs you${r.reason ? ' · ' + r.reason : ''}`, btn: `<button class="btn sm" data-act="show-run" data-run="${esc(r.run)}" title="Bring its terminal to the front">Show</button>` });
   for (const a of accts) {
     const risks = m.atRisk.filter((r) => r.acct === a), spent = risks.find((r) => r.win.left === 0), out = risks.find((r) => r.win.left > 0);
     if (!spent && !out && !a.needsLogin) continue;
@@ -301,7 +304,7 @@ function draw(sheet) {
   const shownSessions = sessions.filter((s) => livePc === 'all' || s.computer === livePc).sort((a, b) => (b.streaming - a.streaming) || ((a.since || 0) - (b.since || 0)));
   const count = (id, text) => (others.length && sessions.some((s) => s.computer === id) ? `<button type="button" class="ov-count ${livePc === id ? 'on' : ''}" aria-pressed="${livePc === id}" data-act="home-live-pc" data-v="${esc(id)}" title="Show only these; again for all">${text}</button>` : `<span>${text}</span>`);
   const runCard = `<section class="card" data-key="running" data-testid="running-now" aria-label="Running now"><div class="card-head"><h2 class="section">Running now</h2><span class="small muted ov-counts" title="The local router is ${state.router.running ? 'running on :' + esc(state.router.port) : 'stopped'}" data-testid="running-count">${count(me, `${live} here`)}${others.map((c) => ` · ${count(c.id, `${c.n} on ${esc(c.name)}`)}`).join('')}</span></div>
-    <div class="ov-list" ${shownSessions.length > 4 ? 'tabindex="0" aria-label="All running sessions; scroll for more"' : ''}>${shownSessions.map((s) => `<div class="ov-item" data-key="live-${esc(s.computer)}-${esc(s.id || s.pid)}"><div class="two"><div><b class="trunc grow" title="${esc(s.title)}">${esc(s.title)}</b><span class="meta" title="${s.streaming ? 'Its account sent tokens in the last minutes' : 'Open'}">${s.since ? fmtDuration(now - s.since) : ''}</span></div>
+    <div class="ov-list" ${shownSessions.length > 4 ? 'tabindex="0" aria-label="All running sessions; scroll for more"' : ''}>${shownSessions.map((s) => `<div class="ov-item" data-key="live-${esc(s.computer)}-${esc(s.id || s.pid)}"><div class="two"><div><b class="trunc grow" title="${esc(s.title)}">${esc(s.title)}</b>${s.computer === me && s.id ? needsMark(s.accountId, s.id) : ''}<span class="meta" title="${s.streaming ? 'Its account sent tokens in the last minutes' : 'Open'}">${s.since ? fmtDuration(now - s.since) : ''}</span></div>
         <div class="meta"><span class="trunc">${esc(s.project)}</span><span class="g">${s.tool ? toolIcon(s.tool, 14) : ''}${esc(acctName(s.accountId))}</span><span class="g">${pcDot(pcl, s.computer)}${esc(nameOf(pcs, s.computer) || pcl[0].name)}</span></div></div>
         ${s.id ? `<button class="btn sm" data-act="open-session" data-profile="${esc(s.accountId)}" data-id="${esc(s.id)}" ${s.computer !== me ? `data-device="${esc(s.computer)}"` : ''}>Follow</button>` : `<button class="btn sm" data-act="show-window" data-pid="${s.pid}" title="Bring its console window to the front">Show</button>`}</div>`).join('') || '<div class="ov-empty">No session is running.</div>'}</div></section>`;
 

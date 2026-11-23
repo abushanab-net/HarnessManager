@@ -5,6 +5,8 @@
 //! FAKE_RUN_LOG    file that receives one JSON line per launch: tool, args, cwd and relevant variables
 //! FAKE_WAIT_CODE  when set, `auth login` waits for a pasted code on stdin before finishing
 //! FAKE_HOLD_MS    keep running this long first, like a console the user left open
+//! FAKE_HOOK       claude: a hook event (JSON) sent first, as Claude Code does, to each command the `--settings` file
+//!                 has for that event; each run is recorded in FAKE_RUN_LOG with its exit code and output
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -33,6 +35,24 @@ fn record(tool: &str, args: &[String]) {
     let line = json!({"tool": tool, "args": args, "cwd": std::env::current_dir().unwrap().display().to_string(), "env": env});
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap();
     f.write_all(format!("{line}\n").as_bytes()).unwrap();
+}
+
+fn fire_hook(args: &[String]) {
+    let Ok(ev) = std::env::var("FAKE_HOOK") else { return };
+    let v: serde_json::Value = serde_json::from_str(&ev).unwrap();
+    let file = args.windows(2).find(|w| w[0] == "--settings").map(|w| PathBuf::from(&w[1]));
+    let s: serde_json::Value = file.and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let name = v["hook_event_name"].as_str().unwrap_or("");
+    for cmd in s["hooks"][name].as_array().into_iter().flatten().flat_map(|g| g["hooks"].as_array().cloned().unwrap_or_default()).filter_map(|h| h["command"].as_str().map(String::from)) {
+        let mut c = if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", &cmd]); c } else { let mut c = std::process::Command::new("sh"); c.args(["-c", &cmd]); c };
+        let mut child = c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(ev.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        if let Ok(log) = std::env::var("FAKE_RUN_LOG") {
+            let line = json!({"hook": name, "command": cmd, "code": out.status.code(), "stdout": String::from_utf8_lossy(&out.stdout), "stderr": String::from_utf8_lossy(&out.stderr)});
+            std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap().write_all(format!("{line}\n").as_bytes()).unwrap();
+        }
+    }
 }
 
 fn email(args: &[String]) -> String {
@@ -174,6 +194,7 @@ fn main() {
     let me = std::env::current_exe().unwrap();
     let name = me.file_stem().unwrap().to_string_lossy().to_lowercase();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if name == "claude" { fire_hook(&args); }
     if let Some(ms) = std::env::var("FAKE_HOLD_MS").ok().and_then(|v| v.parse().ok()) { std::thread::sleep(std::time::Duration::from_millis(ms)); }
     // every real tool answers this, and it is not a run
     if args == ["--version"] { println!("1.0.0 (fake {name})"); return; }

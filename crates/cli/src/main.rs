@@ -54,6 +54,9 @@ enum Cmd {
     Remove { name: String, #[arg(long)] delete_home: bool },
     /// Run the harness as an account in this console; arguments after -- go to the harness
     Run { name: String, #[arg(last = true)] args: Vec<String> },
+    /// Called by Claude Code's hooks: records whether a session hrm run started is working, waiting for you or done.
+    /// Reads the event on standard input, prints nothing and always succeeds; outside hrm run it does nothing
+    Hook,
     /// Open a new terminal running the account
     Start { name: String, #[arg(long)] cwd: Option<PathBuf>, #[arg(last = true)] args: Vec<String> },
     /// API keys for API-key accounts (kept in this computer's credential store: see `hrm secrets check`)
@@ -329,6 +332,19 @@ fn main() {
         default_hook(info);
     }));
     let cli = Cli::parse();
+    // before Ctx::open: it runs on every tool call, and must never fail or slow the tool
+    if matches!(cli.cmd, Cmd::Hook) {
+        // outside hrm run there is nothing to record, and nothing is read
+        if std::env::var_os(hrm_core::hooks::RUN_VAR).is_some() {
+            let mut input = String::new();
+            let r = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input).map_err(anyhow::Error::from).and_then(|_| hrm_core::hooks::record(&input));
+            if let Err(e) = r {
+                hrm_core::log::init(&hrm_core::ctx::data_dir(), true, "info");
+                hrm_core::log::info(&format!("hrm hook: {e:#}"));
+            }
+        }
+        std::process::exit(0);
+    }
     match real_main(cli) {
         Ok(code) => std::process::exit(code),
         Err(e) => {
@@ -431,9 +447,13 @@ fn real_main(cli: Cli) -> Result<i32> {
             println!("Removed {name}{}", if delete_home { " and its folder" } else { "" });
         }
         Cmd::Run { name, args } => {
-            let spec = service::launch_spec(&ctx, &name, &args)?;
-            return spec.run();
+            let mut spec = service::launch_spec(&ctx, &name, &args)?;
+            let run = hrm_core::hooks::start_run(&ctx, ctx.registry()?.get(&name)?, &mut spec.env_set);
+            let code = spec.run();
+            if let Some(r) = run { hrm_core::hooks::end_run(&ctx, &r); }
+            return code;
         }
+        Cmd::Hook => unreachable!("answered in main"),
         Cmd::Start { name, cwd, args } => {
             service::start(&ctx, &name, cwd, &args)?;
             println!("Opened a terminal for {name}");

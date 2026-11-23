@@ -624,7 +624,7 @@ mod limits_tests {
         std::fs::write(t.path().join("pricing.json"), "{}").unwrap();
         std::env::set_var("HRM_PRICING_FILE", t.path().join("pricing.json"));
         let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 };
+        let p = |name: &str, main| Profile { name: name.into(), label: None, harness: "codex".into(), kind: Kind::Subscription, email: None, main, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
         let (main, other, none) = (p("codex-main", true), p("other", false), p("none", false));
         let week = |q: Option<Quota>| q.map(|q| (q.tier("week").unwrap().used, q.fetched_at.unwrap()));
         let file = |p: &Profile, name: &str, text: &str| { let f = Codex.home(&ctx, p).join("sessions").join(name); std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, text).unwrap(); f };

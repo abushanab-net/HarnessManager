@@ -95,6 +95,12 @@ you are on. The **?** button replays the page's tour.
   project, date, account, tool or tag. Tag sessions and projects with your own labels. A reading view shows the
   steps, failed commands, answers and changed files, and follows a running session live. Resume reopens a
   session in its own account.
+- **Needs you:** a Claude Code session started from Harness Manager says whether it is working, waiting for you
+  or done, through a hook it is started with (`hrm settings session_hooks false` turns it off). The hook comes
+  from a file in Harness Manager's own folder: no account's files change, and sessions started elsewhere are not
+  touched. A session that waits for a permission or an answer shows on the Overview, on its row, in the tray and
+  in a message, and Show brings its terminal to the front. A Claude subscription account can also start with
+  Claude Code's own Remote Control.
 - **MCP servers, skills and prompts, kept once:** each MCP server is written into every tool you tick.
   Skills live once in `~/.agents/skills` and are linked into each tool; Discover installs skills from
   GitHub repositories. A ledger records what Harness Manager wrote, so it only ever removes its own entries.

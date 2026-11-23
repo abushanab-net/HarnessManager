@@ -186,7 +186,8 @@ fn claude_subscription_profile_login_identity_quota_and_launch() {
     assert!(c.status().unwrap().success());
     let run = e.runs().pop().unwrap();
     assert_eq!(run["tool"], "claude");
-    assert_eq!(run["args"], json!(["--resume", "abc"]));
+    // the session-state hooks first (hooks.rs), then the user's arguments as given
+    assert_eq!(run["args"], json!(["--settings", e.data.join("claude-hooks.json").display().to_string(), "--resume", "abc"]));
     assert_eq!(run["env"]["CLAUDE_CONFIG_DIR"], home.display().to_string());
     assert!(run["env"].get("ANTHROPIC_API_KEY").is_none(), "a subscription launch must not inherit an API key");
 
@@ -1100,4 +1101,40 @@ fn a_backup_leaves_the_transcripts_out_when_told_to_whatever_the_setting_says() 
     assert!(e.ok(&["backup"]).contains(", with transcripts"), "the setting decides without a flag");
     assert!(!e.ok(&["backup", "--no-transcripts"]).contains("with transcripts"), "the flag wins over the setting");
     e.fail(&["backup", "--no-transcripts", "--with-transcripts"]);
+}
+
+#[test]
+fn a_session_hrm_run_started_reports_its_state_through_its_launch_hooks_and_one_started_elsewhere_has_none() {
+    let mut e = Env::new();
+    e.ok(&["add", "work", "--no-login"]);
+    let home = e.home.join(".claude-work");
+    let ev = json!({"hook_event_name": "PermissionRequest", "session_id": "s-1", "cwd": "D:/w", "tool_name": "Bash", "tool_input": {"command": "npm test"}}).to_string();
+    e.extra = vec![("FAKE_HOOK".into(), ev.clone()), ("FAKE_HOLD_MS".into(), "4000".into())];
+    let mut run = e.cmd(&["run", "work"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).spawn().unwrap();
+    let rows = || -> Vec<(i64, String, String, String, String)> {
+        let Ok(c) = rusqlite::Connection::open(e.data.join("hm.db")) else { return vec![] };
+        let Ok(mut st) = c.prepare("select pid, profile, harness, state, reason from run_state where session_id = 's-1'") else { return vec![] };
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap().collect::<Result<_, _>>().unwrap()
+    };
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while rows().is_empty() && std::time::Instant::now() < end { std::thread::sleep(std::time::Duration::from_millis(100)); }
+    assert_eq!(rows(), vec![(run.id() as i64, "work".into(), "claude".into(), "waiting".into(), "Bash: npm test".into())], "the row hrm run made, with the hook's state");
+    // the hook said nothing the tool would read as a decision
+    let hook = e.runs().into_iter().find(|r| r["hook"] == "PermissionRequest").unwrap();
+    assert_eq!((hook["code"].clone(), hook["stdout"].clone()), (json!(0), json!("")));
+    assert!(run.wait().unwrap().success());
+    assert!(rows().is_empty(), "gone with the hrm run that made it");
+    // the tool was started with our settings file; nothing went into the account's folder
+    let launch = e.runs().into_iter().find(|r| r["tool"] == "claude").unwrap();
+    assert_eq!(launch["args"], json!(["--settings", e.data.join("claude-hooks.json").display().to_string()]));
+    assert!(!home.join("settings.json").exists());
+
+    // the same account's Claude Code started without hrm run has no hook to run
+    let n = e.runs().len();
+    let fake = Command::new(e.bin.join("claude.exe")).env("CLAUDE_CONFIG_DIR", &home).env("HRM_HOME", &e.data).env("FAKE_RUN_LOG", &e.run_log).env("FAKE_HOOK", &ev)
+        .env_remove("HRM_RUN").output().unwrap();
+    assert!(fake.status.success());
+    assert!(e.runs()[n..].iter().all(|r| r.get("hook").is_none()), "no hook ran");
+    let c = rusqlite::Connection::open(e.data.join("hm.db")).unwrap();
+    assert_eq!(c.query_row("select count(*) from run_state", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
 }

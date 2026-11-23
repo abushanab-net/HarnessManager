@@ -244,6 +244,8 @@ impl Db {
         // pages read from the mapped file, not one ReadFile each: the year of usage the Overview adds up is ~3x faster
         conn.pragma_update(None, "mmap_size", 1i64 << 30)?;
         conn.execute_batch(SCHEMA)?;
+        // what each session hrm run started last reported through its hooks (hooks.rs)
+        conn.execute_batch(crate::hooks::TABLE)?;
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
         if !has {

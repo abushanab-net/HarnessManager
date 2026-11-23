@@ -94,7 +94,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let ctx = computer(t.path());
         let mut reg = ctx.registry().unwrap();
-        reg.add_profile(crate::Profile { name: "opencode-main".into(), label: None, harness: "opencode".into(), kind: crate::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+        reg.add_profile(crate::Profile { name: "opencode-main".into(), label: None, harness: "opencode".into(), kind: crate::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
         ctx.save_registry(&reg).unwrap();
         let data = harness::opencode::OpenCode.data_dir(&ctx, reg.get("opencode-main").unwrap());
         std::fs::create_dir_all(data.join("snapshot")).unwrap();

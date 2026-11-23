@@ -262,7 +262,7 @@ pub(crate) mod tests {
     pub(crate) fn computer(dir: &Path) -> Ctx {
         let ctx = Ctx::open_at(&dir.join("data"), &dir.join("home")).unwrap();
         let mut reg = ctx.registry().unwrap();
-        reg.add_profile(Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }).unwrap();
+        reg.add_profile(Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
         ctx.save_registry(&reg).unwrap();
         std::fs::create_dir_all(ctx.home.join(".claude").join("projects").join("p")).unwrap();
         ctx

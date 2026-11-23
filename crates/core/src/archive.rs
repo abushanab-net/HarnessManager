@@ -188,7 +188,7 @@ mod tests {
     use crate::registry::{Kind, Profile};
 
     fn profile(name: &str, harness: &str) -> Profile {
-        Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, created_at: 0 }
+        Profile { name: name.into(), label: None, harness: harness.into(), kind: Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }
     }
 
     /// A Claude Code session file in the main home, last active at `stamp`.

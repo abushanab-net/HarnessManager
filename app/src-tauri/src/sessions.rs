@@ -54,13 +54,33 @@ pub fn export_markdown(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
 }
 
 pub fn show_window(_: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
-    // best effort: activate the console window that runs this process
     if !cfg!(windows) { bail!("showing a console window is not available on this system; switch to its terminal"); }
-    let pid = a["pid"].as_u64().context("pid")?;
-    let ok = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("(New-Object -ComObject WScript.Shell).AppActivate({pid})")])
-        .output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "True").unwrap_or(false);
-    Ok(json!(ok))
+    Ok(json!(focus_console(a["hwnd"].as_i64().unwrap_or(0), a["pid"].as_u64().context("pid")? as u32)))
 }
+
+/// Best effort: the console window `hrm run` recorded (`hwnd`), or the window that owns it (Windows Terminal owns
+/// the hidden one its tabs have; the window comes forward, not the tab); else the window of process `pid`.
+pub fn focus_console(hwnd: i64, pid: u32) -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow, ShowWindow, GA_ROOTOWNER, SW_RESTORE};
+        let h = hwnd as windows_sys::Win32::Foundation::HWND;
+        if !h.is_null() && IsWindow(h) != 0 {
+            let top = GetAncestor(h, GA_ROOTOWNER);
+            let top = if top.is_null() { h } else { top };
+            if IsWindowVisible(top) != 0 {
+                if IsIconic(top) != 0 { ShowWindow(top, SW_RESTORE); }
+                if SetForegroundWindow(top) != 0 { return true; }
+            }
+        }
+    }
+    let _ = hwnd;
+    std::process::Command::new("powershell").args(["-NoProfile", "-Command", &format!("(New-Object -ComObject WScript.Shell).AppActivate({pid})")])
+        .output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "True").unwrap_or(false)
+}
+
+/// The sessions hrm run started, as their hooks last reported (see `hrm_core::hooks`).
+pub fn needs(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(json!(hrm_core::hooks::runs(ctx)?)) }
 
 pub fn session_stats(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::dash::session_stats(ctx, &s(a, "profile")?, &s(a, "id")?) }
 

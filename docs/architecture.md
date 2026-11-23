@@ -67,7 +67,7 @@ when set.
 |---|---|---|
 | `profiles.json` | The account list: accounts, providers, routes, MCP servers, skills, skill repositories, prompts, targets, project names. Format version 2. Each MCP env and header value is written as `null` once the credential store holds it. The file can live elsewhere (`registry_path` in settings), for example a OneDrive folder | `registry.rs` |
 | `settings.json` | This computer's settings: terminal, refresh pace, router port, theme, text size, backups, the log, the computer's id, name and incarnation, the sync mode, folder and hub address, the archive | `ctx.rs` (`Settings`) |
-| `hm.db` | SQLite: usage rows and read cursors, limits and their history, the session index (`sessions`, `sessions_fts`), the ledger, tags, the router's log, the journal outbox, the other computers and their cursors | `db.rs` |
+| `hm.db` | SQLite: usage rows and read cursors, limits and their history, the session index (`sessions`, `sessions_fts`), the ledger, tags, the router's log, the journal outbox, the other computers and their cursors, the state of each session `hrm run` started (`run_state`) | `db.rs`, `hooks.rs` |
 | `backups/` | One zip per backup | `backup.rs` |
 | `logs/harness-manager.log` | The diagnostic log, rolled over at 2 MB | `log.rs` |
 | `secrets.json` | Off Windows only, when no system credential store answers; see Secrets | `secrets.rs` |
@@ -177,6 +177,31 @@ every ticked tool in its format (Claude JSON, Codex TOML, OpenCode JSON, Antigra
 Skills live once in `~/.agents/skills` and each tool's skills folder links to the store's copy. Prompts are
 written into each account's prompt file. The ledger in `hm.db` records every entry Harness Manager wrote, and
 sync removes only those; a hand-made entry with the same name is reported as a conflict and left alone.
+
+## Session states
+
+`crates/core/src/hooks.rs`. While `session_hooks` is on (the default), the Claude Code launch spec starts with
+`--settings <data>/claude-hooks.json`, ahead of the user's arguments. The file holds only one hook group per event
+(`UserPromptSubmit`, `PermissionRequest`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd`) running `hrm hook`
+by its full path, and is written when its content changes. No account's files change, and a session started
+outside Harness Manager is not touched at all. When the user's own arguments carry `--settings`, ours is left out
+and that session is not tracked.
+
+`hrm run` adds a row to `run_state` (its pid, start time, console window, account and tool) and puts
+`HRM_RUN=<pid>:<start ms>` in the tool's environment. `hrm hook` reads the event on standard input and, when
+`HRM_RUN` names a row, sets the session's state: `waiting` (a permission request, or a notification of a permission
+prompt or a question), `working` (a prompt sent, a tool ran) or `done` (the turn ended, or the tool waits for the
+next message). It prints nothing and always
+exits 0, so the tool behaves as without it; without `HRM_RUN` it does nothing. `hrm run` deletes its row when the
+tool exits, and a row whose `hrm run` is gone is deleted the next time the states are read. Codex's events have
+the same names and the mapping reads them, but Codex is not started with hooks yet.
+
+The app reads the table every second and emits `needs` when it changes: the Overview lists the sessions that wait,
+their rows get a mark, the sidebar counts them, a toast says when one starts waiting, and the tray's tooltip and
+menu name them. Show brings the console window `hrm run` recorded to the front; in Windows Terminal that is the
+window, not the tab.
+
+A Claude subscription account can also start with Claude Code's own `--remote-control` (`Profile::remote_control`).
 
 ## The local router
 

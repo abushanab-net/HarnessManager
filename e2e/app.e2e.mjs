@@ -573,6 +573,31 @@ try {
     await waitFor(() => readLines(termLog).some((t) => JSON.stringify(t.args) === JSON.stringify(['run', 'work-max'])), 'terminal launch');
   });
 
+  await test('needs you: a session hrm run started that reaches a permission prompt shows as waiting within two seconds, on the Overview, in the sidebar and in a toast', async () => {
+    await nav('#home');
+    await drawn('the Overview');
+    // the fake Claude Code sends the event through the hook entries hrm run wrote into the account's settings.json
+    const ev = JSON.stringify({ hook_event_name: 'PermissionRequest', session_id: 'needs-1', cwd: repo, tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    const run = spawn(path.join(appDir, 'hrm.exe'), ['run', 'claude-main'], { env: { ...env, FAKE_HOOK: ev, FAKE_HOLD_MS: '8000' }, stdio: 'ignore' });
+    try {
+      const needs = () => exec("return import('./core.js').then((c) => (c.S.needs || []).find((r) => r.session_id === 'needs-1') || null)");
+      const r = await waitFor(async () => { const r = await needs(); return r && r.state === 'waiting' && { ...r, lag: (await exec('return Date.now()')) - r.ts }; }, 'the waiting state in the window', 15000);
+      assert.ok(r.lag < 2000, `seen ${r.lag} ms after the hook reported it`);
+      assert.equal(r.reason, 'Bash: npm test');
+      assert.equal(r.profile, 'claude-main');
+      await hasText('[data-testid=attention]', 'Needs you · Bash: npm test');
+      await $('[data-testid=attention] [data-act=show-run]');
+      await hasText('#toast', 'needs you: Bash: npm test');
+      assert.equal(await text('[data-testid=notice-act]'), 'Show');
+      await hasText('[data-testid=nav-live]', '1 waiting');
+      // hrm run removes its row when the tool exits: the entry goes
+      await waitFor(async () => !(await page.$('[data-testid=attention] [data-act=show-run]')), 'the entry gone with the session', 20000);
+      assert.equal(await needs(), null);
+    } finally { run.kill(); }
+    await nav('#accounts');
+    await drawn('Accounts');
+  });
+
   await test('add an API-key account', async () => {
     await click('[data-testid=add-account]');
     await click('[data-testid=kind-api_key]');
@@ -1112,7 +1137,7 @@ try {
       assert.equal(says, `${rows} settings`, `${id}: the head counts its rows`);
       counts.push(rows);
     }
-    assert.deepEqual(counts, [5, 3, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too');
+    assert.deepEqual(counts, [5, 4, 2, 2, 2, 3, 3, 6], 'settings per section: Appearance has Text size too, Window and terminal has Session states');
   });
 
   await test('usage lives on Accounts: the chart, each row\'s tokens and cost, the range, and the old address', async () => {

@@ -76,6 +76,9 @@ pub struct Settings {
     /// Every account's prompt file (CLAUDE.md, AGENTS.md) ends with a short block, between Harness Manager's own
     /// marks, that tells an agent how to read `hrm list` and when it may use another account. Off: no file is touched.
     pub agent_hint: bool,
+    /// Claude Code started by `hrm run` gets `--settings <data>/claude-hooks.json`, whose hooks run `hrm hook` on a few
+    /// events, so the app shows which session is working, waiting for you or done. No account's files change.
+    pub session_hooks: bool,
 }
 
 impl Default for Settings {
@@ -86,7 +89,7 @@ impl Default for Settings {
             moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
             hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
-            archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false }
+            archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false, session_hooks: true }
     }
 }
 
