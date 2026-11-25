@@ -108,6 +108,16 @@ fn claude(args: &[String]) {
         println!("Login successful.");
         return;
     }
+    if args.len() >= 2 && args[0] == "auth" && args[1] == "status" {
+        // like Claude Code: an expired access token is renewed with the saved refresh token
+        let f = std::env::var("CLAUDE_CONFIG_DIR").map(PathBuf::from).unwrap_or_else(|_| home().join(".claude")).join(".credentials.json");
+        if let Some(mut c) = std::fs::read_to_string(&f).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
+            if c["claudeAiOauth"]["refreshToken"].is_string() {
+                c["claudeAiOauth"]["expiresAt"] = json!(now_ms() + 3_600_000);
+                std::fs::write(&f, c.to_string()).unwrap();
+            }
+        }
+    }
     record("claude", args);
 }
 

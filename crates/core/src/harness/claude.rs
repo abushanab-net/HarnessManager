@@ -67,14 +67,21 @@ fn rejected_key(p: &Profile) -> String { format!("login:refused:{}", p.name) }
 
 impl Claude {
 
-    /// Live limits from Anthropic, using the access token Claude Code saved on this computer. Opt-in;
-    /// only while that token is valid: Harness Manager never refreshes, copies or stores it.
+    /// Live limits from Anthropic, using the access token Claude Code saved on this computer. Opt-in.
+    /// The token lasts about 8 hours; an expired one is renewed by Claude Code itself (`claude auth status`):
+    /// Harness Manager never refreshes, copies or stores it.
     pub fn live_quota(&self, ctx: &Ctx, p: &Profile) -> Result<Quota> {
-        let creds = self.creds(ctx, p).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
-        let token = str_at(&creds, &["claudeAiOauth", "accessToken"]).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
-        if i64_at(&creds, &["claudeAiOauth", "expiresAt"]) < now_ms() + 60_000 {
-            bail!("Claude Code's login on this computer has expired; it refreshes the next time this account runs");
+        let expired = |c: &Value| i64_at(c, &["claudeAiOauth", "expiresAt"]) < now_ms() + 60_000;
+        let mut creds = self.creds(ctx, p).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
+        if expired(&creds) {
+            let renewed = self.renew(ctx, p);
+            creds = self.creds(ctx, p).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
+            if expired(&creds) {
+                bail!("Claude Code's login on this computer has expired and Claude Code could not renew it{}: start the account or log in again",
+                    renewed.err().map(|e| format!(" ({e:#})")).unwrap_or_default());
+            }
         }
+        let token = str_at(&creds, &["claudeAiOauth", "accessToken"]).ok_or_else(|| anyhow::anyhow!("not logged in"))?;
         let url = crate::testenv::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|| "https://api.anthropic.com/api/oauth/usage".into());
         let r = reqwest::blocking::Client::new()
             .get(url)
@@ -91,6 +98,24 @@ impl Claude {
         let q = parse_utilization(&v, Some(now_ms()), "live");
         ctx.db.put_quota(&p.name, &q)?;
         Ok(q)
+    }
+
+    /// `claude auth status` renews an expired access token with the saved refresh token; it starts no session and spends nothing.
+    fn renew(&self, ctx: &Ctx, p: &Profile) -> Result<()> {
+        let args = vec!["auth".to_string(), "status".into()];
+        let mut spec = self.launch(ctx, p, &args)?;
+        spec.args = args;
+        let mut c = spec.command();
+        c.current_dir(std::env::temp_dir()).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; c.creation_flags(0x0800_0000); } // no console window
+        let mut child = c.spawn()?;
+        let start = std::time::Instant::now();
+        while child.try_wait()?.is_none() {
+            if start.elapsed() > std::time::Duration::from_secs(30) { let _ = child.kill(); bail!("no answer within 30 s"); }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Ok(())
     }
 
     fn session_files(&self, ctx: &Ctx, p: &Profile) -> Vec<(PathBuf, i64, u64)> {
