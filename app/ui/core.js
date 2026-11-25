@@ -264,6 +264,8 @@ export function patch(root, html) {
 export const keyStore = () => (S.state && S.state.secret_store) || "this computer's credential store";
 
 export const shownTools = (st) => st.harnesses.filter((h) => !((st.settings && st.settings.hidden_tools) || []).includes(h.id));
+/** The shown tools this computer can run: only their accounts are listed (Add account and the first run offer every shown tool). */
+export const listedTools = (st) => shownTools(st).filter((h) => h.installed);
 
 /** The brand (Harness or VektraGrid) and light or dark; "system" follows Windows or macOS, and changes with it.
  * The stylesheet reads html[data-brand][data-theme], always one of the four. */
@@ -339,7 +341,7 @@ export function drawNeeds(list, redraw) {
 /** Beside Accounts in the sidebar: how many accounts of the tools shown need attention (a login to renew, a limit used up). */
 export function redrawAttention() {
   if (!S.state) return;
-  const tools = shownTools(S.state).map((h) => h.id), now = Date.now(), n = S.state.profiles.filter((p) => tools.includes(p.harness) && needsAttention(p, now)).length;
+  const tools = listedTools(S.state).map((h) => h.id), now = Date.now(), n = S.state.profiles.filter((p) => tools.includes(p.harness) && needsAttention(p, now)).length;
   badge('n-attention', n ? `${alertIcon}${n}` : '', n ? `${n} ${n === 1 ? 'account needs' : 'accounts need'} attention` : '');
 }
 

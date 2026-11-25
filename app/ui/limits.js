@@ -2,7 +2,7 @@
 // ring and the tray popup's rings. The Overview, Accounts and the tray popup (popup.js) share these; nothing here
 // imports a page, so the popup's small window loads no page's timers or listeners.
 
-import { S, call, shownTools, patch } from './core.js';
+import { S, call, listedTools, patch } from './core.js';
 import { esc, toolIcon } from './lib.js';
 
 // sync is on with a folder or a hub, or with paired computers: computers.js's rule, said again here because that module
@@ -81,7 +81,7 @@ export function acctView(p, x = {}, now = Date.now(), pcs = null) {
     noPlan: !PLAN_TOOLS.includes(p.harness) || p.kind !== 'subscription', mismatch: !!p.email_mismatch };
 }
 /** Every shown account, as acctView draws it. */
-export const accountViews = (st, x, now, pcs) => { const ids = shownTools(st).map((h) => h.id); return st.profiles.filter((p) => ids.includes(p.harness)).map((p) => acctView(p, x, now, pcs)); };
+export const accountViews = (st, x, now, pcs) => { const ids = listedTools(st).map((h) => h.id); return st.profiles.filter((p) => ids.includes(p.harness)).map((p) => acctView(p, x, now, pcs)); };
 /** The one rule for a recommendation: a subscription, signed in, with measured windows none of which is used up. */
 export const eligible = (a) => a.kind === 'subscription' && !a.needsLogin && a.measured && a.windows.every((w) => !w.open || w.left > 0);
 export const w5of = (a) => a.windows.find((w) => w.kind === '5h');

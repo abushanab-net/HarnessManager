@@ -4,7 +4,7 @@
 // eligibility rule, the ring renderer and the tray popup's rings are limits.js's (the Overview and the popup share them);
 // their names are still exported here.
 
-import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize, confirmDialog } from './core.js';
+import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, listedTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize, confirmDialog } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon, ic } from './lib.js';
 import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack, quotaSource, creditText, freshCredits, freshReset, resetHint } from './limits.js';
 import './sessions.js'; // nothing of it is used here: kept so the window's modules still load in the order they did
@@ -50,6 +50,10 @@ function rowRing(a, used, note, px = 44) {
   const wk = wkof(a);
   return draw(`${a.name}: ${wk.label.toLowerCase()} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + fmtAbsoluteReset(wk.resetsAt) : ''}`, used ? wk.used : wk.left, wk.left === 0 ? 'neg' : wk.left <= 30 || wk.outMs != null ? 'warn' : '');
 }
+
+/** A Claude account whose limits were last read over an hour ago: use elsewhere (claude.ai, another computer) is not in them. */
+const staleTag = (a, now) => (a.tool === 'claude' && a.kind === 'subscription' && !a.needsLogin && a.readAt && now - a.readAt > 3600e3
+  ? `<span class="pill warn" title="${esc(`Limits last read ${agoText(a.readAt, now)}. ${S.state.live_quota ? 'Refresh limits in the ⋯ menu reads them now' : 'Turn on Live Claude limits in Settings to keep them current'}.`)}" data-testid="stale-${esc(a.id)}">limits ${dur(now - a.readAt)} old</span>` : '');
 
 /** Why an account has no limit to draw: [the words, the reason said in full, whether it is a login to renew]. */
 const noLimits = (a) => (a.needsLogin ? [a.p.identity.logged_in ? 'Login expired' : 'Not logged in', 'Log in to read its plan and limits.', true]
@@ -140,7 +144,7 @@ function accountRow(a, best, now, used, pcs, sel = '', paned = false) {
     <div class="state" title="${esc(why)}" data-testid="state-${esc(a.id)}"><div class="v trunc ${tone}">${esc(state)}</div>${sub ? `<div class="small muted trunc">${esc(sub)}</div>` : ''}</div></div>`;
   }
   return `${row}
-    <div class="who" title="${esc([a.folder, a.added ? 'added ' + a.added : ''].filter(Boolean).join(' · '))}"><div class="row"><b class="trunc">${esc(a.name)}</b>${openNow ? `<span class="dot live" role="img" title="${esc(openNow)}" aria-label="${esc(openNow)}"></span>` : ''}${a.isMain ? `<span class="pill quiet" title="Main tool profile (${esc(a.folder)}): can be hidden, not deleted">main</span>` : ''}${a.mismatch ? '<span class="pill bad" title="Logged in as a different email than you entered">email differs</span>' : ''}</div>${under ? `<div class="small muted trunc">${esc(under)}</div>` : ''}</div>
+    <div class="who" title="${esc([a.folder, a.added ? 'added ' + a.added : ''].filter(Boolean).join(' · '))}"><div class="row"><b class="trunc">${esc(a.name)}</b>${openNow ? `<span class="dot live" role="img" title="${esc(openNow)}" aria-label="${esc(openNow)}"></span>` : ''}${a.isMain ? `<span class="pill quiet" title="Main tool profile (${esc(a.folder)}): can be hidden, not deleted">main</span>` : ''}${a.mismatch ? '<span class="pill bad" title="Logged in as a different email than you entered">email differs</span>' : ''}${staleTag(a, now)}</div>${under ? `<div class="small muted trunc">${esc(under)}</div>` : ''}</div>
     <div>${plan ? `<span class="pill plan" title="${esc(plan)}">${esc(plan)}</span>` : `<span class="unread" title="${a.needsLogin ? 'Log in to read its plan' : 'No plan'}">—</span>`}</div>
     ${limsLine(a, best, used, now)}
     ${weekReset(a, now)}
@@ -194,7 +198,7 @@ function draw(sheet) {
   const sel = last.sel, picked = sel ? accts.find((a) => a.id === sel) : null, paned = !!picked && paneOpen('accounts');
   const q = (document.getElementById('find').value || '').toLowerCase();
   const shown = accts.filter((a) => !q || a.id.toLowerCase().includes(q) || a.name.toLowerCase().includes(q) || a.email.toLowerCase().includes(q));
-  const tools = shownTools(st), groups = tools.filter((h) => !acctTool || h.id === acctTool);
+  const tools = listedTools(st), groups = tools.filter((h) => !acctTool || h.id === acctTool);
   const series = accts.filter((a) => au.series[a.id] && au.series[a.id].some((v) => v)).map((a) => ({ name: a.name, ci: au.color[a.id] || 0, vals: au.series[a.id] }));
   const topModel = au.models[0] ? au.models[0].tokens : 1;
   const nTools = new Set(accts.map((a) => a.tool)).size, nAtt = accts.filter((a) => needsAttention(a.p, now)).length;
@@ -214,7 +218,7 @@ function draw(sheet) {
       return `<section class="card tool-group-card" data-key="g-${h.id}" data-testid="group-${h.id}"><button class="tool-group-header" data-act="acct-fold" data-h="${h.id}" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the ${esc(h.label)} accounts">
         ${toolIcon(h.id, 18)}<h2>${esc(h.label)}</h2>${list.length ? `<span class="muted" title="${esc(`${on} logged in · ${plural(consoles, 'console')} open`)}">${list.length}</span>` : ''}<span class="chev" aria-hidden="true"></span>
         ${list.length ? `<span class="sum"><span ${isFinite(next) ? '' : 'title="No limit window is open"'}>${isFinite(next) ? 'Next reset in ' + fmtDuration(next) : list.some((a) => !a.noPlan) ? 'Next reset —' : 'No plan limits'}</span><span><b>${fmtTrim(tok)}</b> tokens · ${cst == null ? '—' : '≈ ' + usd(cst)} in ${au.days} days</span></span>` : ''}</button>
-        ${!open ? '' : list.length ? list.map((a) => accountRow(a, best, now, used, pcs, sel, paned)).join('') : `<div class="group-empty">${h.installed ? (q ? 'No account matches the search.' : `No ${esc(h.label)} account yet.`) : `${esc(h.label)} is not installed on this computer.`}</div>`}</section>`;
+        ${!open ? '' : list.length ? list.map((a) => accountRow(a, best, now, used, pcs, sel, paned)).join('') : `<div class="group-empty">${q ? 'No account matches the search.' : `No ${esc(h.label)} account yet.`}</div>`}</section>`;
     }).join('')}</div>
     <section class="panel-card a-usage" data-testid="usage-panel"><div class="panel-head"><button class="panel-title fold" data-act="acct-fold" data-h="charts" aria-expanded="${chartsOpen}">Tokens per day, by account, and by model · ${au.days} days</button><span class="panel-note">Cost at API list prices ≈</span></div>
       ${chartsOpen ? `<div class="a-charts"><div>${series.length && au.days_list ? `<div class="chart-legend">${series.map((s) => `<span><i class="pc-dot c${s.ci}"></i>${esc(s.name)}</span>`).join('')}</div><div data-testid="usage-ledger">${stackedChart(au.days_list, series, true)}</div>` : '<span class="muted" data-testid="usage-ledger">No usage in this range.</span>'}</div>
@@ -464,7 +468,7 @@ view('account', async (sheet, params) => {
 action('start', (el) => attempt(() => call('start', { name: el.dataset.name }), `Opened a terminal for ${acctName(el.dataset.name)}`));
 // the tool's own flag for running without asking before each step, where it has one
 const SKIP = { claude: '--dangerously-skip-permissions', codex: '--dangerously-bypass-approvals-and-sandbox' };
-const startable = () => (S.state.profiles || []).filter((p) => shownTools(S.state).some((h) => h.id === p.harness) && (p.kind !== 'subscription' || p.identity.logged_in));
+const startable = () => (S.state.profiles || []).filter((p) => listedTools(S.state).some((h) => h.id === p.harness) && (p.kind !== 'subscription' || p.identity.logged_in));
 
 /** Start an account in a folder: a recent project of this account or any folder, optionally without
  * permission prompts, with extra arguments for this terminal only. */

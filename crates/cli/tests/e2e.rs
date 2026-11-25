@@ -890,11 +890,20 @@ fn live_claude_limits_use_the_saved_login_while_valid() {
     let saved = std::fs::read_to_string(&creds).unwrap();
     std::fs::write(&creds, saved).unwrap();
     assert_eq!(e.profile("live1")["identity"]["needs_login"], false);
-    // an expired login is never refreshed by Harness Manager
+    // an expired access token is renewed by Claude Code itself (`claude auth status`), then read
     let mut c: Value = serde_json::from_str(&std::fs::read_to_string(&creds).unwrap()).unwrap();
     c["claudeAiOauth"]["expiresAt"] = json!(1);
     std::fs::write(&creds, c.to_string()).unwrap();
-    assert!(e.fail(&["quota", "live1", "--live"]).contains("expired"));
+    let (url, h) = mock_once(r#"{"five_hour":{"utilization":20,"resets_at":"2099-01-01T10:00:00+00:00"}}"#);
+    e.extra.retain(|(k, _)| k != "HRM_ANTHROPIC_USAGE_URL");
+    e.extra.push(("HRM_ANTHROPIC_USAGE_URL".into(), url));
+    assert_eq!(e.json(&["quota", "live1", "--live"])["tiers"][0]["used"], 20.0);
+    h.join().unwrap();
+    assert!(e.runs().iter().any(|r| r["args"] == json!(["auth", "status"])), "Claude Code was asked to renew");
+    // without a refresh token Claude Code cannot renew it, and Harness Manager never does
+    c["claudeAiOauth"].as_object_mut().unwrap().remove("refreshToken");
+    std::fs::write(&creds, c.to_string()).unwrap();
+    assert!(e.fail(&["quota", "live1", "--live"]).contains("could not renew"));
 }
 
 #[test]

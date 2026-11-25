@@ -303,7 +303,8 @@ fn limits_popup(app: &tauri::AppHandle, at: tauri::PhysicalPosition<f64>, icon: 
     // sized at every open, by the accounts shown now: two rings to a row (app.css .tray-rings-grid), a row tall enough
     // for a name on two lines, all of it scaled as Text size zooms the page
     let (n, z) = { let ctx = app.state::<Arc<AppState>>().ctx(); let hidden = &ctx.settings.hidden_tools;
-        (ctx.registry().map(|r| r.profiles.iter().filter(|p| !hidden.contains(&p.harness)).count()).unwrap_or(0), match ctx.settings.text_size.as_str() { "compact" => 0.92, "large" => 1.12, _ => 1.0 }) };
+        let tools: Vec<String> = service::harnesses().into_iter().filter(|h| h.installed && !hidden.contains(&h.id)).map(|h| h.id).collect();
+        (ctx.registry().map(|r| r.profiles.iter().filter(|p| tools.contains(&p.harness)).count()).unwrap_or(0), match ctx.settings.text_size.as_str() { "compact" => 0.92, "large" => 1.12, _ => 1.0 }) };
     let (lw, lh) = (372.0 * z, (69.0 + n.max(1).div_ceil(2) as f64 * 70.0) * z);
     let _ = w.set_size(tauri::LogicalSize::new(lw, lh));
     let (sw, sh) = (lw * scale, lh * scale);
