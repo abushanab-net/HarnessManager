@@ -1,9 +1,12 @@
 //! Claude Code. Each profile is its own `CLAUDE_CONFIG_DIR`; logins stay where Claude Code keeps them.
 
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
+use reqwest::blocking::Client;
 use serde_json::Value;
 
 use super::parse::*;
@@ -97,12 +100,24 @@ impl Claude {
             bail!("Claude Code's login on this computer has expired; it refreshes the next time this account runs");
         }
         let url = crate::testenv::var("HRM_ANTHROPIC_USAGE_URL").unwrap_or_else(|| "https://api.anthropic.com/api/oauth/usage".into());
-        let r = reqwest::blocking::Client::new()
-            .get(url)
+        // Use IPv4 for Anthropic's usage endpoint to avoid intermittent TLS resets over IPv6.
+        let client = Client::builder()
+            .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(15))
+            .build()?;
+        let response = client.get(url)
             .bearer_auth(token)
             .header("anthropic-beta", "oauth-2025-04-20")
-            .timeout(std::time::Duration::from_secs(15))
-            .send()?;
+            .send();
+        let r = response.map_err(|e| {
+            if e.is_connect() || e.is_timeout() {
+                crate::log::warn(&format!("Claude limits for {}: {:?}", p.name, e.without_url()));
+                anyhow::anyhow!("Could not reach Anthropic to refresh Claude limits. Try again in a moment.")
+            } else {
+                e.without_url().into()
+            }
+        })?;
         // a refused login is gone (signed out or revoked elsewhere) though its dates look fine: `identity` says so until Claude Code saves a new one
         if r.status() == reqwest::StatusCode::UNAUTHORIZED {
             ctx.db.kv_set(&rejected_key(p), &now_ms().to_string())?;

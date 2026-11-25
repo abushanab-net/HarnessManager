@@ -862,6 +862,21 @@ fn live_claude_limits_use_the_saved_login_while_valid() {
     assert!(p["quota"]["credits"].get("account_uuid").is_none());
     assert!(e.ok(&["quota", "live1"]).contains("credits off, resets not reported"));
     assert_eq!(p["identity"]["needs_login"], false);
+    // A connection failure leaves the last reading and the account's login status intact.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let closed_addr = listener.local_addr().unwrap();
+    drop(listener);
+    e.extra.last_mut().unwrap().1 = format!("http://{closed_addr}/api/oauth/usage");
+    assert!(e.fail(&["quota", "live1", "--live"]).contains("Could not reach Anthropic to refresh Claude limits"));
+    let after_failure = e.profile("live1");
+    assert_eq!(after_failure["quota"], p["quota"]);
+    assert_eq!(after_failure["identity"]["needs_login"], false);
+    if let Ok(ipv6) = std::net::TcpListener::bind("[::1]:0") {
+        ipv6.set_nonblocking(true).unwrap();
+        e.extra.last_mut().unwrap().1 = format!("http://{}/api/oauth/usage", ipv6.local_addr().unwrap());
+        e.fail(&["quota", "live1", "--live"]);
+        assert_eq!(ipv6.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock, "live limits never connect over IPv6");
+    }
     // Anthropic refuses the saved login (signed out or revoked elsewhere): the account says it needs a new one
     let (url, h) = mock_reply("401 Unauthorized", r#"{"error":"invalid token"}"#);
     e.extra.retain(|(k, _)| k != "HRM_ANTHROPIC_USAGE_URL");
