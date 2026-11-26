@@ -146,11 +146,11 @@ pub fn normalize_url(u: &str) -> Result<String> {
 pub fn token(ctx: &Ctx) -> Option<String> {
     let base = normalize_url(&ctx.settings.hub_url).ok()?;
     if let Some(t) = read_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE) { return Some(t); }
-    // one from before tokens were kept per hub is the hub's it was written for (named, or else these settings' hub,
-    // as it always was): a join since keeps its own and removes it
+    // one from before tokens were kept per hub is used only for the hub it is known to be for: the settings may name
+    // another hub by now (1.13 did not keep the token's hub at all), so with nothing known, or nothing readable, there
+    // is no token, and a join gets this hub's own
     let legacy = read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token")?;
-    let of = ctx.db.kv_get(TOKEN_OF).ok().flatten().unwrap_or_default();
-    (of.is_empty() || of == base).then_some(legacy)
+    match ctx.db.kv_get(TOKEN_OF) { Ok(Some(of)) if !of.is_empty() && of == base => Some(legacy), _ => None }
 }
 
 /// The hub the stored token was given by.
@@ -257,10 +257,12 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
     write_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE, tok)?;
     #[cfg(test)]
     if let Some(f) = JOIN_SEAM.with(|s| s.borrow_mut().take()) { f(); }
-    // the one token of a version before is not this hub's to send any more
-    let _ = secrets::delete(&token_target(&ctx.settings.device_id));
+    // the one token of a version before is not this hub's to send any more; the hub it was for is forgotten only once
+    // it is really gone, so a token left behind is never taken for another hub's
+    let legacy = token_target(&ctx.settings.device_id);
+    let _ = secrets::delete(&legacy);
     let _ = std::fs::remove_file(ctx.data.join("hub.token"));
-    let _ = ctx.db.kv_set(TOKEN_OF, "");
+    if secrets::read(&legacy).is_none() && !ctx.data.join("hub.token").exists() { let _ = ctx.db.kv_set(TOKEN_OF, ""); }
     // the first computer makes the ring; any other gets it by pairing or the recovery key, whichever way it joined:
     // with a ring of its own it could read nothing of theirs, nor they of it
     let others = r["devices"].as_array().into_iter().flatten().any(|d| split_device(d).0["id"].as_str().is_some_and(|i| i != ctx.settings.device_id));

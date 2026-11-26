@@ -57,6 +57,7 @@ create table if not exists phone_hub_deletes(hub_url text not null, mailbox text
 drop table if exists phone_mail_in;
 create table if not exists phone_mail_seen(generation text not null, mailbox text not null, seq integer not null, at integer not null, reply text, sent integer not null default 0,
   primary key(generation, mailbox, seq));
+create table if not exists phone_mail_lease(generation text not null, mailbox text not null, owner text not null, expires_at integer not null, primary key(generation, mailbox));
 create table if not exists phone_hub_invites(hub_url text not null, mailbox text primary key, expires_at integer not null);
 "#;
 

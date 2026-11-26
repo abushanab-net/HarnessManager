@@ -841,3 +841,143 @@ fn r4_each_hub_receives_only_its_own_token_through_a_switch() {
     assert!(!a.contains(&tok_b), "hub A was sent hub B's token");
     assert!(!b.contains(&tok_a), "hub B was sent hub A's token");
 }
+
+// ---------- the fifth review's blockers ----------
+
+/// What the phone was told about action `id`, read as the phone reads its mailbox: each receipt's status.
+fn published(w: &World, j: &HubJoining, me: &PhoneIdentity, desk: &DesktopPayload, id: &str) -> Vec<String> {
+    let list: Value = reqwest::blocking::Client::new().get(format!("{}/v1/mail/{}/down?limit=100", w.url, j.mailbox)).bearer_auth(&j.token).send().unwrap().json().unwrap();
+    let mut out = vec![];
+    for m in list["mail"].as_array().unwrap() {
+        let seq = m["seq"].as_i64().unwrap();
+        let b = reqwest::blocking::Client::new().get(format!("{}/v1/mail/{}/down/{seq}", w.url, j.mailbox)).bearer_auth(&j.token).send().unwrap().bytes().unwrap();
+        if let Ok(body) = me.open_mail(&desk.pubkey, &j.mailbox, desk.enrollment.as_deref().unwrap(), "down", seq, &b) {
+            if body["action_id"] == id { out.push(if body["kind"] == "refused" { format!("refused {}", body["status"]) } else { body["receipt"]["status"].as_str().unwrap_or("").to_string() }); }
+        }
+    }
+    out
+}
+
+/// P1 (legacy token): a desktop upgraded from 1.13 with hub A's token kept under the device alone, its settings now
+/// naming hub B: B never receives A's token; the computer joins B afresh.
+#[test]
+fn r5_a_legacy_token_never_reaches_another_hub() {
+    let w = world();
+    let (url_b0, _hb, _db) = second_hub(&w);
+    let (url_b, seen_b) = proxy(&w, &url_b0);
+    let dir = tempfile::tempdir().unwrap();
+    let (data, home) = (dir.path().join("old"), dir.path().join("home-old"));
+    let old = Ctx::open_at(&data, &home).unwrap();
+    let legacy = crate::sync::hub::token_target(&old.settings.device_id);
+    let _forget = Forget(vec![legacy.clone(), crate::sync::peer::identity::target(&old.settings.device_id)]);
+    crate::secrets::write(&legacy, "hrm", b"legacy-token-of-hub-a").unwrap();
+    // its settings name hub B, as a 1.13 install could have them, with nothing kept of which hub its token is for
+    let mut old = old;
+    (old.settings.sync_mode, old.settings.hub_url) = ("hub".into(), url_b.clone());
+    old.save_settings().unwrap();
+    let old = Ctx::open_at(&data, &home).unwrap();
+    let _ = crate::sync::hub::phone_invite(&old);
+    assert!(!String::from_utf8_lossy(&seen_b.lock().unwrap()).contains("legacy-token-of-hub-a"), "hub B was sent hub A's legacy token");
+    assert!(crate::sync::hub::token(&old).is_none(), "no token: a fresh join is needed");
+}
+
+/// P1 (pruning): a refusal delivered for an action, its slot then hidden from a whole listing and served again once
+/// Control is granted: the refusal stands, the action is not run.
+#[test]
+fn r5_a_delivered_refusal_is_never_decided_again() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "ref-1")}));
+    let slot = up_max(&w, &j);
+    pass(&w.ctx).unwrap();
+    assert_eq!(published(&w, &j, &me, &desk, "ref-1"), ["refused 403"]);
+    // the hub hides it and everything below it; a later message keeps the listing whole
+    let real = slot_body(&w, &j, slot);
+    let db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    db.execute("delete from mail where phone = ? and dir = 'up' and seq <= ?", rusqlite::params![j.mailbox, slot]).unwrap();
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": "x", "query": "q1"}));
+    pass(&w.ctx).unwrap();
+    crate::phones::set_grants(&w.ctx, &me.id, &json!({"control": true})).unwrap();
+    set_slot(&w, &j, slot, &real);
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "open", "the refused answer was run");
+    assert_eq!(actions_named(&w.ctx, "ref-1"), 0);
+}
+
+/// P1 (progress): a mailbox that takes longer to list than one pass allows: successive passes list on from where
+/// the last stopped, and the action at its end is answered within a few passes.
+#[test]
+fn r5_a_mailbox_slower_to_list_than_a_pass_has_its_last_action_answered() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    for i in 0..250 { put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": format!("l-{i}"), "query": format!("q{i}")})); }
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "last-1")}));
+    super::mailbox::LIST_PAGES.with(|c| c.set(1));
+    for _ in 0..6 { pass(&w.ctx).unwrap(); if ask_state(&w.ctx, &ask).0 == "answered" { super::mailbox::LIST_PAGES.with(|c| c.set(0)); return; } }
+    super::mailbox::LIST_PAGES.with(|c| c.set(0));
+    panic!("the last action was not answered within six passes");
+}
+
+/// P1 (progress): one slot that always fails to read does not keep the others from being read.
+#[test]
+fn r5_one_failing_slot_does_not_block_the_others() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    // a slot below it, read first, that the computer can never read: more than a message may be
+    let bad = up_max(&w, &j).max(3) + 1;
+    set_slot(&w, &j, bad, &vec![b'x'; 2 * 1024 * 1024]);
+    rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap().execute("update phones set up_max = ? where id = ?", rusqlite::params![bad, j.mailbox]).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "ok-1")}));
+    let _ = pass(&w.ctx);
+    let _ = pass(&w.ctx);
+    assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
+}
+
+/// P1 (one drainer): two drainers, Control granted between the first one's decision and its record: what the phone
+/// is told is what reached the session.
+#[test]
+fn r5_the_published_outcome_is_what_reached_the_session() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    let other = Arc::new(Ctx::open_at(&w.ctx.data, &w.ctx.home).unwrap());
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "race-1")}));
+    let (tx1, rx1) = std::sync::mpsc::channel::<()>();
+    let (go1, wait1) = std::sync::mpsc::channel::<()>();
+    let c1 = w.ctx.clone();
+    let t1 = std::thread::spawn(move || {
+        super::mailbox::BEFORE_RECORD.with(|s| *s.borrow_mut() = Some(Box::new(move || { tx1.send(()).unwrap(); let _ = wait1.recv(); })));
+        let _ = pass(&c1);
+    });
+    rx1.recv_timeout(Duration::from_secs(20)).expect("the first drainer decided");
+    crate::phones::set_grants(&w.ctx, &me.id, &json!({"control": true})).unwrap();
+    let (tx2, rx2) = std::sync::mpsc::channel::<()>();
+    let (go2, wait2) = std::sync::mpsc::channel::<()>();
+    let c2 = other.clone();
+    let t2 = std::thread::spawn(move || {
+        super::mailbox::BEFORE_RECORD.with(|s| *s.borrow_mut() = Some(Box::new(move || { tx2.send(()).unwrap(); let _ = wait2.recv(); })));
+        let _ = pass(&c2);
+    });
+    // the second drainer decides now, if it may; the first then records first
+    let second_decided = rx2.recv_timeout(Duration::from_secs(5)).is_ok();
+    go1.send(()).unwrap();
+    t1.join().unwrap();
+    let _ = go2.send(());
+    t2.join().unwrap();
+    let _ = pass(&w.ctx);
+    let told = published(&w, &j, &me, &desk, "race-1");
+    let ran = ask_state(&w.ctx, &ask).0 == "answered";
+    assert_eq!(told.len(), 1, "{told:?} (the second drainer decided: {second_decided})");
+    assert_eq!(told[0] == "accepted", ran, "the phone was told {told:?} while the session was {}", if ran { "answered" } else { "not answered" });
+}

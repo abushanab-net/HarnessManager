@@ -343,6 +343,8 @@ impl HubJoining {
 const READ_AT_MOST: usize = 50;
 const LOOK_PAGES: usize = 12;
 const LOOK_TIME: Duration = Duration::from_secs(10);
+/// The part of a look the listing may take: the rest is the fetching's.
+const LIST_SHARE: Duration = Duration::from_secs(6);
 /// How many handled slots are remembered at most: more than the hub keeps.
 const HANDLED_AT_MOST: usize = 4000;
 /// How long an action or a receipt question waits for the computer's answer through the hub.
@@ -382,6 +384,8 @@ struct MailSt {
     /// (`handled`, `resume_handled`); the ones below the hub's oldest are let go.
     handled: std::collections::BTreeSet<i64>,
     turn: usize,
+    /// Where the next look lists on from, when this one could not list it all (0: from the start).
+    list_from: i64,
     snapshot: Option<Value>,
     snapshot_seq: i64,
     /// When the newest snapshot arrived, and when the hub last answered, by this phone's monotonic clock.
@@ -413,6 +417,16 @@ impl MailSt {
         let stale = age.is_none_or(|a| a > STALE_MS) || quiet.is_none_or(|q| q > STALE_MS) || snapshot_at.is_none_or(|t| now_ms - t > STALE_MS);
         Freshness { snapshot_at, snapshot_age_ms: age, heard_at: self.heard_at, missed: self.missed, stale }
     }
+}
+
+/// What the app keeps of a mailbox across restarts (`Mailbox::state`, `Mailbox::restore`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MailboxState {
+    pub mailbox: String,
+    pub enrollment: String,
+    pub handled: Vec<i64>,
+    pub snapshot: Option<Value>,
+    pub snapshot_seq: i64,
 }
 
 /// One call waiting for the computer's answer under `key` (`act:<action id>` or `q:<query id>`); each call has its
@@ -460,7 +474,24 @@ impl Mailbox {
     }
 
     /// The slots down handled, for the app to keep, and to start from again (`resume_handled`).
-    pub async fn handled(&self) -> Vec<i64> { self.st.lock().await.handled.iter().copied().collect() }
+    /// What the app keeps across restarts: the slots handled, and the newest snapshot with its slot, for this
+    /// mailbox and pairing. Restored with `restore`.
+    pub async fn state(&self) -> MailboxState {
+        let st = self.st.lock().await;
+        MailboxState { mailbox: self.mailbox.clone(), enrollment: self.enrollment.clone(), handled: st.handled.iter().copied().collect(), snapshot: st.snapshot.clone(), snapshot_seq: st.snapshot_seq }
+    }
+
+    /// The state an earlier `state` gave, when it is this mailbox's and this pairing's (false, and nothing taken,
+    /// otherwise). The restored snapshot is shown but counts as stale until a new one arrives.
+    pub async fn restore(&self, saved: &MailboxState) -> bool {
+        if saved.mailbox != self.mailbox || saved.enrollment != self.enrollment { return false; }
+        let mut st = self.st.lock().await;
+        st.handled.extend(saved.handled.iter().copied().filter(|s| (1..=1i64 << 53).contains(s)));
+        if saved.snapshot_seq > st.snapshot_seq && saved.snapshot.as_ref().is_some_and(|s| s["kind"] == "snapshot") {
+            (st.snapshot, st.snapshot_seq) = (saved.snapshot.clone(), saved.snapshot_seq);
+        }
+        true
+    }
 
     pub async fn resume_handled(&self, handled: &[i64]) { self.st.lock().await.handled.extend(handled.iter().copied().filter(|s| (1..=1i64 << 53).contains(s))); }
 
@@ -473,11 +504,11 @@ impl Mailbox {
     /// newest first and a share that moves on). A listing that brings nothing new ends the listing, whatever it says
     /// of more. A slot that does not open, or is not there, is simply read again on a later look.
     pub async fn sync(&self) -> Result<()> {
-        let until = Instant::now() + LOOK_TIME;
+        let (until, list_until) = (Instant::now() + LOOK_TIME, Instant::now() + LIST_SHARE);
         let mut st = self.st.lock().await;
-        let (mut after, mut listed, mut whole) = (0, vec![], false);
+        let (mut after, mut listed, mut whole) = (st.list_from, vec![], false);
         for _ in 0..LOOK_PAGES {
-            if Instant::now() >= until { break; }
+            if Instant::now() >= list_until { break; }
             let list = self.hub.list(&self.mailbox, "down", after).await?;
             (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
             let seqs = ahead(&list, after);
@@ -486,13 +517,20 @@ impl Mailbox {
             listed.extend(seqs);
             if list["more"] != true { whole = true; break; }
         }
+        // the next look lists on from here, or from the start once this one reached the end
+        st.list_from = if whole { 0 } else { after };
         let unread: Vec<i64> = listed.iter().copied().filter(|s| !st.handled.contains(s)).collect();
         let mut turn = st.turn;
         let picked = pick(&unread, READ_AT_MOST, &mut turn);
         st.turn = turn;
         for seq in picked {
             if Instant::now() >= until { break; }
-            let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { continue };
+            // a slot that fails to come is passed over this time, not the ones after it; a phone removed stops here
+            let bytes = match self.hub.get_mail(&self.mailbox, "down", seq).await {
+                Ok(Some(b)) => b,
+                Err(e) if matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Revoked(_))) => return Err(e),
+                _ => continue,
+            };
             let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, &self.enrollment, "down", seq, &bytes);
             if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
         }
@@ -898,5 +936,44 @@ mod hostile_hub {
         m.sync().await.unwrap();
         m.sync().await.unwrap();
         assert_eq!(m.freshness().await.snapshot_at, Some(5));
+    }
+
+    /// R5: a mailbox longer to list than one look allows (30 pages): looks list on from where the last stopped, and
+    /// the snapshot at its very end is read within a few looks.
+    #[tokio::test]
+    async fn r5_phone_a_mailbox_longer_than_one_look_is_read_to_its_end() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let last = snap_at(&me, &desk, 3000, 3000);
+        let (url, _) = hub(Arc::new(move |_, p, _| {
+            if let Some(q) = p.split("?after=").nth(1) {
+                let after: i64 = q.split('&').next().unwrap().parse().unwrap();
+                let seqs: Vec<i64> = (after + 1..=(after + 100).min(3000)).collect();
+                return ok(json!({"max": 3000, "mail": seqs.iter().map(|s| json!({"seq": s})).collect::<Vec<_>>(), "more": seqs.last().is_some_and(|l| *l < 3000)}));
+            }
+            if p.ends_with("/down/3000") { (200, last.clone()) } else { (404, b"{}".to_vec()) }
+        })).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_handled(&[1, 2]).await;
+        for _ in 0..4 { m.sync().await.unwrap(); if m.freshness().await.snapshot_at == Some(3000) { return; } }
+        panic!("the end of the mailbox was never read");
+    }
+
+    /// R5: what the app keeps restores the handled slots and the newest snapshot, for this pairing only.
+    #[tokio::test]
+    async fn r5_phone_state_is_kept_and_restored_for_its_own_pairing_only() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let url = scripted(vec![listing(&[3])], vec![(3, vec![snap_at(&me, &desk, 3, 3)])]).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_handled(&[1, 2]).await;
+        m.sync().await.unwrap();
+        let saved = m.state().await;
+        assert_eq!((saved.handled.as_slice(), saved.snapshot_seq), (&[1, 2, 3][..], 3));
+        let again = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        assert!(again.restore(&saved).await);
+        assert_eq!(again.freshness().await.snapshot_at, Some(3), "shown at once after a restart");
+        assert!(again.freshness().await.stale, "and stale until a new one arrives");
+        let other = Mailbox::new(&me, &url, "tok", "ph-1", "e2", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        assert!(!other.restore(&saved).await, "another pairing's state is not taken");
+        assert_eq!(other.freshness().await.snapshot_at, None);
     }
 }

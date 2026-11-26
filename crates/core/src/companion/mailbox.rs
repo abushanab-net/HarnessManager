@@ -10,8 +10,8 @@
 //! message is opened under that row's key and pairing and handled for that very enrollment. There is no read cursor:
 //! each pass lists the mailbox and fetches slots this enrollment has not handled (`phone_mail_seen`, keyed by
 //! generation, mailbox and slot), a bounded share of them; one that does not open is fetched again on a later pass.
-//! A message is decided, then its decision recorded only if none is recorded yet: the record is the claim, and the
-//! slot is handled from then on. A computer stopping between the two decides it again on the next pass, where the
+//! One drainer holds an enrollment's mail at a time (a lease); a message is decided, then its decision recorded, and
+//! the slot is handled from then on, its record kept by age only. A computer stopping between the two decides it again on the next pass, where the
 //! action contract's own rule (the same action id is the stored receipt, a reservation without an outcome reads
 //! `unknown`) keeps it to one dispatch. Messages go through the companion API's own entry point and guards (`actions::act` behind the
 //! enrollment and Control checks `/c1` makes); the answers and a snapshot of what `/c1` shows (hello, overview,
@@ -82,6 +82,9 @@ thread_local! {
     /// Test seams: run once a pass read the claims it is to answer; count the slots fetched up.
     pub(crate) static AFTER_KEPT_READ: Seam = std::cell::RefCell::new(None);
     pub(crate) static FETCHES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Test seams: the listing pages a pass may read (0: as many as it would); run between a decision and its record.
+    pub(crate) static LIST_PAGES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static BEFORE_RECORD: Seam = std::cell::RefCell::new(None);
 }
 
 #[cfg(test)]
@@ -194,8 +197,45 @@ const LIST_TIME: Duration = Duration::from_secs(5);
 const HANDLED_KEPT_MS: i64 = 8 * 24 * 3_600_000;
 
 /// Where each mailbox's share of the pass budget starts this time, so no slot waits for ever behind ones that never
-/// open. In memory: it moves nothing a restart depends on.
+/// open, and where its listing goes on from when the last pass could not list it all. In memory: they move nothing a
+/// restart depends on (a restart lists from the start again).
 static TURN: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Default::default);
+static LIST_FROM: LazyLock<Mutex<HashMap<(String, String), i64>>> = LazyLock::new(Default::default);
+
+/// How long one drainer holds an enrollment's mail: renewed before each decision, and taken over only once it lapsed
+/// (a drainer that stopped dead).
+const LEASE_MS: i64 = 30_000;
+
+/// The one drainer of an enrollment's mail: a row with its owner and expiry, given back when the pass ends. Another
+/// process (or another pass) does nothing while it is held.
+struct Lease<'a> {
+    ctx: &'a Ctx,
+    generation: String,
+    mailbox: String,
+    owner: String,
+}
+
+impl<'a> Lease<'a> {
+    fn take(ctx: &'a Ctx, p: &Paired) -> Result<Option<Lease<'a>>> {
+        let (owner, now) = (crate::util::uuid4(), now_ms());
+        let held = ctx.db.with(|c| Ok(c.execute("insert into phone_mail_lease(generation, mailbox, owner, expires_at) values(?1, ?2, ?3, ?4)
+            on conflict(generation, mailbox) do update set owner = excluded.owner, expires_at = excluded.expires_at where phone_mail_lease.expires_at < ?5",
+            params![p.phone.generation, p.mailbox, owner, now + LEASE_MS, now])? > 0))?;
+        Ok(held.then(|| Lease { ctx, generation: p.phone.generation.clone(), mailbox: p.mailbox.clone(), owner }))
+    }
+
+    /// Still held, for another while; false when another drainer took it over (this one lapsed).
+    fn renew(&self) -> Result<bool> {
+        self.ctx.db.with(|c| Ok(c.execute("update phone_mail_lease set expires_at = ? where generation = ? and mailbox = ? and owner = ?",
+            params![now_ms() + LEASE_MS, self.generation, self.mailbox, self.owner])? > 0))
+    }
+}
+
+impl Drop for Lease<'_> {
+    fn drop(&mut self) {
+        let _ = self.ctx.db.with(|c| Ok(c.execute("delete from phone_mail_lease where generation = ? and mailbox = ? and owner = ?", params![self.generation, self.mailbox, self.owner])?));
+    }
+}
 
 /// What the database holds from before: revocations nobody owed a deletion for are owed one, invites whose time ran
 /// out unpaired are owed one, and what was handled for enrollments no longer here goes.
@@ -209,6 +249,7 @@ fn reconcile(ctx: &Ctx) -> Result<()> {
         tx.execute("insert or ignore into phone_hub_deletes(hub_url, mailbox, phone_id, generation, at) select hub_url, mailbox, '', '', ?1 from phone_hub_invites where expires_at + ?2 < ?1", params![now, RESULT_KEPT_MS])?;
         tx.execute("delete from phone_hub_invites where expires_at + ?2 < ?1", params![now, RESULT_KEPT_MS])?;
         tx.execute("delete from phone_mail_seen where not exists (select 1 from phones p where p.hub_mailbox = phone_mail_seen.mailbox and p.generation = phone_mail_seen.generation and p.revoked_at is null)", [])?;
+        tx.execute("delete from phone_mail_lease where not exists (select 1 from phones p where p.hub_mailbox = phone_mail_lease.mailbox and p.generation = phone_mail_lease.generation and p.revoked_at is null)", [])?;
         tx.commit()?;
         Ok(())
     })
@@ -252,16 +293,24 @@ fn deliver_decision(ctx: &Ctx, hub: &Hub, p: &Paired) -> Result<()> {
     ctx.db.with(|c| Ok(c.execute("update phones set hub_pairing = null where hub_mailbox = ? and hub_pairing = ?", params![p.mailbox, d])?)).map(|_| ())
 }
 
-/// The phone's messages: the replies recorded and not out yet first; then the whole listing, and of the slots this
-/// enrollment has not handled, at most `PER_PASS` fetched (the newest half, and a share that moves on each pass).
-/// One that opens is decided, and its decision recorded only if no other drainer recorded one first: the record is
-/// the claim, and the slot is handled from then on. One that does not open, or is not there, is simply fetched again
-/// on a later pass: nothing moves past it.
+/// The phone's messages, by the one drainer holding the enrollment's lease (another does nothing): the replies
+/// recorded and not out yet first; then the listing, from where the last pass's stopped when it could not list it
+/// all, and of the slots this enrollment has not handled, at most `PER_PASS` fetched (the newest half, and a share
+/// that moves on each pass). One that opens is decided and its decision recorded: the record makes the slot handled.
+/// One that does not open, is not there, or fails to come, is simply fetched again on a later pass: nothing moves past
+/// it.
 fn consume(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
+    let Some(lease) = Lease::take(ctx, p)? else { return Ok(()) };
     answer_kept(ctx, hub, me, p)?;
     let until = std::time::Instant::now() + LIST_TIME;
-    let (mut after, mut listed, mut whole) = (0, vec![], false);
-    for _ in 0..PAGES {
+    let key = (p.phone.generation.clone(), p.mailbox.clone());
+    let from = LIST_FROM.lock().unwrap_or_else(|e| e.into_inner()).get(&key).copied().unwrap_or(0);
+    let (mut after, mut listed, mut whole) = (from, vec![], false);
+    #[cfg(test)]
+    let pages = match LIST_PAGES.with(|c| c.get()) { 0 => PAGES, n => n };
+    #[cfg(not(test))]
+    let pages = PAGES;
+    for _ in 0..pages {
         if std::time::Instant::now() >= until { break; }
         let list = hub.get_json(&format!("/v1/mail/{}/up?after={after}", p.mailbox))?.unwrap_or(Value::Null);
         let seqs = ahead(&list, after);
@@ -270,6 +319,8 @@ fn consume(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
         listed.extend(seqs);
         if list["more"] != true { whole = true; break; }
     }
+    // the next pass lists on from here, or from the start once this one reached the end
+    LIST_FROM.lock().unwrap_or_else(|e| e.into_inner()).insert(key, if whole { 0 } else { after });
     let handled: std::collections::HashSet<i64> = ctx.db.read(|c| Ok(c.prepare("select seq from phone_mail_seen where generation = ? and mailbox = ?")?
         .query_map(params![p.phone.generation, p.mailbox], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?))?;
     let unread: Vec<i64> = listed.iter().copied().filter(|s| !handled.contains(s)).collect();
@@ -277,12 +328,18 @@ fn consume(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
     for seq in picked {
         #[cfg(test)]
         FETCHES.with(|c| c.set(c.get() + 1));
-        let bytes = hub.get_opt_bytes(&format!("/v1/mail/{}/up/{seq}", p.mailbox), MAIL_MAX)?;
+        // a slot that fails to come is passed over this time, not the slots after it
+        let bytes = match hub.get_opt_bytes(&format!("/v1/mail/{}/up/{seq}", p.mailbox), MAIL_MAX) {
+            Ok(b) => b,
+            Err(e) => { crate::log::warn(&format!("phones: slot {seq} of {} did not come; it is fetched again later ({e:#})", p.phone.name)); continue; }
+        };
         let opened = bytes.as_deref().map(|b| open_mail(&me.x_secret, &p.pubkey, &p.mailbox, &p.phone.generation, "up", seq, b));
         let Some(Ok(body)) = opened else {
             if let Some(Err(e)) = &opened { crate::log::warn(&format!("phones: a message for {} does not open; it is fetched again later ({e:#})", p.phone.name)); }
             continue;
         };
+        // nothing is decided without the lease: one that lapsed may be another drainer's now
+        if !lease.renew()? { return Ok(()); }
         let reply = match handle(ctx, p, &body)? {
             // the enrollment this worker serves ended: it does nothing more
             Decision::Ended => return Ok(()),
@@ -291,15 +348,17 @@ fn consume(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
         };
         #[cfg(test)]
         if STOP_AFTER_CLAIM.with(|c| c.replace(false)) { bail!("the computer stopped between the decision and its record"); }
-        // the record takes the claim: the first decision recorded is the only one ever published
+        #[cfg(test)]
+        seam(&BEFORE_RECORD);
+        // recorded once (a slot is never recorded twice), and only this decision is published
         ctx.db.with(|c| Ok(c.execute("insert or ignore into phone_mail_seen(generation, mailbox, seq, at, reply, sent) values(?, ?, ?, ?, ?, ?)",
             params![p.phone.generation, p.mailbox, seq, now_ms(), reply.as_ref().map(|r| r.to_string()), reply.is_none()])?))?;
     }
     answer_kept(ctx, hub, me, p)?;
-    // what the hub no longer keeps is let go: past its week, or below its oldest when the listing was whole
-    let oldest = if whole { listed.first().copied().unwrap_or(0) } else { 0 };
-    ctx.db.with(|c| Ok(c.execute("delete from phone_mail_seen where generation = ? and mailbox = ? and sent = 1 and seq > 2 and (at < ? or seq < ?)",
-        params![p.phone.generation, p.mailbox, now_ms() - HANDLED_KEPT_MS, oldest])?)).map(|_| ())
+    // a decision is let go only by age, past the hub's week and far past any action's window: never by what the hub
+    // lists, so a refusal delivered is never decided again
+    ctx.db.with(|c| Ok(c.execute("delete from phone_mail_seen where generation = ? and mailbox = ? and sent = 1 and seq > 2 and at < ?",
+        params![p.phone.generation, p.mailbox, now_ms() - HANDLED_KEPT_MS])?)).map(|_| ())
 }
 
 /// The replies this enrollment recorded and did not get out yet, oldest first, at most `PER_PASS`, each sent as it
