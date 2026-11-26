@@ -99,6 +99,15 @@ fn jwt_input(header: Value, claims: Value) -> String {
     format!("{}.{}", URL_SAFE_NO_PAD.encode(header.to_string()), URL_SAFE_NO_PAD.encode(claims.to_string()))
 }
 
+async fn forget_rejected_login(cache: &Mutex<Option<(u64, String)>>, used: &str, status: StatusCode) {
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        let mut cached = cache.lock().await;
+        if cached.as_ref().is_some_and(|(_, token)| token == used) {
+            *cached = None;
+        }
+    }
+}
+
 fn fcm_message(token: &str, kind: Kind, collapse: &str) -> Value {
     let mut msg = json!({"token":token, "android":{"collapse_key":collapse,"priority":"HIGH","ttl":"60s"}});
     match kind {
@@ -154,9 +163,10 @@ impl Fcm {
     }
 
     async fn send(&self, http: &Client, token: &str, kind: Kind, collapse: &str) -> Result<Delivery> {
+        let bearer = self.bearer(http).await?;
         let response = http
             .post(format!("https://fcm.googleapis.com/v1/projects/{}/messages:send", self.project))
-            .bearer_auth(self.bearer(http).await?)
+            .bearer_auth(&bearer)
             .json(&fcm_message(token, kind, collapse))
             .send()
             .await?;
@@ -164,6 +174,7 @@ impl Fcm {
         if status.is_success() {
             return Ok(Delivery::Sent);
         }
+        forget_rejected_login(&self.bearer, &bearer, status).await;
         let error: Value = response.json().await?;
         let invalid = error["error"]["details"].as_array().into_iter().flatten().any(|d| {
             d["@type"] == "type.googleapis.com/google.firebase.fcm.v1.FcmError"
@@ -197,10 +208,11 @@ impl Apns {
         let now = now_ms() / 1000;
         let (topic, push_type, payload) = apns_message(kind, now);
         let host = if self.cfg.sandbox { "api.sandbox.push.apple.com" } else { "api.push.apple.com" };
+        let bearer = self.bearer(now).await?;
         let response = http
             .post(format!("https://{host}/3/device/{token}"))
             .version(reqwest::Version::HTTP_2)
-            .bearer_auth(self.bearer(now).await?)
+            .bearer_auth(&bearer)
             .header("apns-topic", topic)
             .header("apns-push-type", push_type)
             .header("apns-collapse-id", collapse)
@@ -212,6 +224,7 @@ impl Apns {
         if status.is_success() {
             return Ok(Delivery::Sent);
         }
+        forget_rejected_login(&self.bearer, &bearer, status).await;
         let error: Value = response.json().await?;
         match (status, error["reason"].as_str()) {
             (StatusCode::GONE, Some("Unregistered" | "ExpiredToken"))
@@ -237,6 +250,18 @@ impl Provider for Providers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn only_a_rejection_of_the_current_login_clears_the_cache() {
+        for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+            let cache = Mutex::new(Some((123, "current".into())));
+            forget_rejected_login(&cache, "superseded", status).await;
+            forget_rejected_login(&cache, "current", StatusCode::SERVICE_UNAVAILABLE).await;
+            assert!(cache.lock().await.is_some());
+            forget_rejected_login(&cache, "current", status).await;
+            assert!(cache.lock().await.is_none());
+        }
+    }
 
     #[test]
     fn provider_payloads_only_announce_a_request_or_an_update() {
