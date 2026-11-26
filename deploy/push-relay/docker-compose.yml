@@ -1,0 +1,16 @@
+services:
+  hrm-push-relay:
+    build:
+      context: ../..
+      dockerfile: deploy/push-relay/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - push-data:/data
+      - ${PUSH_CONFIG_DIR:-/etc/hrm-push}:/etc/hrm-push:ro
+    networks: [hub]
+networks:
+  hub:
+    external: true
+    name: ${HUB_NETWORK:-hub_default}
+volumes:
+  push-data:

@@ -1,0 +1,7 @@
+{
+  "bind": "0.0.0.0:8788",
+  "database": "/data/push.db",
+  "signing_key_file": "/etc/hrm-push/relay.key",
+  "fcm_service_account_file": null,
+  "apns": null
+}
