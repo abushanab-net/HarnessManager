@@ -1,7 +1,6 @@
 //! A phone's actions on a session. In wave 1 a phone answers requests; Reply and Stop are refused (a later package,
 //! WP-M8, designs them). One transaction claims an answer before it reaches the session: it checks the grant and the
-//! enrollment, the deadline, the request, the state version the phone was shown and whether the run's events were
-//! all recorded, consumes that version (so a second action on the same screen is refused) and reserves the receipt.
+//! enrollment, the deadline, the request and the state version the phone was shown, consumes that version (so a second action on the same screen is refused) and reserves the receipt.
 //! Just before dispatch the grant, the deadline and the claimed version are looked at again, and the answer's own
 //! write checks them once more. The receipt is kept 24 h; the same `action_id` again returns it and does nothing. A
 //! reservation that never got its outcome (the process ended on the way) reads as `unknown` and is never dispatched
@@ -24,7 +23,9 @@ use crate::{hooks, Ctx};
 
 const KEPT_MS: i64 = 24 * 3_600_000;
 pub(crate) const NOT_YET: &str = "Reply and Stop from a phone are not available yet";
-const STATE_UNKNOWN: &str = "An event of this session may not have been recorded, so this request may already be settled; answer in its terminal";
+/// An accepted answer's receipt: Claude Code acts only on the first decision for a tool call, and an event the hook
+/// could not save can leave a request open after the terminal answered it (PLAN.md, release criteria).
+pub(crate) const ACCEPTED: &str = "Sent to the session. If the terminal answered first, nothing changed.";
 
 /// shortcut: one action at a time on this computer, which serialises each run's actions too; per-run locks if
 /// phones ever act on many runs at once and one slow terminal holds the others up
@@ -108,7 +109,6 @@ fn claim(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, String
     if let Some(gone) = ask_gone(c, run, ask)? { return Ok(Some(gone)); }
     let row: Option<RunNow> = c.query_row("select version, pid, started from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let Some((version, _, _)) = row.filter(|r| crate::procs::start_ms(r.1).is_some_and(|s| r.2 == 0 || s == r.2)) else { return Ok(un("that session is no longer running here")) };
-    if !hooks::events_all_recorded(c, run) { return Ok(un(STATE_UNKNOWN)); }
     if version != a.state_version { return Ok(Some((Status::Expired, "the session changed since this was shown; look again".into()))); }
     c.execute("update run_state set version = version + 1 where run = ?1 and version = ?2", params![run, version])?;
     Ok(None)
@@ -130,7 +130,7 @@ fn dispatch(ctx: &Ctx, p: &Phone, a: &Action) -> (Status, String) {
     // where the answer is written, the claim's preconditions are checked again
     let guard = hooks::Guard { version: a.state_version + 1, deadline: a.expires_at, phone: Some((p.id.clone(), p.generation.clone())) };
     match hooks::answer_guarded(ctx, ask, &a.payload, Some(&guard)) {
-        Ok(true) => (Status::Accepted, "answered".into()),
+        Ok(true) => (Status::Accepted, ACCEPTED.into()),
         Ok(false) => ctx.db.read(|c| Ok(ask_gone(c, run, ask)?.or(last_check(c, p, a)?))).ok().flatten()
             .unwrap_or((Status::Unavailable, "the session no longer waits for this answer".into())),
         Err(e) => (Status::Unavailable, format!("{e:#}")),

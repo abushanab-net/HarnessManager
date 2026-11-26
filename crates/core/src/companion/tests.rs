@@ -308,7 +308,6 @@ fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
             params![ask, run, now_ms(), now_ms() + expires_in, pid, started])?;
         Ok(())
     }).unwrap();
-    std::fs::create_dir_all(crate::hooks::markers_dir(&ctx.data, &run)).unwrap();
     (run, ask, 3)
 }
 
@@ -336,7 +335,7 @@ fn the_action_contract_holds_without_a_terminal() {
 
     // accepted, once: the same action_id again is the stored receipt and changes nothing
     let first = act(answer(&run, &ask, v, "a-1"));
-    assert_eq!((first.status, first.detail.as_str()), (Status::Accepted, "answered"));
+    assert_eq!((first.status, first.detail.as_str()), (Status::Accepted, "Sent to the session. If the terminal answered first, nothing changed."));
     assert_eq!(ask_state(&d.ctx, &ask), ("answered".into(), "allow".into()));
     d.ctx.db.with(|c| Ok(c.execute("update run_ask set answer = 'deny-marker' where id = ?", [&ask])?)).unwrap();
     assert_eq!(act(answer(&run, &ask, v, "a-1")), first);
@@ -400,7 +399,6 @@ fn working(ctx: &Ctx) -> (String, i64) {
     let run = format!("{pid}:{}", crate::util::uuid4());
     ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness, session_id, state, version, terminal_port, terminal_token) values(?, ?, ?, 'work', 'claude', 's-2', 'working', 5, 9, x'00')",
         params![run, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
-    std::fs::create_dir_all(crate::hooks::markers_dir(&ctx.data, &run)).unwrap();
     (run, 5)
 }
 
@@ -961,28 +959,6 @@ fn a_phones_reply_and_stop_are_refused_and_answers_still_work() {
     let (run, ask, v) = waiting(&ctx, 60_000);
     let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "off-3")).unwrap();
     assert_eq!(r.status, Status::Accepted, "answers are not affected");
-}
-
-// ---------- the fifth review (Codex, at da23831) ----------
-
-/// #1: while a run's state is unknown (a hook's event may not be recorded) a phone's answer is refused before it is
-/// claimed: nothing is dispatched and the version is not consumed. Once a settling event is recorded, it is accepted.
-#[test]
-fn a_phones_answer_is_refused_while_its_runs_state_is_unknown() {
-    let t = tempfile::tempdir().unwrap();
-    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-    let p = enrolled(&ctx, true);
-    let (run, ask, v) = waiting(&ctx, 60_000);
-    let marker = crate::hooks::markers_dir(&ctx.data, &run).join("0-a-hook-in-flight");
-    std::fs::write(&marker, b"0 0").unwrap();
-    let before = dispatched();
-    let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-1")).unwrap();
-    assert_eq!((r.status, dispatched()), (Status::Unavailable, before), "{r:?}");
-    assert!(r.detail.contains("may not have been recorded"), "{r:?}");
-    assert_eq!(crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap().version, v, "nothing consumed");
-    assert_eq!(ask_state(&ctx, &ask).0, "open");
-    std::fs::remove_file(&marker).unwrap();
-    assert_eq!(super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-2")).unwrap().status, Status::Accepted);
 }
 
 /// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of

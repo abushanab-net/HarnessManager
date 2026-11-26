@@ -8,8 +8,6 @@
 //! same way). A permission prompt stays answerable in the terminal, while a question appears there after the hook
 //! exits. A later event or the hook's expiry closes the request and the hook exits 0 printing nothing.
 
-use std::cell::Cell;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -101,23 +99,12 @@ fn kind_of(v: &Value) -> Option<&'static str> {
 /// variable changes nothing.
 pub fn hook(input: &str) -> Result<Option<String>> {
     let Ok(run) = std::env::var(RUN_VAR) else { return Ok(None) };
+    let v: Value = serde_json::from_str(input).context("the hook's input is not JSON")?;
+    // not Ctx::open: no migrations, no settings, on every tool call; hm.db is there, hrm run opened it
+    let c = hook_connection(&crate::ctx::data_dir().join("hm.db"))?;
     let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u32);
     let question = std::env::var(QUESTION_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(crate::phones::QUESTION_WITHOUT).min(crate::phones::QUESTION_WITH_PHONE);
-    hook_in(&crate::ctx::data_dir(), &run, input, Duration::from_secs(secs.into()), Duration::from_secs(question.into()))
-}
-
-/// `hook` for the data folder `data`: the event's in-flight marker is made before anything else, so a hook that
-/// fails anywhere (its input, opening the database, the schema check, the write) leaves it, and phones are refused.
-fn hook_in(data: &Path, run: &str, input: &str, wait: Duration, question: Duration) -> Result<Option<String>> {
-    let flight = InFlight::begin(data, run);
-    let r = (|| {
-        let v: Value = serde_json::from_str(input).context("the hook's input is not JSON")?;
-        // not Ctx::open: no migrations, no settings, on every tool call; hm.db is there, hrm run opened it
-        let c = hook_connection(&data.join("hm.db"))?;
-        Ok(handle_in_flight(&c, run, &v, wait, question, &flight)?.map(|d| d.to_string()))
-    })();
-    if r.is_err() { flight.failed(); }
-    r
+    Ok(handle_asking(&c, &run, &v, Duration::from_secs(secs.into()), Duration::from_secs(question.into()))?.map(|d| d.to_string()))
 }
 
 /// The database as `hrm hook` writes it. An `hrm run` started before an update may still run, and its hooks run the
@@ -141,9 +128,8 @@ struct Opening<'a> {
 }
 
 /// What an event says about its session, written in one transaction with the request it opens (bound to the run's
-/// current turn), so no later event can come between the two. True when the event closed every request the run had
-/// open: whatever an event lost before it left open is settled by it.
-fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>, flight: &InFlight) -> rusqlite::Result<bool> {
+/// current turn), so no later event can come between the two.
+fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>) -> rusqlite::Result<()> {
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let input = v["tool_input"].to_string();
     let event = v["hook_event_name"].as_str().unwrap_or("");
@@ -152,22 +138,16 @@ fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>, fligh
     if event == "UserPromptSubmit" { tx.execute("update run_state set turn = turn + 1 where run = ?", [run])?; }
     // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
     // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
-    let (closed, settles) = match event {
-        "Notification" if v["notification_type"] != "idle_prompt" => (0, false),
-        "PostToolUse" => (tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?, false),
-        _ => (tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?, true),
+    let closed = match event {
+        "Notification" if v["notification_type"] != "idle_prompt" => 0,
+        "PostToolUse" => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?,
+        _ => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?,
     };
     if let Some((state, reason)) = state_of(v) {
         tx.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
             version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
     } else if closed > 0 {
         tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
-    }
-    // no marker could be made: the run is unsure for phones (with the request this event opens) until an event with
-    // its marker settles it; a marker folder that was missing (gone with a failure, or never made) likewise
-    let (no_marker, missing) = (flight.own.is_none(), flight.was_missing);
-    if no_marker || settles || missing {
-        tx.execute("update run_state set unsure = case when ?2 then 1 when ?3 then 0 else 1 end where run = ?1", params![run, no_marker, settles])?;
     }
     if let Some(o) = opening {
         // the request and the version it moves come together: nobody sees the request beside the version before it
@@ -176,88 +156,7 @@ fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>, fligh
             params![o.id, run, s("session_id"), o.kind, s("tool_name"), o.what, input, o.created, o.expires, o.pid, o.started])?;
         tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
     }
-    tx.commit()?;
-    Ok(settles)
-}
-
-/// Where a run's hooks leave their in-flight markers: one file per event, made before the hook touches the database
-/// and removed by that hook once its event committed. A marker left behind is an event that may not be recorded.
-pub(crate) fn markers_dir(data: &Path, run: &str) -> PathBuf {
-    let name: String = run.chars().map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' { ch } else { '_' }).collect();
-    data.join("run-unknown").join(name)
-}
-
-fn data_of(c: &Connection) -> Option<PathBuf> { c.path().filter(|p| !p.is_empty()).and_then(|p| Path::new(p).parent()).map(Path::to_path_buf) }
-
-#[cfg(test)]
-thread_local! {
-    /// Test seam: runs after a hook's event committed, before it removes its marker.
-    pub(crate) static AFTER_COMMIT: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
-}
-
-/// One hook's event in flight: its own marker (named by when it began, so names sort by age; it holds the hook's pid
-/// and start), made before the hook touches the database.
-struct InFlight {
-    dir: PathBuf,
-    name: String,
-    own: Option<PathBuf>,
-    was_missing: bool,
-    committed: Cell<bool>,
-}
-
-impl InFlight {
-    fn begin(data: &Path, run: &str) -> InFlight {
-        let dir = markers_dir(data, run);
-        let was_missing = !dir.is_dir();
-        let begun = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let name = format!("{begun:024}-{}", crate::util::uuid4());
-        let pid = std::process::id();
-        let own = std::fs::create_dir_all(&dir).and_then(|_| {
-            use std::io::Write;
-            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&name))?;
-            f.write_all(format!("{pid} {}", crate::procs::start_ms(pid).unwrap_or(0)).as_bytes())
-        });
-        if let Err(e) = &own { crate::log::info(&format!("hook: no in-flight marker for {run}: {e:#}")); }
-        InFlight { own: own.ok().map(|_| dir.join(&name)), dir, name, was_missing, committed: Cell::new(false) }
-    }
-
-    /// Its event committed: its own marker goes. An event that closed every open request also removes the markers of
-    /// hooks that began before it and have exited: what their events would have changed, it settled. A hook still
-    /// running, or one that began after it, keeps its marker.
-    fn landed(&self, settles: bool) {
-        self.committed.set(true);
-        #[cfg(test)]
-        if let Some(f) = AFTER_COMMIT.with(|a| a.borrow_mut().take()) { f(); }
-        let gone = |path: &Path| if let Err(e) = std::fs::remove_file(path) { crate::log::info(&format!("hook: removing marker {}: {e:#}", path.display())); };
-        let Some(own) = &self.own else { return };
-        gone(own);
-        if !settles { return; }
-        match std::fs::read_dir(&self.dir) {
-            Ok(list) => for e in list.flatten() {
-                let older = e.file_name().to_str().is_some_and(|n| n < self.name.as_str());
-                let owner = std::fs::read_to_string(e.path()).unwrap_or_default();
-                let mut it = owner.split(' ').map(|x| x.parse::<i64>().unwrap_or(0));
-                let (pid, started) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
-                if older && !hook_is_live(pid as u32, started) { gone(&e.path()); }
-            },
-            Err(e) => crate::log::info(&format!("hook: reading markers in {}: {e:#}", self.dir.display())),
-        }
-    }
-
-    /// Its event may not be recorded. Its marker stays; without one, the marker folder goes if it is empty, so the
-    /// run reads as unknown to phones all the same.
-    fn failed(&self) {
-        if self.committed.get() || self.own.is_some() { return; }
-        if let Err(e) = std::fs::remove_dir(&self.dir) { crate::log::info(&format!("hook: no marker and the folder stays: {e:#}")); }
-    }
-}
-
-/// Whether a phone may answer on `run`: every event its hooks began was recorded. Its marker folder must list, and
-/// list nothing, and no hook found the markers unavailable since the last settling event. Any error refuses.
-pub fn events_all_recorded(c: &Connection, run: &str) -> bool {
-    let Some(data) = data_of(c) else { return false };
-    let listed_empty = std::fs::read_dir(markers_dir(&data, run)).is_ok_and(|mut d| d.next().is_none());
-    listed_empty && c.query_row("select unsure = 0 from run_state where run = ?", [run], |r| r.get::<_, bool>(0)).unwrap_or(false)
+    tx.commit()
 }
 
 /// `handle_asking` with the question window of a computer without a phone.
@@ -269,16 +168,8 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
 /// waits up to `wait` for the app's answer (a question up to `question`). Answers the decision for the tool, or None:
 /// no decision, the terminal prompt stands. The run's `version` moves with every change of its state or of its
 /// requests, so a phone's action names the state it was shown. An event that cannot be written fails as it always
-/// did, and its in-flight marker keeps phones out until a later event settles it.
+/// did (see the release criteria in docs/plans/mobile/PLAN.md for what that leaves open).
 pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration) -> Result<Option<Value>> {
-    let Some(data) = data_of(c) else { bail!("the hook's database has no folder") };
-    let flight = InFlight::begin(&data, run);
-    let r = handle_in_flight(c, run, v, wait, question, &flight);
-    if r.is_err() { flight.failed(); }
-    r
-}
-
-fn handle_in_flight(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration, flight: &InFlight) -> Result<Option<Value>> {
     let kind = kind_of(v);
     let wait = if kind == Some("question") { wait.min(question) } else { wait };
     // whether the event holds a request is decided first, so the request is written with the event: only for a
@@ -296,7 +187,7 @@ fn handle_in_flight(c: &Connection, run: &str, v: &Value, wait: Duration, questi
         }
         _ => None,
     };
-    flight.landed(record(c, run, v, opening.as_ref(), flight)?);
+    record(c, run, v, opening.as_ref())?;
     let Some(Opening { id, kind, expires, .. }) = opening else { return Ok(None) };
     let deadline = Instant::now() + wait;
     loop {
@@ -348,10 +239,10 @@ pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> { answer_guarded(c
 /// `answer`, for a phone: the run must still be at the version its action claimed, and the action's deadline not
 /// passed, when the answer is written.
 pub fn answer_guarded(ctx: &Ctx, id: &str, a: &Value, guard: Option<&Guard>) -> Result<bool> {
-    let row: Option<(String, String, u32, i64, String)> = ctx.db.read(|c| Ok(c.query_row(
-        "select kind, input, hook_pid, hook_started, run from run_ask where id = ?1 and state = 'open' and expires > ?2",
-        params![id, now_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).optional()?))?;
-    let Some((kind, input, pid, started, run)) = row else { return Ok(false) };
+    let row: Option<(String, String, u32, i64)> = ctx.db.read(|c| Ok(c.query_row(
+        "select kind, input, hook_pid, hook_started from run_ask where id = ?1 and state = 'open' and expires > ?2",
+        params![id, now_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?))?;
+    let Some((kind, input, pid, started)) = row else { return Ok(false) };
     if !hook_is_live(pid, started) { return Ok(false); }
     let answer = if kind == "question" {
         let input: Value = serde_json::from_str(&input)?;
@@ -373,8 +264,6 @@ pub fn answer_guarded(ctx: &Ctx, id: &str, a: &Value, guard: Option<&Guard>) -> 
         // the write lock first, then the clock: a write that waited for another writer is judged at its own time
         let tx = c.transaction()?;
         if !hook_is_live(pid, started) { return Ok(false); }
-        // an event of this run may be lost: the request may already be settled at the terminal
-        if guard.is_some() && !events_all_recorded(&tx, &run) { return Ok(false); }
         let now = now_ms();
         // a phone's answer also names the run version it claimed, its own deadline and its enrollment, which must
         // still have Control: all hold in the same write that takes the open request
@@ -417,10 +306,6 @@ pub fn start_run(ctx: &Ctx, p: &Profile, env: &mut Vec<(String, String)>) -> Opt
 /// `hrm run`, after the tool exited: its rows go.
 pub fn end_run(ctx: &Ctx, run: &str) {
     let _ = ctx.db.with(|c| { c.execute("delete from run_state where run = ?", [run])?; c.execute("delete from run_ask where run = ?", [run])?; Ok(()) });
-    let dir = markers_dir(&ctx.data, run);
-    if let Err(e) = std::fs::remove_dir_all(&dir) {
-        if e.kind() != std::io::ErrorKind::NotFound { crate::log::info(&format!("end of run {run}: removing its markers: {e:#}")); }
-    }
 }
 
 #[cfg(windows)]
@@ -859,17 +744,22 @@ mod tests {
         assert!(h.join().unwrap().is_some());
     }
 
-    /// The hooks that failed have exited: their markers name no live process.
-    fn exited(ctx: &Ctx, run: &str) {
-        for e in std::fs::read_dir(markers_dir(&ctx.data, run)).unwrap().flatten() { std::fs::write(e.path(), b"0 0").unwrap(); }
+    /// The files under the data folder, other than SQLite's own.
+    fn files(dir: &std::path::Path) -> Vec<String> {
+        let mut out = vec![];
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("hm.db") { continue; }
+            if e.path().is_dir() { out.extend(files(&e.path()).into_iter().map(|f| format!("{name}/{f}"))); } else { out.push(name); }
+        }
+        out.sort();
+        out
     }
-    fn markers(ctx: &Ctx, run: &str) -> usize { std::fs::read_dir(markers_dir(&ctx.data, run)).unwrap().count() }
 
-    /// A hook that cannot record its event (the database held past its busy wait) fails as it always did, at once, and
-    /// leaves its marker: a phone's answer is refused until an event that settles every open request is recorded. An
-    /// event that leaves a request open does not clear it; the desktop answers throughout.
+    /// A hook that cannot record its event (the database held past its busy wait) fails as it always did, at once,
+    /// without a retry, and the desktop still answers the request it left open.
     #[test]
-    fn a_hook_that_cannot_record_leaves_the_state_unknown_until_a_settling_event() {
+    fn a_hook_that_cannot_record_fails_at_once_and_the_desktop_still_answers() {
         let (_d, ctx, run) = live_run();
         let (h, a) = hold(&ctx, &run, BASH, 20_000);
         let c = Connection::open(ctx.data.join("hm.db")).unwrap();
@@ -878,119 +768,38 @@ mod tests {
         other.execute_batch("begin immediate").unwrap();
         let mut ran: Value = serde_json::from_str(BASH).unwrap();
         ran["hook_event_name"] = json!("PostToolUse");
-        let t = std::time::Instant::now();
+        let t = Instant::now();
         assert!(handle(&c, &run, &ran, Duration::ZERO).is_err());
         assert!(t.elapsed() < Duration::from_secs(2), "no retry: {:?}", t.elapsed());
         other.execute_batch("commit").unwrap();
-        assert!(!events_all_recorded(&c, &run));
-        let phone = a_phone(&ctx);
-        let allow = json!({"behavior": "allow"});
-        let g = || Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone.clone()) };
-        heartbeat(&ctx).unwrap();
-        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g())).unwrap(), "the request may already be settled");
-        handle(&c, &run, &json!({"hook_event_name": "Notification", "notification_type": "permission_prompt"}), Duration::ZERO).unwrap();
-        assert!(!events_all_recorded(&c, &run), "a notification settles nothing");
-        assert!(answer(&ctx, &a.id, &allow).unwrap(), "the desktop answers");
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap());
         assert!(h.join().unwrap().is_some());
-        assert!(!events_all_recorded(&c, &run), "an answer is not the lost event");
-        exited(&ctx, &run);
-        handle(&c, &run, &json!({"hook_event_name": "Stop"}), Duration::ZERO).unwrap();
-        assert!(events_all_recorded(&c, &run), "the turn's end settles every request");
+    }
+
+    /// The hook path of a session with no phone does no filesystem work beyond hm.db, as in 1.13.2: every event, a
+    /// request answered, one that times out, and an event that cannot be written leave the data folder as it was.
+    #[test]
+    fn the_hook_path_without_a_phone_touches_no_file() {
+        let (_d, ctx, run) = live_run();
+        let before = files(&ctx.data);
+        let c = hook_connection(&ctx.data.join("hm.db")).unwrap();
+        for e in ["UserPromptSubmit", "Notification", "PostToolUse", "Stop", "SessionEnd"] {
+            handle(&c, &run, &json!({"hook_event_name": e, "notification_type": "permission_prompt", "tool_name": "Bash", "tool_input": {}}), Duration::ZERO).unwrap();
+        }
         let (h, a) = hold(&ctx, &run, BASH, 20_000);
-        assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g())).unwrap());
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "deny"})).unwrap());
         assert!(h.join().unwrap().is_some());
-    }
-
-    /// Final check, finding 1: an older hook's cleanup never clears a newer failure. A permission hook commits its
-    /// event (opening request A) and, before it removes its marker, the terminal settles A and the matching PostToolUse
-    /// cannot be recorded. The first hook then removes only its own marker; A stays refused to phones.
-    #[test]
-    fn an_older_hooks_cleanup_never_clears_a_newer_failure() {
-        let (_d, ctx, run) = live_run();
-        handle(&conn(&ctx), &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
-        heartbeat(&ctx).unwrap();
-        let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (data, run2, f2) = (ctx.data.clone(), run.clone(), failed.clone());
-        let h = std::thread::spawn(move || {
-            let c = hook_connection(&data.join("hm.db")).unwrap();
-            let (data3, run3) = (data.clone(), run2.clone());
-            AFTER_COMMIT.with(|a| *a.borrow_mut() = Some(Box::new(move || {
-                let other = Connection::open(data3.join("hm.db")).unwrap();
-                other.execute_batch("begin immediate").unwrap();
-                let late = Connection::open(data3.join("hm.db")).unwrap();
-                late.busy_timeout(Duration::from_millis(50)).unwrap();
-                let mut ran: Value = serde_json::from_str(BASH).unwrap();
-                ran["hook_event_name"] = json!("PostToolUse");
-                assert!(handle(&late, &run3, &ran, Duration::ZERO).is_err());
-                other.execute_batch("commit").unwrap();
-                // the failed PostToolUse hook has exited
-                for e in std::fs::read_dir(markers_dir(&data3, &run3)).unwrap().flatten() { std::fs::write(e.path(), b"0 0").unwrap(); }
-                f2.store(true, std::sync::atomic::Ordering::SeqCst);
-            })));
-            handle(&c, &run2, &serde_json::from_str(BASH).unwrap(), Duration::from_secs(20)).unwrap()
-        });
-        let end = Instant::now() + Duration::from_secs(5);
-        let a = loop {
-            let ask = runs(&ctx).unwrap().into_iter().find_map(|r| r.ask);
-            if failed.load(std::sync::atomic::Ordering::SeqCst) && markers(&ctx, &run) == 1 { if let Some(a) = ask { break a; } }
-            assert!(Instant::now() < end, "the first hook never cleaned up");
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        assert!(!events_all_recorded(&conn(&ctx), &run), "the newer failure's marker stays");
-        let phone = a_phone(&ctx);
-        heartbeat(&ctx).unwrap();
-        let allow = json!({"behavior": "allow"});
-        let g = Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone) };
-        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g)).unwrap(), "A was settled at the terminal");
-        assert!(answer(&ctx, &a.id, &allow).unwrap(), "the desktop answers");
-        assert!(h.join().unwrap().is_some());
-    }
-
-    /// Final check, finding 2: a writable database with marker storage unavailable. The hook records its event as
-    /// before, and the run is unsure for phones: the request it opens is not answerable from a phone, the desktop
-    /// answers it, and only a later event with its marker that settles every request clears it.
-    #[test]
-    fn markers_that_cannot_be_made_keep_phones_out_and_the_desktop_in() {
-        let (_d, ctx, run) = live_run();
-        std::fs::write(ctx.data.join("run-unknown"), b"not a folder").unwrap();
-        handle(&conn(&ctx), &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
-        assert_eq!(runs(&ctx).unwrap()[0].state, "working", "recorded as before");
-        let (h, a) = hold(&ctx, &run, BASH, 20_000);
-        let phone = a_phone(&ctx);
-        heartbeat(&ctx).unwrap();
-        let allow = json!({"behavior": "allow"});
-        let g = || Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone.clone()) };
-        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g())).unwrap());
-        // the storage is back: the folder lists empty, and the run stays unsure until an event settles it
-        std::fs::remove_file(ctx.data.join("run-unknown")).unwrap();
-        std::fs::create_dir_all(markers_dir(&ctx.data, &run)).unwrap();
-        assert!(!events_all_recorded(&conn(&ctx), &run));
-        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g())).unwrap());
-        assert!(answer(&ctx, &a.id, &allow).unwrap(), "the desktop answers");
-        assert!(h.join().unwrap().is_some());
-        handle(&conn(&ctx), &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
-        assert!(events_all_recorded(&conn(&ctx), &run));
-        // a marker folder that cannot be listed refuses: missing, or not a folder
-        std::fs::remove_dir_all(markers_dir(&ctx.data, &run)).unwrap();
-        assert!(!events_all_recorded(&conn(&ctx), &run), "missing");
-        std::fs::write(markers_dir(&ctx.data, &run), b"").unwrap();
-        assert!(!events_all_recorded(&conn(&ctx), &run), "not a folder");
-    }
-
-    /// Final check, findings 2 and 3: a hook that fails before it reaches its event (its input, a database it cannot
-    /// open) leaves its marker, so phones are refused; the end of the run removes its markers.
-    #[test]
-    fn a_hook_entry_failure_keeps_phones_out_and_the_runs_end_clears_its_markers() {
-        let (_d, ctx, run) = live_run();
-        handle(&conn(&ctx), &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
-        assert!(events_all_recorded(&conn(&ctx), &run));
-        assert!(hook_in(&ctx.data, &run, "not json", Duration::ZERO, Duration::ZERO).is_err());
-        assert!(!events_all_recorded(&conn(&ctx), &run), "its input failed");
-        let elsewhere = tempfile::tempdir().unwrap();
-        assert!(hook_in(elsewhere.path(), &run, r#"{"hook_event_name": "Stop"}"#, Duration::ZERO, Duration::ZERO).is_err());
-        assert_eq!(std::fs::read_dir(markers_dir(elsewhere.path(), &run)).unwrap().count(), 1, "no database: its marker stays");
+        let (h, _) = hold(&ctx, &run, BASH, 300);
+        assert_eq!(h.join().unwrap(), None);
+        let busy = Connection::open(ctx.data.join("hm.db")).unwrap();
+        busy.busy_timeout(Duration::from_millis(50)).unwrap();
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        assert!(handle(&busy, &run, &json!({"hook_event_name": "Stop"}), Duration::ZERO).is_err());
+        other.execute_batch("commit").unwrap();
         end_run(&ctx, &run);
-        assert!(!markers_dir(&ctx.data, &run).exists(), "the run's markers go with it");
+        assert_eq!(files(&ctx.data), before, "no marker or other file");
+        assert!(!ctx.data.join("run-unknown").exists());
     }
 
     #[test]
