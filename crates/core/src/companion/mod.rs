@@ -156,23 +156,13 @@ struct Cursor {
     cursor: Option<i64>,
 }
 
-/// Reply and Stop for a run, by today's rules: an owned terminal; no reply while a prompt waits; Stop only while a
-/// turn runs or a prompt waits (at the idle prompt Ctrl+C would exit the tool).
-pub(crate) fn run_actions(p: &Phone, r: &hooks::Run, terminal_input: bool) -> Value {
-    let no = |why: &str| json!({"ok": false, "reason": why});
-    if !p.grants.control { let n = no("Control is not granted to this phone; grant it on the computer"); return json!({"reply": n, "stop": n}); }
-    if !terminal_input { let n = no(actions::TERMINAL_INPUT_OFF); return json!({"reply": n, "stop": n}); }
-    if !r.terminal { let n = no("Needs Harness Manager's own terminal"); return json!({"reply": n, "stop": n}); }
-    if r.unconfirmed { let n = no(hooks::UNCONFIRMED); return json!({"reply": n, "stop": n}); }
-    if r.stopping { let n = no("a Stop is already on its way to this session"); return json!({"reply": n, "stop": n}); }
-    // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
-    let reply = if r.state == "waiting" || r.ask.is_some() { no("Answer the request first") } else if r.needs_terminal { no(actions::UNSENT) }
-        else if r.state.is_empty() { no(actions::NO_TURNS) } else { json!({"ok": true}) };
-    json!({"reply": reply,
-        "stop": if r.state == "working" || r.state == "waiting" { json!({"ok": true}) } else { no("Nothing to stop: the session is at its prompt") }})
+/// Reply and Stop for a run: not from a phone in wave 1.
+pub(crate) fn run_actions() -> Value {
+    let n = json!({"ok": false, "reason": actions::NOT_YET});
+    json!({"reply": n, "stop": n})
 }
 
-async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Query(q): Query<Cursor>) -> Response {
+async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(_p): Extension<Phone>, Query(q): Query<Cursor>) -> Response {
     // the page times its size is the query's offset: a cursor past that is no page
     let page = q.cursor.unwrap_or(0);
     if !(0..i64::MAX / SESSIONS_PER_PAGE).contains(&page) { return (StatusCode::BAD_REQUEST, Json(json!({"error": "no such page"}))).into_response(); }
@@ -180,13 +170,12 @@ async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Q
         let f = SessionFilter { scope: Some("here".into()), per: Some(SESSIONS_PER_PAGE), page: Some(page), ..Default::default() };
         let list = service::sessions(&ctx, &f)?;
         let runs = hooks::runs(&ctx)?;
-        let input_on = ctx.db.read(|c| Ok(actions::terminal_input_on(c)))?;
         let me = computer(&ctx);
         let items: Vec<Value> = list.iter().map(|s| {
             let run = runs.iter().find(|r| !s.id.is_empty() && r.session_id == s.id && r.profile == s.profile);
             let mut v = json!(api::Session { harness: s.harness.clone(), profile: s.profile.clone(), id: s.id.clone(), title: s.title.clone(), project: s.project_name.clone(), computer: me.clone(),
                 state: run.map(|r| r.state.clone()).unwrap_or_default(), open: s.open, last_active_at: s.last_active_at });
-            if let Some(r) = run { v["run"] = json!(r.run); v["state_version"] = json!(r.version); v["actions"] = run_actions(&p, r, input_on); }
+            if let Some(r) = run { v["run"] = json!(r.run); v["state_version"] = json!(r.version); v["actions"] = run_actions(); }
             v
         }).collect();
         let next = (items.len() as i64 == SESSIONS_PER_PAGE).then_some(page + 1);

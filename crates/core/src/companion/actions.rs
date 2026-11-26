@@ -1,10 +1,11 @@
-//! A phone's actions on a session: answer a request, reply one line, Stop. One transaction claims an action before
-//! anything reaches the session: it checks the grant and the enrollment, the deadline, the request, the state version
-//! the phone was shown and the desktop's own rules, consumes that version (so a second action on the same screen is
-//! refused) and reserves the receipt. Just before dispatch the grant, the deadline and the claimed version are
-//! looked at again. The receipt is kept 24 h; the same `action_id` again returns it and does nothing. A reservation
-//! that never got its outcome (the process ended on the way) reads as `unknown` and is never dispatched again.
-//! An answer goes through `hooks::answer`, a reply and Stop through `terminal::reply` and `terminal::stop`.
+//! A phone's actions on a session. In wave 1 a phone answers requests; Reply and Stop are refused (a later package,
+//! WP-M8, designs them). One transaction claims an answer before it reaches the session: it checks the grant and the
+//! enrollment, the deadline, the request, the state version the phone was shown and whether the run's events were
+//! all recorded, consumes that version (so a second action on the same screen is refused) and reserves the receipt.
+//! Just before dispatch the grant, the deadline and the claimed version are looked at again, and the answer's own
+//! write checks them once more. The receipt is kept 24 h; the same `action_id` again returns it and does nothing. A
+//! reservation that never got its outcome (the process ended on the way) reads as `unknown` and is never dispatched
+//! again. An answer goes through `hooks::answer_guarded`.
 
 use std::sync::{Arc, Mutex};
 
@@ -22,20 +23,8 @@ use crate::util::now_ms;
 use crate::{hooks, Ctx};
 
 const KEPT_MS: i64 = 24 * 3_600_000;
-pub(crate) const UNSENT: &str = "Text from an earlier reply waits unsent in the session's input; finish or clear it in the terminal";
-pub(crate) const NO_TURNS: &str = "This session does not report its turns; reply in its terminal";
-pub(crate) const TERMINAL_INPUT_OFF: &str = "Reply and Stop from a phone are off on this computer; answers still work";
-
-/// The one switch for a phone's Reply and Stop (answers are not affected). Off unless the owner turns it on: input
-/// typed into a terminal cannot be checked against the tool's own turn at the instant it is written, so a reply or
-/// a Ctrl+C can still land a few milliseconds late. `phones:terminal_input` = "1" turns it on.
-pub const TERMINAL_INPUT: &str = "phones:terminal_input";
-
-pub fn terminal_input_on(c: &Connection) -> bool {
-    c.query_row("select v from kv where k = ?", [TERMINAL_INPUT], |r| r.get::<_, String>(0)).optional().ok().flatten().as_deref() == Some("1")
-}
-/// A reply's text as the terminal takes it (control.rs): one line, no control characters, at most 16 KiB.
-const MAX_TEXT: usize = 16 * 1024;
+pub(crate) const NOT_YET: &str = "Reply and Stop from a phone are not available yet";
+const STATE_UNKNOWN: &str = "An event of this session could not be recorded, so this request may already be settled; answer in its terminal";
 
 /// shortcut: one action at a time on this computer, which serialises each run's actions too; per-run locks if
 /// phones ever act on many runs at once and one slow terminal holds the others up
@@ -104,54 +93,28 @@ fn may_act(c: &Connection, p: &Phone) -> Result<bool> {
     Ok(row.is_some_and(|(g, generation, revoked)| revoked.is_none() && generation == p.generation && serde_json::from_str::<companion_proto::api::Grants>(&g).is_ok_and(|g| g.control)))
 }
 
-/// A reply the terminal will take: one line of text, no control characters, at most 16 KiB.
-fn reply_text(a: &Action) -> Option<&str> {
-    a.payload["text"].as_str().filter(|t| !t.trim().is_empty() && t.len() <= MAX_TEXT && !t.chars().any(char::is_control))
-}
-
-/// A run as the claim reads it: state, version, owned terminal, pid, start, Stop claimed at, unsent text waiting, an
-/// input not confirmed.
-type RunNow = (String, i64, bool, u32, i64, Option<i64>, bool, bool);
+/// A run as the claim reads it: version, pid, start.
+type RunNow = (i64, u32, i64);
 
 /// In the claiming transaction: the outcome when the action cannot go ahead; None when it may, its run's version is
 /// then consumed.
 fn claim(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, String)>> {
+    if a.kind != ActionKind::Answer { return Ok(un(NOT_YET)); }
     if !may_act(c, p)? { return Ok(un("Control is not granted to this phone")); }
     if a.expires_at <= now_ms() { return Ok(Some((Status::Expired, "the action expired before it arrived".into()))); }
     let run = &a.target.run;
     // the terminal answering first moves the version too: an answer looks at its request before the version
-    if a.kind == ActionKind::Answer {
-        let Some(ask) = a.target.ask_id.as_deref() else { return Ok(un("an answer names its request")) };
-        if let Some(gone) = ask_gone(c, run, ask)? { return Ok(Some(gone)); }
-    }
-    let row: Option<RunNow> = c.query_row("select state, version, terminal_port is not null, pid, started, stopping, needs_terminal <> 0, delivery_state is not null from run_state where run = ?", [run],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))).optional()?;
-    let Some((state, version, terminal, _, _, stopping, unsent, pending)) = row.filter(|r| crate::procs::start_ms(r.3).is_some_and(|s| r.4 == 0 || s == r.4)) else { return Ok(un("that session is no longer running here")) };
-    let unconfirmed = pending || hooks::state_unknown(c, run);
-    let stopping = hooks::stop_pending(stopping, now_ms());
+    let Some(ask) = a.target.ask_id.as_deref() else { return Ok(un("an answer names its request")) };
+    if let Some(gone) = ask_gone(c, run, ask)? { return Ok(Some(gone)); }
+    let row: Option<RunNow> = c.query_row("select version, pid, started from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    let Some((version, _, _)) = row.filter(|r| crate::procs::start_ms(r.1).is_some_and(|s| r.2 == 0 || s == r.2)) else { return Ok(un("that session is no longer running here")) };
+    if hooks::state_unknown(c, run) { return Ok(un(STATE_UNKNOWN)); }
     if version != a.state_version { return Ok(Some((Status::Expired, "the session changed since this was shown; look again".into()))); }
-    // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
-    let asked = c.query_row("select count(*) from run_ask where run = ?1 and state = 'open' and expires > ?2", params![run, now_ms()], |r| r.get::<_, i64>(0))? > 0;
-    match a.kind {
-        ActionKind::Answer => {}
-        ActionKind::Reply | ActionKind::Stop if !terminal_input_on(c) => return Ok(un(TERMINAL_INPUT_OFF)),
-        ActionKind::Reply | ActionKind::Stop if !terminal => return Ok(un("Needs Harness Manager's own terminal")),
-        ActionKind::Reply | ActionKind::Stop if unconfirmed => return Ok(un(hooks::UNCONFIRMED)),
-        ActionKind::Reply | ActionKind::Stop if stopping => return Ok(un("a Stop is already on its way to this session")),
-        ActionKind::Reply if state == "waiting" || asked => return Ok(un("Answer the request first")),
-        ActionKind::Reply if unsent => return Ok(un(UNSENT)),
-        // without its hooks the session's turns cannot be seen, so a reply could land in a prompt nobody was shown
-        ActionKind::Reply if state.is_empty() => return Ok(un(NO_TURNS)),
-        ActionKind::Reply if reply_text(a).is_none() => return Ok(un("a reply is one line of text, at most 16 KiB")),
-        ActionKind::Stop if state != "working" && state != "waiting" => return Ok(un("Nothing to stop: the session is at its prompt")),
-        _ => {}
-    }
     c.execute("update run_state set version = version + 1 where run = ?1 and version = ?2", params![run, version])?;
     Ok(None)
 }
 
-/// Just before dispatch: the grant, the deadline and the state the claim left (a hook moving the run since, say a
-/// prompt opening under a reply, stops it).
+/// Just before dispatch: the grant, the deadline and the state the claim left (a hook moving the run since stops it).
 fn last_check(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, String)>> {
     if !may_act(c, p)? { return Ok(un("Control is not granted to this phone")); }
     if a.expires_at <= now_ms() { return Ok(Some((Status::Expired, "the action expired before it could be delivered".into()))); }
@@ -163,26 +126,13 @@ fn last_check(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, S
 fn dispatch(ctx: &Ctx, p: &Phone, a: &Action) -> (Status, String) {
     #[cfg(test)]
     DISPATCHED.with(|d| d.set(d.get() + 1));
-    let run = &a.target.run;
-    // where the effect is committed (the hook's write, the terminal's relay), the claim's preconditions are checked again
-    let guard = hooks::Guard { version: a.state_version + 1, deadline: a.expires_at, phone: Some((p.id.clone(), p.generation.clone())), stop: None };
-    let r = match a.kind {
-        ActionKind::Answer => {
-            let ask = a.target.ask_id.as_deref().unwrap_or("");
-            match hooks::answer_guarded(ctx, ask, &a.payload, Some(&guard)) {
-                Ok(true) => Ok("answered"),
-                Ok(false) => return ctx.db.read(|c| Ok(ask_gone(c, run, ask)?.or(last_check(c, p, a)?))).ok().flatten()
-                    .unwrap_or((Status::Unavailable, "the session no longer waits for this answer".into())),
-                Err(e) => Err(e),
-            }
-        }
-        ActionKind::Reply => crate::terminal::reply_guarded(&ctx.data, run, reply_text(a).unwrap_or_default(), Some(&guard)).map(|_| "sent"),
-        ActionKind::Stop => crate::terminal::stop_guarded(&ctx.data, run, Some(&guard)).map(|_| "stopped"),
-    };
-    match r {
-        Ok(d) => (Status::Accepted, d.into()),
-        // sent, and not answered: it may have arrived, so it must not read as failed (a resend would repeat it)
-        Err(e) if e.downcast_ref::<crate::terminal::MaybeDelivered>().is_some() => (Status::Unknown, format!("{e:#}")),
+    let (run, ask) = (&a.target.run, a.target.ask_id.as_deref().unwrap_or(""));
+    // where the answer is written, the claim's preconditions are checked again
+    let guard = hooks::Guard { version: a.state_version + 1, deadline: a.expires_at, phone: Some((p.id.clone(), p.generation.clone())) };
+    match hooks::answer_guarded(ctx, ask, &a.payload, Some(&guard)) {
+        Ok(true) => (Status::Accepted, "answered".into()),
+        Ok(false) => ctx.db.read(|c| Ok(ask_gone(c, run, ask)?.or(last_check(c, p, a)?))).ok().flatten()
+            .unwrap_or((Status::Unavailable, "the session no longer waits for this answer".into())),
         Err(e) => (Status::Unavailable, format!("{e:#}")),
     }
 }

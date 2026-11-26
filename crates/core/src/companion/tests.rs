@@ -370,20 +370,17 @@ fn the_action_contract_holds_without_a_terminal() {
     // another phone's action id is not this phone's receipt
     assert_eq!(rt.block_on(other.c.receipt("a-1")).unwrap(), None);
 
-    // reply and Stop keep the desktop's rules: no owned terminal here
-    input_on(&d.ctx);
+    // Reply and Stop are not a phone's in wave 1
     let (run, _, v) = waiting(&d.ctx, 60_000);
     for (kind, payload) in [(ActionKind::Reply, json!({"text": "go on"})), (ActionKind::Stop, json!({}))] {
         let r = act(Action { action_id: format!("c-{kind:?}"), kind, target: Target { run: run.clone(), ask_id: None }, state_version: v, expires_at: now_ms() + 30_000, payload });
-        assert_eq!((r.status, r.detail.as_str()), (Status::Unavailable, "Needs Harness Manager's own terminal"), "{kind:?}");
+        assert_eq!((r.status, r.detail.as_str()), (Status::Unavailable, "Reply and Stop from a phone are not available yet"), "{kind:?}");
     }
-    let gone = act(Action { action_id: "c-gone".into(), kind: ActionKind::Stop, target: Target { run: "1:2".into(), ask_id: None }, state_version: 0, expires_at: now_ms() + 30_000, payload: json!({}) });
-    assert_eq!(gone.status, Status::Unavailable);
 
     // Control taken away between the screen and the tap
     crate::phones::set_grants(&d.ctx, &p.me.id, &json!({"control": false})).unwrap();
     assert_eq!(refused(rt.block_on(p.c.act(&answer(&run, "x", v, "d-1")))), 403);
-    assert!(count(&d.ctx, "select count(*) from phone_actions") >= 10, "each receipt kept");
+    assert!(count(&d.ctx, "select count(*) from phone_actions") >= 9, "each receipt kept");
 }
 
 // ---------- the security review's findings (Codex review of 7a8cc09), one test each where a test can show it ----------
@@ -398,16 +395,12 @@ fn enrolled(ctx: &Ctx, control: bool) -> crate::phones::Phone {
 /// A live run (this process) working in an owned terminal that is not there: an action is claimed and dispatched,
 /// and the dispatch fails without reaching anything.
 fn working(ctx: &Ctx) -> (String, i64) {
-    input_on(ctx);
     let pid = std::process::id();
     let run = format!("{pid}:{}", crate::util::uuid4());
     ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness, session_id, state, version, terminal_port, terminal_token) values(?, ?, ?, 'work', 'claude', 's-2', 'working', 5, 9, x'00')",
         params![run, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
     (run, 5)
 }
-
-/// The owner turned on a phone's Reply and Stop (`actions::TERMINAL_INPUT`).
-fn input_on(ctx: &Ctx) { ctx.db.kv_set(super::actions::TERMINAL_INPUT, "1").unwrap(); }
 
 fn act_now(kind: ActionKind, run: &str, version: i64, id: &str, payload: Value) -> Action {
     Action { action_id: id.into(), kind, target: Target { run: run.into(), ask_id: None }, state_version: version, expires_at: now_ms() + 30_000, payload }
@@ -451,64 +444,32 @@ fn an_action_whose_outcome_was_never_written_reads_unknown_and_is_not_sent_again
     assert_eq!(dispatched(), before + 1, "never dispatched twice");
 }
 
-/// #3: an action consumes the version it was shown: a second action on the same screen never reaches the terminal.
-#[test]
-fn two_replies_on_one_screen_reach_the_terminal_once() {
-    let t = tempfile::tempdir().unwrap();
-    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-    let (a, b) = (enrolled(&ctx, true), enrolled(&ctx, true));
-    let (run, v) = working(&ctx);
-    let before = dispatched();
-    let first = super::actions::act(&ctx, &a, &act_now(ActionKind::Reply, &run, v, "r-1", json!({"text": "go on"}))).unwrap();
-    assert_eq!(dispatched(), before + 1, "{first:?}");
-    let second = super::actions::act(&ctx, &b, &act_now(ActionKind::Reply, &run, v, "r-2", json!({"text": "go on"}))).unwrap();
-    assert_eq!((second.status, dispatched()), (Status::Expired, before + 1), "{second:?}");
-    // a reply the terminal would refuse is refused before it costs the version
-    let (run, v) = working(&ctx);
-    let bad = super::actions::act(&ctx, &a, &act_now(ActionKind::Reply, &run, v, "r-3", json!({"text": "two\nlines"}))).unwrap();
-    assert_eq!((bad.status, dispatched()), (Status::Unavailable, before + 1));
-}
-
 /// #3: what changes between the claim and the dispatch holds: Control taken away, the deadline passed, or the run
-/// moved (a prompt opening under a reply).
+/// moved.
 #[test]
-fn control_withdrawn_the_deadline_passed_or_a_prompt_opened_after_the_claim_stops_the_dispatch() {
+fn control_withdrawn_the_deadline_passed_or_the_run_moved_after_the_claim_stops_the_dispatch() {
     let t = tempfile::tempdir().unwrap();
     let ctx = Arc::new(Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap());
     let p = enrolled(&ctx, true);
     let before = dispatched();
-    let (run, v) = working(&ctx);
+    let (run, ask, v) = waiting(&ctx, 60_000);
     let (c2, id) = (ctx.clone(), p.id.clone());
     super::actions::BEFORE_DISPATCH.with(|b| *b.borrow_mut() = Some(Box::new(move || { crate::phones::set_grants(&c2, &id, &json!({"control": false})).unwrap(); })));
-    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Stop, &run, v, "g-1", json!({}))).unwrap();
+    let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "g-1")).unwrap();
     assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, "Control is not granted to this phone", before));
     crate::phones::set_grants(&ctx, &p.id, &json!({"control": true})).unwrap();
-    let (run, v) = working(&ctx);
-    let mut late = act_now(ActionKind::Reply, &run, v, "g-2", json!({"text": "go on"}));
+    let (run, ask, v) = waiting(&ctx, 60_000);
+    let mut late = answer(&run, &ask, v, "g-2");
     late.expires_at = now_ms() + 50;
     super::actions::BEFORE_DISPATCH.with(|b| *b.borrow_mut() = Some(Box::new(|| std::thread::sleep(Duration::from_millis(80)))));
     assert_eq!((super::actions::act(&ctx, &p, &late).unwrap().status, dispatched()), (Status::Expired, before));
-    let (run, v) = working(&ctx);
+    let (run, ask, v) = waiting(&ctx, 60_000);
     let (c2, r2) = (ctx.clone(), run.clone());
     super::actions::BEFORE_DISPATCH.with(|b| *b.borrow_mut() = Some(Box::new(move || {
-        c2.db.with(|c| Ok(c.execute("update run_state set state = 'waiting', version = version + 1 where run = ?", [&r2])?)).unwrap();
+        c2.db.with(|c| Ok(c.execute("update run_state set version = version + 1 where run = ?", [&r2])?)).unwrap();
     })));
-    assert_eq!((super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "g-3", json!({"text": "go on"}))).unwrap().status, dispatched()), (Status::Expired, before));
-}
-
-/// #3: one Stop per turn, from the desktop and from a phone alike.
-#[test]
-fn one_stop_per_turn_whoever_presses_it() {
-    let t = tempfile::tempdir().unwrap();
-    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-    let p = enrolled(&ctx, true);
-    let (run, v) = working(&ctx);
-    let c = rusqlite::Connection::open(ctx.data.join("hm.db")).unwrap();
-    assert!(crate::hooks::claim_stop(&c, &run, None).unwrap().is_some());
-    assert_eq!(format!("{:#}", crate::hooks::claim_stop(&c, &run, None).unwrap_err()), "a Stop is already on its way to this session", "a second Stop would press Ctrl+C again");
-    let before = dispatched();
-    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Stop, &run, v, "s-1", json!({}))).unwrap();
-    assert_eq!((r.status, dispatched()), (Status::Expired, before), "the phone's screen showed the turn the desktop stopped");
+    assert_eq!((super::actions::act(&ctx, &p, &answer(&run, &ask, v, "g-3")).unwrap().status, dispatched()), (Status::Expired, before));
+    assert_eq!(ask_state(&ctx, &ask).0, "open");
 }
 
 /// #4: an approval that comes once the code expired stores nothing, and says so.
@@ -857,23 +818,6 @@ fn the_announcement_follows_the_attempt_shown() {
     }
 }
 
-/// N1: an open request blocks a reply even when the run's state does not say waiting.
-#[test]
-fn an_open_request_blocks_a_reply_whatever_the_state_says() {
-    let t = tempfile::tempdir().unwrap();
-    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-    let p = enrolled(&ctx, true);
-    let (run, v) = working(&ctx);
-    let pid = std::process::id();
-    ctx.db.with(|c| Ok(c.execute("insert into run_ask(id, run, kind, tool, created, expires, hook_pid, hook_started) values('open-1', ?1, 'permission', 'Bash', ?2, ?3, ?4, ?5)",
-        params![run, now_ms(), now_ms() + 60_000, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
-    let before = dispatched();
-    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "n1-1", json!({"text": "yes"}))).unwrap();
-    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, "Answer the request first", before));
-    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
-    assert_eq!(super::run_actions(&p, &shown, true)["reply"]["ok"], false);
-}
-
 /// A claude session file with one turn, as Claude Code writes it.
 fn session_file(ctx: &Ctx, cwd: &std::path::Path, id: &str, prompt: &str) -> std::path::PathBuf {
     let f = ctx.home.join(".claude").join("projects").join(crate::harness::claude::project_dir_name(cwd)).join(format!("{id}.jsonl"));
@@ -959,26 +903,6 @@ fn a_push_handle_change_belongs_to_its_enrollment() {
 
 // ---------- the third review (Codex, at fe1dcd5) ----------
 
-/// (c): a phone's reply waits while text a reply left unsent is in the input, and is refused for a session that does
-/// not report its turns (nothing then shows a prompt opening under it).
-#[test]
-fn a_phone_reply_waits_for_unsent_text_and_needs_reported_turns() {
-    let t = tempfile::tempdir().unwrap();
-    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-    let p = enrolled(&ctx, true);
-    let before = dispatched();
-    let (run, v) = working(&ctx);
-    ctx.db.with(|c| Ok(c.execute("update run_state set needs_terminal = 1 where run = ?", [&run])?)).unwrap();
-    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-1", json!({"text": "next"}))).unwrap();
-    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::UNSENT, before));
-    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
-    assert_eq!(super::run_actions(&p, &shown, true)["reply"]["reason"], super::actions::UNSENT);
-    let (run, v) = working(&ctx);
-    ctx.db.with(|c| Ok(c.execute("update run_state set state = '' where run = ?", [&run])?)).unwrap();
-    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-2", json!({"text": "next"}))).unwrap();
-    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::NO_TURNS, before));
-}
-
 /// (d): a certificate is let in only when one snapshot shows exactly one holder: two phone rows and a computer
 /// sharing it (rows from before enrollment checked) admit nobody, not the computer.
 #[test]
@@ -1016,24 +940,47 @@ fn an_announcement_mdns_did_not_take_is_tried_again() {
 
 // ---------- the fourth review (Codex, at eafb449) ----------
 
-/// The switch: a phone's Reply and Stop are off until the owner turns them on; its answers work either way.
+/// Wave 1: a phone's Reply and Stop are refused on every run and no setting turns them on; the sessions it reads say
+/// so; its answers work.
 #[test]
-fn a_phones_reply_and_stop_are_off_by_default_and_answers_still_work() {
+fn a_phones_reply_and_stop_are_refused_and_answers_still_work() {
     let t = tempfile::tempdir().unwrap();
     let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
     let p = enrolled(&ctx, true);
     let (run, v) = working(&ctx);
-    ctx.db.kv_set(super::actions::TERMINAL_INPUT, "0").unwrap();
+    ctx.db.kv_set("phones:terminal_input", "1").unwrap(); // the switch an earlier build had
     let before = dispatched();
     for (kind, payload, id) in [(ActionKind::Reply, json!({"text": "go on"}), "off-1"), (ActionKind::Stop, json!({}), "off-2")] {
         let r = super::actions::act(&ctx, &p, &act_now(kind, &run, v, id, payload)).unwrap();
-        assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::TERMINAL_INPUT_OFF, before), "{kind:?}");
+        assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, "Reply and Stop from a phone are not available yet", before), "{kind:?}");
     }
-    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
-    assert_eq!(super::run_actions(&p, &shown, false)["stop"]["reason"], super::actions::TERMINAL_INPUT_OFF);
+    assert_eq!(crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap().version, v, "nothing consumed");
+    for k in ["reply", "stop"] { assert_eq!(super::run_actions()[k], json!({"ok": false, "reason": "Reply and Stop from a phone are not available yet"})); }
     let (run, ask, v) = waiting(&ctx, 60_000);
     let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "off-3")).unwrap();
     assert_eq!(r.status, Status::Accepted, "answers are not affected");
+}
+
+// ---------- the fifth review (Codex, at da23831) ----------
+
+/// #1: while a run's state is unknown (a hook could not record its event) a phone's answer is refused before it is
+/// claimed: nothing is dispatched and the version is not consumed. Once a settling event is recorded, it is accepted.
+#[test]
+fn a_phones_answer_is_refused_while_its_runs_state_is_unknown() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    let (run, ask, v) = waiting(&ctx, 60_000);
+    let c = rusqlite::Connection::open(ctx.data.join("hm.db")).unwrap();
+    crate::hooks::set_state_unknown(&c, &run, true);
+    let before = dispatched();
+    let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-1")).unwrap();
+    assert_eq!((r.status, dispatched()), (Status::Unavailable, before), "{r:?}");
+    assert!(r.detail.contains("could not be recorded"), "{r:?}");
+    assert_eq!(crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap().version, v, "nothing consumed");
+    assert_eq!(ask_state(&ctx, &ask).0, "open");
+    crate::hooks::set_state_unknown(&c, &run, false);
+    assert_eq!(super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-2")).unwrap().status, Status::Accepted);
 }
 
 /// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of

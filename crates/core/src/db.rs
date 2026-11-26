@@ -248,21 +248,9 @@ pub(crate) fn hook_columns(conn: &Connection) -> rusqlite::Result<()> {
         ("run_ask", "hook_started", "integer not null default 0"),
         // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
         ("run_state", "version", "integer not null default 0"),
-        // a Stop on its way: when it was claimed and by which claim (hooks::claim_stop)
-        ("run_state", "stopping", "integer"),
-        ("run_state", "stop_token", "text"),
-        // a reply typed but not submitted waits in the input: no remote reply until the terminal settles it
-        ("run_state", "needs_terminal", "integer not null default 0"),
-        // remote input recorded before its first byte goes out, until its outcome is settled (hooks::begin_delivery)
-        ("run_state", "delivery_id", "text"),
-        ("run_state", "delivery_kind", "text"),
-        ("run_state", "delivery_state", "text"),
-        ("run_state", "delivery_at", "integer"),
-        // the turn a session is in (a submitted prompt starts one), and the one a Stop ended
+        // the turn a session is in (a submitted prompt starts one), and the turn a request was opened in
         ("run_state", "turn", "integer not null default 0"),
-        ("run_state", "stopped_turn", "integer"),
-        // the terminal relay's protocol, registered with its endpoint (terminal/control.rs)
-        ("run_state", "relay_version", "integer not null default 0"),
+        ("run_ask", "turn", "integer not null default 0"),
     ] {
         if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
             add_column(conn, table, col, ty)?;
