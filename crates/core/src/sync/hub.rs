@@ -27,7 +27,15 @@ const SEED_BYTES: usize = 20;
 
 /// The credentials carry the device id so two data folders on one computer (tests, `HRM_HOME`) stay apart.
 pub(crate) fn ring_target(device_id: &str) -> String { format!("{}:ring-key:{device_id}", secrets::prefix()) }
+/// Where a version before tokens were kept per hub kept this computer's one hub token.
 pub(crate) fn token_target(device_id: &str) -> String { format!("{}:hub-token:{device_id}", secrets::prefix()) }
+
+/// The token hub `hub` gave this computer, kept under that hub's own address: one write holds the token and the hub
+/// it belongs to, so a context for one hub never reads another's.
+pub(crate) fn token_target_for(device_id: &str, hub: &str) -> String { format!("{}:hub-token:{device_id}:{}", secrets::prefix(), &crate::util::sha256_hex(hub.as_bytes())[..16]) }
+
+/// A file name no version kept a token in: the per-hub tokens have no file to move from.
+const NO_FILE: &str = "hub.token.per-hub";
 
 /// `file`: where a version before the credential store on macOS and Linux kept this secret, in the data folder.
 fn read_secret(ctx: &Ctx, target: &str, file: &str) -> Option<String> {
@@ -134,7 +142,34 @@ pub fn normalize_url(u: &str) -> Result<String> {
     Ok(u)
 }
 
-pub fn token(ctx: &Ctx) -> Option<String> { read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token") }
+/// The token of the hub these settings name, and of no other.
+pub fn token(ctx: &Ctx) -> Option<String> {
+    let base = normalize_url(&ctx.settings.hub_url).ok()?;
+    if let Some(t) = read_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE) { return Some(t); }
+    // one from before tokens were kept per hub is used only for the hub it is known to be for: the settings may name
+    // another hub by now (1.13 did not keep the token's hub at all), so with nothing known, or nothing readable, there
+    // is no token, and a join gets this hub's own
+    let legacy = read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token")?;
+    match ctx.db.kv_get(TOKEN_OF) { Ok(Some(of)) if !of.is_empty() && of == base => Some(legacy), _ => None }
+}
+
+/// The hub the stored token was given by.
+const TOKEN_OF: &str = "hub:token_of";
+
+/// What the hub status and the CLI say to a computer whose only token is one an earlier version kept without its hub.
+pub const REJOIN: &str = "Join your hub again to keep syncing";
+
+/// The computer has a token from an earlier version (kept under the computer alone, its hub not known) and none it
+/// may use: it joins its hub once more.
+pub fn needs_rejoin(ctx: &Ctx) -> bool {
+    token(ctx).is_none() && (secrets::read(&token_target(&ctx.settings.device_id)).is_some() || ctx.data.join("hub.token").exists())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs during a join, just after its credential is written.
+    pub(crate) static JOIN_SEAM: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
 
 pub struct Hub {
     http: reqwest::blocking::Client,
@@ -143,10 +178,15 @@ pub struct Hub {
 }
 
 impl Hub {
-    /// This computer's hub, with its token.
+    /// This computer's hub, with its token: the one that hub gave, read under that hub's address, so a context still
+    /// naming another hub (a pairing begun before this computer joined a new one) only ever sends that hub its own.
     pub fn open(ctx: &Ctx) -> Result<Hub> {
         let base = normalize_url(&ctx.settings.hub_url).context("no hub address")?;
-        let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… on the Computers page")?;
+        let token = match token(ctx) {
+            Some(t) => t,
+            None if needs_rejoin(ctx) => bail!("{REJOIN}: Join with a code… on the Computers page (hrm hub join)"),
+            None => bail!("this computer has not joined the hub yet: Join with a code… on the Computers page"),
+        };
         Hub::at(&base, &token)
     }
 
@@ -182,6 +222,13 @@ impl Hub {
     pub fn get_bytes(&self, path: &str, max: u64) -> Result<Vec<u8>> {
         let r = self.req(reqwest::Method::GET, path).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
         body_capped(Self::checked(r, path)?, max, path)
+    }
+
+    /// An answer's bytes, at most `max`; `None` when the hub has nothing under that path.
+    pub fn get_opt_bytes(&self, path: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        let r = self.req(reqwest::Method::GET, path).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
+        if r.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
+        Ok(Some(body_capped(Self::checked(r, path)?, max, path)?))
     }
 
     pub fn put(&self, path: &str, body: Vec<u8>, headers: &[(&str, String)]) -> Result<()> {
@@ -220,7 +267,15 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
         if s.starts_with("the hub refused this computer") { anyhow!("the hub did not accept the {}; check it and try again", if code.is_some() { "code" } else { "admin token" }) } else { e }
     })?;
     let tok = r["token"].as_str().filter(|t| !t.is_empty()).context("the hub answered without a token")?;
-    write_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token", tok)?;
+    write_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE, tok)?;
+    #[cfg(test)]
+    if let Some(f) = JOIN_SEAM.with(|s| s.borrow_mut().take()) { f(); }
+    // the one token of a version before is not this hub's to send any more; the hub it was for is forgotten only once
+    // it is really gone, so a token left behind is never taken for another hub's
+    let legacy = token_target(&ctx.settings.device_id);
+    let _ = secrets::delete(&legacy);
+    let _ = std::fs::remove_file(ctx.data.join("hub.token"));
+    if secrets::read(&legacy).is_none() && !ctx.data.join("hub.token").exists() { let _ = ctx.db.kv_set(TOKEN_OF, ""); }
     // the first computer makes the ring; any other gets it by pairing or the recovery key, whichever way it joined:
     // with a ring of its own it could read nothing of theirs, nor they of it
     let others = r["devices"].as_array().into_iter().flatten().any(|d| split_device(d).0["id"].as_str().is_some_and(|i| i != ctx.settings.device_id));
@@ -232,10 +287,21 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
 /// A one-time six-digit code for another computer, good for ten minutes: `{code, expires_at}`.
 pub fn invite(ctx: &Ctx) -> Result<Value> { Hub::open(ctx)?.post_json("/v1/invite", &json!({})) }
 
+/// A one-use code for a phone to join through the hub, and the phone's mailbox there: `{code, phone_id, expires_at}`.
+pub fn phone_invite(ctx: &Ctx) -> Result<Value> {
+    if !ctx.settings.phones_via_hub { bail!("phones through the hub are off (experimental): pair the phone directly, or turn on phones_via_hub"); }
+    Hub::open(ctx)?.post_json("/v1/phones/invite", &json!({}))
+}
+
+/// A phone's token and mailbox gone from the hub (already gone counts).
+pub fn delete_phone(ctx: &Ctx, mailbox: &str) -> Result<()> { Hub::open(ctx)?.delete(&format!("/v1/phones/{mailbox}")) }
+
 /// Leave the hub: this computer's record and token go there, the token here; the settings fall back to off.
 pub fn leave(ctx: &Ctx) -> Result<Ctx> {
     if let Ok(h) = Hub::open(ctx) { if let Err(e) = h.delete(&format!("/v1/devices/{}", ctx.settings.device_id)) { crate::log::warn(&format!("hub: leaving: {e:#}")); } }
+    if let Ok(base) = normalize_url(&ctx.settings.hub_url) { let _ = secrets::delete(&token_target_for(&ctx.settings.device_id, &base)); }
     let _ = secrets::delete(&token_target(&ctx.settings.device_id));
+    let _ = ctx.db.kv_set(TOKEN_OF, "");
     let _ = std::fs::remove_file(ctx.data.join("hub.token"));
     journal::configure(&ctx.data, &ctx.home, &json!({"sync_mode": "off"}))
 }
@@ -409,7 +475,8 @@ pub fn status(ctx: &Ctx) -> Value {
     let devices: i64 = ctx.db.read(|c| Ok(c.query_row("select count(*) from peers where transport='hub'", [], |r| r.get(0))?)).unwrap_or(0);
     let joined = token(ctx).is_some() && !ctx.settings.hub_url.is_empty();
     let last = kv("computers:last").and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
-    json!({"url": ctx.settings.hub_url, "joined": joined, "devices": if joined { devices + 1 } else { 0 },
+    let rejoin = ctx.settings.sync_mode == "hub" && needs_rejoin(ctx);
+    json!({"url": ctx.settings.hub_url, "joined": joined, "rejoin": rejoin, "rejoin_text": if rejoin { json!(REJOIN) } else { Value::Null }, "devices": if joined { devices + 1 } else { 0 },
         "last_push": kv("hub:last_push").and_then(|v| v.parse::<i64>().ok()), "last_pull": kv("hub:last_pull").and_then(|v| v.parse::<i64>().ok()),
         "ws": kv("hub:ws").as_deref() == Some("1"), "error": if ctx.settings.sync_mode == "hub" { last["error"].clone() } else { Value::Null },
         "ring": has_ring(ctx), "ring_shown": kv("ring:shown").as_deref() != Some("0")})
@@ -420,8 +487,16 @@ pub fn status(ctx: &Ctx) -> Value {
 pub type CtxOf = Arc<dyn Fn() -> Arc<Ctx> + Send + Sync>;
 pub type OnStatus = Arc<dyn Fn(Value) + Send + Sync>;
 
-/// A hub event about another computer; one about this computer is the echo of its own write.
-fn from_another(event: &str, me: &str) -> bool { serde_json::from_str::<Value>(event).map(|v| v["id"].as_str() != Some(me)).unwrap_or(true) }
+/// A hub event about another computer; one about this computer is the echo of its own write. Mail is not a change
+/// of any computer's.
+fn from_another(event: &str, me: &str) -> bool { serde_json::from_str::<Value>(event).map(|v| v["kind"] != "mail" && v["id"].as_str() != Some(me)).unwrap_or(true) }
+
+/// A phone this computer invited has left it mail: the mailbox pass looks at once.
+fn mail_for_me(event: &str, me: &str) -> bool {
+    let mine = serde_json::from_str::<Value>(event).is_ok_and(|v| v["kind"] == "mail" && v["to"].as_str() == Some(me));
+    if mine { crate::companion::mailbox::wake(); }
+    mine
+}
 
 /// One connection to `/v1/events`: another computer's message runs a round (what changed is pulled, and what is
 /// new here goes up), a burst of them one round, told to `on_status`. Returns when the socket closes or fails.
@@ -439,13 +514,14 @@ async fn listen(ctx: &Ctx, base: &str, token: &str, ctx_of: &CtxOf, on_status: &
         match tokio::time::timeout(Duration::from_secs(60), ws.next()).await {
             Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) => {
                 quiet = 0;
-                if !from_another(t.as_str(), &ctx.settings.device_id) { continue; }
+                if mail_for_me(t.as_str(), &ctx.settings.device_id) || !from_another(t.as_str(), &ctx.settings.device_id) { continue; }
                 // what else arrives in the next second goes with this round
                 let settle = tokio::time::Instant::now() + Duration::from_secs(1);
                 while let Ok(m) = tokio::time::timeout_at(settle, ws.next()).await {
                     match m {
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) | None => bail!("the hub closed the events socket"),
                         Some(Err(e)) => bail!("events socket: {e}"),
+                        Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => { mail_for_me(t.as_str(), &ctx.settings.device_id); }
                         Some(Ok(_)) => {}
                     }
                 }
@@ -473,8 +549,10 @@ fn set_ws(ctx: &Ctx, v: &str) {
 }
 
 /// Keeps the events socket open while the app runs, on its own thread; without it, a round every 30 s is the
-/// fallback. Nothing happens while the hub is not this computer's transport.
+/// fallback. Nothing happens while the hub is not this computer's transport. The phones paired through the hub are
+/// served beside it (`companion::mailbox::watch`).
 pub fn watch(ctx_of: CtxOf, on_status: OnStatus) {
+    crate::companion::mailbox::watch(ctx_of.clone());
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio");
         // after a failure the next try comes soon, then later: 1, 2, 4 ... 30 seconds
@@ -506,7 +584,11 @@ pub fn rendezvous_pairs(ctx: &Ctx, id: &str) -> Vec<(String, u16)> {
 }
 
 #[cfg(test)]
-pub(crate) fn keys_of(ctx: &Ctx) -> Vec<String> { vec![ring_target(&ctx.settings.device_id), token_target(&ctx.settings.device_id)] }
+pub(crate) fn keys_of(ctx: &Ctx) -> Vec<String> { vec![ring_target(&ctx.settings.device_id), token_target(&ctx.settings.device_id), token_target_of(ctx)] }
+
+/// Tests: where the token of `ctx`'s hub is kept.
+#[cfg(test)]
+pub(crate) fn token_target_of(ctx: &Ctx) -> String { token_target_for(&ctx.settings.device_id, &normalize_url(&ctx.settings.hub_url).unwrap_or_default()) }
 
 #[cfg(test)]
 #[path = "hub_tests.rs"]

@@ -40,6 +40,9 @@ fn cipher(shared: &MontgomeryPoint, e: &[u8], to: &[u8]) -> Result<ChaCha20Poly1
     Ok(ChaCha20Poly1305::new_from_slice(&k)?)
 }
 
+/// The X25519 public key (base64) of a secret: what a sender seals to.
+pub fn x25519_public(secret: &[u8; 32]) -> String { b64(&MontgomeryPoint::mul_base_clamped(*secret).to_bytes()) }
+
 /// `plaintext` sealed to the holder of X25519 key `to` (base64), signed by `sender`.
 pub fn seal_to(sender: &SigningKey, to: &str, plaintext: &[u8]) -> Result<Sealed> {
     let to = x25519_key(to)?;
@@ -72,6 +75,11 @@ impl crate::PhoneIdentity {
 
     /// Opened by this phone: sealed to it and signed by `from`.
     pub fn open_from(&self, from: &str, s: &Sealed) -> Result<Vec<u8>> { open_from(&self.x25519_secret(), from, s) }
+
+    /// A mailbox message sealed to this phone (`mailbox::open_mail` with its own secret).
+    pub fn open_mail(&self, from: &str, mailbox: &str, enrollment: &str, dir: &str, seq: i64, bytes: &[u8]) -> Result<serde_json::Value> {
+        crate::mailbox::open_mail(&self.x25519_secret(), from, mailbox, enrollment, dir, seq, bytes)
+    }
 }
 
 #[cfg(test)]

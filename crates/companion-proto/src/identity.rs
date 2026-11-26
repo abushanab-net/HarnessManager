@@ -12,6 +12,7 @@ use crate::{b64, random};
 /// PKCS#8 v1 wrapping of an Ed25519 seed (RFC 8410): a fixed 16-byte prefix before the 32-byte seed.
 const PKCS8_PREFIX: [u8; 16] = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
 
+#[derive(Clone)]
 pub struct PhoneIdentity {
     /// The phone's id, as the computer stores it (`phones.phone_id`).
     pub id: String,
@@ -20,7 +21,7 @@ pub struct PhoneIdentity {
 }
 
 /// The certificate's signer: rcgen without a crypto backend of its own, signing with ed25519-dalek.
-struct Ed(SigningKey);
+pub(crate) struct Ed(pub(crate) SigningKey);
 
 impl rcgen::PublicKeyData for Ed {
     fn der_bytes(&self) -> &[u8] { self.0.as_ref().as_bytes() }

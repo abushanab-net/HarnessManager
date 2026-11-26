@@ -863,6 +863,7 @@ fn real_main(cli: Cli) -> Result<i32> {
                 if j.json { return print_json(&st).map(|_| 0); }
                 let n = st["devices"].as_i64().unwrap_or(0);
                 println!("{}  {}", st["url"].as_str().filter(|u| !u.is_empty()).unwrap_or("no hub"), if st["joined"] == true { format!("joined, {n} {}", if n == 1 { "computer" } else { "computers" }) } else { "not joined".into() });
+                if st["rejoin"] == true { println!("  {}: hrm hub join {} --code <code from another computer>", hrm_core::sync::hub::REJOIN, st["url"].as_str().unwrap_or("<url>")); }
                 println!("  ring key   {}", if st["ring"] == true { "on this computer" } else { "missing: hrm ring enter" });
                 println!("  last push  {}   last pull  {}   events {}", fmt_reset(st["last_push"].as_i64()), fmt_reset(st["last_pull"].as_i64()), if st["ws"] == true { "live" } else { "polling" });
                 if let Some(e) = st["error"].as_str() { println!("  last run   {e}"); }

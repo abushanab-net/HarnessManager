@@ -874,6 +874,7 @@ dependencies = [
  "hyper-util",
  "rcgen",
  "rustls",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -881,6 +882,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "webpki-root-certs",
 ]
 
 [[package]]
@@ -2192,6 +2194,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "hrm-hub",
  "if-addrs",
  "junction",
  "keyring",

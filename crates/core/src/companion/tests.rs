@@ -325,7 +325,7 @@ fn revoking_a_phone_closes_its_open_events_and_refuses_it_from_then_on() {
 // ---------- actions: a run and its open request as `hrm run` and its hook leave them, the hook being this process ----------
 
 /// A live run waiting on a permission request; answers (run, ask id, state version).
-fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
+pub(super) fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
     let pid = std::process::id();
     let started = crate::procs::start_ms(pid).unwrap();
     let (run, ask) = (format!("{pid}:{}", crate::util::uuid4()), crate::util::uuid4());
@@ -338,11 +338,11 @@ fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
     (run, ask, 3)
 }
 
-fn answer(run: &str, ask: &str, version: i64, id: &str) -> Action {
+pub(super) fn answer(run: &str, ask: &str, version: i64, id: &str) -> Action {
     Action { action_id: id.into(), kind: ActionKind::Answer, target: Target { run: run.into(), ask_id: Some(ask.into()) }, state_version: version, expires_at: now_ms() + 30_000, payload: json!({"behavior": "allow"}) }
 }
 
-fn ask_state(ctx: &Ctx, ask: &str) -> (String, String) { ctx.db.read(|c| Ok(c.query_row("select state, answer from run_ask where id = ?", [ask], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() }
+pub(super) fn ask_state(ctx: &Ctx, ask: &str) -> (String, String) { ctx.db.read(|c| Ok(c.query_row("select state, answer from run_ask where id = ?", [ask], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() }
 
 #[test]
 fn desktop_snapshots_wake_once_and_report_permanent_rejection_to_the_enrolled_phone() {

@@ -24,13 +24,14 @@ pub(super) async fn events(ws: WebSocketUpgrade, State(ctx): State<Arc<Ctx>>, Ex
 
 /// What the phone is told about: the open requests, each run's state, a stamp of usage and limits; None once the
 /// phone may no longer listen.
-struct Look {
+#[derive(Debug)]
+pub(super) struct Look {
     needs: Value,
     runs: Vec<(String, String, i64)>,
     changed: (i64, i64),
 }
 
-fn look(ctx: &Ctx, phone: &Phone) -> Option<Look> {
+pub(super) fn look(ctx: &Ctx, phone: &Phone) -> Option<Look> {
     phones::get(ctx, &phone.id).ok().flatten().filter(|p| p.revoked_at.is_none() && p.generation == phone.generation && p.grants.summaries)?;
     let runs = hooks::runs(ctx).unwrap_or_default();
     let now = now_ms();

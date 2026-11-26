@@ -64,7 +64,8 @@ phone gets neither.
 ## Contract: phone enrollment
 
 - Table `phones(phone_id text primary key, name text, platform text, cert_pem text, pubkey text, x25519 text,
-  grants text, paired_at integer, last_seen integer, revoked_at integer, relay_handle text)`. `grants` is JSON
+  grants text, paired_at integer, last_seen integer, revoked_at integer, relay_handle text)`, with `hub_mailbox`
+  (the phone's id on the hub, for a phone paired through it) and `hub_gone` (when the hub acknowledged deleting it). `grants` is JSON
   `{"summaries": bool, "transcripts": bool, "control": bool}`.
 - The desktop shows **Pair a phone**: a QR code holding `hm-phone:1?h=<host:port>&c=<code>&f=<desktop fingerprint>`
   and the same six digits in plain text. The pairing port lives two minutes and allows three failures, as for computers.
@@ -73,7 +74,8 @@ phone gets neither.
 - After `finish` the desktop shows the phone's name, the **three verification words** (derived from the SPAKE2 key on
   both sides) and the grant switches. Nothing is sealed back until the owner approves.
 - `GET /pair/phone/result?id=` returns `pending`, or the sealed desktop payload (id, name, cert_pem, pubkey,
-  address hints, hub URL and a phone hub token when the hub is on, the granted scopes), or `refused`. The phone polls
+  address hints, the granted scopes, and `x25519`, the key the phone seals mailbox messages to), or `refused`. The
+  direct payload carries no hub token: a phone gets one by pairing through the hub (below). The phone polls
   it; the S4 "Waiting for approval" screen shows the time left.
 - Revoking a phone sets `revoked_at`, cuts its open connections, deletes its hub token and mailbox, and deregisters
   its relay handle. The Phones list shows which of these were acknowledged.
@@ -219,14 +221,135 @@ POST /c1/actions
 
 ## Contract: the hub, for phones
 
-- `POST /v1/phones/invite` (a joined computer) mints a one-use code for a phone; the phone redeems it with
-  `POST /v1/phones/join` and gets a **phone token** that can only reach its own mailbox. The code alone grants nothing:
-  the computer still approves the phone (grants and verification words) through the mailbox.
-- Mailbox: `PUT/GET /v1/mail/{phone_id}/up/{seq}` (phone → computer), `PUT/GET /v1/mail/{phone_id}/down/{seq}`
-  (computer → phone), a 7-day expiry, and a `mail` event on `/v1/events` for the computer side.
-- Everything in the mailbox is sealed to the recipient: X25519 + ChaCha20-Poly1305, the sender signing with its
-  Ed25519 key. The computer posts snapshots (overview, accounts, requests) after each change, and the phone posts the
-  same `/c1/actions` bodies; receipts come back the same way. The hub sees sizes and timing only.
+**Experimental, and off.** The hub mailbox ships switched off: the desktop setting `phones_via_hub` (default false,
+`configure {phones_via_hub}`) gates everything phone-related on the hub on the desktop side. Off, the desktop sends
+the hub no phone invite, runs no mailbox pass and sends no snapshot; only a deletion already owed there (a phone
+paired through the hub while it was on, revoked since) is still sent. Direct pairing, the push relay and the
+computers' own sync through the hub work as before, on or off. What follows is the contract as built; its hardening
+before it is turned on by default is WP-M5b below.
+
+- `POST /v1/phones/invite` (a joined computer's token; the admin owns no phone) → `{code, phone_id, expires_at}`: a
+  one-use six-digit code for ten minutes, and the phone's id on the hub (`ph-<hex>`, one per invite: a phone paired
+  with two computers has two mailboxes). No live invite holds the same digits, a computer's or a phone's. The computer
+  shows `hm-hub:1?c=<code>&f=<its certificate fingerprint>&u=<hub url>` and the six digits. `POST /v1/phones/join
+  {code}` → `{phone_id, token, computer: {id, name}, expires_at}`. Join attempts, computers' and phones', are counted
+  as they are let in (10 a minute that do not succeed), and one that succeeds gives its place back only to the minute
+  it was let in. The **phone token** reaches only `/v1/mail/{its phone_id}/…`;
+  every other route answers it 401, `/v1/events` included, and so does its mailbox once the computer that invited it
+  is gone. The code alone grants nothing: the computer still approves the phone (grants and verification words)
+  through the mailbox.
+- The phone reaches the hub over HTTPS, checked against the public roots. Plain HTTP goes only to a private or
+  loopback address written as one (10/8, 172.16/12, 192.168/16, 127/8, fc00::/7, ::1), checked again on the
+  connection's peer before the code or the token is sent; a name always needs HTTPS.
+- Mailbox: `PUT /v1/mail/{phone_id}/up/{seq}` (the phone writes), `PUT /v1/mail/{phone_id}/down/{seq}` (the computer
+  that invited it writes), `GET` of either slot by either side, and `GET /v1/mail/{phone_id}/up|down?after=&limit=` →
+  `{max, mail: [{seq, bytes, at}], more}`, at most 100 a page. A number is 1 to 2^53 (400 otherwise) and above every
+  one used before in that direction, even after its message expired (409 with `max` otherwise); a message is 1 byte
+  to 1 MiB (400 empty, 413 refused while it is read); a direction holds at most 16 MiB and 1000 messages (the oldest
+  go, the newest stays); each is kept 7 days. A hub database from the first mailbox version (no `bytes`) has it added
+  and filled from the bodies at start. Each message up (and the join) is the event `{kind: "mail", id:
+  <phone_id>, to: <computer id>}` on `/v1/events`, which the computer it names acts on at once (else it looks every 2 s).
+- `DELETE /v1/phones/{phone_id}` (the computer that invited it, or the admin): the token and the mailbox go, and the
+  phone's token is 401 from then on (`ConnectError::Revoked` on the phone). A computer leaving the hub takes its phones
+  in the same transaction.
+- Pairing through the mailbox is the direct pairing's exchange: up 1 `{kind: "pair-start", id, msg}` (SPAKE2, the
+  code as password, the phone is A), down 1 `{kind: "pair-start", msg}`, up 2 `{kind: "pair-finish", payload}` (the
+  phone's payload sealed under the SPAKE2 key). The computer shows the phone's name and the three words. Down slots 1
+  and 2 are the pairing's: down 2 `{kind: "pair-result", state: "approved" | "refused", payload?, sig?}` is written only
+  once the owner decided, and nothing else goes down before it. An approval carries the desktop payload sealed under
+  the SPAKE2 key (`address_hints` empty without the direct connection, `hub_url` and `x25519` set) and `sig`, the
+  computer's Ed25519 identity signing `companion_proto::mailbox::approval_binding`: the three messages of the
+  exchange, the mailbox, the phone's id and both its keys, the computer's id and both its keys, and the grants. The
+  phone accepts it only when the signature checks out under the payload's key, that key is the one its certificate
+  is made for, and (from the QR code) the certificate has the invite's fingerprint; a hub that knows the code and runs
+  either half itself cannot make one, and shows other words besides. The signed approval is kept with the enrollment
+  (`phones.hub_pairing`) until it is on the hub, so the mailbox pass delivers it after a restart too; a slot 2 already
+  taken must hold that very decision. Up 3 `{kind: "fetched"}` says the phone has it: sealed by the approved phone,
+  or signed by the refused one (`fetched_refusal`); the computer counts nothing else. The phone's own messages start
+  at up 4, and the phone writes slot 3 before its first of them when it is still empty (once 4 is taken, 3 never can
+  be). An approval names a fresh `enrollment` value (in the payload and in `approval_binding`): every mailbox message
+  of that pairing names it, so one written in an earlier pairing on the same mailbox, with the same keys, is not this
+  one's. The computer's key must be its certificate's own public-key field,
+  parsed. The computer keeps each invite (`phone_hub_invites`) from the moment the hub gives it; approval turns it into
+  the enrollment, with the pairing's own slots up 1 and 2 handled, in one transaction, and an invite that ends unpaired
+  (refused, expired, cancelled, or left by a computer that stopped, once its time and 30 s more are up) is turned
+  into a deletion owed on the hub.
+- After the approval everything in the mailbox is sealed to the recipient: X25519 + ChaCha20-Poly1305, the sender
+  signing with its Ed25519 key (`companion_proto::mailbox::seal_mail`, over `{mailbox, enrollment, dir, seq, at, body}`; the
+  computer's X25519 key is derived from its Ed25519 seed). A message changed, sealed by anyone else, or found in a
+  slot it was not written for (replayed or moved) is dropped. There is no read cursor, no skipped slot and no retry
+  timer: each side keeps the set of slots it handled (the computer: `phone_mail_seen`, keyed by the enrollment's
+  generation, the mailbox and the slot; the phone: `Mailbox::state`, which the app keeps). Every look or pass lists
+  the mailbox (pages of 100, at most 12 of them and a few seconds, on the phone at most 6 of its 10 s; a page out of
+  order, out of 1 to 2^53, or bringing nothing new ends the listing) from where the last one stopped when it could
+  not list it all, so successive passes cover the whole of a mailbox slower to list than one pass, and fetches the
+  listed slots not handled yet, at most 20 a pass on the computer and 50 a look on the phone: the newest half, and a
+  share that moves on each time, so no slot waits for ever behind ones that never open. A slot that does not open, is
+  not there, or fails to come (an error reading that one slot) is simply fetched again later, and the slots after it
+  are still read: a slot served wrong for a while, missing from a listing, or a false one made up high never hides or
+  loses a real one. A handled slot is let go only by age, eight days after it was handled (past the hub's week and far
+  past any action's window), never by what a listing shows, so a delivered refusal is never decided again.
+  The computer reads each enrollment from one row (mailbox, keys, grants, generation; the generation is the pairing's
+  `enrollment` value) and handles a message for that enrollment only. One drainer at a time serves an enrollment's
+  mail: it takes a lease (`phone_mail_lease`: owner and expiry, 30 s, renewed before each decision, given back at the
+  end of its pass); another process does nothing while it is held, and takes over only once it lapsed (a drainer that
+  stopped dead). A message is decided first (the companion API's entry point and guards), then recorded with its
+  reply (keyed by generation, mailbox and slot), and the slot is handled from then on: what the phone is told is
+  what reached the session. A recorded reply goes out as it was recorded, never decided again (a refusal stays a
+  refusal though Control came since). A drainer stopping between a decision and its record leaves it to the next
+  holder, which decides again under the action contract's rule (the same action id is the stored receipt; a
+  reservation without an outcome reads `unknown`; nothing is sent twice). Every change names generation, mailbox
+  and slot, and a worker whose enrollment ended (revoked, or paired again, on the same mailbox too) does nothing more;
+  what was handled for an enrollment no longer here goes. A database read that fails records nothing. The hub sees
+  sizes and timing only.
+- Up: `{kind: "act", action: <the POST /c1/actions body>}` and `{kind: "receipt", action_id, query}` (`query` a
+  random id of the phone's question). They go through the same entry point and guards as `/c1` (the enrollment read
+  again, Control, `actions::act`). Down: `{kind: "receipt", action_id, query?, receipt}` or `{kind: "refused",
+  action_id, query?, status, error}` (403 without Control, as `/c1` answers), and `{kind: "snapshot", hello, overview,
+  accounts, requests, refused?}`, each part as its `/c1` route answers it; without Summaries only `hello`, the others
+  null and `refused` saying why. A snapshot is built under the enrollment read after the messages were answered, and
+  not sent if its grants changed (or it was revoked or paired again) before the very PUT that would carry it, its
+  retries included; it is sent when what it
+  shows changes (the requests, runs, usage, limits, grants) and at least every 5 minutes. Sessions and transcripts stay
+  on the direct connection.
+- The phone (`companion_proto::mailbox`): `join_hub_qr` / `join_hub` → `HubJoining` (`words`, `result`, `wait`,
+  `mailbox`; the invite's deadline is held to 15 minutes whatever the hub says), and `Mailbox` with the direct
+  `Client`'s typed calls (`hello`, `overview`, `accounts`, `account`, `requests`, `act`, `receipt`) plus `sync`,
+  `state` / `restore` for the app to keep across restarts (the mailbox, the pairing, the slots handled, the newest
+  snapshot and its slot, together; restored only into the same mailbox and pairing, the snapshot shown at once but
+  stale until a new one arrives), and `freshness` → `{snapshot_at, snapshot_age_ms,
+  heard_at, missed, stale}`: a hub can always withhold mail, so `stale` when no snapshot arrived for 12 minutes by the
+  phone's own monotonic clock, when the hub was silent as long, or when the snapshot is that old by the computer's
+  signed time; `missed` counts the listed slots not read yet. A newer snapshot is never replaced by an older one read
+  later. A look lasts at most 10 s. `receipt` asks the computer each time; each call
+  waits on its own (two for one action both get the answer) and its waiter goes when the call ends, given up on
+  included.
+- The desktop (`core::companion::mailbox`): `pair_start(ctx, on_event) -> HubPairing` with `status`, `attempt`,
+  `approve(grants)`, `refuse`, `cancel`, `ended`; the status is `phone_pair_status`'s with `route: "hub"` and
+  `hub_url`, and its changes are `phones-pairing` events. `pass(ctx)` is the mailbox pass, run by `sync::hub::watch`.
+  `phones::list` gives `route: "hub"`. Each hub's token is kept under that hub's own address, in one write (the
+  address is the credential's name): a context names a hub and reads that hub's token only, so a pairing begun on hub
+  A and cleaned up while this computer joins hub B sends A its own token, never B's, with no moment in between where
+  the two disagree. A token kept by a version before, under the computer alone (1.13 kept no record of its hub), is
+  used only when this branch recorded the hub it was for and that hub is the one asked: otherwise there is no token,
+  and the computer joins its hub afresh. An upgraded 1.13 desktop on a hub joins once more: nothing it kept says
+  which hub issued its token (an interrupted 1.13 join could leave one hub's token beside another's address), so it
+  is never guessed. The hub status says `rejoin` with "Join your hub again to keep syncing", shown on the Computers
+  page and by `hrm hub status`, and the sync round's error says the same. A join forgets that
+  record only once the old token is really gone. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
+  and only that hub's answer settles its deletion. An enrollment with no hub recorded can only come from this branch
+  before it kept one (nothing released has hub enrollments): it is served by no hub and its deletion is owed to none,
+  so no hub's "no such phone" settles it; pair such a phone again. A deletion owed on the hub (a revocation, the earlier mailbox of a phone paired again, an invite that ended
+  unpaired) is written in the same transaction as what owes it, keyed by that hub's address, the mailbox and the
+  enrollment (`phone_hub_deletes`), and tried at every pass on that hub until it confirms it (gone, or never there);
+  one owed on a hub this computer left stays owed. A revocation from before the queue, not acknowledged, is taken up.
+  `acks.hub` on a revoked phone is true once its own hub confirmed its own enrollment's mailbox, false until then,
+  null for a phone never paired through it.
+- Databases of this branch from before the handled set (its `phone_mail_in` table) are disposable: nothing released
+  has hub phones, and that table is dropped at start with what it held.
+- Follow-ups (not in this package): the phone's ten-second look deadline enforced around each awaited call (one
+  request may take its own 20 s today); a test of a forged refusal acknowledgement; the app saving `Mailbox::state`
+  and restoring it at start (the protocol side is here).
 
 ## Contract: the push relay
 
@@ -265,7 +388,27 @@ Phases 1 and 2 can overlap once the `/c1` contract is fixed: the app builds agai
 
 Wave 2: WP-M4 the Flutter app (its own repository), WP-M5 hub mailbox (`crates/hub/**`, `crates/core/src/sync/hub.rs`),
 WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository),
-WP-M8 phone Reply and Stop.
+WP-M8 phone Reply and Stop, WP-M5b hub mailbox hardening.
+
+**WP-M5b hub mailbox hardening** (`crates/core/src/companion/mailbox.rs`, `crates/companion-proto/src/mailbox.rs`)
+makes the experimental mailbox fit to be turned on by default. Its inputs are the open findings of the sixth review
+of WP-M5:
+
+- **Lease takeover against a recorded outcome.** A drainer can dispatch an answer and stop before recording its
+  decision; once its lease lapses, the next holder decides again, and with Control withdrawn meanwhile it refuses
+  (403) before looking at the action's own receipt, and records that. The request was answered once, but the phone is
+  told it was refused. The next holder must reconcile the slot with the durable action record before it decides, and
+  the decision's write must check that its writer still holds the lease.
+- **Fetch rotation per page.** With a listing resumed one page per pass, the rotating share moves on by the same step
+  each pass, so on a page that comes back every few passes the same subset is picked each time: a valid answer among
+  the rest is never fetched. Track fetch progress per resumed page, or rotate over the outstanding slots gathered
+  across passes.
+- **Handset pruning of resumed listings.** The phone lets go of handled slots below the first slot of a listing that
+  reached the end; after a resumed listing that slot is only the oldest of the last part, so earlier receipts are
+  read again (harmless today, but not intended).
+- **Handset listing budget.** The phone's six-second listing share is checked only between calls, so one slow listing
+  call can take the whole look and leave nothing for fetching; the look's ten seconds are not enforced around each
+  awaited call either.
 
 **WP-M8 phone Reply and Stop** gets its own design before any code; wave 1's five reviews tried to bolt it onto the
 answer path and taught these inputs:
