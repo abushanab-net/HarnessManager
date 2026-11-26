@@ -38,11 +38,15 @@ const INVITE_MS: i64 = 10 * 60 * 1000;
 /// Wrong join attempts a minute, from anyone: at this pace a six-digit code holds for its ten minutes (at most 100
 /// tries of a million). Past it every join waits for the minute's end; a flood can delay a join, not guess one.
 const JOIN_FAILS_A_MINUTE: u32 = 10;
-/// A mailbox message is kept a week; one is at most 1 MiB, and one direction of a mailbox holds at most 16 MiB (the
-/// oldest go first, the newest always stays).
+/// A mailbox message is kept a week; one is 1 byte to 1 MiB (refused while it is read, past that), and one direction
+/// of a mailbox holds at most 16 MiB and 1000 messages (the oldest go first, the newest always stays). A listing
+/// gives at most 100 at a time. Message numbers run from 1 to 2^53, which every JSON reader holds exactly.
 const MAIL_KEPT_MS: i64 = 7 * 24 * 3_600_000;
 const MAIL_MAX: usize = 1024 * 1024;
 const MAILBOX_MAX: i64 = 16 * 1024 * 1024;
+const MAILBOX_ROWS: i64 = 1000;
+const LIST_PAGE: i64 = 100;
+const MAX_SEQ: i64 = 1 << 53;
 
 pub struct Config {
     pub data_dir: PathBuf,
@@ -58,7 +62,7 @@ struct Hub {
     admin_hash: String,
     db: Mutex<Connection>,
     events: broadcast::Sender<String>,
-    /// Wrong join attempts: when the count began, and the count.
+    /// Join attempts that did not succeed (or are under way): when the count began, and the count.
     join_fails: Mutex<(i64, u32)>,
 }
 
@@ -75,7 +79,8 @@ create table if not exists transcripts(origin text not null, key text not null, 
 create table if not exists rendezvous(id text primary key, addresses text not null, at integer not null);
 create table if not exists phones(id text primary key, device text not null, code text not null, expires_at integer not null, token_hash text,
   joined_at integer, last_seen integer not null default 0, up_max integer not null default 0, down_max integer not null default 0);
-create table if not exists mail(phone text not null, dir text not null, seq integer not null, at integer not null, body blob not null, primary key(phone, dir, seq));
+create table if not exists mail(phone text not null, dir text not null, seq integer not null, at integer not null, bytes integer not null, body blob not null, primary key(phone, dir, seq));
+create index if not exists mail_at on mail(at);
 ";
 
 /// Bind `cfg.bind` (port 0: any free one; the one taken is in the result) and serve from the current tokio
@@ -122,7 +127,8 @@ pub async fn serve(cfg: Config) -> Result<(SocketAddr, axum_server::Handle<Socke
         .route("/v1/phones/join", post(phone_join))
         .route("/v1/phones/{id}", delete(delete_phone))
         .route("/v1/mail/{id}/{dir}", get(mail_list))
-        .route("/v1/mail/{id}/{dir}/{seq}", put(put_mail).get(mail))
+        // a message's own limit while its body is read, not after the server-wide one buffered it
+        .route("/v1/mail/{id}/{dir}/{seq}", put(put_mail).get(mail).layer(DefaultBodyLimit::max(MAIL_MAX)))
         .layer(DefaultBodyLimit::max(limit))
         .with_state(hub);
     tokio::spawn(async move {
@@ -199,14 +205,15 @@ impl Hub {
         if token.is_empty() { return Err(fail(StatusCode::UNAUTHORIZED, "a bearer token is needed")); }
         let h = sha_hex(token.as_bytes());
         let db = self.lock();
-        let row: Option<(String, Option<String>)> = db.query_row("select device, token_hash from phones where id = ?", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(internal)?;
+        // a phone whose computer is gone is gone too
+        let row: Option<(String, Option<String>)> = db.query_row("select p.device, p.token_hash from phones p join devices d on d.id = p.device where p.id = ?", [id], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(internal)?;
         if let Some((device, Some(th))) = &row {
             if *th == h {
                 db.execute("update phones set last_seen = ? where id = ?", params![now_ms(), id]).map_err(internal)?;
                 return Ok((Side::Phone, device.clone()));
             }
         }
-        if db.query_row("select 1 from phones where token_hash = ?", [&h], |_| Ok(())).optional().map_err(internal)?.is_some() { return Err(fail(StatusCode::FORBIDDEN, "own mailbox only")); }
+        if db.query_row("select 1 from phones p join devices d on d.id = p.device where p.token_hash = ?", [&h], |_| Ok(())).optional().map_err(internal)?.is_some() { return Err(fail(StatusCode::FORBIDDEN, "own mailbox only")); }
         let dev: Option<String> = db.query_row("select id from devices where token_hash = ?", [&h], |r| r.get(0)).optional().map_err(internal)?;
         let Some(dev) = dev else { return Err(fail(StatusCode::UNAUTHORIZED, "unknown token")) };
         match row {
@@ -216,17 +223,19 @@ impl Hub {
         }
     }
 
-    /// One wrong join attempt more, and the answer that says so.
-    fn join_failed(&self, status: StatusCode, msg: &str) -> Response {
+    /// A join attempt is let in only while the minute's budget lasts, and counted as it is let in, so attempts at
+    /// once cannot all pass before any is counted; one that succeeds gives its place back (`join_ok`).
+    fn join_admit(&self) -> Result<(), Response> {
         let mut f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
         if now_ms() - f.0 >= 60_000 { *f = (now_ms(), 0); }
+        if f.1 >= JOIN_FAILS_A_MINUTE { return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many wrong attempts; try again in a minute")); }
         f.1 += 1;
-        fail(status, msg)
+        Ok(())
     }
 
-    fn joins_held(&self) -> bool {
-        let f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
-        now_ms() - f.0 < 60_000 && f.1 >= JOIN_FAILS_A_MINUTE
+    fn join_ok(&self) {
+        let mut f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
+        f.1 = f.1.saturating_sub(1);
     }
 
     fn device_list(&self, db: &Connection) -> rusqlite::Result<Vec<Value>> {
@@ -283,15 +292,15 @@ struct JoinBody {
 /// A second join by the same computer replaces its token; with a code it must prove it is that computer (see `known_ok`).
 async fn join(State(hub): St, Json(body): Json<JoinBody>) -> Reply {
     let (id, record) = checked_record(&body.device)?;
-    if hub.joins_held() { return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many wrong attempts; try again in a minute")); }
+    hub.join_admit()?;
     let db = hub.lock();
     match (body.admin_token.as_deref(), body.code.as_deref()) {
         (Some(t), _) if !t.is_empty() => {
-            if sha_hex(t.as_bytes()) != hub.admin_hash { return Err(hub.join_failed(StatusCode::UNAUTHORIZED, "wrong admin token")); }
+            if sha_hex(t.as_bytes()) != hub.admin_hash { return Err(fail(StatusCode::UNAUTHORIZED, "wrong admin token")); }
         }
         (_, Some(code)) if !code.is_empty() => {
             let n = db.execute("update invites set used = 1 where code = ? and used = 0 and expires_at > ?", params![code, now_ms()]).map_err(internal)?;
-            if n == 0 { return Err(hub.join_failed(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")); }
+            if n == 0 { return Err(fail(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")); }
             let known: Option<String> = db.query_row("select record from devices where id = ?", [&id], |r| r.get(0)).optional().map_err(internal)?;
             if !known_ok(known.as_deref(), &record) { return Err(fail(StatusCode::FORBIDDEN, "a computer with this id is on the hub already, under another key")); }
         }
@@ -304,16 +313,30 @@ async fn join(State(hub): St, Json(body): Json<JoinBody>) -> Reply {
         params![id, record.to_string(), sha_hex(token.as_bytes()), now_ms(), now_ms()]).map_err(internal)?;
     let devices = hub.device_list(&db).map_err(internal)?;
     drop(db);
+    hub.join_ok();
     hub.emit("device", &id);
     Ok(Json(json!({"token": token, "devices": devices})).into_response())
 }
 
+/// Six digits no live invite holds, a computer's or a phone's: the digits shown for one never redeem the other.
+fn fresh_code(db: &Connection, mut draw: impl FnMut() -> Result<u32, Response>) -> Result<String, Response> {
+    let now = now_ms();
+    loop {
+        let c = format!("{:06}", draw()? % 1_000_000);
+        let taken = db.query_row("select exists(select 1 from invites where code = ?1 and used = 0 and expires_at > ?2) or exists(select 1 from phones where code = ?1 and token_hash is null and expires_at > ?2)",
+            params![c, now], |r| r.get::<_, bool>(0)).map_err(internal)?;
+        if !taken { return Ok(c); }
+    }
+}
+
+fn draw() -> Result<u32, Response> { getrandom::u32().map_err(internal) }
+
 async fn invite(State(hub): St, headers: HeaderMap) -> Reply {
     hub.who(&headers)?;
-    let code = format!("{:06}", getrandom::u32().map_err(internal)? % 1_000_000);
     let expires_at = now_ms() + INVITE_MS;
     let db = hub.lock();
     db.execute("delete from invites where expires_at < ?", [now_ms()]).map_err(internal)?;
+    let code = fresh_code(&db, draw)?;
     db.execute("insert or replace into invites(code, expires_at, used) values(?, ?, 0)", params![code, expires_at]).map_err(internal)?;
     Ok(Json(json!({"code": code, "expires_at": expires_at})).into_response())
 }
@@ -341,12 +364,15 @@ async fn delete_device(State(hub): St, headers: HeaderMap, Path(id): Path<String
         Who::Device(me) if me == id => {}
         _ => return Err(fail(StatusCode::FORBIDDEN, "own only, or the admin")),
     }
-    let db = hub.lock();
-    for t in ["devices", "presence", "rendezvous"] { db.execute(&format!("delete from {t} where id = ?"), [&id]).map_err(internal)?; }
-    for t in ["chunks", "transcripts"] { db.execute(&format!("delete from {t} where origin = ?"), [&id]).map_err(internal)?; }
+    let mut db = hub.lock();
+    // one transaction: a hub stopping half way never leaves its phones' tokens behind it
+    let tx = db.transaction().map_err(internal)?;
+    for t in ["devices", "presence", "rendezvous"] { tx.execute(&format!("delete from {t} where id = ?"), [&id]).map_err(internal)?; }
+    for t in ["chunks", "transcripts"] { tx.execute(&format!("delete from {t} where origin = ?"), [&id]).map_err(internal)?; }
     // the phones it invited go with it: no other computer may read their mailboxes
-    db.execute("delete from mail where phone in (select id from phones where device = ?)", [&id]).map_err(internal)?;
-    db.execute("delete from phones where device = ?", [&id]).map_err(internal)?;
+    tx.execute("delete from mail where phone in (select id from phones where device = ?)", [&id]).map_err(internal)?;
+    tx.execute("delete from phones where device = ?", [&id]).map_err(internal)?;
+    tx.commit().map_err(internal)?;
     let _ = std::fs::remove_dir_all(hub.blobs(&id));
     drop(db);
     hub.emit("device", &id);
@@ -514,11 +540,7 @@ async fn phone_invite(State(hub): St, headers: HeaderMap) -> Reply {
     let db = hub.lock();
     db.execute("delete from phones where token_hash is null and expires_at < ?", [now_ms()]).map_err(internal)?;
     db.execute("delete from mail where phone not in (select id from phones)", []).map_err(internal)?;
-    // a code is one live invite's only: drawn again while another unredeemed invite has it
-    let code = loop {
-        let c = format!("{:06}", getrandom::u32().map_err(internal)? % 1_000_000);
-        if db.query_row("select 1 from phones where code = ? and token_hash is null", [&c], |_| Ok(())).optional().map_err(internal)?.is_none() { break c; }
-    };
+    let code = fresh_code(&db, draw)?;
     let mut raw = [0u8; 16];
     getrandom::fill(&mut raw).map_err(internal)?;
     let id = format!("ph-{}", hex::encode(raw));
@@ -533,14 +555,15 @@ struct PhoneJoin { code: String }
 /// A phone redeems its code, once: a token for its own mailbox, and the computer that invited it. Wrong codes count
 /// with the computers' wrong joins.
 async fn phone_join(State(hub): St, Json(body): Json<PhoneJoin>) -> Reply {
-    if hub.joins_held() { return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many wrong attempts; try again in a minute")); }
+    hub.join_admit()?;
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(internal)?;
     let token = hex::encode(raw);
     let db = hub.lock();
     let row: Option<(String, String, i64)> = db.query_row("update phones set token_hash = ?1, joined_at = ?2, last_seen = ?2 where code = ?3 and token_hash is null and expires_at > ?2 returning id, device, expires_at",
         params![sha_hex(token.as_bytes()), now_ms(), body.code.trim()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional().map_err(internal)?;
-    let Some((id, device, expires_at)) = row else { drop(db); return Err(hub.join_failed(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")) };
+    let Some((id, device, expires_at)) = row else { return Err(fail(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")) };
+    hub.join_ok();
     let name = db.query_row("select record from devices where id = ?", [&device], |r| r.get::<_, String>(0)).ok()
         .and_then(|r| serde_json::from_str::<Value>(&r).ok()).and_then(|v| v["name"].as_str().map(String::from)).unwrap_or_default();
     drop(db);
@@ -569,23 +592,24 @@ fn dir_of(dir: &str) -> Result<&'static str, Response> {
 }
 
 /// A message in: numbered above every one before it in that direction (a number is never used twice, even after the
-/// message it held expired), at most `MAIL_MAX`. The week's expiry and the direction's cap are applied here.
+/// message it held expired), 1 byte to `MAIL_MAX`. The week's expiry and the direction's caps are applied here.
 async fn put_mail(State(hub): St, headers: HeaderMap, Path((id, dir, seq)): Path<(String, String, i64)>, body: Bytes) -> Reply {
     let dir = dir_of(&dir)?;
     let (side, device) = hub.mail_side(&headers, &id)?;
     if (dir == "up") != (side == Side::Phone) { return Err(fail(StatusCode::FORBIDDEN, if dir == "up" { "up is the phone's to write" } else { "down is the computer's to write" })); }
-    if body.len() > MAIL_MAX { return Err(fail(StatusCode::PAYLOAD_TOO_LARGE, format!("a message is at most {MAIL_MAX} bytes"))); }
+    if body.is_empty() { return Err(fail(StatusCode::BAD_REQUEST, "a message is not empty")); }
+    if !(1..=MAX_SEQ).contains(&seq) { return Err(fail(StatusCode::BAD_REQUEST, format!("a message is numbered 1 to {MAX_SEQ}"))); }
     let now = now_ms();
     let mut db = hub.lock();
     let tx = db.transaction().map_err(internal)?;
     let max: i64 = tx.query_row(&format!("select {dir}_max from phones where id = ?"), [&id], |r| r.get(0)).map_err(internal)?;
     if seq <= max { return Err((StatusCode::CONFLICT, Json(json!({"error": format!("the next message is numbered above {max}"), "max": max}))).into_response()); }
-    tx.execute("insert into mail(phone, dir, seq, at, body) values(?, ?, ?, ?, ?)", params![id, dir, seq, now, body.as_ref()]).map_err(internal)?;
+    tx.execute("insert into mail(phone, dir, seq, at, bytes, body) values(?, ?, ?, ?, ?, ?)", params![id, dir, seq, now, body.len() as i64, body.as_ref()]).map_err(internal)?;
     tx.execute(&format!("update phones set {dir}_max = ? where id = ?"), params![seq, id]).map_err(internal)?;
     tx.execute("delete from mail where at < ?", [now - MAIL_KEPT_MS]).map_err(internal)?;
     loop {
-        let (n, total): (i64, i64) = tx.query_row("select count(*), coalesce(sum(length(body)), 0) from mail where phone = ? and dir = ?", params![id, dir], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
-        if n <= 1 || total <= MAILBOX_MAX { break; }
+        let (n, total): (i64, i64) = tx.query_row("select count(*), coalesce(sum(bytes), 0) from mail where phone = ? and dir = ?", params![id, dir], |r| Ok((r.get(0)?, r.get(1)?))).map_err(internal)?;
+        if n <= 1 || (total <= MAILBOX_MAX && n <= MAILBOX_ROWS) { break; }
         tx.execute("delete from mail where phone = ?1 and dir = ?2 and seq = (select min(seq) from mail where phone = ?1 and dir = ?2)", params![id, dir]).map_err(internal)?;
     }
     tx.commit().map_err(internal)?;
@@ -604,18 +628,22 @@ async fn mail(State(hub): St, headers: HeaderMap, Path((id, dir, seq)): Path<(St
 }
 
 #[derive(Deserialize)]
-struct After { after: Option<i64> }
+struct After { after: Option<i64>, limit: Option<i64> }
 
-/// `{max, mail: [{seq, bytes, at}]}`: the messages kept in one direction after `after`, and the highest number used.
+/// `{max, mail: [{seq, bytes, at}], more}`: the messages kept in one direction after `after`, the first `limit` of
+/// them (at most 100), and the highest number used; `more` when the page did not hold them all.
 async fn mail_list(State(hub): St, headers: HeaderMap, Path((id, dir)): Path<(String, String)>, Query(q): Query<After>) -> Reply {
     let dir = dir_of(&dir)?;
     hub.mail_side(&headers, &id)?;
     let db = hub.lock();
     let max: i64 = db.query_row(&format!("select {dir}_max from phones where id = ?"), [&id], |r| r.get(0)).map_err(internal)?;
-    let mut st = db.prepare("select seq, length(body), at from mail where phone = ? and dir = ? and seq > ? and at >= ? order by seq").map_err(internal)?;
-    let list: Vec<Value> = st.query_map(params![id, dir, q.after.unwrap_or(0), now_ms() - MAIL_KEPT_MS], |r| Ok(json!({"seq": r.get::<_, i64>(0)?, "bytes": r.get::<_, i64>(1)?, "at": r.get::<_, i64>(2)?})))
+    let limit = q.limit.unwrap_or(LIST_PAGE).clamp(1, LIST_PAGE);
+    let mut st = db.prepare("select seq, bytes, at from mail where phone = ? and dir = ? and seq > ? and at >= ? order by seq limit ?").map_err(internal)?;
+    let mut list: Vec<Value> = st.query_map(params![id, dir, q.after.unwrap_or(0), now_ms() - MAIL_KEPT_MS, limit + 1], |r| Ok(json!({"seq": r.get::<_, i64>(0)?, "bytes": r.get::<_, i64>(1)?, "at": r.get::<_, i64>(2)?})))
         .map_err(internal)?.collect::<rusqlite::Result<_>>().map_err(internal)?;
-    Ok(Json(json!({"max": max, "mail": list})).into_response())
+    let more = list.len() as i64 > limit;
+    list.truncate(limit as usize);
+    Ok(Json(json!({"max": max, "mail": list, "more": more})).into_response())
 }
 
 #[cfg(test)]

@@ -404,3 +404,72 @@ async fn the_computer_is_told_of_its_phones_mail_and_a_phone_goes_with_its_revoc
     assert_eq!(b.req(reqwest::Method::DELETE, &hub, "/v1/devices/bbbb").send().await.unwrap().status(), StatusCode::NO_CONTENT);
     assert_eq!(as_token(reqwest::Method::GET, &hub, &t3, &format!("/v1/mail/{p3}/down")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
 }
+
+// ---------- the review's findings on the hub ----------
+
+/// #6: a message's limit applies while its body is read: a body over 1 MiB is refused before anything else looks at
+/// the request (before, it was buffered up to the server-wide limit and the token was checked first).
+#[tokio::test]
+async fn a_mail_body_over_its_limit_is_refused_while_it_is_read() {
+    let hub = start(2048).await;
+    let r = Client::new().put(format!("{}/v1/mail/ph-x/up/1", hub.url)).bearer_auth("nobody").body(vec![0u8; 2 * super::MAIL_MAX]).send().await;
+    assert!(r.map(|r| r.status() == StatusCode::PAYLOAD_TOO_LARGE).unwrap_or(true));
+    let r = Client::new().put(format!("{}/v1/mail/ph-x/up/1", hub.url)).bearer_auth("nobody").body(vec![0u8; super::MAIL_MAX + 1]).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE, "refused at extraction, not 401 after buffering");
+}
+
+/// #6 and #13: an empty message, or a number outside 1..=2^53, is refused; a direction keeps at most 1000 messages
+/// whatever their size, and a listing gives at most 100 at a time.
+#[tokio::test]
+async fn mail_rows_are_capped_numbers_bounded_and_listings_paged() {
+    let hub = start(2048).await;
+    let (a, _b) = joined(&hub).await;
+    let (p, t) = phone(&hub, &a).await;
+    let put = |seq: i64, body: &'static [u8]| as_token(reqwest::Method::PUT, &hub, &t, &format!("/v1/mail/{p}/up/{seq}")).body(body).send();
+    assert_eq!(put(1, b"").await.unwrap().status(), StatusCode::BAD_REQUEST, "empty");
+    assert_eq!(put(0, b"x").await.unwrap().status(), StatusCode::BAD_REQUEST);
+    assert_eq!(put(i64::MAX, b"x").await.unwrap().status(), StatusCode::BAD_REQUEST, "no number left after it");
+    assert_eq!(put(super::MAX_SEQ + 1, b"x").await.unwrap().status(), StatusCode::BAD_REQUEST);
+    for seq in 1..=1005 { assert_eq!(put(seq, b"x").await.unwrap().status(), StatusCode::NO_CONTENT); }
+    let db = rusqlite::Connection::open(hub._dir.path().join("hub.db")).unwrap();
+    let (n, first): (i64, i64) = db.query_row("select count(*), min(seq) from mail where phone = ?", [&p], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((n, first), (super::MAILBOX_ROWS, 6));
+    let page: Value = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up")).send().await.unwrap().json().await.unwrap();
+    assert_eq!((page["mail"].as_array().unwrap().len() as i64, page["more"].as_bool(), page["max"].as_i64()), (super::LIST_PAGE, Some(true), Some(1005)));
+    let last: Value = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up?after=1000&limit=3")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(last["mail"].as_array().unwrap().iter().map(|m| m["seq"].as_i64().unwrap()).collect::<Vec<_>>(), [1001, 1002, 1003]);
+    assert_eq!(last["more"], true);
+}
+
+/// #14: a phone whose computer is no longer on the hub is gone too, even if its own row was left behind.
+#[tokio::test]
+async fn a_phone_whose_computer_is_gone_is_refused() {
+    let hub = start(2048).await;
+    let (a, _b) = joined(&hub).await;
+    let (p, t) = phone(&hub, &a).await;
+    let db = rusqlite::Connection::open(hub._dir.path().join("hub.db")).unwrap();
+    db.execute("delete from devices where id = 'aaaa'", []).unwrap();
+    assert_eq!(as_token(reqwest::Method::GET, &hub, &t, &format!("/v1/mail/{p}/down")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+}
+
+/// #12: six digits a live computer invite holds are never a phone invite's, nor the other way round.
+#[test]
+fn an_invite_code_is_unique_across_computers_and_phones() {
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch(super::SCHEMA).unwrap();
+    let later = super::now_ms() + 60_000;
+    db.execute("insert into invites(code, expires_at, used) values('123456', ?, 0)", [later]).unwrap();
+    db.execute("insert into phones(id, device, code, expires_at) values('ph-1', 'aaaa', '222222', ?)", [later]).unwrap();
+    let mut draws = vec![123456u32, 222222, 333333].into_iter();
+    assert_eq!(super::fresh_code(&db, || Ok(draws.next().unwrap())).unwrap(), "333333");
+}
+
+/// #12: wrong joins at once are counted as they are let in: no more than the minute's budget gets through.
+#[tokio::test]
+async fn wrong_joins_at_once_do_not_pass_the_budget_together() {
+    let hub = start(2048).await;
+    let tries = (0..30).map(|_| { let url = format!("{}/v1/phones/join", hub.url); tokio::spawn(async move { Client::new().post(url).json(&json!({"code": "999999"})).send().await.unwrap().status() }) });
+    let mut wrong = 0;
+    for t in tries { if t.await.unwrap() == StatusCode::UNAUTHORIZED { wrong += 1; } }
+    assert!(wrong <= super::JOIN_FAILS_A_MINUTE, "{wrong} wrong attempts got through");
+}
