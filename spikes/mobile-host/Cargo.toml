@@ -1,0 +1,23 @@
+[package]
+name = "mobile-spike-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# throwaway spike: outside the workspace, versions pinned by the workspace's Cargo.lock copied here
+[workspace]
+
+[dependencies]
+anyhow = "1"
+axum = "0.8.9"
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+ed25519-dalek = "3.0.0"
+getrandom = "0.3"
+hex = "0.4.3"
+rcgen = { version = "0.14.10", default-features = false, features = ["pem", "aws_lc_rs"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+spake2 = { version = "0.4", features = ["getrandom"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
