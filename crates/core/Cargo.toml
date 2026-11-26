@@ -10,6 +10,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.23.1"
 chacha20poly1305 = "0.11.0"
 chrono = "0.4.45"
+companion-proto = { path = "../companion-proto" }
 data-encoding = "2"
 dirs = "7.0.0"
 ed25519-dalek = "3.0.0"

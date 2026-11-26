@@ -24,6 +24,7 @@ pub mod sweep;
 pub mod sync;
 pub mod testenv;
 pub mod transcripts;
+pub mod recommend;
 pub mod util;
 pub mod watch;
 pub mod apps;
