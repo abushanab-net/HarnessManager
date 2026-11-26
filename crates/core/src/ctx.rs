@@ -138,7 +138,10 @@ impl Ctx {
         if settings.device_name.is_empty() { settings.device_name = crate::util::hostname(); made = true; }
         if made { write_atomic(&settings_path, serde_json::to_string_pretty(&settings)?.as_bytes())?; }
         let db = Db::open(&data.join("hm.db"), &settings.device_id, settings.sync_mode != "off" || settings.direct_connection)?;
-        Ok(Ctx { data: data.to_path_buf(), home: home.to_path_buf(), settings, db })
+        let ctx = Ctx { data: data.to_path_buf(), home: home.to_path_buf(), settings, db };
+        // once, before anything can change the settings or reach a hub
+        crate::sync::hub::adopt_legacy_token(&ctx);
+        Ok(ctx)
     }
 
     pub fn registry_path(&self) -> PathBuf {

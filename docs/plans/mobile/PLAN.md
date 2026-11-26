@@ -296,10 +296,13 @@ POST /c1/actions
   `phones::list` gives `route: "hub"`. Each hub's token is kept under that hub's own address, in one write (the
   address is the credential's name): a context names a hub and reads that hub's token only, so a pairing begun on hub
   A and cleaned up while this computer joins hub B sends A its own token, never B's, with no moment in between where
-  the two disagree. A token kept by a version before, under the computer alone (1.13 kept no record of its hub), is
-  used only when this branch recorded the hub it was for and that hub is the one asked: otherwise there is no token,
-  and the computer joins its hub afresh (an upgraded 1.13 desktop on the hub joins once more). A join forgets that
-  record only once the old token is really gone. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
+  the two disagree. A token 1.13 kept under the computer alone is moved once, at the first start of this version
+  (in the start-up, before anything can change the settings or reach a hub), under the hub address its settings
+  saved: 1.13 had one hub at a time and saved that address with its token, so an upgraded desktop keeps its hub
+  without joining again. That one write keeps the token and its hub together; the look is made once, so settings
+  changed afterwards never move an old token to another hub. With no hub address saved, the old token is left
+  unresolved: no token, and a join gets one. After that the strict rule holds: an old token is used only for the
+  hub it is recorded for, and a join forgets that record only once the old token is really gone. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
   and only that hub's answer settles its deletion. An enrollment with no hub recorded can only come from this branch
   before it kept one (nothing released has hub enrollments): it is served by no hub and its deletion is owed to none,
   so no hub's "no such phone" settles it; pair such a phone again. A deletion owed on the hub (a revocation, the earlier mailbox of a phone paired again, an invite that ended
