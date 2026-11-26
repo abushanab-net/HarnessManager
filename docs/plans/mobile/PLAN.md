@@ -14,7 +14,8 @@ are what other packages rely on. The plan's review page is `docs/plans/mobile/pl
   you"); the phone fetches the details after unlock.
 - **Grants per computer:** Summaries and Transcripts on by default, **Control** granted on the computer. In wave 1
   Control answers requests; a phone's Reply and Stop come later, with their own design (WP-M8).
-- **Question window:** 60 s when a phone with Control is paired, 15 s otherwise. A permission request waits up to 300 s.
+- **Question window:** 60 s when a phone with Control is paired, 15 s otherwise. A phone answers a permission request up to 300 s
+  after it opened; the desktop waits as long as `request_seconds` says (up to 15 min), as in 1.13.2.
 - **Game layer: balanced.** XP, harvest, streak, levels (Connected → Organized → Planner → Strategist), badges with
   their rule, weekly recap. Points only for saving room or time. It can be switched off.
 - **Design:** Calibre. Every screen, state, moment, the three Android adaptations and the desktop S24 frames are
@@ -149,8 +150,11 @@ POST /c1/actions
   checked once more, judged when that write gets the database.
 - **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
   its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
-  to a request from another turn is refused. Where the answer is written, the request must still be open and its hook
-  live, the run at the claimed version and turn, both deadlines unpassed, and the enrollment current with Control. A
+  to a request from another turn is refused. An event that ends what came before (a prompt, a finished tool, the
+  turn's end, the session's end, the idle prompt) records when it settled (`run_state.settled_at`), and a hook whose
+  process started before that does not open its request: a delayed hook cannot recreate a settled one. Where the
+  answer is written, the request must still be open and its hook live, the run at the claimed version and turn, both
+  deadlines unpassed, the request less than 300 s old, and the enrollment current with Control. A
   hook that cannot record its event fails as it always did; the hook path does no file work beyond 1.13.2's (see the
   release criteria for what a lost event leaves open). The person at the computer answers throughout.
 - A repeated `action_id` returns the stored receipt and does nothing again. An answer is never resent automatically.
@@ -160,7 +164,9 @@ POST /c1/actions
 - **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
   (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is then 70 s, 10 s beyond the
   window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before.
-  A permission request waits at most 300 s whatever `request_seconds` says.
+  The desktop's permission wait is `request_seconds` (up to 15 min) and its hook entry 30 s more, as in 1.13.2; a
+  phone may answer only within 300 s of the request's opening (refused at the claim and at the write, and the expiry
+  the phone is shown is the earlier of the two).
 
 ## Contract: the hub, for phones
 
@@ -235,8 +241,11 @@ answer path and taught these inputs:
 - **Known residual, accepted for wave 1:** if the terminal answers first and that hook event cannot be saved (SQLite
   busy past the hook's 2 s timeout), the request stays open in hm.db and a phone's answer to it may be accepted.
   Claude Code acts only on the first decision for a tool call, so the late one changes nothing (a spike is verifying
-  this now); the desktop app behaves the same way in 1.13.2. The receipt says so: "Sent to the session. If the
-  terminal answered first, nothing changed."
+  this now); the desktop app behaves the same way in 1.13.2. Besides a failed save, a terminal approval reaches
+  hm.db only when the tool finishes (its `PostToolUse`): while an approved tool is still running, the request still
+  looks open and a phone's answer to it may be accepted. Claude Code acts only on the first decision, so that answer
+  changes nothing either. The receipt says so in both cases: "Sent to the session. If the terminal answered first,
+  nothing changed."
 - A summaries-only phone gets 403 on transcripts, actions and every `/v1` route; two computers with the same account
   and session names stay apart.
 - A revoked phone loses its connection, its hub token and its push handle within one minute while the computer is on.
