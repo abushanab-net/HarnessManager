@@ -1,0 +1,230 @@
+[
+ {
+  "case": "A",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": 10.2,
+  "terminal_answer": "No (Esc)",
+  "runs_after_terminal": 0,
+  "hook_alive_after_terminal": false,
+  "model_after_terminal": [
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "screen_after_terminal": "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u276f\u00a0 \n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \u23f8 manual mode on \u00b7 ? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "allow",
+  "runs_after_hook": 0,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=84888"
+  ],
+  "model_after_hook": [
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "session_alive": true,
+  "n": 1
+ },
+ {
+  "case": "A",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": 13.5,
+  "terminal_answer": "No (Esc)",
+  "runs_after_terminal": 0,
+  "hook_alive_after_terminal": false,
+  "model_after_terminal": [
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "screen_after_terminal": "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u276f\u00a0 \n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \u23f8 manual mode on \u00b7 ? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "allow",
+  "runs_after_hook": 0,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=122504"
+  ],
+  "model_after_hook": [
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "session_alive": true,
+  "n": 2
+ },
+ {
+  "case": "A",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": 14.2,
+  "terminal_answer": "No (Esc)",
+  "runs_after_terminal": 0,
+  "hook_alive_after_terminal": false,
+  "model_after_terminal": [
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "screen_after_terminal": "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u276f\u00a0 \n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 \u23f8 manual mode on \u00b7 ? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "allow",
+  "runs_after_hook": 0,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=89536"
+  ],
+  "model_after_hook": [
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash"
+  ],
+  "session_alive": true,
+  "n": 3
+ },
+ {
+  "case": "B",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": null,
+  "terminal_answer": "Yes (Enter)",
+  "runs_after_terminal": 1,
+  "hook_alive_after_terminal": true,
+  "model_after_terminal": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "screen_after_terminal": "king\u20261ostToolUse hook \u00b7 1s \u00b7 \u2193 9tokens) \u2722Thinking\u2026Thinking\u2026ermissionRequest hook \u00b7 1s\u00b7 \u2193 9 tokens) Ran 1 shell command\n\n\u25cffixture-result-seenStop hook \u00b7 1s \u00b7 \u2193 9 token)\n*11 tokens)\u273bBaked for 1s \u00b7 done 10:20 AM\u276f\u00a0? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "deny",
+  "runs_after_hook": 1,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=15492",
+   "printing deny",
+   "returned deny (stdout write ok)"
+  ],
+  "model_after_hook": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "session_alive": true,
+  "n": 1
+ },
+ {
+  "case": "B",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": null,
+  "terminal_answer": "Yes (Enter)",
+  "runs_after_terminal": 1,
+  "hook_alive_after_terminal": true,
+  "model_after_terminal": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "screen_after_terminal": "s \u00b7 \u2193 9tokens)Contemplating\u2026 Contemplating\u2026ermissionRequest hook \u00b7 1s\u00b7 \u2193 9 tokens) Ran 1 shell command\n\n\u25cffixture-result-seenStop hook \u00b7 1s \u00b7 \u2193 9 token)\n\u273bContemplating\u202611 tokens)\u273bSaut\u00e9ed for 1s \u00b7 done 10:21 AM\u276f\u00a0? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "deny",
+  "runs_after_hook": 1,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=36708",
+   "printing deny",
+   "returned deny (stdout write ok)"
+  ],
+  "model_after_hook": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "session_alive": true,
+  "n": 2
+ },
+ {
+  "case": "B",
+  "waited_s": 75.0,
+  "hook_died_after_terminal_s": null,
+  "terminal_answer": "Yes (Enter)",
+  "runs_after_terminal": 1,
+  "hook_alive_after_terminal": true,
+  "model_after_terminal": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "events_after_terminal": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "screen_after_terminal": "unning\u2026 ostToolUse hook \u00b7 0s \u00b7 \u2193 9tokens)Bunning\u2026ermissionRequest hook \u00b7 1s\u00b7 \u2193 9 tokens) Ran 1 shell command\n\n\u25cffixture-result-seen\u273bBunning\u2026Stop hook \u00b7 1s \u00b7 \u2193 11 tokens)Bunning\u20262\u273bSaut\u00e9ed for 1s \u00b7 done 10:23 AM\u276f\u00a0? for shortcuts \u00b7 \u2190 for agents",
+  "hook_decision": "deny",
+  "runs_after_hook": 1,
+  "hook_alive_after_decision": false,
+  "hook_log": [
+   "entered PermissionRequest Bash pid=73676",
+   "printing deny",
+   "returned deny (stdout write ok)"
+  ],
+  "model_after_hook": [
+   "Claude prompt received",
+   "Claude tool result allowed",
+   "Claude prompt received"
+  ],
+  "harness_message_on_screen": false,
+  "events_after_hook": [
+   "UserPromptSubmit",
+   "PreToolUse Bash",
+   "PostToolUse Bash",
+   "Stop",
+   "Notification idle_prompt"
+  ],
+  "session_alive": true,
+  "n": 3
+ }
+]
