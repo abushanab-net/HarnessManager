@@ -1,0 +1,29 @@
+[package]
+name = "hm_spike_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+# throwaway spike inside the desktop repository: its own workspace
+[workspace]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+# the crates and versions the desktop uses (workspace Cargo.lock copied here)
+anyhow = "1"
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+ed25519-dalek = "3.0.0"
+getrandom = "0.3"
+rcgen = { version = "0.14.10", default-features = false, features = ["pem", "aws_lc_rs"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+spake2 = { version = "0.4", features = ["getrandom"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls"] }
+
+[profile.release]
+strip = true
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
