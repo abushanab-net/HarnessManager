@@ -82,22 +82,28 @@ phone gets neither.
 ```rust
 // crates/core/src/phones.rs
 pub fn list(ctx: &Ctx) -> Result<Value>;
-//   [{phone_id, name, platform, grants, paired_at, last_seen, revoked_at, route: "direct"|"hub"|null}]
+//   [{phone_id, name, platform, grants, paired_at, last_seen, revoked_at, route: "direct"|"hub"|null,
+//     acks?: {connection, hub, push}}]   acks on a revoked phone, as they stand now
 pub fn set_grants(ctx: &Ctx, phone_id: &str, grants: &Value) -> Result<Value>;   // the phone's row
 pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value>;
 //   {phone_id, revoked_at, acks: {connection: bool, hub: bool|null, push: bool|null}}
+//   connection: true once the listener holding the phone's connections has cut them (it may run in another process;
+//   revoke waits up to 3 s, and a later acknowledgement shows in list)
 
 // crates/core/src/sync/peer/mod.rs, on Runtime
 pub fn phone_pair_start(&self, ctx: &Arc<Ctx>, host_name: Option<&str>) -> Result<Value>;
-//   {code, expires_at, host_hint, port, qr}   qr = "hm-phone:1?h=<host:port>&c=<code>&f=<fingerprint>"
+//   {attempt, code, expires_at, host_hint, port, qr, state}   qr = "hm-phone:1?h=<host:port>&c=<code>&f=<fingerprint>"
 pub fn phone_pair_status(&self) -> Option<Value>;
-//   {state: "waiting"|"confirm"|"paired"|"refused"|"expired"|"failed", phone?: {name, platform}, words?: [3], error?}
-pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, grants: &Value) -> Result<Value>;  // the status after
-pub fn phone_pair_refuse(&self) -> Result<Value>;
-pub fn phone_pair_cancel(&self) -> Result<Value>;
+//   {attempt, state: "waiting"|"confirm"|"paired"|"refused"|"expired"|"failed", phone?: {name, platform}, words?: [3],
+//    error?, code, expires_at, host_hint, port, qr}
+pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, attempt: &str, grants: &Value) -> Result<Value>;  // the status after
+pub fn phone_pair_refuse(&self, attempt: &str) -> Result<Value>;
+pub fn phone_pair_cancel(&self, attempt: &str) -> Result<Value>;                // null
 ```
 
 Every status change is also sent as the event `phones-pairing` with the status value, as `computers-pairing` is today.
+`attempt` names one showing of a code: approve, refuse and cancel pass the `attempt` of the status the owner is looking
+at, and are refused for any other, so a decision taken on one phone's words never lands on another's.
 
 ## Contract: companion API (`/c1`, on the peer listener, phone certificates only)
 
@@ -128,18 +134,23 @@ POST /c1/actions
 { "action_id": uuid, "kind": "answer" | "reply" | "stop",
   "target": { "run": str, "ask_id"?: str }, "state_version": int, "expires_at": ms,
   "payload": { "behavior": "allow"|"deny" } | { "answers": {...} } | { "text": str } | {} }
-→ { "action_id", "status": "accepted" | "already_handled" | "expired" | "unavailable", "detail", "at": ms }
+→ { "action_id", "status": "accepted" | "already_handled" | "expired" | "unavailable" | "unknown", "detail", "at": ms }
 ```
 
 - The origin rechecks grant, run, request and state version immediately before it acts, serialises actions per run,
   and keeps each receipt 24 h in `phone_actions(action_id primary key, phone_id, kind, target, status, detail, at)`.
+  One transaction claims the action: it consumes the state version (a second action on the same screen is `expired`)
+  and reserves the receipt before anything reaches the session. `unknown`: the computer stopped between reserving and
+  recording the outcome; the action may have arrived and is never sent again.
 - A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
   automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
   fails too.
 - `answer` goes through `hooks::answer()`, `reply` through `terminal::reply()`, `stop` through `terminal::stop()`;
   reply and Stop keep today's rules (owned terminal, one line, at most 16 KiB, no reply while a prompt waits).
-- **Question window:** a launch writes the hook entry with a 60 s timeout, and the wait variable carries 60 when a phone
-  with Control is paired, else 15 (`QUESTION_SECONDS` becomes a function of the phones table).
+- **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
+  (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is 70 s, 10 s beyond the window
+  for the hook's start and for printing an answer taken at the window's end. A permission request waits at most 300 s
+  whatever `request_seconds` says.
 
 ## Contract: the hub, for phones
 
