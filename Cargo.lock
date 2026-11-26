@@ -2192,6 +2192,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "hrm-hub",
  "if-addrs",
  "junction",
  "keyring",

@@ -40,7 +40,7 @@ thread_local! {
 }
 
 /// The receipt kept for `action_id` (younger than 24 h), with the enrollment that made it.
-fn stored(ctx: &Ctx, action_id: &str) -> Result<Option<(String, String, Receipt)>> {
+pub(crate) fn stored(ctx: &Ctx, action_id: &str) -> Result<Option<(String, String, Receipt)>> {
     ctx.db.read(|c| Ok(c.query_row("select phone_id, generation, status, detail, at from phone_actions where action_id = ?1 and at >= ?2", params![action_id, now_ms() - KEPT_MS], |r| {
         let status: String = r.get(2)?;
         let (status, detail) = match Status::parse(&status) {

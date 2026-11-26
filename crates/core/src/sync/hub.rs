@@ -184,6 +184,13 @@ impl Hub {
         body_capped(Self::checked(r, path)?, max, path)
     }
 
+    /// An answer's bytes, at most `max`; `None` when the hub has nothing under that path.
+    pub fn get_opt_bytes(&self, path: &str, max: u64) -> Result<Option<Vec<u8>>> {
+        let r = self.req(reqwest::Method::GET, path).send().with_context(|| format!("could not reach the hub at {}", self.base))?;
+        if r.status() == reqwest::StatusCode::NOT_FOUND { return Ok(None); }
+        Ok(Some(body_capped(Self::checked(r, path)?, max, path)?))
+    }
+
     pub fn put(&self, path: &str, body: Vec<u8>, headers: &[(&str, String)]) -> Result<()> {
         let mut r = self.req(reqwest::Method::PUT, path).body(body);
         for (k, v) in headers { r = r.header(*k, v); }
@@ -231,6 +238,12 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
 
 /// A one-time six-digit code for another computer, good for ten minutes: `{code, expires_at}`.
 pub fn invite(ctx: &Ctx) -> Result<Value> { Hub::open(ctx)?.post_json("/v1/invite", &json!({})) }
+
+/// A one-use code for a phone to join through the hub, and the phone's mailbox there: `{code, phone_id, expires_at}`.
+pub fn phone_invite(ctx: &Ctx) -> Result<Value> { Hub::open(ctx)?.post_json("/v1/phones/invite", &json!({})) }
+
+/// A phone's token and mailbox gone from the hub (already gone counts).
+pub fn delete_phone(ctx: &Ctx, mailbox: &str) -> Result<()> { Hub::open(ctx)?.delete(&format!("/v1/phones/{mailbox}")) }
 
 /// Leave the hub: this computer's record and token go there, the token here; the settings fall back to off.
 pub fn leave(ctx: &Ctx) -> Result<Ctx> {
@@ -420,8 +433,16 @@ pub fn status(ctx: &Ctx) -> Value {
 pub type CtxOf = Arc<dyn Fn() -> Arc<Ctx> + Send + Sync>;
 pub type OnStatus = Arc<dyn Fn(Value) + Send + Sync>;
 
-/// A hub event about another computer; one about this computer is the echo of its own write.
-fn from_another(event: &str, me: &str) -> bool { serde_json::from_str::<Value>(event).map(|v| v["id"].as_str() != Some(me)).unwrap_or(true) }
+/// A hub event about another computer; one about this computer is the echo of its own write. Mail is not a change
+/// of any computer's.
+fn from_another(event: &str, me: &str) -> bool { serde_json::from_str::<Value>(event).map(|v| v["kind"] != "mail" && v["id"].as_str() != Some(me)).unwrap_or(true) }
+
+/// A phone this computer invited has left it mail: the mailbox pass looks at once.
+fn mail_for_me(event: &str, me: &str) -> bool {
+    let mine = serde_json::from_str::<Value>(event).is_ok_and(|v| v["kind"] == "mail" && v["to"].as_str() == Some(me));
+    if mine { crate::companion::mailbox::wake(); }
+    mine
+}
 
 /// One connection to `/v1/events`: another computer's message runs a round (what changed is pulled, and what is
 /// new here goes up), a burst of them one round, told to `on_status`. Returns when the socket closes or fails.
@@ -439,13 +460,14 @@ async fn listen(ctx: &Ctx, base: &str, token: &str, ctx_of: &CtxOf, on_status: &
         match tokio::time::timeout(Duration::from_secs(60), ws.next()).await {
             Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) => {
                 quiet = 0;
-                if !from_another(t.as_str(), &ctx.settings.device_id) { continue; }
+                if mail_for_me(t.as_str(), &ctx.settings.device_id) || !from_another(t.as_str(), &ctx.settings.device_id) { continue; }
                 // what else arrives in the next second goes with this round
                 let settle = tokio::time::Instant::now() + Duration::from_secs(1);
                 while let Ok(m) = tokio::time::timeout_at(settle, ws.next()).await {
                     match m {
                         Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) | None => bail!("the hub closed the events socket"),
                         Some(Err(e)) => bail!("events socket: {e}"),
+                        Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => { mail_for_me(t.as_str(), &ctx.settings.device_id); }
                         Some(Ok(_)) => {}
                     }
                 }
@@ -473,8 +495,10 @@ fn set_ws(ctx: &Ctx, v: &str) {
 }
 
 /// Keeps the events socket open while the app runs, on its own thread; without it, a round every 30 s is the
-/// fallback. Nothing happens while the hub is not this computer's transport.
+/// fallback. Nothing happens while the hub is not this computer's transport. The phones paired through the hub are
+/// served beside it (`companion::mailbox::watch`).
 pub fn watch(ctx_of: CtxOf, on_status: OnStatus) {
+    crate::companion::mailbox::watch(ctx_of.clone());
     std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio");
         // after a failure the next try comes soon, then later: 1, 2, 4 ... 30 seconds

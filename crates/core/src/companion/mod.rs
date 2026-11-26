@@ -6,6 +6,9 @@
 pub mod actions;
 pub mod conn;
 mod events;
+pub mod mailbox;
+#[cfg(test)]
+mod mailbox_tests;
 #[cfg(test)]
 mod tests;
 
@@ -94,15 +97,15 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
     any.merge(summaries).merge(transcripts).merge(control).route_layer(middleware::from_fn_with_state(ctx.clone(), phone_only)).with_state(ctx)
 }
 
-async fn hello(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Json<api::Hello> {
-    let c = ctx.clone();
+async fn hello(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Json<api::Hello> { Json(blocking(move || hello_of(&ctx, &p)).await) }
+
+pub(crate) fn hello_of(ctx: &Ctx, p: &Phone) -> api::Hello {
     // the other computers' names and systems are a summary: only with Summaries
     let computers = if p.grants.summaries {
-        blocking(move || crate::journal::peers(&c).unwrap_or_default()).await.into_iter()
-            .map(|k| api::KnownComputer { id: k.id, name: k.name, os: k.os, last_seen: k.last_seen }).collect()
+        crate::journal::peers(ctx).unwrap_or_default().into_iter().map(|k| api::KnownComputer { id: k.id, name: k.name, os: k.os, last_seen: k.last_seen }).collect()
     } else { vec![] };
     let now = now_ms();
-    Json(api::Hello { computer: computer(&ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers })
+    api::Hello { computer: computer(ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers }
 }
 
 /// What this phone may do with requests now, and why not.

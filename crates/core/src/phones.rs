@@ -33,20 +33,23 @@ fn grants_of(s: &str) -> Grants { serde_json::from_str(s).unwrap_or(Grants { sum
 
 fn row_json(ctx: &Ctx, r: &rusqlite::Row) -> rusqlite::Result<Value> {
     let id: String = r.get(0)?;
-    let route = crate::companion::conn::connected(ctx, &id).then_some("direct");
     let revoked: Option<i64> = r.get(6)?;
+    let mailbox: Option<String> = r.get(8)?;
+    let route = if crate::companion::conn::connected(ctx, &id) { Some("direct") } else { mailbox.as_ref().filter(|_| revoked.is_none()).map(|_| "hub") };
     let mut v = json!({"phone_id": id, "name": r.get::<_, Option<String>>(1)?, "platform": r.get::<_, Option<String>>(2)?, "grants": grants_of(&r.get::<_, Option<String>>(3)?.unwrap_or_default()),
         "paired_at": r.get::<_, Option<i64>>(4)?, "last_seen": r.get::<_, Option<i64>>(5)?, "revoked_at": revoked, "route": route});
     // what a revocation got acknowledged: the listener's cut may come later, from the process that holds it
-    if revoked.is_some() { v["acks"] = json!({"connection": r.get::<_, Option<i64>>(7)?.is_some(), "hub": null, "push": null}); }
+    // the hub's: null for a phone that never had a mailbox there
+    let hub = mailbox.as_ref().map(|_| r.get::<_, Option<i64>>(9)).transpose()?.map(|gone| gone.is_some());
+    if revoked.is_some() { v["acks"] = json!({"connection": r.get::<_, Option<i64>>(7)?.is_some(), "hub": hub, "push": null}); }
     Ok(v)
 }
 
-const COLS: &str = "phone_id, name, platform, grants, paired_at, last_seen, revoked_at, cut_at";
+const COLS: &str = "phone_id, name, platform, grants, paired_at, last_seen, revoked_at, cut_at, hub_mailbox, hub_gone";
 
 /// Every phone paired here, revoked ones too: `[{phone_id, name, platform, grants, paired_at, last_seen, revoked_at,
-/// route, acks?}]`; `route` is "direct" while it is connected, "hub" (wave 2) or null; a revoked phone carries the
-/// acknowledgements as `revoke` reports them, up to date.
+/// route, acks?}]`; `route` is "direct" while it is connected, else "hub" for a phone paired through the hub, or null;
+/// a revoked phone carries the acknowledgements as `revoke` reports them, up to date.
 pub fn list(ctx: &Ctx) -> Result<Value> {
     ctx.db.read(|c| {
         let v: Vec<Value> = c.prepare(&format!("select {COLS} from phones order by paired_at"))?.query_map([], |r| row_json(ctx, r))?.collect::<rusqlite::Result<_>>()?;
@@ -95,13 +98,15 @@ pub fn set_grants(ctx: &Ctx, phone_id: &str, grants: &Value) -> Result<Value> {
     row(ctx, &id)
 }
 
-/// Revoke a phone: its open connections are cut, its certificate refused from now on, its relay handle dropped.
-/// `{phone_id, revoked_at, acks: {connection, hub, push}}`; hub and push are null until the hub mailbox and the
-/// relay exist (wave 2).
+/// Revoke a phone: its open connections are cut, its certificate refused from now on, its relay handle dropped, and
+/// its hub token and mailbox deleted there. `{phone_id, revoked_at, acks: {connection, hub, push}}`; hub is null for
+/// a phone that never paired through the hub, false while the hub has not acknowledged (the mailbox pass tries
+/// again); push is null until the relay exists.
 /// The connection ack is true once the listener has cut every connection of the phone: at once when it runs in this
 /// process, else when the listener of the process that holds it says so (it looks every second; this waits 3 s).
 pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     let id = self::phone_id(ctx, phone_id)?;
+    let mailbox: Option<String> = ctx.db.read(|c| Ok(c.query_row("select hub_mailbox from phones where phone_id = ?", [&id], |r| r.get(0))?))?;
     let at = ctx.db.with(|c| {
         c.execute("update phones set revoked_at = ?2, relay_handle = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
         Ok(c.query_row("select revoked_at from phones where phone_id = ?", [&id], |r| r.get::<_, i64>(0))?)
@@ -112,8 +117,17 @@ pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while !acked() && std::time::Instant::now() < deadline { std::thread::sleep(std::time::Duration::from_millis(100)); }
     let connection = acked();
+    let hub = mailbox.map(|mb| match crate::sync::hub::delete_phone(ctx, &mb) {
+        Ok(()) => { hub_gone(ctx, &id); true }
+        Err(e) => { crate::log::warn(&format!("phones: the hub did not delete {id}'s mailbox yet: {e:#}")); false }
+    });
     crate::log::info(&format!("phones: {id} revoked{}", if connection { "" } else { "; no listener acknowledged the cut yet" }));
-    Ok(json!({"phone_id": id, "revoked_at": at, "acks": {"connection": connection, "hub": null, "push": null}}))
+    Ok(json!({"phone_id": id, "revoked_at": at, "acks": {"connection": connection, "hub": hub, "push": null}}))
+}
+
+/// The hub acknowledged deleting a revoked phone's token and mailbox.
+pub(crate) fn hub_gone(ctx: &Ctx, id: &str) {
+    let _ = ctx.db.with(|c| { c.execute("update phones set hub_gone = ?2 where phone_id = ?1 and revoked_at is not null and hub_gone is null", params![id, now_ms()])?; Ok(()) });
 }
 
 /// The listener has no connection of these revoked phones any more.
@@ -187,20 +201,28 @@ pub(crate) fn cert_taken(c: &rusqlite::Connection, der: &[u8], except_phone: Opt
 
 /// A phone the owner approved, stored with its grants as a new enrollment. A phone paired again (the same id) starts
 /// over unrevoked, and the connections of its earlier enrollment are cut.
-pub(crate) fn add(ctx: &Ctx, p: &PhonePayload, grants: Grants) -> Result<()> {
+pub(crate) fn add(ctx: &Ctx, p: &PhonePayload, grants: Grants) -> Result<()> { add_with(ctx, p, grants, None) }
+
+/// The same, paired through the hub when `mailbox` names its mailbox there. The mailbox of an earlier enrollment of the
+/// same phone is deleted on the hub (on a failure, the phone is still enrolled; that mailbox expires unread).
+pub(crate) fn add_with(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Option<&str>) -> Result<()> {
     let ok_id = !p.id.is_empty() && p.id.len() <= 80 && p.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     if !ok_id { bail!("the phone sent no usable id"); }
     let der = check_cert(p)?;
     let name: String = p.name.trim().chars().take(60).collect();
-    ctx.db.with(|c| {
+    let earlier: Option<String> = ctx.db.with(|c| {
         let tx = c.transaction()?;
         if cert_taken(&tx, &der, Some(&p.id))? { bail!("that certificate already belongs to another phone or computer"); }
-        tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null)
-            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null",
-            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4()])?;
+        let earlier: Option<String> = tx.query_row("select hub_mailbox from phones where phone_id = ? and hub_gone is null", [&p.id], |r| r.get(0)).optional()?.flatten();
+        tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at, hub_mailbox, hub_gone) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null,?10,null)
+            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null, hub_mailbox=?10, hub_gone=null",
+            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4(), mailbox])?;
         tx.commit()?;
-        Ok(())
+        Ok(earlier)
     })?;
+    if let Some(mb) = earlier.filter(|mb| Some(mb.as_str()) != mailbox) {
+        if let Err(e) = crate::sync::hub::delete_phone(ctx, &mb) { crate::log::warn(&format!("phones: the earlier hub mailbox of {} stays until it expires: {e:#}", p.id)); }
+    }
     crate::companion::conn::cut(ctx, &p.id);
     crate::log::info(&format!("phones: paired with {name} ({})", p.id));
     Ok(())

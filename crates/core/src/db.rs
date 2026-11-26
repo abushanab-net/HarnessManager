@@ -279,6 +279,9 @@ impl Db {
             // a phone's enrollment, and the listener's acknowledgement of a revocation (phones.rs)
             ("phones", "generation", "text not null default ''"),
             ("phones", "cut_at", "integer"),
+            // a phone paired through the hub: its mailbox there, and when the hub acknowledged deleting it (companion/mailbox.rs)
+            ("phones", "hub_mailbox", "text"),
+            ("phones", "hub_gone", "integer"),
             ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {

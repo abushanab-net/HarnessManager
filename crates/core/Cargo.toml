@@ -45,4 +45,5 @@ windows-sys = { version = "0.61.2", features = ["Win32_Security_Cryptography", "
 keyring = { version = "4.2.0", default-features = false, features = ["v1"] }
 
 [dev-dependencies]
+hrm-hub = { path = "../hub" }
 tempfile = "3.27.0"
