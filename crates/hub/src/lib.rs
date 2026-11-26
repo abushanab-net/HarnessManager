@@ -62,8 +62,9 @@ struct Hub {
     admin_hash: String,
     db: Mutex<Connection>,
     events: broadcast::Sender<String>,
-    /// Join attempts that did not succeed (or are under way): when the count began, and the count.
-    join_fails: Mutex<(i64, u32)>,
+    /// Join attempts that did not succeed (or are under way): when the count began, the count, and which minute
+    /// that is (numbered, so two minutes starting at the same millisecond are still two).
+    join_fails: Mutex<(i64, u32, u64)>,
 }
 
 type St = State<Arc<Hub>>;
@@ -103,13 +104,17 @@ pub async fn serve(cfg: Config) -> Result<(SocketAddr, axum_server::Handle<Socke
     sweep_tmp(&cfg.data_dir.join("blobs"), 3);
     let db = Connection::open(cfg.data_dir.join("hub.db"))?;
     db.execute_batch(SCHEMA)?;
+    // a database the first mailbox version made has no `bytes`: it is added and filled from the bodies, at once
+    if !db.prepare("select 1 from pragma_table_info('mail') where name = 'bytes'")?.exists([])? {
+        db.execute_batch("begin; alter table mail add column bytes integer not null default 0; update mail set bytes = length(body); commit;")?;
+    }
     let l = std::net::TcpListener::bind(cfg.bind)?;
     l.set_nonblocking(true)?;
     let addr = l.local_addr()?;
     let handle = axum_server::Handle::new();
     let server = axum_server::from_tcp(l)?.handle(handle.clone());
     let limit = (cfg.max_blob_mb * MB) as usize;
-    let hub = Arc::new(Hub { admin_hash: sha_hex(cfg.admin_token.as_bytes()), cfg, db: Mutex::new(db), events: broadcast::channel(64).0, join_fails: Mutex::new((0, 0)) });
+    let hub = Arc::new(Hub { admin_hash: sha_hex(cfg.admin_token.as_bytes()), cfg, db: Mutex::new(db), events: broadcast::channel(64).0, join_fails: Mutex::new((0, 0, 0)) });
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/join", post(join))
@@ -224,18 +229,19 @@ impl Hub {
     }
 
     /// A join attempt is let in only while the minute's budget lasts, and counted as it is let in, so attempts at
-    /// once cannot all pass before any is counted; one that succeeds gives its place back (`join_ok`).
-    fn join_admit(&self) -> Result<(), Response> {
+    /// once cannot all pass before any is counted; one that succeeds gives its place back to the minute it was let in
+    /// (`join_ok` with what this returned), never to a later one.
+    fn join_admit(&self) -> Result<u64, Response> {
         let mut f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
-        if now_ms() - f.0 >= 60_000 { *f = (now_ms(), 0); }
+        if now_ms() - f.0 >= 60_000 { *f = (now_ms(), 0, f.2 + 1); }
         if f.1 >= JOIN_FAILS_A_MINUTE { return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many wrong attempts; try again in a minute")); }
         f.1 += 1;
-        Ok(())
+        Ok(f.2)
     }
 
-    fn join_ok(&self) {
+    fn join_ok(&self, minute: u64) {
         let mut f = self.join_fails.lock().unwrap_or_else(|e| e.into_inner());
-        f.1 = f.1.saturating_sub(1);
+        if f.2 == minute { f.1 = f.1.saturating_sub(1); }
     }
 
     fn device_list(&self, db: &Connection) -> rusqlite::Result<Vec<Value>> {
@@ -292,7 +298,7 @@ struct JoinBody {
 /// A second join by the same computer replaces its token; with a code it must prove it is that computer (see `known_ok`).
 async fn join(State(hub): St, Json(body): Json<JoinBody>) -> Reply {
     let (id, record) = checked_record(&body.device)?;
-    hub.join_admit()?;
+    let minute = hub.join_admit()?;
     let db = hub.lock();
     match (body.admin_token.as_deref(), body.code.as_deref()) {
         (Some(t), _) if !t.is_empty() => {
@@ -313,7 +319,7 @@ async fn join(State(hub): St, Json(body): Json<JoinBody>) -> Reply {
         params![id, record.to_string(), sha_hex(token.as_bytes()), now_ms(), now_ms()]).map_err(internal)?;
     let devices = hub.device_list(&db).map_err(internal)?;
     drop(db);
-    hub.join_ok();
+    hub.join_ok(minute);
     hub.emit("device", &id);
     Ok(Json(json!({"token": token, "devices": devices})).into_response())
 }
@@ -555,7 +561,7 @@ struct PhoneJoin { code: String }
 /// A phone redeems its code, once: a token for its own mailbox, and the computer that invited it. Wrong codes count
 /// with the computers' wrong joins.
 async fn phone_join(State(hub): St, Json(body): Json<PhoneJoin>) -> Reply {
-    hub.join_admit()?;
+    let minute = hub.join_admit()?;
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(internal)?;
     let token = hex::encode(raw);
@@ -563,7 +569,7 @@ async fn phone_join(State(hub): St, Json(body): Json<PhoneJoin>) -> Reply {
     let row: Option<(String, String, i64)> = db.query_row("update phones set token_hash = ?1, joined_at = ?2, last_seen = ?2 where code = ?3 and token_hash is null and expires_at > ?2 returning id, device, expires_at",
         params![sha_hex(token.as_bytes()), now_ms(), body.code.trim()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional().map_err(internal)?;
     let Some((id, device, expires_at)) = row else { return Err(fail(StatusCode::UNAUTHORIZED, "the code is wrong, used or expired")) };
-    hub.join_ok();
+    hub.join_ok(minute);
     let name = db.query_row("select record from devices where id = ?", [&device], |r| r.get::<_, String>(0)).ok()
         .and_then(|r| serde_json::from_str::<Value>(&r).ok()).and_then(|v| v["name"].as_str().map(String::from)).unwrap_or_default();
     drop(db);

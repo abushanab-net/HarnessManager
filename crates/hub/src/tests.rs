@@ -464,12 +464,58 @@ fn an_invite_code_is_unique_across_computers_and_phones() {
     assert_eq!(super::fresh_code(&db, || Ok(draws.next().unwrap())).unwrap(), "333333");
 }
 
-/// #12: wrong joins at once are counted as they are let in: no more than the minute's budget gets through.
-#[tokio::test]
+/// #12: wrong joins at once, all released together by a barrier on several threads, are counted as they are let in:
+/// no more than the minute's budget gets through.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wrong_joins_at_once_do_not_pass_the_budget_together() {
     let hub = start(2048).await;
-    let tries = (0..30).map(|_| { let url = format!("{}/v1/phones/join", hub.url); tokio::spawn(async move { Client::new().post(url).json(&json!({"code": "999999"})).send().await.unwrap().status() }) });
+    let gate = std::sync::Arc::new(tokio::sync::Barrier::new(30));
+    let tries: Vec<_> = (0..30).map(|_| {
+        let (url, gate) = (format!("{}/v1/phones/join", hub.url), gate.clone());
+        tokio::spawn(async move { gate.wait().await; Client::new().post(url).json(&json!({"code": "999999"})).send().await.unwrap().status() })
+    }).collect();
     let mut wrong = 0;
     for t in tries { if t.await.unwrap() == StatusCode::UNAUTHORIZED { wrong += 1; } }
     assert!(wrong <= super::JOIN_FAILS_A_MINUTE, "{wrong} wrong attempts got through");
+}
+
+/// P2: a join that succeeds gives its place back to the minute it was let in, not to a later one.
+#[test]
+fn a_success_gives_back_only_its_own_minutes_place() {
+    let hub = super::Hub { cfg: Config { data_dir: std::env::temp_dir(), admin_token: ADMIN.into(), bind: "127.0.0.1:0".parse().unwrap(), max_blob_mb: 4, retain_mb: 4 },
+        admin_hash: String::new(), db: std::sync::Mutex::new(rusqlite::Connection::open_in_memory().unwrap()), events: tokio::sync::broadcast::channel(4).0, join_fails: std::sync::Mutex::new((0, 0, 0)) };
+    let first = hub.join_admit().unwrap();
+    // that minute ends; a wrong attempt is the first of the next one
+    hub.join_fails.lock().unwrap().0 -= 61_000;
+    let _wrong = hub.join_admit().unwrap();
+    hub.join_ok(first);
+    assert_eq!(hub.join_fails.lock().unwrap().1, 1, "the late success took a place of the new minute's");
+}
+
+/// P1: a hub whose database the first mailbox version made (its mail table has no `bytes`) still lists, takes and
+/// trims mail, the messages it held included.
+#[tokio::test]
+async fn a_hub_upgraded_from_the_first_mailbox_version_keeps_its_mail() {
+    let hub = start(2048).await;
+    let (a, _b) = joined(&hub).await;
+    let (p, t) = phone(&hub, &a).await;
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t, &format!("/v1/mail/{p}/up/1")).body("aaaa").send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    hub._handle.shutdown();
+    let db = rusqlite::Connection::open(hub._dir.path().join("hub.db")).unwrap();
+    // the mail table as b7f7c50 made it, holding what it held
+    db.execute_batch("create table mail_old(phone text not null, dir text not null, seq integer not null, at integer not null, body blob not null, primary key(phone, dir, seq));
+        insert into mail_old select phone, dir, seq, at, body from mail; drop table mail; alter table mail_old rename to mail; drop index if exists mail_at;").unwrap();
+    db.execute("insert into mail(phone, dir, seq, at, body) values(?1, 'up', 2, ?2, x'0102'), (?1, 'up', 3, ?2, x'010203')", rusqlite::params![p, super::now_ms()]).unwrap();
+    db.execute("update phones set up_max = 3 where id = ?", [&p]).unwrap();
+    drop(db);
+    let cfg = Config { data_dir: hub._dir.path().to_path_buf(), admin_token: ADMIN.into(), bind: "127.0.0.1:0".parse().unwrap(), max_blob_mb: 4, retain_mb: 2048 };
+    let (addr, handle) = super::serve(cfg).await.unwrap();
+    let again = Hub { url: format!("http://{addr}"), _dir: hub._dir, _handle: handle };
+    let list: Value = a.req(reqwest::Method::GET, &again, &format!("/v1/mail/{p}/up")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(list["mail"].as_array().unwrap().iter().map(|m| (m["seq"].as_i64().unwrap(), m["bytes"].as_i64().unwrap())).collect::<Vec<_>>(), [(1, 4), (2, 2), (3, 3)]);
+    assert_eq!(&as_token(reqwest::Method::GET, &again, &t, &format!("/v1/mail/{p}/up/1")).send().await.unwrap().bytes().await.unwrap()[..], b"aaaa");
+    for seq in 4..20 { assert_eq!(as_token(reqwest::Method::PUT, &again, &t, &format!("/v1/mail/{p}/up/{seq}")).body(vec![1u8; super::MAIL_MAX]).send().await.unwrap().status(), StatusCode::NO_CONTENT); }
+    let list: Value = a.req(reqwest::Method::GET, &again, &format!("/v1/mail/{p}/up")).send().await.unwrap().json().await.unwrap();
+    let total: i64 = list["mail"].as_array().unwrap().iter().map(|m| m["bytes"].as_i64().unwrap()).sum();
+    assert!(total <= super::MAILBOX_MAX, "trimmed to the cap, old messages counted: {total}");
 }
