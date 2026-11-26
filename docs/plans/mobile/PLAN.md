@@ -100,7 +100,19 @@ pub fn phone_pair_status(&self) -> Option<Value>;
 pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, attempt: &str, grants: &Value) -> Result<Value>;  // the status after
 pub fn phone_pair_refuse(&self, attempt: &str) -> Result<Value>;
 pub fn phone_pair_cancel(&self, attempt: &str) -> Result<Value>;                // null
+pub fn phone_pair_end(&self, attempt: &str, within: Duration) -> Result<bool>;   // true once the phone fetched
 ```
+
+- Once the owner decided, the attempt's status carries `fetched` (false, then true when the phone has read its
+  decision from `GET /pair/phone/result`; that change is a `phones-pairing` event too). The result route stays up until
+  the attempt ends (the code's two minutes and 30 s more). A caller that ends once paired (`hrm phones pair`) calls
+  `phone_pair_end`: it waits up to 30 s for the fetch, then stops showing the code; the app's window keeps the
+  attempt to its end.
+- The sealed approval names the port this computer's listener holds at the moment of approval (the Runtime's own
+  listener, else the one another process of this computer holds, as saved), never the port a context opened before
+  the listener chose one (0 on a data folder new to the direct connection); an approval with no port is refused.
+- `hrm phones pair` runs beside the app or `hrm computers serve`: when this computer's listener port is already
+  held, it pairs on its own pairing port and gives the phone the running listener's port.
 
 Every status change is also sent as the event `phones-pairing` with the status value, as `computers-pairing` is today.
 `attempt` names one showing of a code: approve, refuse and cancel pass the `attempt` of the status the owner is looking
@@ -114,16 +126,26 @@ refused on `/c1`, and phone certificates on `/v1`.
 
 | Route | Grant | Returns |
 |---|---|---|
-| `GET /c1/hello` | any | computer, app version, `api: 1`, grants, server time |
-| `GET /c1/overview` | summaries | needs-you count and soonest expiry, running, next reset, today, `use_next` with its reason |
-| `GET /c1/accounts`, `/c1/accounts/{profile}` | summaries | windows (left %, reset at), plan, reading age, login attention, 7-day tokens |
+| `GET /c1/hello` | any | computer, app version, `api: 1`, grants, server time; with Summaries, `computers`: the other computers this one knows (id, name, os, last seen) |
+| `GET /c1/overview` | summaries | needs-you count and soonest expiry, `at_computer` count, running (sessions working, waiting or at their prompt, seen by their console or reported by `hrm run`, each once), next reset, today, `today_cost` (list prices, USD, null when no price is known), `daily_tokens` (the last 30 days here, oldest first), `use_next` with its reason, the desktop's `why` line, its window (label, left, reset, `out_at`) and `runner_up` (profile, name, left, `out_at`, the desktop's line) |
+| `GET /c1/accounts`, `/c1/accounts/{profile}` | summaries | windows (left %, reset at, `hours` long, the forecast: `left_at_reset`, `runs_out_at` before the reset), plan, reading age, login attention, 7-day tokens |
 | `GET /c1/sessions?cursor=` | summaries | sessions with state, project, account, computer |
 | `GET /c1/sessions/{harness}/{profile}/{id}/transcript?after=` | transcripts | transcript pages, bounded |
-| `GET /c1/requests` | summaries | open requests: kind, tool, what (command or question), expires, state version |
-| `GET /c1/events` | summaries | WebSocket: `needs`, `changed`, `run-state`, `revoked` |
+| `GET /c1/requests` | summaries | open requests: kind, tool, what (command or question), expires, state version, `opened_at`, `session_id`, `cwd`, the session's `title`, a permission's `description`, and Claude's `last_line` before the request (from the transcript; only with Transcripts); `title` and `last_line` are null without a transcript, and the request is listed all the same. A question whose window ended is listed for ten minutes more with `state: "expired"` and `ended_at`; open ones say `state: "open"` |
+| `GET /c1/events` | summaries | WebSocket: `needs`, `changed`, `run-state`, `revoked` (`revoked_at`, `why`: revoked, paired again, summaries withdrawn or removed, `by`: the computer) |
 | `POST /c1/actions` | control | a receipt (see below) |
 | `GET /c1/actions/{action_id}` | control | the stored receipt, for "delivery unknown" |
 | `PUT /c1/push` / `DELETE /c1/push` | any | registers or removes the phone's relay handle |
+
+Nothing of a request's tool input reaches a phone beyond its command or file (`what`), a permission's `description`,
+and a question's text and options.
+
+The phone tells a removed phone from a computer it cannot reach by companion-proto's `ConnectError`: `Revoked` when the
+computer sent a TLS alert, `Unreachable` for everything else on the way (no answer, a dropped or refused connection, a
+timeout, a certificate that is not the paired computer's); an HTTP refusal stays `Refused`. The listener makes the
+alert reliable: no TLS session resumption (every connection's certificate is verified at the handshake), and a
+connection it refuses is closed only after what the phone already sent is read (at most 64 KiB, half a second), so
+no reset swallows the alert.
 
 `use_next` is computed once, in core, from the rule the desktop uses today (`recommendedFor` in `app/ui/home.js` moves
 to Rust), so the desktop, the phone and the widgets always agree.
