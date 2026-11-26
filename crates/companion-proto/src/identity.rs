@@ -21,7 +21,7 @@ pub struct PhoneIdentity {
 }
 
 /// The certificate's signer: rcgen without a crypto backend of its own, signing with ed25519-dalek.
-struct Ed(SigningKey);
+pub(crate) struct Ed(pub(crate) SigningKey);
 
 impl rcgen::PublicKeyData for Ed {
     fn der_bytes(&self) -> &[u8] { self.0.as_ref().as_bytes() }

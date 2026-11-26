@@ -10,7 +10,6 @@
 //! `POST /c1/actions` and the receipts come back the same way. `Mailbox` answers the same typed calls as the direct
 //! `Client`, so the app can switch routes, and says how fresh what it shows is (`freshness`).
 
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -51,11 +50,12 @@ pub fn open_mail(secret: &[u8; 32], from: &str, mailbox: &str, dir: &str, seq: i
     Ok(env["body"].clone())
 }
 
-/// The numbers of a listing to read, in order: above `cursor`, each above the one before. A hub that lists an older
-/// message after a newer one, or one twice, is not followed back.
+/// The numbers of a listing to read, in order: within the hub's range (1 to 2^53), above `cursor`, each above the
+/// one before. A hub that lists an older message after a newer one, one twice, or one out of range, is not followed.
 pub fn ahead(list: &Value, cursor: i64) -> Vec<i64> {
     let mut last = cursor;
-    list["mail"].as_array().into_iter().flatten().filter_map(|m| m["seq"].as_i64()).filter(|&s| { let up = s > last; if up { last = s; } up }).collect()
+    list["mail"].as_array().into_iter().flatten().filter_map(|m| m["seq"].as_i64()).filter(|s| (1..=1i64 << 53).contains(s))
+        .filter(|&s| { let up = s > last; if up { last = s; } up }).collect()
 }
 
 /// The next number after `max`, as the hub listed it; none past the hub's own range (2^53).
@@ -81,7 +81,10 @@ pub fn approval_binding(mailbox: &str, phone_id: &str, phone_pubkey: &str, phone
 fn approval_ok(desk: &DesktopPayload, cert_der: &[u8], binding: &[u8], sig: &str) -> bool {
     let Ok(pk) = unb64(&desk.pubkey) else { return false };
     let spki = [ED25519_SPKI.as_slice(), &pk].concat();
-    if pk.len() != 32 || !cert_der.windows(spki.len()).any(|w| w == spki) { return false; }
+    // the certificate's own public-key field, parsed: not the key's bytes found anywhere in it
+    let der = rustls::pki_types::CertificateDer::from(cert_der);
+    let Ok(cert) = webpki::EndEntityCert::try_from(&der) else { return false };
+    if pk.len() != 32 || cert.subject_public_key_info().as_ref() != spki.as_slice() { return false; }
     let (Ok(vk), Ok(sig)) = (VerifyingKey::from_bytes(&pk.try_into().unwrap_or([0; 32])), unb64(sig).and_then(|s| Ok(Signature::from_slice(&s)?))) else { return false };
     vk.verify(binding, &sig).is_ok()
 }
@@ -330,20 +333,27 @@ impl HubJoining {
 // ---------- the mailbox, as the direct client ----------
 
 /// The most messages one look reads: after a long absence the older ones are passed over (and counted as missed),
-/// since a newer snapshot supersedes them and a receipt is asked for again.
+/// since a newer snapshot supersedes them and a receipt is asked for again. One look also asks for at most
+/// `LOOK_PAGES` listings and lasts at most `LOOK_TIME`, whatever the hub answers.
 const READ_AT_MOST: i64 = 50;
+const LOOK_PAGES: usize = 5;
+const LOOK_TIME: Duration = Duration::from_secs(10);
+/// The hub's own range of message numbers.
+const MAX_SEQ: i64 = 1 << 53;
 /// How long an action or a receipt question waits for the computer's answer through the hub.
 const ANSWER_WAIT: Duration = Duration::from_secs(20);
-/// The computer sends a snapshot at least every five minutes: one older than this, or no word from the hub for as
-/// long, is stale.
+/// The computer sends a snapshot at least every five minutes: none received here for longer than this, one older
+/// than this by the computer's own clock, or no word from the hub for as long, is stale.
 pub const STALE_MS: i64 = 12 * 60_000;
 
-/// How fresh what the mailbox shows is: when the newest snapshot was taken (the computer's clock), when the hub last
-/// answered, how many of the computer's messages never arrived or were passed over, and whether it is stale. A hub
-/// can always withhold mail; this is how the phone sees it did.
+/// How fresh what the mailbox shows is: when the newest snapshot was taken (the computer's clock) and how long ago
+/// this phone received it (its own clock), when the hub last answered, how many of the computer's messages never
+/// arrived or were passed over, and whether it is stale. A hub can always withhold mail; this is how the phone sees
+/// it did.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Freshness {
     pub snapshot_at: Option<i64>,
+    pub snapshot_age_ms: Option<i64>,
     pub heard_at: Option<i64>,
     pub missed: u64,
     pub stale: bool,
@@ -351,38 +361,63 @@ pub struct Freshness {
 
 #[derive(Default)]
 struct MailSt {
+    /// The last message read that opened: the cursor the app keeps.
     down_seen: i64,
+    /// The last slot looked at, whether it opened or not: where the next listing starts; never kept.
+    inspected: i64,
     snapshot: Option<Value>,
-    /// The answers waited for, by key (`act:<action id>` or `q:<query id>`), once they came; nothing else is kept.
-    waiting: HashMap<String, Option<Value>>,
+    /// When the newest snapshot arrived, and when the hub last answered, by this phone's monotonic clock.
+    snapshot_got: Option<Instant>,
+    heard: Option<Instant>,
+    heard_at: Option<i64>,
     dropped: u32,
     missed: u64,
-    heard_at: Option<i64>,
 }
 
 impl MailSt {
-    /// One message the computer sealed for slot `seq`, read in order: the cursor only moves up, and the slots it
-    /// jumped are counted as missed.
-    fn take(&mut self, seq: i64, opened: Result<Value>) {
-        if seq <= self.down_seen { return; }
+    /// One message read from slot `seq`: when it opened, the cursor moves up to it (the slots it jumped counted as
+    /// missed) and its body is kept or handed back as an answer; one that did not open moves nothing the app keeps.
+    fn take(&mut self, seq: i64, opened: Result<Value>) -> Option<Value> {
+        self.inspected = self.inspected.max(seq);
+        if seq <= self.down_seen { return None; }
+        let Ok(body) = opened else { self.dropped += 1; return None };
         self.missed += (seq - self.down_seen - 1) as u64;
         self.down_seen = seq;
-        let Ok(body) = opened else { self.dropped += 1; return };
         match body["kind"].as_str() {
-            Some("snapshot") => self.snapshot = Some(body),
-            Some("receipt" | "refused") => {
-                let key = match body["query"].as_str() { Some(q) => format!("q:{q}"), None => format!("act:{}", body["action_id"].as_str().unwrap_or("")) };
-                if let Some(slot) = self.waiting.get_mut(&key) { *slot = Some(body); }
-            }
-            _ => {}
+            Some("snapshot") => { self.snapshot = Some(body); self.snapshot_got = Some(Instant::now()); None }
+            Some("receipt" | "refused") => Some(body),
+            _ => None,
         }
     }
 
-    fn freshness(&self, now: i64) -> Freshness {
+    fn freshness(&self, now_ms: i64, now: Instant) -> Freshness {
         let snapshot_at = self.snapshot.as_ref().and_then(|s| s["hello"]["observed_at"].as_i64());
-        let stale = snapshot_at.is_none_or(|t| now - t > STALE_MS) || self.heard_at.is_none_or(|t| now - t > STALE_MS);
-        Freshness { snapshot_at, heard_at: self.heard_at, missed: self.missed, stale }
+        let age = self.snapshot_got.map(|t| now.saturating_duration_since(t).as_millis() as i64);
+        let quiet = self.heard.map(|t| now.saturating_duration_since(t).as_millis() as i64);
+        let stale = age.is_none_or(|a| a > STALE_MS) || quiet.is_none_or(|q| q > STALE_MS) || snapshot_at.is_none_or(|t| now_ms - t > STALE_MS);
+        Freshness { snapshot_at, snapshot_age_ms: age, heard_at: self.heard_at, missed: self.missed, stale }
     }
+}
+
+/// One call waiting for the computer's answer under `key` (`act:<action id>` or `q:<query id>`); each call has its
+/// own, so two calls for one action each get it.
+struct Waiter {
+    id: u64,
+    key: String,
+    answer: Option<Value>,
+}
+
+/// An answer handed to every call waiting for it; one nobody waits for is dropped.
+fn hand(waiters: &mut [Waiter], body: &Value) {
+    let key = match body["query"].as_str() { Some(q) => format!("q:{q}"), None => format!("act:{}", body["action_id"].as_str().unwrap_or("")) };
+    for w in waiters.iter_mut().filter(|w| w.key == key && w.answer.is_none()) { w.answer = Some(body.clone()); }
+}
+
+/// Takes its waiter away however the call ends, given up on included.
+struct Leave<'a>(&'a std::sync::Mutex<Vec<Waiter>>, u64);
+
+impl Drop for Leave<'_> {
+    fn drop(&mut self) { self.0.lock().unwrap_or_else(|e| e.into_inner()).retain(|w| w.id != self.1); }
 }
 
 /// One paired computer through the hub.
@@ -393,6 +428,8 @@ pub struct Mailbox {
     desk_pubkey: String,
     desk_x25519: String,
     st: Mutex<MailSt>,
+    waiters: std::sync::Mutex<Vec<Waiter>>,
+    next_waiter: std::sync::atomic::AtomicU64,
 }
 
 impl Mailbox {
@@ -400,50 +437,59 @@ impl Mailbox {
     /// X25519 keys the pairing gave (`DesktopPayload::pubkey`, `x25519`).
     pub fn new(me: &PhoneIdentity, hub_url: &str, token: &str, mailbox: &str, desk_pubkey: &str, desk_x25519: &str) -> Result<Mailbox> {
         if desk_x25519.is_empty() { bail!("the computer gave no key to seal to; pair through the hub again"); }
-        Ok(Mailbox { hub: HubHttp::new(hub_url, token)?, me: me.clone(), mailbox: mailbox.into(), desk_pubkey: desk_pubkey.into(), desk_x25519: desk_x25519.into(), st: Mutex::new(MailSt::default()) })
+        Ok(Mailbox { hub: HubHttp::new(hub_url, token)?, me: me.clone(), mailbox: mailbox.into(), desk_pubkey: desk_pubkey.into(), desk_x25519: desk_x25519.into(),
+            st: Mutex::new(MailSt::default()), waiters: std::sync::Mutex::new(vec![]), next_waiter: Default::default() })
     }
 
-    /// The last message read from the computer, for the app to keep, and to start from again (`resume_from`, which
-    /// never moves it back).
+    /// The last message read from the computer that opened, for the app to keep, and to start from again
+    /// (`resume_from`, which never moves it back).
     pub async fn down_seen(&self) -> i64 { self.st.lock().await.down_seen }
 
-    pub async fn resume_from(&self, down_seen: i64) { let mut st = self.st.lock().await; st.down_seen = st.down_seen.max(down_seen); }
+    pub async fn resume_from(&self, down_seen: i64) { let mut st = self.st.lock().await; st.down_seen = st.down_seen.max(down_seen.clamp(0, MAX_SEQ)); }
 
     /// Messages read that did not open (changed on the way, sealed by someone else, replayed): never used.
     pub async fn dropped(&self) -> u32 { self.st.lock().await.dropped }
 
-    pub async fn freshness(&self) -> Freshness { self.st.lock().await.freshness(now_ms()) }
+    pub async fn freshness(&self) -> Freshness { self.st.lock().await.freshness(now_ms(), Instant::now()) }
 
-    /// Read what the computer left since the last look: at most `READ_AT_MOST` messages, oldest first, numbers only
-    /// upwards.
+    /// Read what the computer left since the last look, oldest first: at most `READ_AT_MOST` messages, `LOOK_PAGES`
+    /// listings and `LOOK_TIME`. A listing that brings nothing new ends the look, whatever it says of more.
     pub async fn sync(&self) -> Result<()> {
+        let until = Instant::now() + LOOK_TIME;
         let mut st = self.st.lock().await;
-        let mut list = self.hub.list(&self.mailbox, "down", st.down_seen).await?;
-        st.heard_at = Some(now_ms());
-        // far behind: start with the newest, the rest counted as missed
-        let max = list["max"].as_i64().unwrap_or(0);
-        if max.saturating_sub(st.down_seen) > READ_AT_MOST {
-            list = self.hub.list(&self.mailbox, "down", max - READ_AT_MOST).await?;
+        let mut after = st.down_seen.max(st.inspected);
+        let mut list = self.hub.list(&self.mailbox, "down", after).await?;
+        (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
+        // far behind: start with the newest, the rest counted as missed once a newer one opens
+        let max = list["max"].as_i64().unwrap_or(0).clamp(0, MAX_SEQ);
+        if max.saturating_sub(after) > READ_AT_MOST {
+            after = max - READ_AT_MOST;
+            list = self.hub.list(&self.mailbox, "down", after).await?;
         }
         let mut read = 0;
-        loop {
-            for seq in ahead(&list, st.down_seen) {
-                if read >= READ_AT_MOST { return Ok(()); }
+        for _ in 0..LOOK_PAGES {
+            let seqs = ahead(&list, after);
+            if seqs.is_empty() { return Ok(()); }
+            for seq in seqs {
+                if read >= READ_AT_MOST || Instant::now() >= until { return Ok(()); }
                 read += 1;
-                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { continue };
+                after = seq;
+                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.inspected = st.inspected.max(seq); continue };
                 let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, "down", seq, &bytes);
-                st.take(seq, opened);
+                if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
             }
-            if list["more"] != true || read >= READ_AT_MOST { return Ok(()); }
-            list = self.hub.list(&self.mailbox, "down", st.down_seen).await?;
+            if list["more"] != true || Instant::now() >= until { return Ok(()); }
+            list = self.hub.list(&self.mailbox, "down", after).await?;
         }
+        Ok(())
     }
 
-    /// One message to the computer, sealed for the next free slot (another of this phone's takes the slot first:
-    /// nothing was stored, so the next one is tried).
+    /// One message to the computer, sealed for the next free slot from 4 on (slots 1 to 3 are the pairing's, 3 the
+    /// phone's word that it read the decision); another of this phone's takes the slot first: nothing was stored, so
+    /// the next one is tried.
     async fn send(&self, body: &Value) -> Result<()> {
         for _ in 0..3 {
-            let seq = next_seq(self.hub.list(&self.mailbox, "up", i64::MAX).await?["max"].as_i64().unwrap_or(0))?;
+            let seq = next_seq(self.hub.list(&self.mailbox, "up", i64::MAX).await?["max"].as_i64().unwrap_or(0))?.max(4);
             let m = seal_mail(self.me.signing_key(), &self.desk_x25519, &self.mailbox, "up", seq, body)?;
             match self.hub.put_mail(&self.mailbox, "up", seq, m).await {
                 Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.status == 409) => continue,
@@ -453,21 +499,21 @@ impl Mailbox {
         bail!("the mailbox is busy; try again")
     }
 
-    /// `body` sent, then the computer's answer under `key`, read as it comes; nothing is kept once it is given.
+    /// `body` sent, then the computer's answer under `key`, read as it comes. The waiter goes when the call ends,
+    /// however it ends.
     async fn ask(&self, key: String, body: Value) -> Result<Value> {
-        self.st.lock().await.waiting.insert(key.clone(), None);
-        let r = async {
-            self.send(&body).await?;
-            let until = Instant::now() + ANSWER_WAIT;
-            loop {
-                self.sync().await?;
-                if let Some(Some(v)) = self.st.lock().await.waiting.get(&key) { return Ok(v.clone()); }
-                if Instant::now() >= until { return Err(ConnectError::Unreachable("the computer did not answer through the hub in time".into()).into()); }
-                tokio::time::sleep(POLL).await;
-            }
-        }.await;
-        self.st.lock().await.waiting.remove(&key);
-        r
+        let id = self.next_waiter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.waiters.lock().unwrap_or_else(|e| e.into_inner()).push(Waiter { id, key, answer: None });
+        let _leave = Leave(&self.waiters, id);
+        self.send(&body).await?;
+        let until = Instant::now() + ANSWER_WAIT;
+        loop {
+            self.sync().await?;
+            let got = self.waiters.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|w| w.id == id).and_then(|w| w.answer.clone());
+            if let Some(v) = got { return Ok(v); }
+            if Instant::now() >= until { return Err(ConnectError::Unreachable("the computer did not answer through the hub in time".into()).into()); }
+            tokio::time::sleep(POLL).await;
+        }
     }
 
     fn receipt_of(v: &Value) -> Result<Receipt> {
@@ -571,35 +617,37 @@ mod tests {
         st.take(6, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 10}})));
         st.take(5, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 1}})));
         assert_eq!((st.down_seen, st.missed, st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64()), (6, 1, Some(10)), "an older snapshot is not taken back");
+        // one that does not open moves nothing the app keeps
         st.take(7, Err(anyhow!("changed")));
-        assert_eq!((st.down_seen, st.dropped), (7, 1));
+        assert_eq!((st.down_seen, st.inspected, st.dropped), (6, 7, 1));
     }
 
     /// #8: a snapshot that is not renewed, or a hub that stops answering, reads as stale.
     #[test]
     fn an_old_snapshot_or_a_silent_hub_is_stale() {
-        let now = 100 * STALE_MS;
+        let (now, t) = (100 * STALE_MS, Instant::now());
+        let later = |ms: i64| t + Duration::from_millis(ms as u64);
         let mut st = MailSt::default();
-        assert!(st.freshness(now).stale, "nothing yet");
-        st.snapshot = Some(json!({"hello": {"observed_at": now - 1000}}));
-        st.heard_at = Some(now);
-        assert!(!st.freshness(now).stale);
-        st.heard_at = Some(now - STALE_MS - 1);
-        assert!(st.freshness(now).stale, "the hub went silent");
-        st.heard_at = Some(now);
-        st.snapshot = Some(json!({"hello": {"observed_at": now - STALE_MS - 1}}));
-        assert!(st.freshness(now).stale, "the computer stopped renewing");
+        assert!(st.freshness(now, t).stale, "nothing yet");
+        st.take(3, Ok(json!({"kind": "snapshot", "hello": {"observed_at": now - 1000}})));
+        st.heard = Some(t);
+        assert!(!st.freshness(now, t).stale);
+        assert!(st.freshness(now, later(STALE_MS + 1000)).stale, "the hub went silent and no snapshot came");
+        st.heard = Some(later(STALE_MS + 1000));
+        assert!(st.freshness(now, later(STALE_MS + 1000)).stale, "the hub answers, but no snapshot came for twelve minutes");
+        st.take(4, Ok(json!({"kind": "snapshot", "hello": {"observed_at": now - STALE_MS - 1}})));
+        st.heard = Some(Instant::now());
+        assert!(st.freshness(now, Instant::now()).stale, "the computer's own time says it is old");
     }
 
     /// #10: only answers waited for are kept; an answer nobody asks for is dropped.
     #[test]
     fn only_answers_waited_for_are_kept() {
-        let mut st = MailSt::default();
-        st.waiting.insert("q:abc".into(), None);
-        st.take(1, Ok(json!({"kind": "receipt", "action_id": "a", "query": "abc", "receipt": {}})));
-        st.take(2, Ok(json!({"kind": "receipt", "action_id": "b", "receipt": {}})));
-        assert_eq!(st.waiting.len(), 1);
-        assert!(st.waiting["q:abc"].is_some());
+        let mut ws = vec![Waiter { id: 1, key: "q:abc".into(), answer: None }];
+        hand(&mut ws, &json!({"kind": "receipt", "action_id": "a", "query": "abc", "receipt": {}}));
+        hand(&mut ws, &json!({"kind": "receipt", "action_id": "b", "receipt": {}}));
+        assert_eq!(ws.len(), 1);
+        assert!(ws[0].answer.is_some());
     }
 
     /// #13: numbers and deadlines from the hub are bounded.
@@ -611,5 +659,156 @@ mod tests {
         assert_eq!(invite_deadline(i64::MAX, now), now + LONGEST_INVITE_MS);
         assert_eq!(invite_deadline(i64::MIN, now), now);
         assert_eq!(invite_deadline(now + 60_000, now), now + 60_000);
+    }
+}
+
+#[cfg(test)]
+mod hostile_hub {
+    //! The phone against a hub that answers what it likes: a few lines of HTTP on loopback.
+
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    type Answer = Arc<dyn Fn(&str, &str, &[u8]) -> (u16, Vec<u8>) + Send + Sync>;
+
+    /// A hub answering each request with `f(method, path, body)`, and the paths it was asked for.
+    async fn hub(f: Answer) -> (String, Arc<StdMutex<Vec<String>>>) {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let asked = Arc::new(StdMutex::new(vec![]));
+        let a2 = asked.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = l.accept().await else { return };
+                let (f, asked) = (f.clone(), a2.clone());
+                tokio::spawn(async move {
+                    let (mut buf, mut tmp) = (Vec::new(), [0u8; 8192]);
+                    let end = loop {
+                        let n = s.read(&mut tmp).await.unwrap_or(0);
+                        if n == 0 { return; }
+                        buf.extend_from_slice(&tmp[..n]);
+                        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") { break i + 4; }
+                    };
+                    let head = String::from_utf8_lossy(&buf[..end]).to_string();
+                    let len = head.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                    while buf.len() < end + len { let n = s.read(&mut tmp).await.unwrap_or(0); if n == 0 { break; } buf.extend_from_slice(&tmp[..n]); }
+                    let mut w = head.split_whitespace();
+                    let (m, p) = (w.next().unwrap_or("").to_string(), w.next().unwrap_or("").to_string());
+                    asked.lock().unwrap().push(format!("{m} {p}"));
+                    let (st, body) = f(&m, &p, &buf[end..]);
+                    let _ = s.write_all(format!("HTTP/1.1 {st} X\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", body.len()).as_bytes()).await;
+                    let _ = s.write_all(&body).await;
+                });
+            }
+        });
+        (format!("http://{addr}"), asked)
+    }
+
+    fn ok(v: Value) -> (u16, Vec<u8>) { (200, v.to_string().into_bytes()) }
+
+    /// A phone, the computer it pairs with, and a mailbox past the pairing's slots on a hub answering `f`.
+    async fn mailbox(f: Answer) -> (Mailbox, PhoneIdentity, PhoneIdentity, Arc<StdMutex<Vec<String>>>) {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let (url, asked) = hub(f).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_from(2).await;
+        (m, me, desk, asked)
+    }
+
+    /// P1: a page that says there is more and holds nothing new ends the look instead of asking for ever.
+    #[tokio::test]
+    async fn a_page_that_makes_no_progress_ends_the_look() {
+        let (m, _, _, _) = mailbox(Arc::new(|_, _, _| ok(json!({"max": 5, "mail": [], "more": true})))).await;
+        let r = tokio::time::timeout(Duration::from_secs(10), m.sync()).await;
+        assert!(r.is_ok(), "sync never returned");
+    }
+
+    /// P1: a slot that does not open, or a number out of range, never moves the cursor the app keeps.
+    #[tokio::test]
+    async fn a_slot_that_does_not_open_does_not_move_the_cursor() {
+        let (m, _, _, asked) = mailbox(Arc::new(|_, p, _| {
+            if p.contains("?after=") { return ok(json!({"max": 9, "mail": [{"seq": 1i64 << 60}, {"seq": 9}], "more": false})); }
+            (200, b"{\"v\":1}".to_vec())
+        })).await;
+        m.sync().await.unwrap();
+        assert_eq!(m.down_seen().await, 2, "the app's cursor stayed below what did not authenticate");
+        assert_eq!(m.dropped().await, 1);
+        assert!(!asked.lock().unwrap().iter().any(|a| a.contains(&(1i64 << 60).to_string())), "a number out of range is not asked for");
+    }
+
+    /// P2: up slot 3 is the pairing's acknowledgement: the mailbox's own messages start at 4.
+    #[tokio::test]
+    async fn the_mailbox_leaves_up_slot_3_to_the_acknowledgement() {
+        let (m, _, _, asked) = mailbox(Arc::new(|meth, p, _| if meth == "PUT" { (204, vec![]) } else if p.contains("/up?") { ok(json!({"max": 2, "mail": [], "more": false})) } else { ok(json!({})) })).await;
+        m.send(&json!({"kind": "receipt", "action_id": "a"})).await.unwrap();
+        let puts: Vec<String> = asked.lock().unwrap().iter().filter(|a| a.starts_with("PUT")).cloned().collect();
+        assert_eq!(puts, ["PUT /v1/mail/ph-1/up/4"]);
+    }
+
+    /// P2: an `act` given up (the app moved on) leaves no waiter behind.
+    #[tokio::test]
+    async fn a_cancelled_call_leaves_no_waiter() {
+        let (m, _, _, _) = mailbox(Arc::new(|meth, _, _| if meth == "PUT" { (204, vec![]) } else { ok(json!({"max": 3, "mail": [], "more": false})) })).await;
+        let a: Action = serde_json::from_value(json!({"action_id": "a", "kind": "answer", "target": {"run": "r", "ask_id": "q"}, "state_version": 1, "expires_at": 9, "payload": {}})).unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(500), m.act(&a)).await.is_err());
+        assert_eq!(m.waiters.lock().unwrap().len(), 0);
+    }
+
+    /// P2: two calls for the same action each get the computer's answer.
+    #[tokio::test]
+    async fn two_calls_for_one_action_both_get_the_answer() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let receipt = json!({"kind": "receipt", "action_id": "a", "receipt": {"action_id": "a", "status": "accepted", "detail": "", "at": 1}});
+        let sealed = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "down", 3, &receipt).unwrap();
+        let put = Arc::new(StdMutex::new(false));
+        let (url, _) = hub(Arc::new(move |meth, p, _| {
+            if meth == "PUT" { *put.lock().unwrap() = true; return (204, vec![]); }
+            if p.contains("/up?") { return ok(json!({"max": 3, "mail": [], "more": false})); }
+            if p.contains("/down?") { return ok(if *put.lock().unwrap() { json!({"max": 3, "mail": [{"seq": 3}], "more": false}) } else { json!({"max": 2, "mail": [], "more": false}) }); }
+            (200, sealed.clone())
+        })).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_from(2).await;
+        let a: Action = serde_json::from_value(json!({"action_id": "a", "kind": "answer", "target": {"run": "r", "ask_id": "q"}, "state_version": 1, "expires_at": 9, "payload": {}})).unwrap();
+        let (r1, r2) = tokio::time::timeout(Duration::from_secs(30), async { tokio::join!(m.act(&a), m.act(&a)) }).await.unwrap();
+        assert_eq!((r1.unwrap().status, r2.unwrap().status), (crate::api::Status::Accepted, crate::api::Status::Accepted));
+    }
+
+    /// #5: the computer's key is the one in its certificate's public-key field, not bytes found anywhere in it.
+    #[test]
+    fn the_key_must_be_the_certificates_own() {
+        let (x, k) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+        params.serial_number = Some(rcgen::SerialNumber::from(1u64));
+        let kp = unb64(&k.pubkey()).unwrap();
+        params.custom_extensions.push(rcgen::CustomExtension::from_oid_content(&[1, 3, 6, 1, 4, 1, 55555, 1], [ED25519_SPKI.as_slice(), &kp].concat()));
+        let cert = params.self_signed(&crate::identity::Ed(x.signing_key().clone())).unwrap();
+        let desk = |pubkey: String, cert_pem: String| DesktopPayload { id: "d".into(), name: "D".into(), cert_pem, pubkey, address_hints: vec![], hub_url: None, hub_token: None, grants: crate::api::Grants::default(), x25519: None };
+        let sig = b64(&k.signing_key().sign(b"binding").to_bytes());
+        assert!(!approval_ok(&desk(k.pubkey(), cert.pem()), cert.der(), b"binding", &sig), "K is only in an extension of X's certificate");
+        let (pem, der) = k.cert().unwrap();
+        assert!(approval_ok(&desk(k.pubkey(), pem), &der, b"binding", &sig));
+    }
+
+    /// P2: the computer's clock an hour ahead, and a hub that answers every look but withholds the snapshots: stale
+    /// once twelve minutes passed here.
+    #[test]
+    fn a_computer_clock_ahead_does_not_hide_a_withheld_snapshot() {
+        let (now, t) = (100 * STALE_MS, Instant::now());
+        let later = t + Duration::from_secs(13 * 60);
+        let mut st = MailSt::default();
+        st.take(3, Ok(json!({"kind": "snapshot", "hello": {"observed_at": now + 3_600_000}})));
+        st.heard = Some(later);
+        assert!(st.freshness(now + 13 * 60_000, later).stale);
+    }
+
+    /// P2: two waiters for the same action: one finishing does not take the other's answer.
+    #[test]
+    fn one_waiter_finishing_keeps_the_others_answer() {
+        let ws = std::sync::Mutex::new(vec![Waiter { id: 1, key: "act:a".into(), answer: None }, Waiter { id: 2, key: "act:a".into(), answer: None }]);
+        hand(&mut ws.lock().unwrap(), &json!({"kind": "receipt", "action_id": "a", "receipt": {}}));
+        drop(Leave(&ws, 1));
+        assert!(ws.lock().unwrap().iter().find(|w| w.id == 2).is_some_and(|w| w.answer.is_some()), "the second call lost its answer");
     }
 }
