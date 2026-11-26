@@ -258,6 +258,10 @@ impl Db {
             ("run_ask", "hook_started", "integer not null default 0"),
             // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
             ("run_state", "version", "integer not null default 0"),
+            // a phone's enrollment, and the listener's acknowledgement of a revocation (phones.rs)
+            ("phones", "generation", "text not null default ''"),
+            ("phones", "cut_at", "integer"),
+            ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
                 add_column(&conn, table, col, ty)?;

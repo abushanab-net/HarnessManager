@@ -18,7 +18,7 @@ use crate::util::now_ms;
 use crate::{hooks, Ctx};
 
 pub(super) async fn events(ws: WebSocketUpgrade, State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    ws.on_upgrade(move |socket| run(socket, ctx, p.id))
+    ws.on_upgrade(move |socket| run(socket, ctx, p))
 }
 
 /// What the phone is told about: the open requests, each run's state, a stamp of usage and limits; None once the
@@ -29,8 +29,8 @@ struct Look {
     changed: (i64, i64),
 }
 
-fn look(ctx: &Ctx, phone: &str) -> Option<Look> {
-    phones::get(ctx, phone).ok().flatten().filter(|p| p.revoked_at.is_none() && p.grants.summaries)?;
+fn look(ctx: &Ctx, phone: &Phone) -> Option<Look> {
+    phones::get(ctx, &phone.id).ok().flatten().filter(|p| p.revoked_at.is_none() && p.generation == phone.generation && p.grants.summaries)?;
     let runs = hooks::runs(ctx).unwrap_or_default();
     let needs: Vec<Value> = runs.iter().filter_map(|r| r.ask.as_ref().map(|a| json!({"run": r.run, "ask_id": a.id, "expires": a.expires, "state_version": r.version}))).collect();
     let changed = ctx.db.read(|c| Ok(c.query_row("select (select coalesce(max(rowid), 0) from usage), (select coalesce(max(updated_at), 0) from quota)", [], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap_or((0, 0));
@@ -39,7 +39,7 @@ fn look(ctx: &Ctx, phone: &str) -> Option<Look> {
 
 fn event(kind: &str, data: Value) -> Message { Message::Text(serde_json::to_string(&Event { kind: kind.into(), at: now_ms(), data }).unwrap_or_default().into()) }
 
-async fn run(mut socket: WebSocket, ctx: Arc<Ctx>, phone: String) {
+async fn run(mut socket: WebSocket, ctx: Arc<Ctx>, phone: Phone) {
     let mut last: Option<Look> = None;
     loop {
         let (c, id) = (ctx.clone(), phone.clone());

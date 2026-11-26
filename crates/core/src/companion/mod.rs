@@ -57,11 +57,12 @@ fn forbidden(why: &str) -> Response { (StatusCode::FORBIDDEN, Json(json!({"error
 
 /// Phones only, and only one that is not revoked: its row goes beside the request.
 async fn phone_only(State(ctx): State<Arc<Ctx>>, caller: Option<Extension<Caller>>, mut req: Request, next: Next) -> Response {
-    let Some(Extension(Caller::Phone(id))) = caller else { return forbidden("the companion API is for paired phones") };
+    let Some(Extension(Caller::Phone { id, generation })) = caller else { return forbidden("the companion API is for paired phones") };
     let p = blocking(move || { let p = phones::get(&ctx, &id).ok().flatten(); if p.is_some() { phones::seen(&ctx, &id); } p }).await;
     match p {
-        Some(p) if p.revoked_at.is_none() => { req.extensions_mut().insert(p); next.run(req).await }
-        _ => forbidden("this phone was revoked"),
+        // the enrollment this connection showed its certificate for, not one paired again under the same id since
+        Some(p) if p.revoked_at.is_none() && p.generation == generation => { req.extensions_mut().insert(p); next.run(req).await }
+        _ => forbidden("this phone was revoked or paired again"),
     }
 }
 
@@ -166,8 +167,10 @@ pub(crate) fn run_actions(p: &Phone, r: &hooks::Run) -> Value {
 }
 
 async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Query(q): Query<Cursor>) -> Response {
+    // the page times its size is the query's offset: a cursor past that is no page
+    let page = q.cursor.unwrap_or(0);
+    if !(0..i64::MAX / SESSIONS_PER_PAGE).contains(&page) { return (StatusCode::BAD_REQUEST, Json(json!({"error": "no such page"}))).into_response(); }
     answer(blocking(move || {
-        let page = q.cursor.unwrap_or(0).max(0);
         let f = SessionFilter { scope: Some("here".into()), per: Some(SESSIONS_PER_PAGE), page: Some(page), ..Default::default() };
         let list = service::sessions(&ctx, &f)?;
         let runs = hooks::runs(&ctx)?;
@@ -189,15 +192,53 @@ struct After {
     after: Option<usize>,
 }
 
+/// The transcript last read, by its file's path, size and time: a phone pages through one session, and each page
+/// would otherwise read and parse the whole file again.
+/// shortcut: one transcript kept; a small cache per phone if several phones page different sessions at once
+type Parsed = (String, u64, Option<std::time::SystemTime>, Arc<crate::model::Transcript>);
+static LAST: std::sync::Mutex<Option<Parsed>> = std::sync::Mutex::new(None);
+
+fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::Result<Arc<crate::model::Transcript>> {
+    // this computer's own copy, found before anything is opened: another computer's session of the same id is that
+    // computer's to serve
+    let f = SessionFilter { profile: Some(profile.into()), id: Some(id.into()), scope: Some("here".into()), ..Default::default() };
+    let s = service::sessions(ctx, &f)?.into_iter().find(|s| s.harness == harness && (s.device.is_empty() || s.device == ctx.db.device)).ok_or_else(|| anyhow::anyhow!("no such session"))?;
+    let m = std::fs::metadata(&s.source_path).ok();
+    let key = (s.source_path.clone(), m.as_ref().map(|m| m.len()).unwrap_or(0), m.and_then(|m| m.modified().ok()));
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((p, n, t, tr)) = last.as_ref() { if (p, n, t) == (&key.0, &key.1, &key.2) && tr.meta.profile == profile && tr.meta.id == id { return Ok(tr.clone()); } }
+    let tr = Arc::new(service::transcript(ctx, profile, id)?);
+    *last = Some((key.0, key.1, key.2, tr.clone()));
+    Ok(tr)
+}
+
+/// A turn that fits a page: its long texts cut to 2,000 characters, then its steps left out, then its answers after
+/// the first 20; `truncated` says it was cut.
+fn bounded(mut v: Value) -> Value {
+    fn cut(v: &mut Value) {
+        match v {
+            Value::String(t) if t.chars().count() > 2000 => { *t = t.chars().take(2000).collect::<String>() + "…"; }
+            Value::Array(a) => a.iter_mut().for_each(cut),
+            Value::Object(o) => o.values_mut().for_each(cut),
+            _ => {}
+        }
+    }
+    let fits = |v: &Value| v.to_string().len() <= PAGE_BYTES;
+    if fits(&v) { return v; }
+    v["truncated"] = json!(true);
+    cut(&mut v);
+    if !fits(&v) { let n = v["steps"].as_array().map(Vec::len).unwrap_or(0); v["steps"] = json!([]); v["steps_left_out"] = json!(n); }
+    if !fits(&v) { if let Some(a) = v["answer"].as_array_mut() { a.truncate(20); } }
+    v
+}
+
 async fn transcript(State(ctx): State<Arc<Ctx>>, Path((harness, profile, id)): Path<(String, String, String)>, Query(q): Query<After>) -> Response {
     answer(blocking(move || {
-        let t = service::transcript(&ctx, &profile, &id)?;
-        // another computer's session of the same id is that computer's to serve
-        if t.meta.harness != harness || (!t.meta.device.is_empty() && t.meta.device != ctx.db.device) { anyhow::bail!("no such session"); }
+        let t = transcript_of(&ctx, &harness, &profile, &id)?;
         let from = q.after.unwrap_or(0).min(t.turns.len());
         let (mut turns, mut bytes) = (vec![], 0);
         for turn in &t.turns[from..] {
-            let v = serde_json::to_value(turn)?;
+            let v = bounded(serde_json::to_value(turn)?);
             let n = v.to_string().len();
             if turns.len() >= TURNS_PER_PAGE || (!turns.is_empty() && bytes + n > PAGE_BYTES) { break; }
             bytes += n;
@@ -208,10 +249,21 @@ async fn transcript(State(ctx): State<Arc<Ctx>>, Path((harness, profile, id)): P
     }).await)
 }
 
+/// What a phone is shown of a request's tool input: a question's text and its options; nothing of a permission's
+/// (a file's new content, say), whose command or file is already in `what`.
+fn summary(kind: &str, input: &Value) -> Value {
+    if kind != "question" { return json!({}); }
+    let qs: Vec<Value> = input["questions"].as_array().into_iter().flatten().map(|q| json!({
+        "question": q["question"].as_str().unwrap_or(""), "multiSelect": q["multiSelect"] == true,
+        "options": q["options"].as_array().into_iter().flatten().map(|o| json!({"label": o["label"].as_str().unwrap_or(""), "description": o["description"].as_str().unwrap_or("")})).collect::<Vec<_>>(),
+    })).collect();
+    json!({"questions": qs})
+}
+
 /// The open requests, each with the state version an answer must name.
 pub(crate) fn requests_of(ctx: &Ctx) -> anyhow::Result<Vec<api::Request>> {
     Ok(hooks::runs(ctx)?.into_iter().filter_map(|r| r.ask.clone().map(|a| api::Request {
-        run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, input: a.input, profile: r.profile.clone(), expires: a.expires, state_version: r.version,
+        input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires: a.expires, state_version: r.version,
     })).collect())
 }
 

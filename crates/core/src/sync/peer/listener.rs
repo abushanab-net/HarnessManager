@@ -61,6 +61,8 @@ impl ClientCertVerifier for Paired {
 pub struct Listener {
     handle: axum_server::Handle<SocketAddr>,
     pub port: u16,
+    data: std::path::PathBuf,
+    stopped: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Every paired computer asks for this computer's record and presence every ten seconds, and each costs a scan
@@ -90,7 +92,11 @@ pub(super) fn kept(slot: &Kept, make: impl FnOnce() -> Result<Value>) -> Result<
 }
 
 impl Listener {
-    pub fn stop(&self) { self.handle.shutdown(); }
+    pub fn stop(&self) {
+        self.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::companion::conn::listening(&self.data, false);
+        self.handle.shutdown();
+    }
 }
 
 /// Serve on `bind:port` (0: any free port; the one taken is in the result) from the runtime's threads.
@@ -115,12 +121,23 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, port: u16
         .merge(crate::companion::router(ctx.clone()));
     let _in_runtime = rt.enter();
     let server = axum_server::from_tcp_rustls(l, axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(cfg)))?
-        .map(|inner| crate::companion::conn::Acceptor { inner, ctx })
+        .map(|inner| crate::companion::conn::Acceptor { inner, ctx: ctx.clone() })
         .handle(handle.clone());
     rt.spawn(async move {
         if let Err(e) = server.serve(app.into_make_service()).await { crate::log::warn(&format!("computers: the listener stopped: {e}")); }
     });
-    Ok(Listener { handle, port })
+    // this listener holds the phones' connections: it cuts those revoked or paired again from any process
+    crate::companion::conn::listening(&ctx.data, true);
+    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (s2, data) = (stopped.clone(), ctx.data.clone());
+    rt.spawn(async move {
+        while !s2.load(std::sync::atomic::Ordering::SeqCst) {
+            let c = ctx.clone();
+            let _ = tokio::task::spawn_blocking(move || crate::companion::conn::sweep(&c)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    Ok(Listener { handle, port, data, stopped })
 }
 
 /// The database and process scans are blocking work: off the runtime's threads.

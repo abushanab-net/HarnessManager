@@ -79,6 +79,9 @@ impl Runtime {
     pub fn tick(&self, ctx: &Arc<Ctx>) {
         let done = self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result().is_some() || h.expires_at < now_ms()).unwrap_or(false);
         if done { self.pair_cancel_inner(); }
+        // a phone pairing that ended keeps its status for the window, but is no longer announced
+        let phone_done = self.phone_pair_status().is_some_and(|v| !matches!(v["state"].as_str(), Some("waiting" | "confirm")));
+        if phone_done { self.advertise_phone(None); }
         match self.ensure(ctx) {
             Ok(ctx) if ctx.settings.direct_connection => {
                 if let Err(e) = journal::publish(&ctx) { crate::log::warn(&format!("journal: {e:#}")); }
@@ -91,7 +94,7 @@ impl Runtime {
 
     pub fn stop(&self) {
         self.pair_cancel_inner();
-        let _ = self.phone_pair_cancel();
+        self.phone_cancel_inner();
         if let Some(l) = self.listener.lock().unwrap_or_else(|e| e.into_inner()).take() { l.stop(); }
         if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
     }
@@ -136,41 +139,66 @@ impl Runtime {
     /// The pairing shown now: `{ok, peer?, error?}` once it ended, `null` while it waits; `None` without one.
     pub fn pair_result(&self) -> Option<Option<Value>> { self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result()) }
 
-    /// Show a code to a phone for two minutes: `{code, expires_at, host_hint, port, qr, state}`; the QR code says
-    /// `hm-phone:1?h=<host:port>&c=<code>&f=<this computer's certificate fingerprint>`. `host_name` as for computers.
+    fn advertise_phone(&self, port: Option<u16>) {
+        if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { let _ = m.advertise_phone(port); }
+    }
+
+    /// Show a code to a phone for two minutes: `{attempt, code, expires_at, host_hint, port, qr, state}`; the QR code
+    /// says `hm-phone:1?h=<host:port>&c=<code>&f=<this computer's certificate fingerprint>`, and mDNS announces the
+    /// port for a phone given the six digits. `host_name` as for computers.
     pub fn phone_pair_start(&self, ctx: &Arc<Ctx>, host_name: Option<&str>) -> Result<Value> {
         let ctx = self.ready(ctx)?;
-        let _ = self.phone_pair_cancel();
+        self.phone_cancel_inner();
         let h = pairing::start_phone(ctx, self.rt.handle(), self.bind, host_name, self.on_event.clone())?;
+        self.advertise_phone(Some(h.port));
         let v = h.status();
         *self.phone.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
         Ok(v)
     }
 
-    /// The phone pairing shown: `{state: waiting|confirm|paired|refused|expired|failed, phone?: {name, platform},
-    /// words?, error?, code, expires_at, host_hint, port, qr}`; None without one.
+    /// The phone pairing shown: `{attempt, state: waiting|confirm|paired|refused|expired|failed, phone?: {name,
+    /// platform}, words?, error?, code, expires_at, host_hint, port, qr}`; None without one. Every change is also sent
+    /// as `phones-pairing` with this value.
     pub fn phone_pair_status(&self) -> Option<Value> { self.phone.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.status()) }
 
-    /// The owner approved the phone shown, with `grants` (`{summaries, transcripts, control}`; missing ones as the
-    /// defaults: summaries and transcripts on, Control off). Answers the status after.
-    pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, grants: &Value) -> Result<Value> {
+    /// The pairing the owner decides on: the one shown, by the `attempt` its status carried.
+    fn shown<'a>(h: &'a Option<pairing::PhoneHost>, attempt: &str) -> Result<&'a pairing::PhoneHost> {
+        h.as_ref().filter(|h| h.attempt() == attempt).context("that phone pairing is no longer shown; look at the one shown now")
+    }
+
+    /// The owner approved the phone of pairing `attempt`, with `grants` (`{summaries, transcripts, control}`; missing
+    /// ones as the defaults: summaries and transcripts on, Control off). Answers the status after.
+    pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, attempt: &str, grants: &Value) -> Result<Value> {
         let g: companion_proto::api::Grants = if grants.is_null() { Default::default() } else {
             let d = companion_proto::api::Grants::default();
             let b = |k: &str, def: bool| -> Result<bool> { match &grants[k] { Value::Null => Ok(def), Value::Bool(b) => Ok(*b), _ => bail!("{k} is on or off") } };
             companion_proto::api::Grants { summaries: b("summaries", d.summaries)?, transcripts: b("transcripts", d.transcripts)?, control: b("control", d.control)? }
         };
         let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
-        h.as_ref().context("no phone is pairing")?.approve(ctx, g)
+        Self::shown(&h, attempt)?.approve(ctx, g)
     }
 
-    pub fn phone_pair_refuse(&self) -> Result<Value> {
+    pub fn phone_pair_refuse(&self, attempt: &str) -> Result<Value> {
         let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
-        h.as_ref().context("no phone is pairing")?.refuse()
+        Self::shown(&h, attempt)?.refuse()
     }
 
-    /// Stop showing the code: answers null, as `phone_pair_status` has nothing to show after.
-    pub fn phone_pair_cancel(&self) -> Result<Value> {
+    /// Tests: the phone pairing shown, as its host.
+    #[cfg(test)]
+    pub(crate) fn with_phone_host<T>(&self, f: impl FnOnce(&pairing::PhoneHost) -> T) -> Option<T> { self.phone.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(f) }
+
+    fn phone_cancel_inner(&self) {
         if let Some(h) = self.phone.lock().unwrap_or_else(|e| e.into_inner()).take() { h.cancel(); }
+        self.advertise_phone(None);
+    }
+
+    /// Stop showing the code of pairing `attempt`: answers null, as `phone_pair_status` has nothing to show after.
+    pub fn phone_pair_cancel(&self, attempt: &str) -> Result<Value> {
+        {
+            let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+            Self::shown(&h, attempt)?;
+        }
+        self.phone_cancel_inner();
         Ok(Value::Null)
     }
 }

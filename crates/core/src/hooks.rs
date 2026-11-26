@@ -26,6 +26,11 @@ pub const WAIT_VAR: &str = "HRM_REQUEST_SECONDS";
 /// Set by `hrm run` beside `RUN_VAR`: how many seconds a question waits (`phones::question_seconds`, 60 while a phone
 /// with Control is paired, else 15). Claude draws the question in the terminal only once the hook exits.
 pub const QUESTION_VAR: &str = "HRM_QUESTION_SECONDS";
+/// The longest a permission request waits (the plan's ceiling), whatever `request_seconds` says.
+pub const MAX_REQUEST_SECONDS: u32 = 300;
+/// What a hook entry's timeout allows beyond the window its request waits: the hook's start, its last poll and
+/// printing the decision, so an answer taken at the window's end still reaches the tool.
+const ENTRY_MARGIN: u32 = 10;
 pub(crate) const APP_HEARTBEAT: &str = "hooks:app-heartbeat";
 
 /// The desktop's session watcher calls this every second while it can offer answers.
@@ -43,7 +48,8 @@ fn app_is_present(c: &Connection) -> rusqlite::Result<bool> {
 pub const EVENTS: &[&str] = &["UserPromptSubmit", "PermissionRequest", "Notification", "PostToolUse", "Stop", "SessionEnd"];
 
 /// One row per `hrm run` in hm.db; `hwnd` is its console window (0 when unknown), to bring it to the front. `run_ask`:
-/// the requests the hook holds for an answer; `state` is open, answered (then `answer` holds it) or closed.
+/// the requests the hook holds for an answer; `state` is open, answered (then `answer` holds it), closed, or expired
+/// (the hook let it go at its deadline).
 pub const TABLE: &str = "create table if not exists run_state(run text primary key, pid integer not null, started integer not null,
   hwnd integer not null default 0, profile text not null, harness text not null, session_id text not null default '',
   cwd text not null default '', state text not null default '', reason text not null default '', ts integer not null default 0);
@@ -153,9 +159,10 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
             Ok(Some(("open", _))) | Err(_) => {}
             Ok(_) => return Ok(None), // closed, or gone with its run
         }
-        // The close and an answer both update only an open row.
-        if (Instant::now() >= deadline || now_ms() >= expires || matches!(app_is_present(c), Ok(false)))
-            && c.execute("update run_ask set state = 'closed' where id = ? and state = 'open'", [&id])? == 1 {
+        // The close and an answer both update only an open row; a close at the deadline says so, for a phone's receipt
+        let timed_out = Instant::now() >= deadline || now_ms() >= expires;
+        if (timed_out || matches!(app_is_present(c), Ok(false)))
+            && c.execute("update run_ask set state = ?2 where id = ?1 and state = 'open'", params![id, if timed_out { "expired" } else { "closed" }])? == 1 {
             let _ = c.execute("update run_state set version = version + 1 where run = ?", [run]);
             return Ok(None);
         }
@@ -213,6 +220,18 @@ pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
     })
 }
 
+/// Stop claims the turn it interrupts, from the desktop and from a phone alike: the run goes to `done` in the same
+/// write that finds it working or waiting (or not yet reported), so a second Stop is refused instead of pressing
+/// Ctrl+C again, which would exit the tool.
+pub fn claim_stop(c: &Connection, run: &str) -> Result<()> {
+    let n = c.execute("update run_state set state = 'done', reason = '', ts = ?2, version = version + 1 where (run = ?1 or session_id = ?1) and state in ('working', 'waiting', '')",
+        params![run, now_ms()])?;
+    // no such run: nothing to claim, and the terminal says it has none
+    let known = c.query_row("select count(*) from run_state where run = ?1 or session_id = ?1", [run], |r| r.get::<_, i64>(0))? > 0;
+    if n == 0 && known { bail!("Nothing to stop: the session is at its prompt"); }
+    Ok(())
+}
+
 /// `hrm run`, before the tool starts: its row, and the variables that let the tool's hooks find it. Answers the run
 /// id for `end_run`; None when the row could not be made.
 pub fn start_run(ctx: &Ctx, p: &Profile, env: &mut Vec<(String, String)>) -> Option<String> {
@@ -223,7 +242,7 @@ pub fn start_run(ctx: &Ctx, p: &Profile, env: &mut Vec<(String, String)>) -> Opt
         params![run, pid, started, console_window(), p.name, p.harness, now_ms()])?));
     if let Err(e) = r { crate::log::info(&format!("run state for {}: {e:#}", p.name)); return None; }
     env.push((RUN_VAR.into(), run.clone()));
-    env.push((WAIT_VAR.into(), ctx.settings.request_seconds.to_string()));
+    env.push((WAIT_VAR.into(), ctx.settings.request_seconds.min(MAX_REQUEST_SECONDS).to_string()));
     env.push((QUESTION_VAR.into(), crate::phones::question_seconds(ctx).to_string()));
     Some(run)
 }
@@ -323,9 +342,9 @@ fn settings(ctx: &Ctx) -> Value {
     let command = crate::cli_path::installed_cli(ctx)
         .map(|exe| format!("{} hook", crate::launch::sh_quote(&exe.to_string_lossy())))
         .unwrap_or_else(command);
-    let (entry, held) = (|timeout: u32| json!({"type": "command", "command": command, "timeout": timeout}), ctx.settings.request_seconds.saturating_add(30));
+    let (entry, held) = (|timeout: u32| json!({"type": "command", "command": command, "timeout": timeout}), ctx.settings.request_seconds.min(MAX_REQUEST_SECONDS) + 30);
     let mut hooks: Map<String, Value> = EVENTS.iter().map(|e| (e.to_string(), json!([{"hooks": [entry(if *e == "PermissionRequest" { held } else { 10 })]}]))).collect();
-    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(crate::phones::QUESTION_WITH_PHONE)]}]));
+    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(crate::phones::QUESTION_WITH_PHONE + ENTRY_MARGIN)]}]));
     json!({"hooks": hooks})
 }
 
@@ -571,6 +590,21 @@ mod tests {
     }
 
     #[test]
+    fn a_hook_entry_outlasts_its_window_and_a_permission_waits_at_most_300_s() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = Ctx::open_at(&dir.path().join("data"), &dir.path().join("home")).unwrap();
+        ctx.settings.request_seconds = 900;
+        let v = settings(&ctx);
+        assert_eq!(v["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], json!(330));
+        let question = v["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"].as_u64().unwrap();
+        assert!(question >= u64::from(crate::phones::QUESTION_WITH_PHONE + ENTRY_MARGIN), "the tool would end the hook before an answer taken at the window's end prints: {question}");
+        let p = Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
+        let mut env = vec![];
+        start_run(&ctx, &p, &mut env);
+        assert!(env.contains(&(WAIT_VAR.to_string(), "300".to_string())), "{env:?}");
+    }
+
+    #[test]
     fn the_settings_file_holds_only_our_entries_and_is_written_once() {
         let dir = tempfile::tempdir().unwrap();
         let mut ctx = Ctx::open_at(&dir.path().join("data"), &dir.path().join("home")).unwrap();
@@ -581,8 +615,8 @@ mod tests {
         assert_eq!(v.as_object().unwrap().keys().collect::<Vec<_>>(), ["hooks"]);
         for e in EVENTS { assert_eq!(v["hooks"][e][0]["hooks"][0]["command"], json!(command()), "{e}"); }
         // PermissionRequest outlasts its wait. PreToolUse gets its own shorter cap.
-        assert_eq!(v["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], json!(ctx.settings.request_seconds + 30));
-        assert_eq!(v["hooks"]["PreToolUse"], json!([{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command(), "timeout": 60}]}]));
+        assert_eq!(v["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], json!(ctx.settings.request_seconds.min(MAX_REQUEST_SECONDS) + 30));
+        assert_eq!(v["hooks"]["PreToolUse"], json!([{"matcher": "AskUserQuestion", "hooks": [{"type": "command", "command": command(), "timeout": 70}]}]));
         let stamp = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         settings_args(&ctx, &["fix it".into()]).unwrap().unwrap();

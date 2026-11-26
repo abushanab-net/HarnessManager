@@ -123,7 +123,8 @@ pub struct Request {
     pub tool: String,
     /// The command or file, or the questions in one line.
     pub what: String,
-    /// The tool's input: a question's `questions` with their options.
+    /// What the phone is shown of the tool's input: a question's `questions` with their text, `multiSelect` and
+    /// options (label, description); `{}` for a permission, whose command or file is `what`.
     pub input: Value,
     pub profile: String,
     pub expires: i64,
@@ -176,15 +177,18 @@ pub enum Status {
     AlreadyHandled,
     Expired,
     Unavailable,
+    /// The computer reserved the action and then stopped before it knew the outcome: it may or may not have reached
+    /// the session, and it is never sent again. The phone shows "delivery unknown".
+    Unknown,
 }
 
 impl Status {
     pub fn as_str(self) -> &'static str {
-        match self { Status::Accepted => "accepted", Status::AlreadyHandled => "already_handled", Status::Expired => "expired", Status::Unavailable => "unavailable" }
+        match self { Status::Accepted => "accepted", Status::AlreadyHandled => "already_handled", Status::Expired => "expired", Status::Unavailable => "unavailable", Status::Unknown => "unknown" }
     }
 
     pub fn parse(s: &str) -> Option<Status> {
-        [Status::Accepted, Status::AlreadyHandled, Status::Expired, Status::Unavailable].into_iter().find(|x| x.as_str() == s)
+        [Status::Accepted, Status::AlreadyHandled, Status::Expired, Status::Unavailable, Status::Unknown].into_iter().find(|x| x.as_str() == s)
     }
 }
 
@@ -340,7 +344,7 @@ mod tests {
         assert_eq!((a.kind, a.target.ask_id.as_deref()), (ActionKind::Answer, Some("a")));
         let r = Receipt { action_id: "u1".into(), status: Status::AlreadyHandled, detail: String::new(), at: 1 };
         assert_eq!(serde_json::to_value(&r).unwrap()["status"], "already_handled");
-        for s in ["accepted", "already_handled", "expired", "unavailable"] { assert_eq!(Status::parse(s).unwrap().as_str(), s); }
+        for s in ["accepted", "already_handled", "expired", "unavailable", "unknown"] { assert_eq!(Status::parse(s).unwrap().as_str(), s); }
         assert_eq!(Grants::default(), Grants { summaries: true, transcripts: true, control: false });
     }
 }

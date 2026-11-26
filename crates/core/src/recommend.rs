@@ -79,12 +79,22 @@ pub fn listed(ctx: &crate::Ctx) -> Vec<String> {
     crate::service::harnesses().into_iter().filter(|h| h.installed && !ctx.settings.hidden_tools.contains(&h.id)).map(|h| h.id).collect()
 }
 
-/// Use next for every tool this computer lists, in the tools' order.
+/// Where the owner's "5h first" choice is kept, so the desktop and the phone rank with the same one.
+const FIVE_HOUR_FIRST: &str = "use_next:five_hour_first";
+
+/// The owner prefers the 5-hour window that resets soonest ("5h first").
+pub fn five_hour_first(ctx: &crate::Ctx) -> bool { ctx.db.kv_get(FIVE_HOUR_FIRST).ok().flatten().as_deref() == Some("1") }
+
+/// Keep the "5h first" choice; the desktop's toggle calls this.
+pub fn set_five_hour_first(ctx: &crate::Ctx, on: bool) -> anyhow::Result<()> { ctx.db.kv_set(FIVE_HOUR_FIRST, if on { "1" } else { "0" }) }
+
+/// Use next for every tool this computer lists, in the tools' order, by the owner's "5h first" choice.
 pub fn use_next(ctx: &crate::Ctx, views: &[ProfileView], now: i64) -> anyhow::Result<Vec<companion_proto::api::UseNext>> {
     let forecast = crate::dash::forecasts(ctx, now)?;
     let listed = listed(ctx);
     let accts: Vec<Acct> = views.iter().filter(|p| listed.contains(&p.harness)).map(|p| acct(p, &forecast, now)).collect();
-    Ok(listed.iter().filter_map(|t| recommended_for(&accts, t, false).map(|(a, reason)| companion_proto::api::UseNext { tool: t.clone(), profile: a.p.name.clone(), name: a.p.label.clone(), reason })).collect())
+    let five = five_hour_first(ctx);
+    Ok(listed.iter().filter_map(|t| recommended_for(&accts, t, five).map(|(a, reason)| companion_proto::api::UseNext { tool: t.clone(), profile: a.p.name.clone(), name: a.p.label.clone(), reason })).collect())
 }
 
 #[cfg(test)]

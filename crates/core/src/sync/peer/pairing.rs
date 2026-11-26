@@ -10,7 +10,7 @@
 //! and gets no ring key.
 
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -72,8 +72,11 @@ pub fn store_peer(ctx: &Ctx, p: &Value, address: &str) -> Result<Value> {
     let id = p["id"].as_str().filter(|s| !s.is_empty()).context("the payload has no id")?;
     if id == ctx.settings.device_id { bail!("that is this computer"); }
     let port: u16 = p["address_hint"].as_str().and_then(|a| a.rsplit_once(':')).and_then(|(_, p)| p.parse().ok()).unwrap_or(0);
-    if p["cert_pem"].as_str().map(|c| identity::pem_to_der(c).is_err()).unwrap_or(true) { bail!("the payload has no certificate"); }
+    let Some(der) = p["cert_pem"].as_str().and_then(|c| identity::pem_to_der(c).ok()) else { bail!("the payload has no certificate") };
     ctx.db.with(|c| {
+        // the listener tells a computer from a phone by the certificate alone
+        let phones: Vec<String> = c.prepare("select cert_pem from phones where revoked_at is null")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        if phones.iter().any(|pem| identity::pem_to_der(pem).ok().as_deref() == Some(der.as_slice())) { bail!("that certificate already belongs to a paired phone"); }
         c.execute("insert into peers(device_id, name, os, app_version, incarnation, cert_pem, pubkey, paired_at, address, port, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'direct')
             on conflict(device_id) do update set name=?2, os=?3, app_version=?4, incarnation=?5, cert_pem=?6, pubkey=?7, paired_at=?8, address=?9, port=?10, transport='direct'",
             params![id, p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""), p["incarnation"].as_str().unwrap_or(""),
@@ -243,16 +246,17 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
 
 // ---------- a phone: the same exchange on its own routes; the owner approves before anything is sealed back ----------
 
+/// How long an approved or refused phone can still fetch the answer after the code expired.
+const RESULT_KEPT: Duration = Duration::from_secs(30);
+
 /// Where a phone pairing stands, and what the owner is shown.
 #[derive(Default)]
 struct PhoneSt {
-    /// "waiting", "confirm", "paired", "refused", "expired" or "failed".
+    /// "waiting", "confirm", "paired", "refused", "expired", "failed", or "cancelled" (shown to nobody).
     state: &'static str,
     phone: Option<PhonePayload>,
     key: Option<Keyed>,
     sealed: Option<String>,
-    /// The phone read the result: the port can close.
-    delivered: bool,
     error: Option<String>,
 }
 
@@ -264,13 +268,14 @@ struct PhoneShared {
     st: Mutex<PhoneSt>,
     handle: axum_server::Handle<SocketAddr>,
     on_event: OnEvent,
-    /// `{code, expires_at, host_hint, port, qr}`.
+    /// When the code stops being good (ms).
+    deadline: AtomicI64,
+    /// `{attempt, code, expires_at, host_hint, port, qr}`.
     shown: Value,
 }
 
 impl PhoneShared {
-    fn status(&self) -> Value {
-        let st = self.st.lock().unwrap_or_else(|e| e.into_inner());
+    fn status_of(&self, st: &PhoneSt) -> Value {
         let mut v = self.shown.clone();
         v["state"] = json!(st.state);
         if let Some(p) = &st.phone { v["phone"] = json!({"name": p.name, "platform": p.platform}); }
@@ -279,18 +284,29 @@ impl PhoneShared {
         v
     }
 
+    fn status(&self) -> Value { self.status_of(&self.st.lock().unwrap_or_else(|e| e.into_inner())) }
+
     /// A change of state, told as `phones-pairing`; false when the pairing is not at one of `from` any more.
     fn set(&self, from: &[&str], f: impl FnOnce(&mut PhoneSt)) -> bool {
-        {
+        let v = {
             let mut st = self.st.lock().unwrap_or_else(|e| e.into_inner());
             if !from.contains(&st.state) { return false; }
             f(&mut st);
-        }
-        (self.on_event)("phones-pairing", self.status());
+            self.status_of(&st)
+        };
+        (self.on_event)("phones-pairing", v);
         true
     }
 
     fn state(&self) -> &'static str { self.st.lock().unwrap_or_else(|e| e.into_inner()).state }
+
+    /// The code's two minutes are up: a pairing still open expires (a cancelled one says nothing), and the port
+    /// closes, after a moment more when a phone still has an answer to fetch.
+    async fn expire(&self) {
+        self.set(&["waiting", "confirm"], |st| { st.state = "expired"; st.error = Some("the code expired".into()); });
+        if matches!(self.state(), "paired" | "refused") { tokio::time::sleep(RESULT_KEPT).await; }
+        self.handle.shutdown();
+    }
 }
 
 /// The computer showing a code to a phone.
@@ -303,15 +319,33 @@ pub struct PhoneHost {
 impl PhoneHost {
     pub fn status(&self) -> Value { self.shared.status() }
 
-    pub fn cancel(&self) { self.shared.handle.shutdown(); }
+    /// The id of this attempt: the owner's approve, refuse and cancel name it, so a decision taken on one phone's
+    /// words never lands on another's.
+    pub fn attempt(&self) -> &str { self.shared.shown["attempt"].as_str().unwrap_or("") }
+
+    /// Stop showing the code; the attempt ends without an event.
+    pub fn cancel(&self) {
+        self.shared.st.lock().unwrap_or_else(|e| e.into_inner()).state = "cancelled";
+        self.shared.handle.shutdown();
+    }
 
     /// The owner approved the phone shown, with these grants: it is stored, and this computer's payload is sealed
-    /// for it to fetch. Never the ring key: a phone is not a computer.
+    /// for it to fetch. Never the ring key: a phone is not a computer. Decided under the pairing's lock, with the
+    /// deadline: the expiry cannot come between the check and the stored phone, and what is stored is what is told.
     pub fn approve(&self, ctx: &Ctx, grants: Grants) -> Result<Value> {
         let s = &self.shared;
-        let (phone, sealed) = {
-            let st = s.st.lock().unwrap_or_else(|e| e.into_inner());
-            let (Some(phone), Some(key)) = (st.phone.clone().filter(|_| st.state == "confirm"), st.key.as_ref()) else { bail!("no phone waits for approval") };
+        let v = {
+            let mut st = s.st.lock().unwrap_or_else(|e| e.into_inner());
+            if st.state != "confirm" { bail!("no phone waits for approval"); }
+            if now_ms() >= s.deadline.load(Ordering::SeqCst) {
+                st.state = "expired";
+                st.error = Some("the code expired".into());
+                let v = s.status_of(&st);
+                drop(st);
+                (s.on_event)("phones-pairing", v);
+                bail!("the code expired before the approval; show a new one");
+            }
+            let (Some(phone), Some(key)) = (st.phone.clone(), st.key.as_ref()) else { bail!("no phone waits for approval") };
             let id = identity::load(ctx)?;
             let port = s.ctx.settings.listen_port;
             let shown = s.shown["host_hint"].as_str().and_then(|h| h.rsplit_once(':')).map(|(h, _)| h.to_string()).unwrap_or_default();
@@ -320,11 +354,14 @@ impl PhoneHost {
             if !hints.contains(&me) { hints.push(me); }
             let p = DesktopPayload { id: ctx.settings.device_id.clone(), name: ctx.settings.device_name.clone(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(),
                 address_hints: hints, hub_url: None, hub_token: None, grants };
-            (phone, key.seal(&p)?)
+            let sealed = key.seal(&p)?;
+            crate::phones::add(ctx, &phone, grants)?;
+            st.state = "paired";
+            st.sealed = Some(sealed);
+            s.status_of(&st)
         };
-        crate::phones::add(ctx, &phone, grants)?;
-        s.set(&["confirm"], |st| { st.state = "paired"; st.sealed = Some(sealed); });
-        Ok(self.status())
+        (s.on_event)("phones-pairing", v.clone());
+        Ok(v)
     }
 
     /// The owner refused the phone, or stopped waiting for one.
@@ -332,6 +369,14 @@ impl PhoneHost {
         if !self.shared.set(&["waiting", "confirm"], |st| st.state = "refused") { bail!("the pairing already ended"); }
         Ok(self.status())
     }
+
+    /// Tests: the code's time is up now.
+    #[cfg(test)]
+    pub(crate) fn run_out(&self) { self.shared.deadline.store(now_ms() - 1, Ordering::SeqCst); }
+
+    /// Tests: what the expiry task does when the time is up, now.
+    #[cfg(test)]
+    pub(crate) async fn expire_now(&self) { self.run_out(); self.shared.expire().await; }
 }
 
 /// Show a code for a phone: the pairing routes on a free port for two minutes.
@@ -345,9 +390,9 @@ pub fn start_phone(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, hos
     let host_hint = format!("{}:{port}", host_name.map(String::from).unwrap_or_else(crate::util::hostname));
     let qr = companion_proto::pairing::qr(&host_hint, &code, &companion_proto::pairing::fingerprint(&id.cert_der));
     let handle = axum_server::Handle::new();
-    let shown = json!({"code": code, "expires_at": expires_at, "host_hint": host_hint, "port": port, "qr": qr});
+    let shown = json!({"attempt": crate::util::uuid4(), "code": code, "expires_at": expires_at, "host_hint": host_hint, "port": port, "qr": qr});
     let shared = Arc::new(PhoneShared { ctx: ctx.clone(), code, keys: Mutex::new(vec![]), failures: AtomicU32::new(0), st: Mutex::new(PhoneSt { state: "waiting", ..Default::default() }),
-        handle: handle.clone(), on_event, shown });
+        handle: handle.clone(), on_event, deadline: AtomicI64::new(expires_at), shown });
     let app = Router::new().route("/pair/hello", get(phone_hello)).route("/pair/phone/start", post(phone_start)).route("/pair/phone/finish", post(phone_finish))
         .route("/pair/phone/result", get(phone_result)).with_state(shared.clone());
     let _in_runtime = rt.enter();
@@ -356,11 +401,7 @@ pub fn start_phone(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, hos
     let s2 = shared.clone();
     rt.spawn(async move {
         tokio::time::sleep(Duration::from_millis(LIVES_MS as u64)).await;
-        s2.set(&["waiting", "confirm"], |st| { st.state = "expired"; st.error = Some("the code expired".into()); });
-        // a phone approved in the last seconds still has a moment to fetch its result
-        let waits = { let st = s2.st.lock().unwrap_or_else(|e| e.into_inner()); st.state == "paired" && !st.delivered };
-        if waits { tokio::time::sleep(Duration::from_secs(30)).await; }
-        s2.handle.shutdown();
+        s2.expire().await;
     });
     Ok(PhoneHost { expires_at, port, shared })
 }
@@ -398,8 +439,8 @@ async fn phone_finish(State(s): State<Arc<PhoneShared>>, Json(a): Json<Value>) -
         Err(_) => {
             let n = s.failures.fetch_add(1, Ordering::SeqCst) + 1;
             crate::log::warn(&format!("phones: a pairing attempt with a wrong code ({n} of {FAILURES})"));
-            if n >= FAILURES {
-                s.set(&["waiting"], |st| { st.state = "failed"; st.error = Some("three wrong codes; show a new one".into()); });
+            // only the failure that ends a pairing still waiting closes the port, not one that lost to a phone at confirm
+            if n >= FAILURES && s.set(&["waiting"], |st| { st.state = "failed"; st.error = Some("three wrong codes; show a new one".into()); }) {
                 s.handle.graceful_shutdown(Some(Duration::from_secs(2)));
             }
             refused(StatusCode::FORBIDDEN, "the code did not match")
@@ -413,20 +454,19 @@ struct Of {
 }
 
 /// What the owner decided, for the phone that finished: `pending`, `approved` with the sealed payload, `refused`.
+/// The answer can be fetched again until the attempt ends (a moment past the code's expiry), so one lost on the way
+/// is not lost for good.
 async fn phone_result(State(s): State<Arc<PhoneShared>>, Query(q): Query<Of>) -> Response {
     let (state, sealed) = {
-        let mut st = s.st.lock().unwrap_or_else(|e| e.into_inner());
+        let st = s.st.lock().unwrap_or_else(|e| e.into_inner());
         if st.phone.as_ref().map(|p| p.id.as_str()) != Some(q.id.as_str()) { return refused(StatusCode::NOT_FOUND, "no such phone is pairing"); }
-        if matches!(st.state, "paired" | "refused") { st.delivered = true; }
         (st.state, st.sealed.clone())
     };
-    let expires_in = (s.shown["expires_at"].as_i64().unwrap_or(0) - now_ms()).max(0);
-    let r = match state {
+    let expires_in = (s.deadline.load(Ordering::SeqCst) - now_ms()).max(0);
+    Json(match state {
         "confirm" | "waiting" => PairResult { state: "pending".into(), payload: None, expires_in },
         "paired" => PairResult { state: "approved".into(), payload: sealed, expires_in },
         "refused" => PairResult { state: "refused".into(), payload: None, expires_in },
         _ => PairResult { state: "expired".into(), payload: None, expires_in: 0 },
-    };
-    if r.state != "pending" { s.handle.graceful_shutdown(Some(Duration::from_secs(2))); }
-    Json(r).into_response()
+    }).into_response()
 }

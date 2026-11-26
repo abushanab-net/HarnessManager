@@ -31,6 +31,10 @@ pub fn reply(data: &Path, run: &str, text: &str) -> Result<()> {
 pub fn stop(data: &Path, run: &str) -> Result<()> {
     #[cfg(windows)]
     {
+        // one Stop per turn, whoever presses it (hooks::claim_stop)
+        let c = rusqlite::Connection::open(data.join("hm.db"))?;
+        c.busy_timeout(std::time::Duration::from_secs(2))?;
+        crate::hooks::claim_stop(&c, run)?;
         control::send(data, run, control::Action::Stop)?;
         stopped(data, run);
         return Ok(());
