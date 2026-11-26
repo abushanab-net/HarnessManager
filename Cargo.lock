@@ -2146,6 +2146,7 @@ dependencies = [
  "clap",
  "hrm-core",
  "hrm-router",
+ "qrcode",
  "rpassword",
  "rusqlite",
  "serde",
@@ -2163,6 +2164,7 @@ version = "1.13.2"
 dependencies = [
  "anyhow",
  "hrm-core",
+ "qrcode",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -3885,6 +3887,12 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ace1a365f55004297f2cf24acfd96d02966246ca423385273b58a7dc873ee14d"
 
 [[package]]
 name = "quick-xml"
