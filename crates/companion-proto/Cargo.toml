@@ -1,0 +1,20 @@
+[package]
+name = "companion-proto"
+version.workspace = true
+edition.workspace = true
+
+# the phone's side of pairing, sealing and the /c1 types, shared with the desktop; the app builds it for Android and
+# iOS through flutter_rust_bridge, so nothing here may need the desktop, a native crypto library or a network stack
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
+curve25519-dalek = "5.0.0"
+ed25519-dalek = "3.0.0"
+getrandom = "0.3"
+hex = "0.4.3"
+rcgen = { version = "0.14.10", default-features = false, features = ["pem"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.10.9"
+spake2 = { version = "0.4", features = ["getrandom"] }
