@@ -101,11 +101,19 @@ pub fn hook(input: &str) -> Result<Option<String>> {
     let Ok(run) = std::env::var(RUN_VAR) else { return Ok(None) };
     let v: Value = serde_json::from_str(input).context("the hook's input is not JSON")?;
     // not Ctx::open: no migrations, no settings, on every tool call; hm.db is there, hrm run opened it
-    let c = Connection::open_with_flags(crate::ctx::data_dir().join("hm.db"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    c.busy_timeout(Duration::from_secs(2))?;
+    let c = hook_connection(&crate::ctx::data_dir().join("hm.db"))?;
     let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u32);
     let question = std::env::var(QUESTION_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(crate::phones::QUESTION_WITHOUT).min(crate::phones::QUESTION_WITH_PHONE);
     Ok(handle_asking(&c, &run, &v, Duration::from_secs(secs.into()), Duration::from_secs(question.into()))?.map(|d| d.to_string()))
+}
+
+/// The database as `hrm hook` writes it. An `hrm run` started before an update may still run, and its hooks run the
+/// updated `hrm` before anything else migrated: the columns this version writes are made first.
+pub fn hook_connection(path: &std::path::Path) -> Result<Connection> {
+    let c = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    c.busy_timeout(Duration::from_secs(2))?;
+    crate::db::hook_columns(&c)?;
+    Ok(c)
 }
 
 /// `handle_asking` with the question window of a computer without a phone.
@@ -129,7 +137,11 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
     };
     if let Some((state, reason)) = state_of(v) {
         c.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
-            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6, stopping = null where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
+            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6,
+            stopping = case when state <> ?4 then null else stopping end, stop_token = case when state <> ?4 then null else stop_token end,
+            needs_terminal = case when ?8 then 0 else needs_terminal end where run = ?1",
+            // a new state ends a Stop's claim (a repeated one does not); a submitted prompt took what waited in the input
+            params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64, v["hook_event_name"] == "UserPromptSubmit"])?;
     } else if closed > 0 {
         c.execute("update run_state set version = version + 1 where run = ?", [run])?;
     }
@@ -222,11 +234,20 @@ pub fn answer_guarded(ctx: &Ctx, id: &str, a: &Value, guard: Option<&Guard>) -> 
         match a["behavior"].as_str() { Some(b @ ("allow" | "deny")) => b.to_string(), _ => bail!("the answer is allow or deny") }
     };
     ctx.db.with(|c| {
+        // the write lock first, then the clock: a write that waited for another writer is judged at its own time
+        let tx = c.transaction()?;
         if !hook_is_live(pid, started) { return Ok(false); }
-        // a phone's answer also names the run version it claimed and its own deadline: both hold in the same write
+        let now = now_ms();
+        // a phone's answer also names the run version it claimed, its own deadline and its enrollment, which must
+        // still have Control: all hold in the same write that takes the open request
         let (version, deadline) = guard.map(|g| (Some(g.version), g.deadline)).unwrap_or((None, i64::MAX));
-        Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3 and ?3 < ?5
-            and (?4 is null or ?4 = (select version from run_state where run_state.run = run_ask.run))", params![id, answer, now_ms(), version, deadline])? == 1)
+        let (phone, generation) = guard.and_then(|g| g.phone.clone()).map(|(p, g)| (Some(p), Some(g))).unwrap_or((None, None));
+        let n = tx.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3 and ?3 < ?5
+            and (?4 is null or ?4 = (select version from run_state where run_state.run = run_ask.run))
+            and (?6 is null or exists (select 1 from phones where phone_id = ?6 and generation = ?7 and revoked_at is null and json_extract(grants, '$.control') = 1))",
+            params![id, answer, now, version, deadline, phone, generation])?;
+        tx.commit()?;
+        Ok(n == 1)
     })
 }
 
@@ -237,6 +258,9 @@ pub struct Guard {
     pub version: i64,
     pub deadline: i64,
     pub phone: Option<(String, String)>,
+    /// A Stop's own claim (`claim_stop`): the relay takes no other.
+    #[serde(default)]
+    pub stop: Option<String>,
 }
 
 /// The guard still holds for `run`, just before input reaches it: the deadline is ahead, the run is at the claimed
@@ -247,6 +271,10 @@ pub fn guard_holds(c: &Connection, run: &str, g: &Guard, reply: bool) -> std::re
     let row: Option<(i64, String)> = c.query_row("select version, state from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(|e| e.to_string())?;
     let Some((version, state)) = row else { return Err("the session is gone".into()) };
     if version != g.version { return Err("the session changed".into()); }
+    if let Some(token) = &g.stop {
+        let mine: bool = c.query_row("select stop_token is ?2 from run_state where run = ?1", params![run, token], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if !mine { return Err("this Stop's claim on the turn has ended".into()); }
+    }
     if reply {
         let ask = c.query_row("select count(*) from run_ask where run = ?1 and state = 'open' and expires > ?2", params![run, now], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?;
         if state == "waiting" || ask > 0 { return Err("a request waits for an answer".into()); }
@@ -274,33 +302,77 @@ pub fn live_run(c: &Connection, run: &str) -> Result<Option<String>> {
     }
 }
 
-/// How long a Stop holds its turn when its delivery is not known: the next hook event releases it sooner.
-const STOP_HELD_MS: i64 = 60_000;
+/// How long a Stop's claim is good for, and its relay deadline: a claim older than this either ended its turn (the
+/// relay finalises a Stop in the write that sends it) or surely never reached the terminal (the relay refuses it past
+/// its deadline), so it may be claimed again. The same rule for the desktop and a phone; a lost acknowledgement
+/// blocks Stop for at most this long, and never lets a second Ctrl+C reach a tool the first one already stopped.
+pub const STOP_WINDOW_MS: i64 = 5_000;
 
-/// Stop reserves the turn it interrupts, from the desktop and from a phone alike: one live run is resolved, and in the
-/// same write that finds it working or waiting (or not yet reported) and not already being stopped, the run is marked
-/// as being stopped. Its state is left alone until the Ctrl+C is delivered (`stopped`); a Stop that surely did not
-/// reach the terminal releases it (`release_stop`). A second Stop is refused instead of pressing Ctrl+C again, which
-/// would exit the tool. With `expected` (a phone's), the run must also still be at that version. Answers the run and
-/// its version after; None when no row names `run`.
-pub fn claim_stop(c: &Connection, run: &str, expected: Option<i64>) -> Result<Option<(String, i64)>> {
-    let Some(run) = live_run(c, run)? else { return Ok(None) };
-    let now = now_ms();
-    let n = c.execute("update run_state set stopping = ?2, version = version + 1 where run = ?1 and state in ('working', 'waiting', '')
-        and (stopping is null or stopping < ?3) and (?4 is null or version = ?4)", params![run, now, now - STOP_HELD_MS, expected])?;
-    if n == 0 {
-        let (stopping, version): (Option<i64>, i64) = c.query_row("select stopping, version from run_state where run = ?", [&run], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        if expected.is_some_and(|v| v != version) { bail!("the session changed since this was shown; look again"); }
-        if stopping.is_some_and(|t| t >= now - STOP_HELD_MS) { bail!("a Stop is already on its way to this session"); }
-        bail!("Nothing to stop: the session is at its prompt");
-    }
-    let version = c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?;
-    Ok(Some((run, version)))
+/// A Stop's claim on one run's turn: the run, its version after the claim, the claim's own token and its deadline.
+#[derive(Debug, Clone)]
+pub struct StopClaim {
+    pub run: String,
+    pub version: i64,
+    pub token: String,
+    pub deadline: i64,
 }
 
-/// A Stop that surely did not reach the terminal gives its turn back.
-pub fn release_stop(c: &Connection, run: &str) -> Result<()> {
-    c.execute("update run_state set stopping = null where run = ?", [run])?;
+/// A Stop claimed less than `STOP_WINDOW_MS` ago is on its way.
+pub fn stop_pending(stopping: Option<i64>, now: i64) -> bool { stopping.is_some_and(|t| t > now - STOP_WINDOW_MS) }
+
+/// Stop claims the turn it interrupts, from the desktop and from a phone alike: one live run is resolved, and in one
+/// write that finds it working or waiting (or not yet reported) and not already being stopped, the claim is recorded
+/// with its own token and the version it leaves, which the write itself returns. The run's state is left alone: the
+/// relay ends the turn in the write that sends the Ctrl+C (`stop_landed`); a Stop that surely did not reach the
+/// terminal gives its claim back (`release_stop`). With `expected` (a phone's), the run must also still be at that
+/// version. None when no row names `run` (the terminal then says it has no owned terminal).
+pub fn claim_stop(c: &Connection, run: &str, expected: Option<i64>) -> Result<Option<StopClaim>> {
+    let Some(run) = live_run(c, run)? else { return Ok(None) };
+    let (now, token) = (now_ms(), crate::util::uuid4());
+    let version: Option<i64> = c.query_row("update run_state set stopping = ?2, stop_token = ?5, version = version + 1 where run = ?1 and state in ('working', 'waiting', '')
+        and (stopping is null or stopping <= ?3) and (?4 is null or version = ?4) returning version", params![run, now, now - STOP_WINDOW_MS, expected, token], |r| r.get(0)).optional()?;
+    let Some(version) = version else {
+        let (stopping, version): (Option<i64>, i64) = c.query_row("select stopping, version from run_state where run = ?", [&run], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if expected.is_some_and(|v| v != version) { bail!("the session changed since this was shown; look again"); }
+        if stop_pending(stopping, now) { bail!("a Stop is already on its way to this session"); }
+        bail!("Nothing to stop: the session is at its prompt");
+    };
+    Ok(Some(StopClaim { run, version, token, deadline: now + STOP_WINDOW_MS }))
+}
+
+/// A Stop that surely did not reach the terminal gives its claim back; only its own.
+pub fn release_stop(c: &Connection, run: &str, token: &str) -> Result<()> {
+    c.execute("update run_state set stopping = null, stop_token = null where run = ?1 and stop_token = ?2", [run, token])?;
+    Ok(())
+}
+
+/// In the relay's held write, once the Ctrl+C went out: the turn this claim was for ends, with the requests it had
+/// (not one opened since), and nothing changes when the claim is no longer the run's.
+pub fn stop_landed(c: &Connection, run: &str, token: &str) -> Result<bool> {
+    let Some(at) = c.query_row("select stopping from run_state where run = ?1 and stop_token = ?2", [run, token], |r| r.get::<_, i64>(0)).optional()? else { return Ok(false) };
+    c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and created <= ?2", params![run, at])?;
+    c.execute("update run_state set state = 'done', reason = '', stopping = null, stop_token = null, version = version + 1, ts = ?3 where run = ?1 and stop_token = ?2",
+        params![run, token, now_ms()])?;
+    Ok(true)
+}
+
+/// What a remote reply is told while text an earlier one left unsent waits in the input.
+pub const UNSENT_TEXT: &str = "text from an earlier reply waits unsent in the session's input; finish or clear it in the terminal";
+
+/// Text a reply left unsent waits in the run's input (read inside the relay's held write): no remote reply now.
+pub fn unsent_waits(c: &Connection, run: &str) -> bool {
+    c.query_row("select needs_terminal <> 0 from run_state where run = ?", [run], |r| r.get(0)).optional().ok().flatten().unwrap_or(true)
+}
+
+/// A reply's text was typed and its Enter withheld: remote replies stop until the terminal settles it.
+pub fn withheld(c: &Connection, run: &str) -> Result<()> {
+    c.execute("update run_state set needs_terminal = 1 where run = ?", [run])?;
+    Ok(())
+}
+
+/// Someone typed at the terminal: what a withheld reply left there is theirs now.
+pub fn terminal_typed(c: &Connection, run: &str) -> Result<()> {
+    c.execute("update run_state set needs_terminal = 0 where run = ?1 and needs_terminal <> 0", [run])?;
     Ok(())
 }
 
@@ -346,6 +418,8 @@ pub struct Run {
     pub version: i64,
     /// A Stop is on its way (`claim_stop`): no other Stop, and no reply, until it lands or is released.
     pub stopping: bool,
+    /// Text a reply left unsent waits in its input: no remote reply until the terminal settles it.
+    pub needs_terminal: bool,
     /// It owns its terminal (`own_terminal`), so `terminal::reply` and `terminal::stop` reach it.
     pub terminal: bool,
     /// The request its hook holds open for an answer, if any.
@@ -371,9 +445,9 @@ pub struct Ask {
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
     let rows: Vec<(Run, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version, stopping is not null from run_state order by ts")?;
+        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version, stopping, needs_terminal <> 0 from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
-            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, stopping: r.get(13)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, stopping: stop_pending(r.get(13)?, now_ms()), needs_terminal: r.get(14)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires, hook_pid, hook_started from run_ask where state = 'open' and expires > ? order by created")?;
         let asks = st.query_map([now_ms()], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
             input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? }, r.get::<_, u32>(8)?, r.get::<_, i64>(9)?)))?;
@@ -671,13 +745,120 @@ mod tests {
         let (h, a) = hold(&ctx, &run, BASH, 20_000);
         let v: i64 = ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?)).unwrap();
         let allow = json!({"behavior": "allow"});
-        let g = |version: i64, deadline: i64| Guard { version, deadline, phone: None };
+        let g = |version: i64, deadline: i64| Guard { version, deadline, phone: None, stop: None };
         // the hook lets a request go once the app's heartbeat is 3 s old: a loaded test run must not get there first
         heartbeat(&ctx).unwrap();
         assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v - 1, now_ms() + 60_000))).unwrap(), "another version");
         assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() - 1))).unwrap(), "past the deadline");
         assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() + 60_000))).unwrap());
         assert!(h.join().unwrap().is_some());
+    }
+
+    /// (a): a phone's answer is judged at the moment its write gets the database: an action whose deadline passed while
+    /// another writer held it is refused, and so is one from a phone whose Control was withdrawn after its last check.
+    #[test]
+    fn an_answer_is_judged_when_its_write_gets_the_database() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let v: i64 = ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?)).unwrap();
+        let allow = json!({"behavior": "allow"});
+        // a phone with Control, then without it
+        let me = companion_proto::PhoneIdentity::generate().unwrap();
+        crate::phones::add(&ctx, &companion_proto::pairing::PhonePayload::of(&me, "P", "ios").unwrap(), companion_proto::api::Grants { summaries: true, transcripts: true, control: true }).unwrap();
+        let phone = crate::phones::get(&ctx, &me.id).unwrap().unwrap();
+        let g = |deadline: i64| Guard { version: v, deadline, phone: Some((phone.id.clone(), phone.generation.clone())), stop: None };
+        crate::phones::set_grants(&ctx, &me.id, &json!({"control": false})).unwrap();
+        heartbeat(&ctx).unwrap();
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 60_000))).unwrap(), "Control was withdrawn");
+        crate::phones::set_grants(&ctx, &me.id, &json!({"control": true})).unwrap();
+        // another writer holds the database past the action's deadline
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        let release = std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(400)); other.execute_batch("commit").unwrap(); });
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 150))).unwrap(), "the deadline passed while the write waited");
+        release.join().unwrap();
+        heartbeat(&ctx).unwrap();
+        assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 60_000))).unwrap());
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// (b): a Stop's claim survives a notification that repeats the state; it ends with a new state.
+    #[test]
+    fn a_stop_claim_survives_a_repeated_state_and_ends_with_a_new_one() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        let claim = claim_stop(&c, &run, None).unwrap().unwrap();
+        handle(&c, &run, &json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {}}), Duration::ZERO).unwrap();
+        let token: Option<String> = c.query_row("select stop_token from run_state where run = ?", [&run], |r| r.get(0)).unwrap();
+        assert_eq!(token.as_deref(), Some(claim.token.as_str()), "working again is the same turn");
+        handle(&c, &run, &json!({"hook_event_name": "Stop"}), Duration::ZERO).unwrap();
+        let token: Option<String> = c.query_row("select stop_token from run_state where run = ?", [&run], |r| r.get(0)).unwrap();
+        assert_eq!(token, None, "the turn ended by itself");
+    }
+
+    /// (b): a Stop's end and release touch only its own claim, and its end closes only the requests of its turn.
+    #[test]
+    fn a_stop_ends_and_releases_only_its_own_claim() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        let first = claim_stop(&c, &run, None).unwrap().unwrap();
+        // the first claim's window ran out unanswered; a second Stop claims the turn, and a request opens after it
+        c.execute("update run_state set stopping = stopping - ?2 where run = ?1", params![run, STOP_WINDOW_MS + 1]).unwrap();
+        let second = claim_stop(&c, &run, None).unwrap().unwrap();
+        c.execute("insert into run_ask(id, run, kind, tool, created, expires) values('later', ?1, 'permission', 'Bash', ?2, ?3)", params![run, now_ms() + 1, now_ms() + 60_000]).unwrap();
+        release_stop(&c, &run, &first.token).unwrap();
+        assert!(!stop_landed(&c, &run, &first.token).unwrap(), "the first claim is no longer the run's");
+        let token: Option<String> = c.query_row("select stop_token from run_state where run = ?", [&run], |r| r.get(0)).unwrap();
+        assert_eq!(token.as_deref(), Some(second.token.as_str()));
+        assert!(stop_landed(&c, &run, &second.token).unwrap());
+        let (state, ask): (String, String) = c.query_row("select (select state from run_state where run = ?1), (select state from run_ask where id = 'later')", [&run], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((state.as_str(), ask.as_str()), ("done", "open"), "a request opened after the Stop's claim is not its turn's");
+    }
+
+    /// (e): a Stop whose outcome is not known holds the turn for its window only, the same for every caller: once
+    /// delivered it ended the turn (no second Ctrl+C); if it never arrived, Stop is offered again after the window.
+    #[test]
+    fn an_unknown_stop_holds_its_turn_for_its_window_only() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        claim_stop(&c, &run, None).unwrap().unwrap();
+        assert_eq!(format!("{:#}", claim_stop(&c, &run, None).unwrap_err()), "a Stop is already on its way to this session");
+        assert!(runs(&ctx).unwrap()[0].stopping, "a phone is told the same");
+        // it never arrived: the relay refuses it past its deadline, so after the window the turn is free again
+        c.execute("update run_state set stopping = stopping - ?2 where run = ?1", params![run, STOP_WINDOW_MS + 1]).unwrap();
+        assert!(!runs(&ctx).unwrap()[0].stopping);
+        let again = claim_stop(&c, &run, None).unwrap().unwrap();
+        // it arrived: the relay ended the turn in the write that sent it, so nothing is left to stop
+        assert!(stop_landed(&c, &run, &again.token).unwrap());
+        c.execute("update run_state set stopping = null", []).unwrap();
+        assert_eq!(format!("{:#}", claim_stop(&c, &run, None).unwrap_err()), "Nothing to stop: the session is at its prompt");
+    }
+
+    /// (f): the hook of an `hrm run` started before an update writes a database the update has not migrated yet.
+    #[test]
+    fn a_hook_writes_a_database_from_before_the_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hm.db");
+        let pid = std::process::id();
+        {
+            // the hook tables as the release before them made them, and a run going on
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch("create table kv(k text primary key, v text not null);
+                create table run_state(run text primary key, pid integer not null, started integer not null, hwnd integer not null default 0, profile text not null,
+                  harness text not null, session_id text not null default '', cwd text not null default '', state text not null default '', reason text not null default '',
+                  ts integer not null default 0, terminal_port integer, terminal_token blob);
+                create table run_ask(id text primary key, run text not null, session_id text not null default '', kind text not null, tool text not null,
+                  what text not null default '', input text not null default '{}', created integer not null, expires integer not null, state text not null default 'open',
+                  answer text not null default '', hook_pid integer not null default 0, hook_started integer not null default 0);").unwrap();
+            c.execute("insert into run_state(run, pid, started, profile, harness) values('r', ?1, ?2, 'work', 'claude')", params![pid, crate::procs::start_ms(pid).unwrap()]).unwrap();
+        }
+        let c = hook_connection(&path).unwrap();
+        handle(&c, "r", &json!({"hook_event_name": "UserPromptSubmit", "session_id": "s"}), Duration::ZERO).unwrap();
+        let state: String = c.query_row("select state from run_state where run = 'r'", [], |r| r.get(0)).unwrap();
+        assert_eq!(state, "working");
     }
 
     #[test]

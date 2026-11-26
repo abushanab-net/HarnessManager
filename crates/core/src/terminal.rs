@@ -61,23 +61,26 @@ pub fn reply_guarded(data: &Path, run: &str, text: &str, guard: Option<&Guard>) 
 /// Send Ctrl+C to a local run, by run ID or by the session ID reported by its hooks.
 pub fn stop(data: &Path, run: &str) -> Result<()> { stop_guarded(data, run, None) }
 
-/// `stop`, for a phone: the run must still be at the version its action claimed (`guard.version`).
+/// `stop`, for a phone: the run must still be at the version its action claimed (`guard.version`). Every Stop claims
+/// its turn first (`hooks::claim_stop`) and carries that claim to the relay, which takes no other and ends the turn in
+/// the same write that sends the Ctrl+C. A Stop that surely did not arrive gives its claim back; one whose arrival is
+/// not known keeps it until its window ends (`hooks::STOP_WINDOW_MS`), the same for the desktop and a phone.
 #[allow(clippy::needless_return)] // the return is needed when the other platform's block is compiled in
 pub fn stop_guarded(data: &Path, run: &str, guard: Option<&Guard>) -> Result<()> {
     #[cfg(windows)]
     {
-        // one Stop per turn, whoever presses it, on one resolved run (hooks::claim_stop)
         let c = rusqlite::Connection::open(data.join("hm.db"))?;
         c.busy_timeout(std::time::Duration::from_secs(2))?;
-        let claimed = crate::hooks::claim_stop(&c, run, guard.map(|g| g.version))?;
-        if guard.is_some() && claimed.is_none() { anyhow::bail!("that session is no longer running here"); }
-        let target = claimed.as_ref().map(|(r, _)| r.as_str()).unwrap_or(run);
-        let guard = guard.zip(claimed.as_ref()).map(|(g, (_, v))| Guard { version: *v, ..g.clone() });
-        return match control::send(data, target, control::Action::Stop, guard.as_ref()) {
-            Ok(()) => { stopped(data, target); Ok(()) }
+        let Some(claim) = crate::hooks::claim_stop(&c, run, guard.map(|g| g.version))? else {
+            if guard.is_some() { anyhow::bail!("that session is no longer running here"); }
+            // no row names it: the terminal says it has none
+            return control::send(data, run, control::Action::Stop, None);
+        };
+        let g = Guard { version: claim.version, deadline: guard.map_or(claim.deadline, |g| g.deadline.min(claim.deadline)), phone: guard.and_then(|g| g.phone.clone()), stop: Some(claim.token.clone()) };
+        return match control::send(data, &claim.run, control::Action::Stop, Some(&g)) {
+            Ok(()) => Ok(()),
             Err(e) => {
-                // surely not delivered: the turn is given back; maybe delivered: it stays held until the session reports
-                if claimed.is_some() && e.downcast_ref::<MaybeDelivered>().is_none() { let _ = crate::hooks::release_stop(&c, target); }
+                if e.downcast_ref::<MaybeDelivered>().is_none() { let _ = crate::hooks::release_stop(&c, &claim.run, &claim.token); }
                 Err(e)
             }
         };
@@ -89,34 +92,8 @@ pub fn stop_guarded(data: &Path, run: &str, guard: Option<&Guard>) -> Result<()>
     }
 }
 
-/// After Stop the session is at its prompt, and no hook says so (Claude Code fires no Stop event after an interrupt):
-/// mark the run done and close its requests, so Stop is not offered again, where another Ctrl+C would exit the tool.
-#[cfg(windows)]
-fn stopped(data: &Path, run: &str) {
-    let r = rusqlite::Connection::open(data.join("hm.db")).and_then(|c| {
-        c.busy_timeout(std::time::Duration::from_secs(2))?;
-        c.execute("update run_ask set state = 'closed' where state = 'open' and run = ?1", [run])?;
-        c.execute("update run_state set state = 'done', reason = '', stopping = null, ts = ?2 where run = ?1", rusqlite::params![run, crate::util::now_ms()])
-    });
-    if let Err(e) = r { crate::log::info(&format!("stop: marking {run} done: {e:#}")); }
-}
-
 #[cfg(all(test, windows))]
 mod tests {
-    #[test]
-    fn after_stop_the_session_is_done_and_its_request_closed() {
-        let t = tempfile::tempdir().unwrap();
-        let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
-        ctx.db.with(|c| {
-            c.execute("insert into run_state(run, pid, started, profile, harness, session_id, state, stopping) values('1:2', 1, 2, 'p', 'claude', 's-1', 'waiting', 5)", [])?;
-            c.execute("insert into run_ask(id, run, kind, tool, created, expires) values('a', '1:2', 'permission', 'Bash', 0, 9999999999999)", [])?;
-            Ok(())
-        }).unwrap();
-        super::stopped(&ctx.data, "1:2"); // the run claim_stop resolved
-        let (state, ask, stopping): (String, String, Option<i64>) = ctx.db.read(|c| Ok(c.query_row("select (select state from run_state), (select state from run_ask), (select stopping from run_state)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?)).unwrap();
-        assert_eq!((state.as_str(), ask.as_str(), stopping), ("done", "closed", None));
-    }
-
     /// N1: a Stop that did not reach the terminal leaves the session as it was: still waiting, its prompt open, and a
     /// Stop offered again.
     #[test]

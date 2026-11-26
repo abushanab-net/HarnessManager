@@ -20,7 +20,6 @@ use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::IO::CancelSynchronousIo;
 
 use super::control::{Action, Command, Control, Outcome};
-use super::Guard;
 use crate::{launch::LaunchSpec, Ctx};
 
 const TICK: Duration = Duration::from_millis(40);
@@ -72,6 +71,9 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
         writer: Mutex::new(writer),
         modes: AtomicU8::new(0),
         closed: AtomicBool::new(false),
+        withheld: AtomicBool::new(false),
+        db: ctx.data.join("hm.db"),
+        run: id.to_string(),
     });
     let display = {
         let relay = relay.clone();
@@ -83,7 +85,6 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
     let result = (|| {
         let child = pty.spawn(spec, &job)?;
         let mut control = Control::listen(ctx, id)?;
-        let (db, run_id) = (ctx.data.join("hm.db"), id.to_string());
         keyboard = Some({
             let relay = relay.clone();
             let console = input.is_some();
@@ -103,8 +104,8 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
                 !display.is_finished(),
                 "terminal output closed before the tool exited"
             );
-            let (input, db, run_id) = (relay.clone(), db.clone(), run_id.clone());
-            control.accept(move |command| input.remote(command, |g, reply| holds(&db, &run_id, g, reply)))?;
+            let input = relay.clone();
+            control.accept(move |command| { let mut row = RunRow { db: &input.db, run: &input.run, held: None }; input.remote(command, &mut row) })?;
             if let Some(output) = &output {
                 let next = output.size()?;
                 if (size.X, size.Y) != (next.X, next.Y) {
@@ -135,18 +136,69 @@ struct Relay {
     writer: Mutex<File>,
     modes: AtomicU8,
     closed: AtomicBool,
+    /// A reply's text waits unsent in the input; the next local keystroke settles it.
+    withheld: AtomicBool,
+    /// The run's database and id: where remote input is decided.
+    db: std::path::PathBuf,
+    run: String,
 }
 
-/// A phone's guard, read from the run's own database row in this process, right before the input is written.
-fn holds(db: &std::path::Path, run: &str, g: &Guard, reply: bool) -> bool {
-    rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .and_then(|c| { c.busy_timeout(Duration::from_secs(2))?; Ok(c) })
-        .is_ok_and(|c| crate::hooks::guard_holds(&c, run, g, reply).is_ok())
+/// Where remote input is decided: the run's database row, held for writing from the decision until the bytes are
+/// out, so whatever else changes the run (its hooks write that row) waits for the input instead of slipping in
+/// between the check and the first byte, or the text and its Enter.
+trait Owner {
+    /// Before the first byte: take the hold and decide; the outcome to answer when the input may not go.
+    fn take(&mut self, command: &Command<'_>) -> Result<(), Outcome>;
+    /// Before a reply's Enter, inside the hold: only time can have moved the guard.
+    fn still(&self, command: &Command<'_>) -> bool;
+    /// What was written, recorded in the hold before it is let go.
+    fn done(&mut self, command: &Command<'_>, out: &Outcome);
+}
+
+struct RunRow<'a> {
+    db: &'a std::path::Path,
+    run: &'a str,
+    held: Option<rusqlite::Connection>,
+}
+
+impl Owner for RunRow<'_> {
+    fn take(&mut self, command: &Command<'_>) -> Result<(), Outcome> {
+        let reply = matches!(command.action, Action::Reply(_));
+        let held = rusqlite::Connection::open(self.db).and_then(|c| { c.busy_timeout(Duration::from_secs(2))?; c.execute_batch("begin immediate")?; Ok(c) });
+        let Ok(c) = held else { return Err(Outcome::Refused) };
+        let refused = if reply && crate::hooks::unsent_waits(&c, self.run) { Some(Outcome::Unsent) }
+            else if command.guard.as_ref().is_some_and(|g| crate::hooks::guard_holds(&c, self.run, g, reply).is_err()) { Some(Outcome::Refused) }
+            else { None };
+        if let Some(out) = refused {
+            let _ = c.execute_batch("rollback");
+            return Err(out);
+        }
+        self.held = Some(c);
+        Ok(())
+    }
+
+    fn still(&self, command: &Command<'_>) -> bool { command.guard.as_ref().is_none_or(|g| crate::util::now_ms() < g.deadline) }
+
+    fn done(&mut self, command: &Command<'_>, out: &Outcome) {
+        let Some(c) = self.held.take() else { return };
+        let r = (|| -> anyhow::Result<()> {
+            match (command.action, out) {
+                // a Ctrl+C that went out, or may have (a write broken part way), ends the turn it claimed
+                (Action::Stop, Outcome::Sent | Outcome::Broken) => {
+                    if let Some(token) = command.guard.as_ref().and_then(|g| g.stop.as_deref()) { crate::hooks::stop_landed(&c, self.run, token)?; }
+                }
+                (Action::Reply(_), Outcome::Withheld) => crate::hooks::withheld(&c, self.run)?,
+                _ => {}
+            }
+            c.execute_batch("commit")?;
+            Ok(())
+        })();
+        if let Err(e) = r { crate::log::warn(&format!("terminal: recording remote input for {}: {e:#}", self.run)); }
+    }
 }
 
 impl Relay {
-    /// `check` is the guard's test: before the first byte, and before the Enter of a reply typed in two steps.
-    fn remote(&self, command: Command<'_>, check: impl Fn(&Guard, bool) -> bool) -> Outcome {
+    fn remote(&self, command: Command<'_>, owner: &mut dyn Owner) -> Outcome {
         let mut writer = match self.writer.try_lock() {
             Ok(writer) => writer,
             Err(TryLockError::WouldBlock) => return Outcome::Busy,
@@ -155,16 +207,20 @@ impl Relay {
         if self.closed.load(Relaxed) {
             return Outcome::Closed;
         }
-        let reply = matches!(command.action, Action::Reply(_));
-        let still = || command.guard.as_ref().is_none_or(|g| check(g, reply));
-        if !still() {
-            return Outcome::Refused;
+        if let Err(out) = owner.take(&command) {
+            return out;
         }
-        match write_remote_input(&mut *writer, command.action, self.modes.load(Relaxed), &still) {
-            Ok(true) => Outcome::Sent,
-            Ok(false) => Outcome::Withheld,
-            Err(_) => Outcome::Broken,
-        }
+        let out = {
+            let still = || owner.still(&command);
+            match write_remote_input(&mut *writer, command.action, self.modes.load(Relaxed), &still) {
+                Ok(true) => Outcome::Sent,
+                Ok(false) => Outcome::Withheld,
+                Err(_) => Outcome::Broken,
+            }
+        };
+        if matches!(out, Outcome::Withheld) { self.withheld.store(true, Relaxed); }
+        owner.done(&command, &out);
+        out
     }
 }
 
@@ -247,6 +303,10 @@ fn relay_input(relay: &Relay, console: bool) -> io::Result<()> {
             }
             &buf[..read as usize]
         };
+        // what a withheld reply left in the input is the person's at the terminal now
+        if relay.withheld.swap(false, Relaxed) {
+            let _ = rusqlite::Connection::open(&relay.db).and_then(|c| { c.busy_timeout(Duration::from_secs(2))?; Ok(c) }).map(|c| crate::hooks::terminal_typed(&c, &relay.run));
+        }
         let mut writer = relay.writer.lock().unwrap();
         if !relay.closed.load(Relaxed) {
             writer.write_all(bytes)?;
@@ -598,6 +658,7 @@ fn command_line(args: &[OsString]) -> Result<Vec<u16>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::Guard;
 
     #[test]
     fn follows_input_mode_toggles_across_reads() {
@@ -636,21 +697,43 @@ mod tests {
         assert_eq!(input(Action::Stop, BRACKETED_PASTE), b"\x03");
     }
 
+    /// A test owner: says yes or no at the start, and yes to `still` this many times.
+    struct Fixed {
+        take: bool,
+        still: std::cell::Cell<u32>,
+        asked: std::cell::Cell<u32>,
+    }
+
+    impl Fixed {
+        fn new(take: bool, still: u32) -> Fixed { Fixed { take, still: std::cell::Cell::new(still), asked: std::cell::Cell::new(0) } }
+    }
+
+    impl Owner for Fixed {
+        fn take(&mut self, _: &Command<'_>) -> Result<(), Outcome> { if self.take { Ok(()) } else { Err(Outcome::Refused) } }
+        fn still(&self, _: &Command<'_>) -> bool {
+            self.asked.set(self.asked.get() + 1);
+            let left = self.still.get();
+            self.still.set(left.saturating_sub(1));
+            left > 0
+        }
+        fn done(&mut self, _: &Command<'_>, _: &Outcome) {}
+    }
+
+    fn relay_on(writer: File, modes: u8, db: &std::path::Path, run: &str) -> Relay {
+        Relay { writer: Mutex::new(writer), modes: AtomicU8::new(modes), closed: AtomicBool::new(false), withheld: AtomicBool::new(false), db: db.to_path_buf(), run: run.into() }
+    }
+
     #[test]
     fn a_second_driver_is_refused_before_writing() {
         let (mut reader, writer) = pipe().unwrap();
-        let relay = Relay {
-            writer: Mutex::new(writer),
-            modes: AtomicU8::new(0),
-            closed: AtomicBool::new(false),
-        };
+        let relay = relay_on(writer, 0, std::path::Path::new("unused"), "r");
         let first = relay.writer.lock().unwrap();
         assert!(matches!(
-            relay.remote(Command { action: Action::Reply("second"), guard: None }, |_, _| true),
+            relay.remote(Command { action: Action::Reply("second"), guard: None }, &mut Fixed::new(true, u32::MAX)),
             Outcome::Busy
         ));
         drop(first);
-        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: None }, |_, _| true), Outcome::Sent));
+        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: None }, &mut Fixed::new(true, u32::MAX)), Outcome::Sent));
         drop(relay);
         let mut received = Vec::new();
         reader.read_to_end(&mut received).unwrap();
@@ -661,17 +744,89 @@ mod tests {
     /// Enter in Win32 input mode.
     #[test]
     fn a_guard_is_checked_before_the_first_byte_and_before_the_enter() {
-        let g = Guard { version: 1, deadline: i64::MAX, phone: None };
         let (mut reader, writer) = pipe().unwrap();
-        let relay = Relay { writer: Mutex::new(writer), modes: AtomicU8::new(WIN32_INPUT), closed: AtomicBool::new(false) };
-        assert!(matches!(relay.remote(Command { action: Action::Reply("before"), guard: Some(g.clone()) }, |_, _| false), Outcome::Refused));
-        let checks = std::cell::Cell::new(0);
-        let out = relay.remote(Command { action: Action::Reply("typed"), guard: Some(g) }, |_, _| { checks.set(checks.get() + 1); checks.get() == 1 });
-        assert!(matches!(out, Outcome::Withheld));
-        assert_eq!(checks.get(), 2, "once before the text, once before the Enter");
+        let relay = relay_on(writer, WIN32_INPUT, std::path::Path::new("unused"), "r");
+        assert!(matches!(relay.remote(Command { action: Action::Reply("before"), guard: None }, &mut Fixed::new(false, 0)), Outcome::Refused));
+        let mut owner = Fixed::new(true, 0);
+        assert!(matches!(relay.remote(Command { action: Action::Reply("typed"), guard: None }, &mut owner), Outcome::Withheld));
+        assert_eq!(owner.asked.get(), 1, "asked before the Enter");
         drop(relay);
         let mut received = Vec::new();
         reader.read_to_end(&mut received).unwrap();
         assert_eq!(received, b"typed", "the text, no Enter, and nothing of the refused one");
+    }
+
+    /// A data folder whose run `r` is working, as its hooks left it.
+    fn run_row() -> (tempfile::TempDir, crate::Ctx) {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = crate::Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness, state, version) values('r', 1, 1, 'p', 'claude', 'working', 4)", [])?)).unwrap();
+        (t, ctx)
+    }
+
+    fn row<T: rusqlite::types::FromSql>(ctx: &crate::Ctx, sql: &str) -> T { ctx.db.read(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() }
+
+    /// (c): the run's row is held from the decision until the input is out: a hook writing the run in between waits for
+    /// it, so the turn cannot change between the check and the first byte, or the text and its Enter.
+    #[test]
+    fn a_hook_writing_the_run_waits_for_the_input_in_flight() {
+        let (_t, ctx) = run_row();
+        let db = ctx.data.join("hm.db");
+        let (_reader, writer) = pipe().unwrap();
+        let relay = relay_on(writer, WIN32_INPUT, &db, "r");
+        let started = std::time::Instant::now();
+        let hook = {
+            let db = db.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(60));
+                let c = rusqlite::Connection::open(&db).unwrap();
+                c.busy_timeout(Duration::from_secs(5)).unwrap();
+                c.execute("update run_state set state = 'waiting', version = version + 1 where run = 'r'", []).unwrap();
+                started.elapsed()
+            })
+        };
+        let out = relay.remote(Command { action: Action::Reply("go on"), guard: None }, &mut RunRow { db: &db, run: "r", held: None });
+        let sent = started.elapsed();
+        assert!(matches!(out, Outcome::Sent));
+        let hooked = hook.join().unwrap();
+        assert!(hooked >= sent, "the hook wrote at {hooked:?}, inside the input that ended at {sent:?}");
+    }
+
+    /// (c): a reply typed but not submitted keeps every remote reply out until the terminal settles it.
+    #[test]
+    fn text_left_unsent_keeps_remote_replies_out_until_the_terminal_settles_it() {
+        let (_t, ctx) = run_row();
+        let db = ctx.data.join("hm.db");
+        let (_reader, writer) = pipe().unwrap();
+        let relay = relay_on(writer, WIN32_INPUT, &db, "r");
+        let g = Guard { version: 4, deadline: crate::util::now_ms() + 60, phone: None, stop: None };
+        let out = relay.remote(Command { action: Action::Reply("typed"), guard: Some(g) }, &mut RunRow { db: &db, run: "r", held: None });
+        assert!(matches!(out, Outcome::Withheld));
+        assert_eq!(row::<i64>(&ctx, "select needs_terminal from run_state"), 1);
+        assert!(matches!(relay.remote(Command { action: Action::Reply("next"), guard: None }, &mut RunRow { db: &db, run: "r", held: None }), Outcome::Unsent));
+        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: None }, &mut RunRow { db: &db, run: "r", held: None }), Outcome::Sent), "Stop is still possible");
+        crate::hooks::terminal_typed(&rusqlite::Connection::open(&db).unwrap(), "r").unwrap();
+        assert!(matches!(relay.remote(Command { action: Action::Reply("next"), guard: None }, &mut RunRow { db: &db, run: "r", held: None }), Outcome::Sent));
+    }
+
+    /// (b): the relay takes only the Stop whose claim is the run's, and ends that turn in the same write.
+    #[test]
+    fn the_relay_takes_only_the_stop_whose_claim_is_the_runs() {
+        let (_t, ctx) = run_row();
+        let db = ctx.data.join("hm.db");
+        let pid = std::process::id();
+        ctx.db.with(|c| Ok(c.execute("update run_state set pid = ?1, started = ?2", rusqlite::params![pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
+        let (mut reader, writer) = pipe().unwrap();
+        let relay = relay_on(writer, 0, &db, "r");
+        let claim = crate::hooks::claim_stop(&rusqlite::Connection::open(&db).unwrap(), "r", None).unwrap().unwrap();
+        let g = |token: &str| Guard { version: claim.version, deadline: claim.deadline, phone: None, stop: Some(token.into()) };
+        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: Some(g("another")) }, &mut RunRow { db: &db, run: "r", held: None }), Outcome::Refused));
+        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: Some(g(&claim.token)) }, &mut RunRow { db: &db, run: "r", held: None }), Outcome::Sent));
+        let (state, token): (String, Option<String>) = ctx.db.read(|c| Ok(c.query_row("select state, stop_token from run_state", [], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap();
+        assert_eq!((state.as_str(), token), ("done", None));
+        drop(relay);
+        let mut received = Vec::new();
+        reader.read_to_end(&mut received).unwrap();
+        assert_eq!(received, [3], "one Ctrl+C");
     }
 }

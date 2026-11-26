@@ -29,6 +29,12 @@ type Seam = Option<Box<dyn FnOnce(&Runtime)>>;
 
 #[cfg(test)]
 thread_local! {
+    /// Test seam: the next registrations mDNS refuses.
+    pub(crate) static FAILED_REGISTRATIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+thread_local! {
     /// Test seam: runs where a phone pairing decision has looked and not yet acted (with `phone` held, so nothing else
     /// can change the attempt there).
     pub(crate) static PHONE_SEAM: std::cell::RefCell<Seam> = std::cell::RefCell::new(None);
@@ -49,7 +55,8 @@ pub struct Runtime {
     host: Mutex<Option<pairing::Host>>,
     phone: Mutex<Option<pairing::PhoneHost>>,
     /// The phone pairing port mDNS announces now; only changed while `phone` is held, so it follows the attempt shown.
-    phone_announced: Mutex<Option<u16>>,
+    /// With whether mDNS took the registration: one that failed is tried again at each tick while the attempt lasts.
+    phone_announced: Mutex<Option<(u16, bool)>>,
     on_event: OnEvent,
 }
 
@@ -155,8 +162,12 @@ impl Runtime {
 
     /// Announce the port of the phone pairing shown, or none; the caller holds `phone`, so the port is the attempt's.
     fn advertise_phone(&self, _shown: &Option<pairing::PhoneHost>, port: Option<u16>) {
-        *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()) = port;
-        if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { let _ = m.advertise_phone(port); }
+        // without mDNS (a loopback listener) there is nothing to register
+        let took = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_none_or(|m| m.advertise_phone(port).is_ok());
+        #[cfg(test)]
+        let took = took && !FAILED_REGISTRATIONS.with(|n| { let failing = n.get() > 0; n.set(n.get().saturating_sub(1)); failing });
+        if !took { crate::log::warn("phones: mDNS did not take the pairing announcement; trying again"); }
+        *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()) = port.map(|p| (p, took));
     }
 
     /// A phone pairing that ended keeps its status for the window, but is no longer announced: decided under the same
@@ -166,7 +177,10 @@ impl Runtime {
         let done = shown.as_ref().is_some_and(|h| !matches!(h.status()["state"].as_str(), Some("waiting" | "confirm")));
         #[cfg(test)]
         phone_seam(self);
-        if done && self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()).is_some() { self.advertise_phone(&shown, None); }
+        let announced = *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner());
+        if done && announced.is_some() { self.advertise_phone(&shown, None); }
+        // an attempt still shown whose announcement mDNS did not take: again
+        if let (false, Some((port, false))) = (done || shown.is_none(), announced) { self.advertise_phone(&shown, Some(port)); }
     }
 
     /// Show a code to a phone for two minutes: `{attempt, code, expires_at, host_hint, port, qr, state}`; the QR code
@@ -236,7 +250,11 @@ impl Runtime {
 
     /// Tests: the phone pairing port announced now.
     #[cfg(test)]
-    pub(crate) fn phone_announced(&self) -> Option<u16> { *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()) }
+    pub(crate) fn phone_announced(&self) -> Option<u16> { self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()).map(|(p, _)| p) }
+
+    /// Tests: the announcement shown was taken by mDNS.
+    #[cfg(test)]
+    pub(crate) fn phone_registered(&self) -> bool { self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|(_, took)| took) }
 
     /// Tests: what the periodic tick does for the phone pairing.
     #[cfg(test)]

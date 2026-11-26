@@ -238,6 +238,29 @@ pub(crate) fn add_column(conn: &Connection, table: &str, col: &str, ty: &str) ->
     }
 }
 
+/// The columns the hook tables gained after their first version. `hrm hook` adds them too, before it writes: an
+/// `hrm run` started before an update keeps running, and its hooks run the updated `hrm` before anything migrates.
+pub(crate) fn hook_columns(conn: &Connection) -> rusqlite::Result<()> {
+    for (table, col, ty) in [
+        ("run_state", "terminal_port", "integer"),
+        ("run_state", "terminal_token", "blob"),
+        ("run_ask", "hook_pid", "integer not null default 0"),
+        ("run_ask", "hook_started", "integer not null default 0"),
+        // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
+        ("run_state", "version", "integer not null default 0"),
+        // a Stop on its way: when it was claimed and by which claim (hooks::claim_stop)
+        ("run_state", "stopping", "integer"),
+        ("run_state", "stop_token", "text"),
+        // a reply typed but not submitted waits in the input: no remote reply until the terminal settles it
+        ("run_state", "needs_terminal", "integer not null default 0"),
+    ] {
+        if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
+            add_column(conn, table, col, ty)?;
+        }
+    }
+    Ok(())
+}
+
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
         let mut conn = Connection::open(path)?;
@@ -251,15 +274,8 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         // what each session hrm run started last reported through its hooks (hooks.rs)
         conn.execute_batch(crate::hooks::TABLE)?;
+        hook_columns(&conn)?;
         for (table, col, ty) in [
-            ("run_state", "terminal_port", "integer"),
-            ("run_state", "terminal_token", "blob"),
-            ("run_ask", "hook_pid", "integer not null default 0"),
-            ("run_ask", "hook_started", "integer not null default 0"),
-            // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
-            ("run_state", "version", "integer not null default 0"),
-            // a Stop on its way (hooks::claim_stop)
-            ("run_state", "stopping", "integer"),
             // a phone's enrollment, and the listener's acknowledgement of a revocation (phones.rs)
             ("phones", "generation", "text not null default ''"),
             ("phones", "cut_at", "integer"),

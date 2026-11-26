@@ -127,15 +127,39 @@ pub fn get(ctx: &Ctx, id: &str) -> Result<Option<Phone>> {
         |r| Ok(Phone { id: r.get(0)?, name: r.get(1)?, grants: grants_of(&r.get::<_, String>(2)?), revoked_at: r.get(3)?, x25519: r.get(4)?, generation: r.get(5)? })).optional()?))
 }
 
-/// The enrollment this certificate belongs to, when it is not revoked: `(phone_id, generation)`.
+/// Who a certificate belongs to, read from one snapshot of the phones and the paired computers.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Holder {
+    Nobody,
+    /// One phone enrollment, not revoked: `(phone_id, generation)`.
+    Phone(String, String),
+    /// One paired computer.
+    Peer,
+    /// More than one holder (rows from before enrollment checked certificates): nobody is let in on it.
+    Ambiguous,
+}
+
+pub fn holder(ctx: &Ctx, der: &[u8]) -> Result<Holder> {
+    let same = |pem: &str| crate::sync::peer::identity::pem_to_der(pem).ok().as_deref() == Some(der);
+    ctx.db.read(|c| {
+        let tx = c.transaction()?;
+        let phones: Vec<(String, String, String)> = tx.prepare("select phone_id, generation, cert_pem from phones where revoked_at is null")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+        let peers: Vec<String> = tx.prepare("select cert_pem from peers where coalesce(cert_pem, '') <> ''")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        let mut phones: Vec<(String, String)> = phones.into_iter().filter(|(_, _, pem)| same(pem)).map(|(id, g, _)| (id, g)).collect();
+        let peers = peers.iter().filter(|pem| same(pem)).count();
+        Ok(match (phones.len(), peers) {
+            (0, 0) => Holder::Nobody,
+            (1, 0) => { let (id, g) = phones.remove(0); Holder::Phone(id, g) }
+            (0, 1) => Holder::Peer,
+            _ => Holder::Ambiguous,
+        })
+    })
+}
+
+/// The enrollment this certificate belongs to, when it is the certificate's only holder: `(phone_id, generation)`.
 pub fn by_cert(ctx: &Ctx, der: &[u8]) -> Option<(String, String)> {
-    let rows: Vec<(String, String, String)> = ctx.db.read(|c| Ok(c.prepare("select phone_id, generation, cert_pem from phones where revoked_at is null")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)).ok()?;
-    let mut hits = rows.into_iter().filter(|(_, _, pem)| crate::sync::peer::identity::pem_to_der(pem).ok().as_deref() == Some(der));
-    let first = hits.next().map(|(id, g, _)| (id, g));
-    // two enrollments with one certificate (rows from before enrollment checked it): neither, rather than a guess
-    if hits.next().is_some() { return None; }
-    first
+    match holder(ctx, der) { Ok(Holder::Phone(id, g)) => Some((id, g)), _ => None }
 }
 
 /// Ed25519's SubjectPublicKeyInfo (RFC 8410) for a public key: what the phone's certificate must carry.

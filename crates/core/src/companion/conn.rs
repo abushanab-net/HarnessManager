@@ -136,14 +136,12 @@ pub(crate) fn sweep(ctx: &Ctx) {
     }
 }
 
-/// The certificate's owner: a phone's enrollment not revoked, or a paired computer; None for anything else, and
-/// for a certificate both claim.
-fn caller_of(ctx: &Ctx, der: &[u8]) -> Option<Caller> {
-    let pems: Vec<String> = ctx.db.read(|c| Ok(c.prepare("select cert_pem from peers where coalesce(cert_pem, '') <> ''")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).ok()?;
-    let peer = pems.iter().any(|p| crate::sync::peer::identity::pem_to_der(p).ok().as_deref() == Some(der));
-    match (crate::phones::by_cert(ctx, der), peer) {
-        (Some((id, generation)), false) => Some(Caller::Phone { id, generation }),
-        (None, true) => Some(Caller::Peer),
+/// The certificate's owner, from one snapshot: a phone's enrollment or a paired computer when it is the only holder;
+/// None for nobody, for a certificate two holders claim, and when it could not be read.
+pub(crate) fn caller_of(ctx: &Ctx, der: &[u8]) -> Option<Caller> {
+    match crate::phones::holder(ctx, der) {
+        Ok(crate::phones::Holder::Phone(id, generation)) => Some(Caller::Phone { id, generation }),
+        Ok(crate::phones::Holder::Peer) => Some(Caller::Peer),
         _ => None,
     }
 }

@@ -144,8 +144,12 @@ POST /c1/actions
   recording the outcome, or the terminal took the input and its acknowledgement was lost; the action may have arrived
   and is never sent again. Where the effect is committed (the hook's write of an answer, the terminal relay before the
   first byte and again before a reply's Enter) the claimed run version, the action's deadline and the phone's Control
-  are checked once more; a reply typed but stopped before its Enter is `unavailable`, its detail saying so. An open
-  request blocks a reply, and a Stop holds its turn apart from the run's state until it lands or surely failed.
+  are checked once more, with the run's row held from that check until the bytes are out (hooks wait), and an
+  answer is judged when its write gets the database. A reply typed but stopped before its Enter is `unavailable`, its
+  detail saying so, and no remote reply goes to that session until the text is settled at the terminal. An open
+  request blocks a reply, and a session that does not report its turns takes no reply from a phone. Every Stop
+  (desktop or phone) claims its turn with a token the relay checks, and the relay ends that turn in the write that
+  sends the Ctrl+C; a claim whose outcome is not known holds the turn for 5 s, after which it surely never arrived.
 - A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
   automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
   fails too.

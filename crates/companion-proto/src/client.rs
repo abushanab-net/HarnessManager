@@ -166,14 +166,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Events<S> {
                 }
                 Err(_) if self.pinged.is_some() => return Some(Err(anyhow!("the computer stopped answering"))),
                 Err(_) => {
-                    if let Err(e) = self.ws.send(Message::Ping(Vec::new().into())).await { return Some(Err(e.into())); }
+                    // a ping that cannot even be written (a socket backed up) counts against the same answer time
+                    match tokio::time::timeout(self.answer_within, self.ws.send(Message::Ping(Vec::new().into()))).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => return Some(Err(e.into())),
+                        Err(_) => return Some(Err(anyhow!("the computer stopped answering"))),
+                    }
                     self.pinged = Some(Instant::now());
                 }
             }
         }
     }
 
-    pub async fn close(mut self) { let _ = self.ws.send(Message::Close(None)).await; }
+    pub async fn close(mut self) { let _ = tokio::time::timeout(self.answer_within, self.ws.send(Message::Close(None))).await; }
 }
 
 #[cfg(test)]
@@ -240,5 +245,46 @@ mod tests {
         let mut ev = events_at(&url).await;
         let r = tokio::time::timeout(Duration::from_secs(2), ev.next()).await.unwrap();
         assert!(matches!(r, Some(Err(_))), "{:?}", r.map(|x| x.map(|(_, u)| u)));
+    }
+
+    /// A socket whose writes stop going through once `stall` is set (a backed-up connection).
+    struct Stalling {
+        inner: TcpStream,
+        stall: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl AsyncRead for Stalling {
+        fn poll_read(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncWrite for Stalling {
+        fn poll_write(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+            if self.stall.load(std::sync::atomic::Ordering::SeqCst) { return std::task::Poll::Pending; }
+            std::pin::Pin::new(&mut self.inner).poll_write(cx, buf)
+        }
+        fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            if self.stall.load(std::sync::atomic::Ordering::SeqCst) { return std::task::Poll::Pending; }
+            std::pin::Pin::new(&mut self.inner).poll_flush(cx)
+        }
+        fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+            std::pin::Pin::new(&mut self.inner).poll_shutdown(cx)
+        }
+    }
+
+    /// N5: a ping that cannot be written (the socket backed up) ends the events within the answer time, and closing
+    /// such a socket returns too.
+    #[tokio::test]
+    async fn a_backed_up_socket_ends_the_events_and_closes_in_bounded_time() {
+        let url = server(|ws| async move { let _held = ws; tokio::time::sleep(Duration::from_secs(10)).await; }).await;
+        let stall = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let s = Stalling { inner: TcpStream::connect(url.trim_start_matches("ws://").trim_end_matches("/c1/events")).await.unwrap(), stall: stall.clone() };
+        let (ws, _) = tokio_tungstenite::client_async_with_config(url.as_str(), s, Some(events_config())).await.unwrap();
+        stall.store(true, std::sync::atomic::Ordering::SeqCst);
+        let mut ev = Events::over(ws, Duration::from_millis(100), Duration::from_millis(100));
+        let r = tokio::time::timeout(Duration::from_secs(2), ev.next()).await.expect("the heartbeat's write is bounded");
+        assert!(format!("{:#}", r.unwrap().unwrap_err()).contains("stopped answering"));
+        tokio::time::timeout(Duration::from_secs(2), ev.close()).await.expect("closing is bounded");
     }
 }

@@ -823,8 +823,14 @@ fn every_page_fits_512_kib_whatever_its_turns_hold() {
         let v = super::page(&ctx, "claude", "p", "s", &tr, from).unwrap();
         let n = v.to_string().len();
         assert!(n <= super::PAGE_BYTES, "page from turn {from}: {n} bytes");
-        assert_eq!(v["turns"][0]["truncated"], true, "page from turn {from}");
+        assert!(!v["turns"].as_array().unwrap().is_empty(), "page from turn {from}");
     }
+    // the page's own fields come from the session and can be long (an imported id): they are measured, not guessed
+    let long_id = "i".repeat(300_000);
+    let v = super::page(&ctx, "opencode", "p", &long_id, &tr, 1).unwrap();
+    assert!(v.to_string().len() <= super::PAGE_BYTES, "a page of {} bytes", v.to_string().len());
+    assert_eq!(v["turns"][0]["truncated"], true);
+    assert!(super::page(&ctx, "opencode", "p", &"i".repeat(600_000), &tr, 1).is_err(), "names longer than a page");
 }
 
 /// #14: the tick decides and clears under the lock that starts an attempt: an attempt started where the tick found the
@@ -914,11 +920,20 @@ fn a_change_to_the_write_ahead_log_is_a_change_to_the_transcript() {
     let f = session_file(&ctx, &cwd, "n6", "hi");
     crate::index::refresh(&ctx, crate::index::Scope::All).unwrap();
     let reads = || super::READS.with(|r| r.get());
+    // N6: a file written in the last two seconds is served, never kept: its next change may not show in size or time
+    let before = reads();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
+    assert_eq!(reads(), before + 2, "a fresh file is read each time");
+    let age = |p: &std::path::Path| std::fs::File::options().write(true).open(p).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(10)).unwrap();
+    age(&f);
     let before = reads();
     super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
     super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
     assert_eq!(reads(), before + 1, "the second page is the kept copy");
-    std::fs::write(format!("{}-wal", f.display()), b"new pages").unwrap();
+    let wal = std::path::PathBuf::from(format!("{}-wal", f.display()));
+    std::fs::write(&wal, b"new pages").unwrap();
+    age(&wal);
     super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
     assert_eq!(reads(), before + 2, "the log changed: read again");
 }
@@ -935,4 +950,61 @@ fn a_push_handle_change_belongs_to_its_enrollment() {
     let handle: Option<String> = ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones where phone_id = ?", [&old.id], |r| r.get(0))?)).unwrap();
     assert_eq!(handle, None);
     crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h")).unwrap();
+}
+
+// ---------- the third review (Codex, at fe1dcd5) ----------
+
+/// (c): a phone's reply waits while text a reply left unsent is in the input, and is refused for a session that does
+/// not report its turns (nothing then shows a prompt opening under it).
+#[test]
+fn a_phone_reply_waits_for_unsent_text_and_needs_reported_turns() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    let before = dispatched();
+    let (run, v) = working(&ctx);
+    ctx.db.with(|c| Ok(c.execute("update run_state set needs_terminal = 1 where run = ?", [&run])?)).unwrap();
+    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-1", json!({"text": "next"}))).unwrap();
+    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::UNSENT, before));
+    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
+    assert_eq!(super::run_actions(&p, &shown)["reply"]["reason"], super::actions::UNSENT);
+    let (run, v) = working(&ctx);
+    ctx.db.with(|c| Ok(c.execute("update run_state set state = '' where run = ?", [&run])?)).unwrap();
+    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-2", json!({"text": "next"}))).unwrap();
+    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::NO_TURNS, before));
+}
+
+/// (d): a certificate is let in only when one snapshot shows exactly one holder: two phone rows and a computer
+/// sharing it (rows from before enrollment checked) admit nobody, not the computer.
+#[test]
+fn a_certificate_is_let_in_only_for_its_one_holder() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let x = PhoneIdentity::generate().unwrap();
+    let xp = pairing::PhonePayload::of(&x, "X", "ios").unwrap();
+    let der = identity::pem_to_der(&xp.cert_pem).unwrap();
+    use crate::companion::conn::{caller_of, Caller};
+    assert_eq!(caller_of(&ctx, &der), None, "nobody");
+    crate::phones::add(&ctx, &xp, Grants::default()).unwrap();
+    assert!(matches!(caller_of(&ctx, &der), Some(Caller::Phone { .. })), "one phone");
+    ctx.db.with(|c| {
+        c.execute("insert into phones(phone_id, name, cert_pem, grants, generation) values('twin', 'T', ?1, '{}', 'g')", [&xp.cert_pem])?;
+        c.execute("insert into peers(device_id, name, cert_pem) values('legacy-peer', 'L', ?1)", [&xp.cert_pem])?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(caller_of(&ctx, &der), None, "two phones and a computer: nobody, not the computer");
+    ctx.db.with(|c| Ok(c.execute("delete from phones", [])?)).unwrap();
+    assert_eq!(caller_of(&ctx, &der), Some(Caller::Peer), "the computer alone");
+}
+
+/// #14: an announcement mDNS did not take is tried again while the attempt is shown.
+#[test]
+fn an_announcement_mdns_did_not_take_is_tried_again() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    crate::sync::peer::FAILED_REGISTRATIONS.with(|n| n.set(1));
+    d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap();
+    assert!(!d.rt.phone_registered());
+    d.rt.tick_phone();
+    assert!(d.rt.phone_registered(), "registered at the next tick");
 }

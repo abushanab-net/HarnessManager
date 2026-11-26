@@ -164,7 +164,9 @@ pub(crate) fn run_actions(p: &Phone, r: &hooks::Run) -> Value {
     if !r.terminal { let n = no("Needs Harness Manager's own terminal"); return json!({"reply": n, "stop": n}); }
     if r.stopping { let n = no("a Stop is already on its way to this session"); return json!({"reply": n, "stop": n}); }
     // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
-    json!({"reply": if r.state == "waiting" || r.ask.is_some() { no("Answer the request first") } else { json!({"ok": true}) },
+    let reply = if r.state == "waiting" || r.ask.is_some() { no("Answer the request first") } else if r.needs_terminal { no(actions::UNSENT) }
+        else if r.state.is_empty() { no(actions::NO_TURNS) } else { json!({"ok": true}) };
+    json!({"reply": reply,
         "stop": if r.state == "working" || r.state == "waiting" { json!({"ok": true}) } else { no("Nothing to stop: the session is at its prompt") }})
 }
 
@@ -228,29 +230,27 @@ fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::R
     #[cfg(test)]
     READS.with(|r| r.set(r.get() + 1));
     let t = Arc::new(t);
-    *last = Some((t.meta.source_path.clone(), sig, t.clone()));
+    // a file written in the last two seconds can change again without its size or time showing it (OpenCode's log
+    // keeps its size): such a read is served, not kept, as the session reader does
+    if sig.iter().all(|s| crate::util::still(*s)) { *last = Some((t.meta.source_path.clone(), sig, t.clone())); }
     Ok(t)
 }
 
-/// What a page holds besides its turns (names, title cut to 200 characters, the counts): kept out of the turns' budget,
-/// so a whole page stays within `PAGE_BYTES`.
-const ENVELOPE: usize = 4 * 1024;
-
-/// A turn that fits a page: its long texts cut to 2,000 characters, then its steps left out, then its answers after
-/// the first 20 (with their places), and at last only the prompt; `truncated` says it was cut.
-fn bounded(mut v: Value) -> Value {
-    fn cut(v: &mut Value) {
+/// A turn that fits `budget` bytes: its long texts cut to 2,000 characters, then its steps left out, then its answers
+/// after the first 20 (with their places), and at last only its prompt, cut to fit; `truncated` says it was cut.
+fn bounded(mut v: Value, budget: usize) -> Value {
+    fn cut(v: &mut Value, chars: usize) {
         match v {
-            Value::String(t) if t.chars().count() > 2000 => { *t = t.chars().take(2000).collect::<String>() + "…"; }
-            Value::Array(a) => a.iter_mut().for_each(cut),
-            Value::Object(o) => o.values_mut().for_each(cut),
+            Value::String(t) if t.chars().count() > chars => { *t = t.chars().take(chars).collect::<String>() + "…"; }
+            Value::Array(a) => a.iter_mut().for_each(|x| cut(x, chars)),
+            Value::Object(o) => o.values_mut().for_each(|x| cut(x, chars)),
             _ => {}
         }
     }
-    let fits = |v: &Value| v.to_string().len() <= PAGE_BYTES - ENVELOPE;
+    let fits = |v: &Value| v.to_string().len() <= budget;
     if fits(&v) { return v; }
     v["truncated"] = json!(true);
-    cut(&mut v);
+    cut(&mut v, 2000);
     if !fits(&v) { let n = v["steps"].as_array().map(Vec::len).unwrap_or(0); v["steps"] = json!([]); v["steps_left_out"] = json!(n); }
     if !fits(&v) {
         let n = v["answer"].as_array().map(Vec::len).unwrap_or(0);
@@ -258,25 +258,34 @@ fn bounded(mut v: Value) -> Value {
         v["answers_left_out"] = json!(n.saturating_sub(20));
     }
     if !fits(&v) {
-        v = json!({"prompt": v["prompt"], "prompt_at": v["prompt_at"], "answer_at": v["answer_at"], "model": v["model"], "steps": [], "answer": [], "answer_pos": [], "truncated": true});
+        // a character takes at most 6 bytes in JSON (``): the prompt alone, cut to what the budget holds
+        let mut p = json!({"prompt": v["prompt"], "prompt_at": v["prompt_at"], "answer_at": v["answer_at"], "model": v["model"], "steps": [], "answer": [], "answer_pos": [], "truncated": true});
+        cut(&mut p, (budget.saturating_sub(512) / 6).min(2000));
+        v = p;
     }
     v
 }
 
-/// One page of a transcript from turn `from`: at most `TURNS_PER_PAGE` turns, all of it within `PAGE_BYTES`.
+/// One page of a transcript from turn `from`: at most `TURNS_PER_PAGE` turns, the whole answer within `PAGE_BYTES`.
+/// The page's own fields are measured as they will be written (names come from the session, of any length), and the
+/// turns get what is left.
 fn page(ctx: &Ctx, harness: &str, profile: &str, id: &str, t: &crate::model::Transcript, from: usize) -> anyhow::Result<Value> {
     let from = from.min(t.turns.len());
+    let title: String = t.meta.title.chars().take(200).collect();
+    let envelope = |turns: Vec<Value>, next: Option<usize>| stamped(ctx, json!({"harness": harness, "profile": profile, "id": id, "title": title, "after": from, "turns": turns, "next": next, "total": t.turns.len()}));
+    // the largest the fields can be: `next` at its longest, and room for the clock's digits to grow
+    let budget = PAGE_BYTES.saturating_sub(envelope(vec![], Some(usize::MAX)).to_string().len() + 32);
+    if budget < 4096 { anyhow::bail!("this session's names are too long to page"); }
     let (mut turns, mut bytes) = (vec![], 0);
     for turn in &t.turns[from..] {
-        let v = bounded(serde_json::to_value(turn)?);
+        let v = bounded(serde_json::to_value(turn)?, budget);
         let n = v.to_string().len() + 1;
-        if turns.len() >= TURNS_PER_PAGE || (!turns.is_empty() && bytes + n > PAGE_BYTES - ENVELOPE) { break; }
+        if turns.len() >= TURNS_PER_PAGE || (!turns.is_empty() && bytes + n > budget) { break; }
         bytes += n;
         turns.push(v);
     }
     let end = from + turns.len();
-    let title: String = t.meta.title.chars().take(200).collect();
-    Ok(stamped(ctx, json!({"harness": harness, "profile": profile, "id": id, "title": title, "after": from, "turns": turns, "next": (end < t.turns.len()).then_some(end), "total": t.turns.len()})))
+    Ok(envelope(turns, (end < t.turns.len()).then_some(end)))
 }
 
 async fn transcript(State(ctx): State<Arc<Ctx>>, Path((harness, profile, id)): Path<(String, String, String)>, Query(q): Query<After>) -> Response {

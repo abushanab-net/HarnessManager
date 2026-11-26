@@ -25,7 +25,7 @@ const TAG_LEN: usize = 16;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CLIENTS: usize = 8;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Action<'a> {
     Reply(&'a str),
     Stop,
@@ -107,6 +107,8 @@ pub(super) enum Outcome {
     Refused = 3,
     Withheld = 4,
     Broken = 5,
+    /// Nothing written: text an earlier reply left unsent waits in the input.
+    Unsent = 6,
 }
 
 pub(super) struct Control {
@@ -362,6 +364,7 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>, guard: Option<&Gu
         [code] if *code == Outcome::Refused as u8 => bail!("the session changed before the input could reach it; look again"),
         [code] if *code == Outcome::Withheld as u8 => Err(Withheld("the reply was typed into the session but not sent: it changed before Enter; the text waits in its input".into()).into()),
         [code] if *code == Outcome::Broken as u8 => Err(maybe("the terminal failed while writing the input")),
+        [code] if *code == Outcome::Unsent as u8 => bail!("{}", crate::hooks::UNSENT_TEXT),
         _ => Err(maybe("invalid terminal response")),
     }
 }
@@ -419,7 +422,7 @@ mod tests {
 
     #[test]
     fn a_guard_rides_before_the_action_and_reads_back() {
-        let g = Guard { version: 7, deadline: 99, phone: Some(("p".into(), "g".into())) };
+        let g = Guard { version: 7, deadline: 99, phone: Some(("p".into(), "g".into())), stop: Some("t".into()) };
         let bytes = Command { action: Action::Reply("hi"), guard: Some(g.clone()) }.encode().unwrap();
         assert_eq!(Command::parse(&bytes).unwrap(), Command { action: Action::Reply("hi"), guard: Some(g) });
         assert_eq!(Command::parse(b"s").unwrap(), Command { action: Action::Stop, guard: None });
