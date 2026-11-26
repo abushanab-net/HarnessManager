@@ -363,7 +363,13 @@ try {
       await click('[data-testid=use-claude]');
       assert.deepEqual(await clickNow('[data-testid=use-prefer]', "return [document.querySelector('[data-testid=use-name]').textContent, document.querySelector('[data-testid=use-prefer]').getAttribute('aria-pressed')]"), ['work-max', 'true']);
       await hasText('[data-testid=use-why]', '64% of the 5-hour window left · resets in 2 h');
+      // the choice is kept in core, where the phone's Use next reads it too, and the page reads it back from there
+      const kept = () => exec("return window.__TAURI__.core.invoke('call', { op: 'home', args: { days: 1, hours: 24 } }).then((r) => r.five_hour_first)");
+      await waitFor(async () => (await kept()) === true, '5h first kept in core');
+      await overview();
+      assert.equal(await exec("return document.querySelector('[data-testid=use-prefer]').getAttribute('aria-pressed')"), 'true', 'and drawn from there');
       assert.equal(await clickNow('[data-testid=use-prefer]', "return document.querySelector('[data-testid=use-name]').textContent"), 'claude-main', 'and off again');
+      await waitFor(async () => (await kept()) === false, '5h first off in core');
       await click('[data-testid=use-any]');
     } finally { await sampleOff(); await overview(); }
   });

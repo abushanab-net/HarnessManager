@@ -13,8 +13,15 @@ pub fn home(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     let scope = a["scope"].as_str();
     let since = a["hours"].as_i64().map(hrm_core::util::since_hours);
     let (total, rows) = service::request_log_since(ctx, days, since, h, scope, a["limit"].as_i64().unwrap_or(50), a["offset"].as_i64().unwrap_or(0))?;
-    Ok(json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows},
+    Ok(json!({"overview": service::overview(ctx, days, h, scope)?, "requests": {"total": total, "rows": rows}, "five_hour_first": hrm_core::recommend::five_hour_first(ctx),
               "dash": hrm_core::dash::dashboard(ctx, a["hours"].as_i64().unwrap_or(24), h, scope)?, "activity": service::activity(ctx, h, scope)?}))
+}
+
+/// Use next's "5h first", kept in core so the phone and the widgets recommend the same account as the desktop.
+pub fn use_next_prefer(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
+    let on = a["on"].as_bool().unwrap_or(false);
+    hrm_core::recommend::set_five_hour_first(ctx, on)?;
+    Ok(json!({"five_hour_first": on}))
 }
 
 pub fn requests(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {

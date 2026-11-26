@@ -266,7 +266,7 @@ view('home', async (sheet) => {
   const [state, d, pcs, cost, open] = await Promise.all([statep, call('home', { days, hours, harness: st.harness, limit: 50, scope: scope() }), pcsp,
     statep.then((s) => (s.profiles.some((p) => p.kind !== 'subscription') ? call('usage', { days: 1 }).catch(() => null) : null)),
     Promise.all([statep, pcsp]).then(([s, c]) => (s.profiles.some((p) => p.running.length) || (syncOn(c) && (c.peers || []).some((p) => (p.running || []).length)) ? call('sessions', { filter: { open: true, per: 60 }, group: 'project', scope: 'all' }).catch(() => null) : null))]);
-  st.rows = d.requests.rows; st.total = d.requests.total;
+  st.rows = d.requests.rows; st.total = d.requests.total; st.preferExpiring = !!d.five_hour_first;
   last = { state, d, pcs, wk, today: Object.fromEntries(((cost && cost.accounts) || []).map((b) => [b.key, b.cost])), titles: Object.fromEntries(((open && open.groups) || []).flatMap((g) => g.sessions).map((s) => [s.profile + '/' + s.id, s])) };
   readApps(state.app_updates || 0);
   draw(sheet);
@@ -361,7 +361,8 @@ action('home-tool', (el) => { st.harness = el.dataset.v; render(); });
 action('home-use-tool', (el) => { st.useTool = el.dataset.v; try { localStorage.setItem(USE_KEY, st.useTool); } catch {} show(); });
 action('home-device', (el) => { st.device = el.dataset.v; show(); });
 action('home-live-pc', (el) => { st.livePc = st.livePc === el.dataset.v ? 'all' : el.dataset.v; show(); });
-action('home-prefer', () => { st.preferExpiring = !st.preferExpiring; show(); });
+// "5h first" is kept in core, where the phone's Use next reads it too
+action('home-prefer', () => { st.preferExpiring = !st.preferExpiring; show(); attempt(() => call('use_next_prefer', { on: st.preferExpiring })); });
 action('home-select', (el) => { st.selected = el.dataset.name; show(); });
 action('home-window-menu', (el) => openMenu(el, WINDOWS.map(([v, label]) => ({ label, on: st.windowMode === v, testid: 'window-' + v, run: () => { st.windowMode = v; show(); } }))));
 action('home-used-menu', (el) => openMenu(el, [['left', '% left'], ['used', '% used']].map(([v, label]) => ({ label, on: showUsed() === (v === 'used'), testid: 'used-' + v, run: () => mutate(() => call('settings_set', { key: 'quota_display', value: v })) }))));

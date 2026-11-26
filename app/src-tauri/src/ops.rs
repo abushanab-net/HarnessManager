@@ -61,6 +61,7 @@ pub static OPS: &[Op] = &[
     // usage
     op("home", usage::home, NO_LOCK | NO_CHANGE | PAGE),
     op("requests", usage::requests, NO_LOCK | NO_CHANGE),
+    op("use_next_prefer", usage::use_next_prefer, NO_LOCK),
     op("today", usage::today, NO_LOCK | NO_CHANGE | PAGE),
     op("usage", usage::usage, NO_LOCK | NO_CHANGE),
     op("usage_csv", usage::usage_csv, NO_LOCK),
