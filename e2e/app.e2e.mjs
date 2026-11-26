@@ -3651,7 +3651,12 @@ description: Bulk skill ${i}
     await $('[data-testid=sec-connections] #st-port');
     assert.deepEqual(await shown(), { panes: ['sec-connections'], on: ['Connections'], hash: '#settings?tab=connections' });
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=st-theme]')")), 'the rows of the other sections are not on the page');
-    assert.deepEqual(await exec("return [document.querySelector('[data-testid=nav-settings]').getAttribute('aria-current'), document.querySelector('.set-pane .pane-head').innerText.replace(/\\s+/g, ' ').trim()]"), ['page', 'Connections 2 settings'], 'Settings stays lit in the sidebar; the card names the section and counts its rows');
+    assert.deepEqual(await exec("return [document.querySelector('[data-testid=nav-settings]').getAttribute('aria-current'), document.querySelector('.set-pane .pane-head').innerText.replace(/\\s+/g, ' ').trim()]"), ['page', 'Connections 3 settings'], 'Settings stays lit in the sidebar; the card names the section and counts its rows');
+    for (const origin of ['https://push.example.test', '']) {
+      await page.fill('#st-push-relay', origin);
+      await click('[data-testid=st-push-relay-save]');
+      await waitFor(() => JSON.parse(fs.readFileSync(path.join(data, 'settings.json'), 'utf8')).push_relay_url === origin, 'push relay address saved');
+    }
     // a link to a section opens it
     await nav('#settings?tab=backups');
     await $('[data-testid=sec-backups] [data-testid=backup-now]');

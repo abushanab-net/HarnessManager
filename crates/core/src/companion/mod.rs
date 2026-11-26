@@ -6,6 +6,7 @@
 pub mod actions;
 pub mod conn;
 mod events;
+pub(crate) mod push;
 #[cfg(test)]
 mod tests;
 
@@ -387,12 +388,17 @@ async fn requests(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -
     answer(blocking(move || Ok(stamped(&ctx, json!({"requests": requests_of(&ctx, p.grants.transcripts)?, "actions": {"answer": may_answer(&p)}})))).await)
 }
 
-async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<api::PushHandle>) -> Response {
+#[derive(Deserialize)]
+struct PushEnrollment { relay_handle: String, secret: Option<String> }
+
+async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<PushEnrollment>) -> Response {
+    let secret = h.secret;
+    if secret.as_ref().is_some_and(|s| hex::decode_to_slice(s, &mut [0; 32]).is_err()) { return StatusCode::BAD_REQUEST.into_response(); }
     let h = h.relay_handle.trim().to_string();
     if h.is_empty() || h.len() > 200 { return (StatusCode::BAD_REQUEST, Json(json!({"error": "give the relay handle"}))).into_response(); }
-    answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h))?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+    answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h), secret.as_deref())?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }
 
 async fn push_delete(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    answer(blocking(move || { phones::set_push(&ctx, &p, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+    answer(blocking(move || { phones::set_push(&ctx, &p, None, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }

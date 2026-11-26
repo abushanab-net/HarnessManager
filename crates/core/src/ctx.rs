@@ -56,6 +56,8 @@ pub struct Settings {
     pub sync_folder: String,
     /// The hub's address when `sync_mode` is "hub"; its token lives in the credential store.
     pub hub_url: String,
+    /// Origin of this computer's push relay. An empty address disables wakes.
+    pub push_relay_url: String,
     pub sync_transcripts: bool,
     /// Tell the other computers what runs here, once a minute.
     pub sync_presence: bool,
@@ -93,7 +95,7 @@ impl Default for Settings {
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
-            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
+            hub_url: String::new(), push_relay_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
             archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false, session_hooks: true, request_seconds: 300, own_terminal: false }
     }
 }

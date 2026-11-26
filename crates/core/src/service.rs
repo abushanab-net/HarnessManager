@@ -1282,6 +1282,9 @@ pub fn settings_set(ctx: &Ctx, key: &str, value: serde_json::Value) -> Result<Ct
     v[key] = value;
     let from = fresh.registry_path();
     fresh.settings = serde_json::from_value(v).with_context(|| format!("that value does not fit {key}"))?;
+    if key == "push_relay_url" && !fresh.settings.push_relay_url.is_empty() {
+        crate::companion::push::wake_url(&fresh.settings.push_relay_url)?;
+    }
     if key == "registry_path" {
         let to = fresh.registry_path();
         if !(fresh.settings.registry_path.is_empty() || to.is_absolute()) { bail!("give the account list's full path, ending in the file's name (profiles.json)"); }

@@ -294,7 +294,7 @@ pub struct Receipt {
     pub at: i64,
 }
 
-/// `PUT /c1/push`: the relay handle the phone registered (wave 2 gives it meaning).
+/// Handle-only enrollment from earlier phones. A signed enrollment also supplies the relay secret.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PushHandle {
     pub relay_handle: String,

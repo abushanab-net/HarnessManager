@@ -103,7 +103,7 @@ pub fn set_grants(ctx: &Ctx, phone_id: &str, grants: &Value) -> Result<Value> {
 pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     let id = self::phone_id(ctx, phone_id)?;
     let at = ctx.db.with(|c| {
-        c.execute("update phones set revoked_at = ?2, relay_handle = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
+        c.execute("update phones set revoked_at = ?2, relay_handle = null, relay_secret = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
         Ok(c.query_row("select revoked_at from phones where phone_id = ?", [&id], |r| r.get::<_, i64>(0))?)
     })?;
     // after the mark: a connection that comes back is refused at its handshake
@@ -196,7 +196,7 @@ pub(crate) fn add(ctx: &Ctx, p: &PhonePayload, grants: Grants) -> Result<()> {
         let tx = c.transaction()?;
         if cert_taken(&tx, &der, Some(&p.id))? { bail!("that certificate already belongs to another phone or computer"); }
         tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null)
-            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null",
+            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, relay_secret=null, generation=?9, cut_at=null",
             params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4()])?;
         tx.commit()?;
         Ok(())
@@ -213,8 +213,8 @@ pub(crate) fn seen(ctx: &Ctx, id: &str) {
 
 /// The phone's relay handle, or none (`PUT` / `DELETE /c1/push`).
 /// The enrollment `p` checked at the request's start, not one paired again since under the same id.
-pub(crate) fn set_push(ctx: &Ctx, p: &Phone, handle: Option<&str>) -> Result<()> {
-    let n = ctx.db.with(|c| Ok(c.execute("update phones set relay_handle = ?3 where phone_id = ?1 and generation = ?2 and revoked_at is null", params![p.id, p.generation, handle])?))?;
+pub(crate) fn set_push(ctx: &Ctx, p: &Phone, handle: Option<&str>, secret: Option<&str>) -> Result<()> {
+    let n = ctx.db.with(|c| Ok(c.execute("update phones set relay_handle = ?3, relay_secret = ?4 where phone_id = ?1 and generation = ?2 and revoked_at is null", params![p.id, p.generation, handle, secret])?))?;
     if n == 0 { bail!("this phone was revoked or paired again"); }
     Ok(())
 }

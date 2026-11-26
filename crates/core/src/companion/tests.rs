@@ -215,10 +215,15 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     let r = rt.block_on(c.requests()).unwrap();
     assert_eq!((r.requests.len(), r.actions.answer.ok), (0, true));
     rt.block_on(c.push_register("h-1")).unwrap();
+    assert_eq!(refused(rt.block_on(c.push_register_signed("h-1", "bad-key"))), 400);
+    let secret = "23".repeat(32);
+    rt.block_on(c.push_register_signed("h-1", &secret)).unwrap();
+    assert_eq!(d.ctx.db.read(|c| Ok(c.query_row("select relay_secret from phones", [], |r| r.get::<_, String>(0))?)).unwrap(), secret);
     assert_eq!(d.ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones", [], |r| r.get::<_, String>(0))?)).unwrap(), "h-1");
     assert_eq!(refused(rt.block_on(c.push_register(" "))), 400);
     rt.block_on(c.push_remove()).unwrap();
     assert_eq!(count(&d.ctx, "select count(*) from phones where relay_handle is not null"), 0);
+    assert_eq!(count(&d.ctx, "select count(*) from phones where relay_secret is not null"), 0);
     assert_eq!(rt.block_on(c.receipt("never-sent")).unwrap(), None);
     // a phone is refused on every computer route
     let me = d.ctx.settings.device_id.clone();
@@ -895,10 +900,10 @@ fn a_push_handle_change_belongs_to_its_enrollment() {
     let old = enrolled(&ctx, false);
     let again = PhoneIdentity::from_secrets(&old.id, &[5; 32], &[6; 32]).unwrap();
     crate::phones::add(&ctx, &pairing::PhonePayload::of(&again, "P", "ios").unwrap(), Grants::default()).unwrap();
-    assert!(crate::phones::set_push(&ctx, &old, Some("stale")).is_err());
+    assert!(crate::phones::set_push(&ctx, &old, Some("stale"), None).is_err());
     let handle: Option<String> = ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones where phone_id = ?", [&old.id], |r| r.get(0))?)).unwrap();
     assert_eq!(handle, None);
-    crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h")).unwrap();
+    crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h"), None).unwrap();
 }
 
 // ---------- the third review (Codex, at fe1dcd5) ----------
