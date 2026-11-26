@@ -136,7 +136,11 @@ html[data-theme="dark"] img.ticon[src$="opencode.svg"] { filter: invert(1); }
 .form-field textarea, .form-field select { padding: 7px 10px; border-radius: var(--radius-control); background: var(--bg-input); border: 1px solid var(--line-default); color: var(--ink-primary); font-size: 12.5px; }
 .form-field select option { color: var(--ink-primary); background: var(--bg-panel); }
 .form-field .field-row { display: flex; gap: 8px; align-items: center; }
-.form-field .field-row input { flex: 1; min-width: 0; }
+.form-field .field-row :is(input, select) { flex: 1; min-width: 0; }
+.form-field .field-row > button { flex: none; }
+.form-field .field-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* a path, address or command has no spaces to break at; in a dialog it wraps instead of widening it */
+.dlg .mono { overflow-wrap: anywhere; }
 .form-field label .opt { font-weight: 400; color: var(--ink-muted); }
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .folder-preview { color: var(--ac); }

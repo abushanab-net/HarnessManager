@@ -133,7 +133,31 @@ write(path.join(home, 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\nDo thi
 // ---------- driving the window: Playwright over the WebView2 DevTools protocol ----------
 // (Microsoft's documented way to automate WebView2 apps; the app is started with remote debugging on.)
 let page;
-const exec = (script, args = []) => page.evaluate(([s, a]) => new Function(s).apply(null, a), [script, args]);
+/** What the watcher below reported: "where: the element that sticks out", once each. */
+const wide = [], dialogs = new Set();
+// Any box that scrolls (a dialog, the page, a pane) and is wider than its frame logs where and what sticks out; a
+// row of a long folder path once pushed Start in a folder's button out of its dialog this way.
+const WIDE_WATCH = `if (!window.__wideWatch) {
+  window.__wideWatch = true;
+  const said = new Set(), log = (m) => { if (!said.has(m)) { said.add(m); console.log(m); } };
+  const say = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (e.dataset.testid ? '[' + e.dataset.testid + ']' : '') + [...e.classList].slice(0, 2).map((c) => '.' + c).join('');
+  const check = () => {
+    for (const d of document.querySelectorAll('.modal-card')) log('HRM-DLG ' + (d.getAttribute('aria-label') || d.querySelector('h2')?.textContent || '?'));
+    for (const c of document.querySelectorAll('body *')) {
+      if (c.scrollWidth <= c.clientWidth + 1 || !c.clientWidth || !/auto|scroll/.test(getComputedStyle(c).overflowX)) continue;
+      const lim = c.getBoundingClientRect().left + c.clientLeft + c.clientWidth + 1;
+      const out = [...c.querySelectorAll('*')].filter((d) => d.getBoundingClientRect().right > lim && d.parentElement.getBoundingClientRect().right <= lim);
+      const dlg = c.closest('.modal-card');
+      log('HRM-WIDE ' + (dlg ? 'dialog "' + (dlg.getAttribute('aria-label') || '') + '"' : location.hash) + ' ' + say(c) + ': ' + (out.slice(0, 2).map(say).join(', ') || '?'));
+    }
+  };
+  let t = 0;
+  // a throttle, not a debounce: a page that redraws every few ms would otherwise never be checked
+  const soon = () => { if (!t) t = requestAnimationFrame(() => { t = 0; check(); }); };
+  const go = () => { new MutationObserver(soon).observe(document.body, { childList: true, subtree: true, characterData: true }); addEventListener('resize', soon); };
+  document.body ? go() : addEventListener('DOMContentLoaded', go);
+}`;
+const exec =(script, args = []) => page.evaluate(([s, a]) => new Function(s).apply(null, a), [script, args]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(fn, what, ms = 15000) {
   const end = Date.now() + ms;
@@ -194,6 +218,10 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 }).catch(() => {});
   page.on('console', (m) => { if (m.type() === 'error') console.log('     [window] ' + m.text()); });
   page.on('pageerror', (e) => console.log('     [window] ' + e.message));
+  // every dialog and page the run draws, watched for content wider than its frame (a sideways scroll bar)
+  page.on('console', (m) => { const t = m.text(); if (t.startsWith('HRM-WIDE ') && !wide.includes(t.slice(9))) wide.push(t.slice(9)); if (t.startsWith('HRM-DLG ')) dialogs.add(t.slice(8)); });
+  await page.addInitScript(WIDE_WATCH);
+  await exec(WIDE_WATCH);
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
   await exec(`localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`);
 
@@ -807,6 +835,8 @@ try {
     await nav('#account?name=claude-main');
     await click('[data-act=start-in-folder]');
     await hasText('[data-testid=sd-dir]', repo);
+    // a long recent folder does not push Choose folder… out of the dialog
+    assert.deepEqual(await exec("const c = document.querySelector('.modal-card'), r = c.getBoundingClientRect().right; return [c.scrollWidth <= c.clientWidth, document.getElementById('sd-choose').getBoundingClientRect().right <= r]"), [true, true], 'the folder row fits the dialog');
     await click('[data-testid=sd-skip]');
     await type('[data-testid=sd-args]', '--model opus --append-system-prompt "Be brief"');
     await shot('05b-start-in-folder');
@@ -4122,6 +4152,17 @@ description: Bulk skill ${i}
     } finally {
       for (const name of [cl, cx]) try { hrm('remove', name, '--delete-home'); } catch {}
     }
+  });
+
+  await test('layout: no dialog, page or pane the run drew was wider than its frame', async () => {
+    // a long path with no spaces, as Apps' "Remove this copy?" shows one, which no other test draws
+    await exec("import('./core.js').then((c) => c.confirmDialog('Remove this copy?', 'The copy at <span class=\"mono\">' + 'C:\\\\Users\\\\someone\\\\AppData\\\\Roaming\\\\npm\\\\node_modules'.repeat(3) + '</span> is removed.', 'Remove'))");
+    await $('.modal-card[aria-label]');
+    await sleep(300);
+    await exec("document.querySelector('[data-act=dialog-close]').click()");
+    await sleep(500);
+    console.log('     dialogs checked: ' + [...dialogs].sort().join(' | '));
+    assert.deepEqual(wide, [], 'these scrolled sideways:\n' + wide.join('\n'));
   });
 
   exitCode =results.some((r) => r[1] !== 'ok') ? 1 : 0;
