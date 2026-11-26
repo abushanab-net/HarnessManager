@@ -272,3 +272,135 @@ async fn delete_a_device_by_its_owner_and_by_the_admin() {
     let list: Value = b.req(reqwest::Method::GET, &hub, "/v1/devices").send().await.unwrap().json().await.unwrap();
     assert_eq!(list.as_array().unwrap().len(), 1);
 }
+
+// ---------- phones and their mailboxes ----------
+
+/// A phone redeemed with an invite from `by`: (its id on the hub, its token).
+async fn phone(hub: &Hub, by: &Dev) -> (String, String) {
+    let inv: Value = by.req(reqwest::Method::POST, hub, "/v1/phones/invite").send().await.unwrap().json().await.unwrap();
+    let r = Client::new().post(format!("{}/v1/phones/join", hub.url)).json(&json!({"code": inv["code"]})).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: Value = r.json().await.unwrap();
+    assert_eq!((v["phone_id"].as_str(), v["computer"]["id"].as_str(), v["computer"]["name"].as_str()), (inv["phone_id"].as_str(), Some(by.id.as_str()), Some(format!("pc-{}", by.id).as_str())));
+    (v["phone_id"].as_str().unwrap().into(), v["token"].as_str().unwrap().into())
+}
+
+fn as_token(method: reqwest::Method, hub: &Hub, token: &str, path: &str) -> reqwest::RequestBuilder { Client::new().request(method, format!("{}{path}", hub.url)).bearer_auth(token) }
+
+#[tokio::test]
+async fn a_phone_invite_is_a_computers_and_is_redeemed_once() {
+    let hub = start(2048).await;
+    let (a, _b) = joined(&hub).await;
+    // the admin owns nothing, and nobody without a token invites
+    assert_eq!(Client::new().post(format!("{}/v1/phones/invite", hub.url)).bearer_auth(ADMIN).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(Client::new().post(format!("{}/v1/phones/invite", hub.url)).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    let inv: Value = a.req(reqwest::Method::POST, &hub, "/v1/phones/invite").send().await.unwrap().json().await.unwrap();
+    assert_eq!(inv["code"].as_str().unwrap().len(), 6);
+    assert!(inv["phone_id"].as_str().unwrap().starts_with("ph-") && inv["expires_at"].as_i64().unwrap() > 0);
+    let join = |code: Value| { let url = format!("{}/v1/phones/join", hub.url); async move { Client::new().post(url).json(&json!({"code": code})).send().await.unwrap().status() } };
+    let wrong = if inv["code"] == "000000" { "000001" } else { "000000" };
+    assert_eq!(join(json!(wrong)).await, StatusCode::UNAUTHORIZED, "a wrong code");
+    assert_eq!(join(inv["code"].clone()).await, StatusCode::OK);
+    assert_eq!(join(inv["code"].clone()).await, StatusCode::UNAUTHORIZED, "a used code");
+    // a computer's invite code is not a phone's
+    let cinv: Value = a.req(reqwest::Method::POST, &hub, "/v1/invite").send().await.unwrap().json().await.unwrap();
+    assert_eq!(join(cinv["code"].clone()).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_phone_token_reaches_only_its_own_mailbox() {
+    let hub = start(2048).await;
+    let (a, b) = joined(&hub).await;
+    let (p1, t1) = phone(&hub, &a).await;
+    let (_p2, t2) = phone(&hub, &a).await;
+    // nothing of the computers' routes
+    for path in ["/v1/devices", "/v1/presence", "/v1/rendezvous", "/v1/chunks/aaaa", "/v1/chunk/aaaa/x", "/v1/transcripts/aaaa/k"] {
+        assert_eq!(as_token(reqwest::Method::GET, &hub, &t1, path).send().await.unwrap().status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+    assert_eq!(as_token(reqwest::Method::POST, &hub, &t1, "/v1/invite").send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(as_token(reqwest::Method::POST, &hub, &t1, "/v1/phones/invite").send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t1, "/v1/presence").body("x").send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    let mut req = format!("{}/v1/events", hub.url.replace("http://", "ws://")).into_client_request().unwrap();
+    req.headers_mut().insert("Authorization", format!("Bearer {t1}").parse().unwrap());
+    assert!(tokio_tungstenite::connect_async(req).await.is_err(), "no events for a phone");
+    // its own up, read back by the computer that invited it
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t1, &format!("/v1/mail/{p1}/up/1")).body("sealed-1").send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    let r = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p1}/up/1")).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(r.headers()["x-at"].to_str().unwrap().parse::<i64>().unwrap() > 0);
+    assert_eq!(&r.bytes().await.unwrap()[..], b"sealed-1");
+    // never another phone's mailbox, and never the other side's direction
+    assert_eq!(as_token(reqwest::Method::GET, &hub, &t2, &format!("/v1/mail/{p1}/up/1")).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t2, &format!("/v1/mail/{p1}/up/2")).body("x").send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t1, &format!("/v1/mail/{p1}/down/1")).body("x").send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(a.req(reqwest::Method::PUT, &hub, &format!("/v1/mail/{p1}/up/2")).body("x").send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(as_token(reqwest::Method::DELETE, &hub, &t1, &format!("/v1/phones/{p1}")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    // another computer on the hub is not the one that invited it
+    assert_eq!(b.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p1}/up/1")).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(b.req(reqwest::Method::PUT, &hub, &format!("/v1/mail/{p1}/down/1")).body("x").send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(b.req(reqwest::Method::DELETE, &hub, &format!("/v1/phones/{p1}")).send().await.unwrap().status(), StatusCode::FORBIDDEN);
+    // the computer's down, read by the phone; an unknown direction or phone is nothing
+    assert_eq!(a.req(reqwest::Method::PUT, &hub, &format!("/v1/mail/{p1}/down/1")).body("sealed-d1").send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(&as_token(reqwest::Method::GET, &hub, &t1, &format!("/v1/mail/{p1}/down/1")).send().await.unwrap().bytes().await.unwrap()[..], b"sealed-d1");
+    assert_eq!(as_token(reqwest::Method::GET, &hub, &t1, &format!("/v1/mail/{p1}/sideways/1")).send().await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(a.req(reqwest::Method::GET, &hub, "/v1/mail/ph-nobody/up/1").send().await.unwrap().status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn mail_is_numbered_once_capped_and_kept_a_week() {
+    let hub = start(2048).await;
+    let (a, _b) = joined(&hub).await;
+    let (p, t) = phone(&hub, &a).await;
+    let put = |seq: i64, body: Vec<u8>| as_token(reqwest::Method::PUT, &hub, &t, &format!("/v1/mail/{p}/up/{seq}")).body(body).send();
+    assert_eq!(put(1, b"one".to_vec()).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(put(3, b"three".to_vec()).await.unwrap().status(), StatusCode::NO_CONTENT);
+    // a number already used, or below the highest, is refused: nothing is overwritten or slipped in before
+    let r = put(3, b"again".to_vec()).await.unwrap();
+    assert_eq!(r.status(), StatusCode::CONFLICT);
+    assert_eq!(r.json::<Value>().await.unwrap()["max"], 3);
+    assert_eq!(put(2, b"two".to_vec()).await.unwrap().status(), StatusCode::CONFLICT);
+    let list: Value = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(list["max"], 3);
+    assert_eq!(list["mail"].as_array().unwrap().iter().map(|m| (m["seq"].as_i64().unwrap(), m["bytes"].as_i64().unwrap())).collect::<Vec<_>>(), [(1, 3), (3, 5)]);
+    let after: Value = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up?after=1")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(after["mail"].as_array().unwrap().len(), 1);
+    // one message is at most 1 MiB
+    let r = put(4, vec![0u8; super::MAIL_MAX + 1]).await;
+    assert!(r.map(|r| r.status() == StatusCode::PAYLOAD_TOO_LARGE).unwrap_or(true));
+    // one direction holds at most 16 MiB: the oldest go, the newest stays
+    for seq in 10..28 { assert_eq!(put(seq, vec![1u8; super::MAIL_MAX]).await.unwrap().status(), StatusCode::NO_CONTENT); }
+    let list: Value = a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up")).send().await.unwrap().json().await.unwrap();
+    let seqs: Vec<i64> = list["mail"].as_array().unwrap().iter().map(|m| m["seq"].as_i64().unwrap()).collect();
+    assert_eq!((seqs.first().copied(), seqs.last().copied(), seqs.len()), (Some(12), Some(27), 16));
+    // a message a week old is gone, read or not; its number stays used
+    let db = rusqlite::Connection::open(hub._dir.path().join("hub.db")).unwrap();
+    db.execute("update mail set at = at - ?1 where seq = 27", [super::MAIL_KEPT_MS + 1]).unwrap();
+    assert_eq!(a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up/27")).send().await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(put(27, b"x".to_vec()).await.unwrap().status(), StatusCode::CONFLICT);
+    assert_eq!(put(28, b"x".to_vec()).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(db.query_row("select count(*) from mail where seq = 27", [], |r| r.get::<_, i64>(0)).unwrap(), 0, "swept at the next put");
+}
+
+#[tokio::test]
+async fn the_computer_is_told_of_its_phones_mail_and_a_phone_goes_with_its_revocation() {
+    let hub = start(2048).await;
+    let (a, b) = joined(&hub).await;
+    let (p, t) = phone(&hub, &a).await;
+    let mut req = format!("{}/v1/events", hub.url.replace("http://", "ws://")).into_client_request().unwrap();
+    req.headers_mut().insert("Authorization", format!("Bearer {}", a.token).parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    assert_eq!(as_token(reqwest::Method::PUT, &hub, &t, &format!("/v1/mail/{p}/up/1")).body("x").send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
+    assert_eq!(serde_json::from_str::<Value>(msg.to_text().unwrap()).unwrap(), json!({"kind": "mail", "id": p, "to": "aaaa"}));
+    // revoked: the token and the mailbox go; the phone reads as unknown from then on
+    assert_eq!(a.req(reqwest::Method::DELETE, &hub, &format!("/v1/phones/{p}")).send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(as_token(reqwest::Method::GET, &hub, &t, &format!("/v1/mail/{p}/up/1")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(a.req(reqwest::Method::GET, &hub, &format!("/v1/mail/{p}/up/1")).send().await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(a.req(reqwest::Method::DELETE, &hub, &format!("/v1/phones/{p}")).send().await.unwrap().status(), StatusCode::NOT_FOUND);
+    // the admin can remove any phone; a computer leaving takes its phones with it
+    let (p2, _) = phone(&hub, &b).await;
+    assert_eq!(Client::new().delete(format!("{}/v1/phones/{p2}", hub.url)).bearer_auth(ADMIN).send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    let (p3, t3) = phone(&hub, &b).await;
+    assert_eq!(b.req(reqwest::Method::DELETE, &hub, "/v1/devices/bbbb").send().await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(as_token(reqwest::Method::GET, &hub, &t3, &format!("/v1/mail/{p3}/down")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+}
