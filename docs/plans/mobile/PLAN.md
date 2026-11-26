@@ -231,23 +231,30 @@ POST /c1/actions
   either half itself cannot make one, and shows other words besides. The signed approval is kept with the enrollment
   (`phones.hub_pairing`) until it is on the hub, so the mailbox pass delivers it after a restart too; a slot 2 already
   taken must hold that very decision. Up 3 `{kind: "fetched"}` says the phone has it: sealed by the approved phone,
-  or signed by the refused one (`fetched_refusal`); the computer counts nothing else, and the phone's own messages
-  start at up 4, so slot 3 stays the acknowledgement's. The phone's key must be its certificate's own public-key field,
+  or signed by the refused one (`fetched_refusal`); the computer counts nothing else. The phone's own messages start
+  at up 4, and the phone writes slot 3 before its first of them when it is still empty (once 4 is taken, 3 never can
+  be). An approval names a fresh `enrollment` value (in the payload and in `approval_binding`): every mailbox message
+  of that pairing names it, so one written in an earlier pairing on the same mailbox, with the same keys, is not this
+  one's. The computer's key must be its certificate's own public-key field,
   parsed. The computer keeps each invite (`phone_hub_invites`) from the moment the hub gives it; approval turns it into
   the enrollment, with its cursor past the pairing's slots, in one transaction, and an invite that ends unpaired
   (refused, expired, cancelled, or left by a computer that stopped, once its time and 30 s more are up) is turned
   into a deletion owed on the hub.
 - After the approval everything in the mailbox is sealed to the recipient: X25519 + ChaCha20-Poly1305, the sender
-  signing with its Ed25519 key (`companion_proto::mailbox::seal_mail`, over `{mailbox, dir, seq, at, body}`; the
+  signing with its Ed25519 key (`companion_proto::mailbox::seal_mail`, over `{mailbox, enrollment, dir, seq, at, body}`; the
   computer's X25519 key is derived from its Ed25519 seed). A message changed, sealed by anyone else, or found in a
   slot it was not written for (replayed or moved) is dropped. Each side reads numbers only upwards from its cursor (a
-  listing that goes back, or out of 1 to 2^53, is not followed), and only a message that opened moves the cursor: a
-  slot that did not open, or was gone, is passed over from then on (the newest 1000 remembered), so one the hub made up
-  never hides a real one below it. Neither side follows the hub's word on where the newest message is. The computer
-  reads each enrollment from one row (mailbox, keys, grants, generation), opens a message under that row's key and
-  handles it for that enrollment only; it claims each slot with the cursor in one transaction and keeps what it held
-  (`phone_mail_in`) until the answer is out. It answers what it claimed before it claims more, at most 20 a pass by
-  its own count and 5 listings, whatever the hub lists. Each claimed message is decided once: the reply is kept with
+  listing that goes back, or out of 1 to 2^53, is not followed). A slot that did not open, or was not there, is a
+  hole: tried again after 1, 2, 4 ... 60 s, and given up once it stayed so for ten minutes (longer than a phone's
+  request window), so an action the hub held back for a while is still read. The cursor each side keeps moves only
+  over slots read (or given up), and waits at the first hole: a later message read meanwhile never carries it past
+  one, and after a restart the hole is looked at again. Neither side follows the hub's word on where the newest
+  message is. The computer reads each enrollment from one row (mailbox, keys, grants, generation; the generation is
+  the pairing's `enrollment` value), opens a message under that row's key and pairing and handles it for that
+  enrollment only; a slot's claim is its row in `phone_mail_in`, kept until the answer is out and the cursor passed
+  it. It answers what it claimed before it claims more, and fetches at most 20 slots a pass (holes and slots that do
+  not open counted), what is new before holes whose wait is over, in 5 listings at most, whatever the hub lists. Each
+  claimed message is decided once: the reply is kept with
   the claim before it goes out, and one that did not go out is sent again as it was, never decided again (a refusal
   stays a refusal though Control came since). A database read that fails keeps the claim for the next pass. A
   computer stopping between the claim and the answer leaves it to the next pass, where the action contract's rule
@@ -276,14 +283,20 @@ POST /c1/actions
 - The desktop (`core::companion::mailbox`): `pair_start(ctx, on_event) -> HubPairing` with `status`, `attempt`,
   `approve(grants)`, `refuse`, `cancel`, `ended`; the status is `phone_pair_status`'s with `route: "hub"` and
   `hub_url`, and its changes are `phones-pairing` events. `pass(ctx)` is the mailbox pass, run by `sync::hub::watch`.
-  `phones::list` gives `route: "hub"`. An enrollment keeps the hub it was paired through (`phones.hub_url`; one from
-  before gets this computer's hub at the first pass): only that hub serves it, and only that hub's answer settles its
-  deletion. A deletion owed on the hub (a revocation, the earlier mailbox of a phone paired again, an invite that ended
+  `phones::list` gives `route: "hub"`. The computer's hub token is sent only to the hub that gave it (`hub:token_of`):
+  a context still naming another hub (a pairing begun before this computer joined a new one) sends nothing, and what
+  it owed stays owed. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
+  and only that hub's answer settles its deletion. An enrollment with no hub recorded can only come from this branch
+  before it kept one (nothing released has hub enrollments): it is served by no hub and its deletion is owed to none,
+  so no hub's "no such phone" settles it; pair such a phone again. A deletion owed on the hub (a revocation, the earlier mailbox of a phone paired again, an invite that ended
   unpaired) is written in the same transaction as what owes it, keyed by that hub's address, the mailbox and the
   enrollment (`phone_hub_deletes`), and tried at every pass on that hub until it confirms it (gone, or never there);
   one owed on a hub this computer left stays owed. A revocation from before the queue, not acknowledged, is taken up.
   `acks.hub` on a revoked phone is true once its own hub confirmed its own enrollment's mailbox, false until then,
   null for a phone never paired through it.
+- Follow-ups (not in this package): the phone's ten-second look deadline enforced around each awaited call (one
+  request may take its own 20 s today); the kept reply written only while still unset, for more than one process
+  draining the same claim; the holes' tries kept across a restart; a test of a forged refusal acknowledgement.
 
 ## Contract: the push relay
 
