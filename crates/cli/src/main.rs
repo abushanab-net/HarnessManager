@@ -973,6 +973,9 @@ fn ask_yes(prompt: &str, default: bool) -> Result<bool> {
     Ok(match l.trim().to_ascii_lowercase().as_str() { "y" | "yes" => true, "n" | "no" => false, _ => default })
 }
 
+/// A revocation's acknowledgement: true confirmed, false not (yet), null not used by this phone.
+fn ack(v: &serde_json::Value) -> &'static str { match v.as_bool() { Some(true) => "confirmed", Some(false) => "not confirmed", None => "not used yet" } }
+
 /// "481920" -> "481 920", as the dialog shows it.
 fn fmt_code(c: &str) -> String { if c.len() == 6 && c.is_ascii() { format!("{} {}", &c[..3], &c[3..]) } else { c.into() } }
 
@@ -985,7 +988,8 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
             if rows.is_empty() { println!("no phone is paired; `hrm phones pair` shows a code to scan"); }
             for p in &rows {
                 let state = match p["revoked_at"].as_i64() { Some(at) => format!("revoked {}", fmt_reset(Some(at))), None => format!("seen {}", fmt_reset(p["last_seen"].as_i64())) };
-                println!("{:<24} {:<8} {:<7} {:<16} grants {}", p["name"].as_str().unwrap_or(""), p["platform"].as_str().unwrap_or(""), p["route"].as_str().unwrap_or("-"), state, grants_text(&p["grants"]));
+                let acks = if p["acks"].is_object() { format!("  connection {}, hub {}, push {}", ack(&p["acks"]["connection"]), ack(&p["acks"]["hub"]), ack(&p["acks"]["push"])) } else { String::new() };
+                println!("{:<24} {:<8} {:<7} {:<16} grants {}{acks}", p["name"].as_str().unwrap_or(""), p["platform"].as_str().unwrap_or(""), p["route"].as_str().unwrap_or("-"), state, grants_text(&p["grants"]));
             }
             Ok(0)
         }
@@ -1004,7 +1008,6 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
             let p = phone_of(&ctx, &phone)?;
             let r = hrm_core::phones::revoke(&ctx, p["phone_id"].as_str().unwrap_or(""))?;
             if j.json { return print_json(&r).map(|_| 0); }
-            let ack = |v: &serde_json::Value| match v.as_bool() { Some(true) => "confirmed", Some(false) => "not confirmed", None => "not used yet" };
             println!("revoked {}", p["name"].as_str().unwrap_or(""));
             println!("  connection  {}\n  hub         {}\n  push        {}", ack(&r["acks"]["connection"]), ack(&r["acks"]["hub"]), ack(&r["acks"]["push"]));
             Ok(0)
@@ -1026,6 +1029,8 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
                 match st["state"].as_str() {
                     Some("waiting") => {}
                     Some("confirm") => {
+                        // the decision names the attempt whose words were printed
+                        let attempt = st["attempt"].as_str().unwrap_or("");
                         let words: Vec<&str> = st["words"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
                         println!("\n{} ({}) wants access.", st["phone"]["name"].as_str().unwrap_or("A phone"), st["phone"]["platform"].as_str().unwrap_or("phone"));
                         println!("Check the phone shows the same words:   {}\n", words.join("   "));
@@ -1034,7 +1039,7 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
                             "transcripts": ask_yes("Transcripts: what each session said and did?", true)?,
                             "control": ask_yes("Control: answer requests, reply and Stop?", false)?,
                         });
-                        let r = if ask_yes("Do the words match? Approve this phone?", false)? { rt.phone_pair_approve(&ctx, &grants)? } else { rt.phone_pair_refuse()? };
+                        let r = if ask_yes("Do the words match? Approve this phone?", false)? { rt.phone_pair_approve(&ctx, attempt, &grants)? } else { rt.phone_pair_refuse(attempt)? };
                         match r["state"].as_str() {
                             Some("paired") => { println!("paired with {}  grants {}", r["phone"]["name"].as_str().unwrap_or("the phone"), grants_text(&grants)); break 0 }
                             Some("refused") => { println!("refused: the phone gets nothing from this computer"); break 1 }
@@ -1050,7 +1055,7 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
                 n += 1;
                 std::thread::sleep(std::time::Duration::from_millis(500));
             };
-            let _ = rt.phone_pair_cancel();
+            let _ = rt.phone_pair_cancel(v["attempt"].as_str().unwrap_or(""));
             rt.stop();
             Ok(code)
         }

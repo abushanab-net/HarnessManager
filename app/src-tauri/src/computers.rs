@@ -74,11 +74,12 @@ pub fn phones_pair_start(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> 
 
 pub fn phones_pair_status(state: &AppState, _: &Ctx, _: &Value) -> Result<Value> { Ok(state.peers()?.phone_pair_status().unwrap_or(Value::Null)) }
 
-pub fn phones_pair_approve(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_approve(&state.ctx(), &a["grants"]) }
+// each decision names the attempt (one showing of a code) the owner is looking at; the core refuses any other
+pub fn phones_pair_approve(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_approve(&state.ctx(), &s(a, "attempt")?, &a["grants"]) }
 
-pub fn phones_pair_refuse(state: &AppState, _: &Ctx, _: &Value) -> Result<Value> { state.peers()?.phone_pair_refuse() }
+pub fn phones_pair_refuse(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_refuse(&s(a, "attempt")?) }
 
-pub fn phones_pair_cancel(state: &AppState, _: &Ctx, _: &Value) -> Result<Value> { state.peers()?.phone_pair_cancel() }
+pub fn phones_pair_cancel(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_cancel(&s(a, "attempt")?) }
 
 /// `text` as a QR code in SVG, black on white with its quiet zone (a phone camera reads it in either theme).
 fn qr_svg(text: &str) -> Result<String> {

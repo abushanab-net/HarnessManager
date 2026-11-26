@@ -170,14 +170,14 @@ function phonePairDialog() {
       <div class="ph-step" data-testid="phone-pair-code"><h3><span class="n">1</span>Scan or type the code</h3><p class="muted">Asking for a code…</p></div>
       <div class="ph-step" data-testid="phone-pair-ask"><h3><span class="n">2</span>Check and approve</h3><p class="muted">When the phone has used the code, its name and three words show here.</p></div></div>
     <div class="modal-foot" id="phone-pair-foot"><span id="phone-pair-left" data-testid="phone-pair-left"></span><span class="acts"><button class="btn-secondary" data-act="dialog-close" data-testid="phone-pair-close">Cancel</button></span></div>`,
-  { onClose: () => { if (phone) { clearInterval(phone.timer); const open = ['waiting', 'confirm'].includes(phone.st.state); phone = null; if (open) call('phones_pair_cancel').catch(() => {}); } }, size: 'ph', label: 'Pair a phone' });
+  { onClose: () => { if (phone) { clearInterval(phone.timer); const { attempt } = phone.r, open = ['waiting', 'confirm'].includes(phone.st.state); phone = null; if (open) call('phones_pair_cancel', { attempt }).catch(() => {}); } }, size: 'ph', label: 'Pair a phone' });
   phoneStart();
 }
 async function phoneStart() {
   const el = document.querySelector('[data-testid=phone-pair-code]');
   let r;
   try { r = await call('phones_pair_start'); } catch (e) { if (el && el.isConnected) phoneShow({ state: 'failed', error: errText(e) }); return; }
-  if (!el.isConnected) { call('phones_pair_cancel').catch(() => {}); return; } // the dialog went while asking
+  if (!el.isConnected) { call('phones_pair_cancel', { attempt: r.attempt }).catch(() => {}); return; } // the dialog went while asking
   el.innerHTML = `<h3><span class="n">1</span>Scan or type the code</h3>
     <div class="ph-qr" data-testid="phone-qr" role="img" aria-label="QR code for the phone">${r.qr_svg || ''}<span class="used">✓ Code used</span></div>
     <p>On the phone: Harness Manager › Pair with a computer. Or type <b class="mono" data-testid="phone-code">${esc(fmtCode(r.code))}</b>.</p>
@@ -191,7 +191,7 @@ function phoneTick() {
   if (!phone || !left) return;
   const ms = phone.r.expires_at - Date.now();
   if (ms > 0) left.textContent = `${mmss(ms)} left`;
-  else { phoneShow({ state: 'expired' }); call('phones_pair_cancel').catch(() => {}); }
+  else { const { attempt } = phone.r; phoneShow({ attempt, state: 'expired' }); call('phones_pair_cancel', { attempt }).catch(() => {}); }
 }
 /** The dialog for a status: waiting, confirm (the phone, the words, the grants), or how it ended. */
 function phoneShow(st) {
@@ -217,8 +217,9 @@ function phoneShow(st) {
       try { phoneShow(await run()); }
       catch (e) { fail('phone-pair-error', null, errText(e)); for (const b of foot.querySelectorAll('button')) b.disabled = false; }
     };
-    document.getElementById('phone-approve').onclick = go(() => call('phones_pair_approve', { grants: Object.fromEntries([...ask.querySelectorAll('[data-grant]')].map((i) => [i.dataset.grant, i.checked])) }));
-    document.getElementById('phone-refuse').onclick = go(() => call('phones_pair_refuse'));
+    // the decision names the attempt whose words are on screen, so it can never land on another phone's
+    document.getElementById('phone-approve').onclick = go(() => call('phones_pair_approve', { attempt: st.attempt, grants: Object.fromEntries([...ask.querySelectorAll('[data-grant]')].map((i) => [i.dataset.grant, i.checked])) }));
+    document.getElementById('phone-refuse').onclick = go(() => call('phones_pair_refuse', { attempt: st.attempt }));
     return document.getElementById('phone-approve').focus();
   }
   if (st.state === 'paired') {
@@ -234,7 +235,7 @@ action('phone-pair', phonePairDialog);
 // a phone used the code, or the pairing ended: the dialog follows; with the dialog closed, a pairing is said once
 if (ev) ev.listen('phones-pairing', (e) => {
   const st = e.payload || {};
-  if (phone && document.querySelector('[data-testid=phone-pair-ask]')) phoneShow(st);
+  if (phone && document.querySelector('[data-testid=phone-pair-ask]')) { if (st.attempt === phone.r.attempt) phoneShow(st); } // another attempt's news is not this dialog's
   else if (st.state === 'paired') { toast(`Paired with ${(st.phone || {}).name || 'a phone'}`); changed(); }
 });
 

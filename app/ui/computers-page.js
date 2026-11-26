@@ -117,7 +117,8 @@ action('computers-now', syncNow);
 // ---------- the phones: what each may do, as switches saved at once, and Revoke… ----------
 const ROUTE = { direct: 'direct', hub: 'through your hub' };
 function phonesCard(list) {
-  const now = Date.now(), on = list.filter((p) => !p.revoked_at);
+  // the revoked phones of the last week stay, with their acknowledgements as they stand now (the cut may come later)
+  const now = Date.now(), on = list.filter((p) => !p.revoked_at), gone = list.filter((p) => p.revoked_at && now - p.revoked_at < 7 * 86400e3);
   const line = (p) => [esc(PLATFORM[p.platform] || p.platform || 'Phone'), esc(ROUTE[p.route] || 'not connected'),
     `last seen ${p.last_seen ? (now - p.last_seen < 60000 ? 'now' : since(now - p.last_seen)) : 'never'}`, p.paired_at ? `paired ${esc(new Date(p.paired_at).toLocaleDateString([], { day: 'numeric', month: 'short' }))}` : ''].filter(Boolean).join(' · ');
   const grant = (p, [k, t]) => `<span class="ph-sw">${t}${toggle(k, !!(p.grants || {})[k], `${t} for ${p.name}`, `phone-${esc(p.phone_id)}-${k}`, 'phone-grant')}</span>`;
@@ -127,6 +128,8 @@ function phonesCard(list) {
       <div class="what"><div class="row"><b class="trunc" title="${esc(p.name)}">${esc(p.name)}</b></div><p data-testid="phone-line">${line(p)}</p></div>
       <div class="ctl" data-id="${esc(p.phone_id)}">${GRANTS.map((g) => grant(p, g)).join('')}<button class="btn sm negT" data-act="phone-revoke" data-id="${esc(p.phone_id)}" data-name="${esc(p.name)}" data-testid="phone-revoke-${esc(p.phone_id)}">Revoke…</button></div></div>`).join('')
       || '<p class="set-none" data-testid="phones-none">No phone yet. Pair a phone… shows a code to scan with Harness Manager on the phone.</p>'}
+    ${gone.map((p) => `<div class="srow ph-row gone" data-testid="phone-${esc(p.phone_id)}"><div class="what"><div class="row"><b class="trunc muted" title="${esc(p.name)}">${esc(p.name)}</b></div>
+      <p data-testid="phone-line">Revoked ${esc(new Date(p.revoked_at).toLocaleDateString([], { day: 'numeric', month: 'short' }))} · ${ACK.map(([k, , w]) => `${w} ${mark((p.acks || {})[k])}`).join(' · ')}</p></div></div>`).join('')}
     <p class="pc-note">A phone is never a full peer: it gets no recovery key and no admin token. Revoking confirms on this computer, the hub and the push relay.</p>
   </section>`;
 }
@@ -136,13 +139,14 @@ action('phone-grant', async (el) => {
   if (await mutate(() => call('phones_set_grants', { id: box.dataset.id, grants }), 'Saved') === undefined) el.checked = !el.checked;
 });
 /** What came back from a revoke: true confirmed, false not confirmed, null not used by this phone (yet). */
-const ACK = [['connection', 'Its open connections cut'], ['hub', 'Its hub token and mailbox deleted'], ['push', 'Its push handle removed from the relay']];
+const ACK = [['connection', 'Its open connections cut', 'connection'], ['hub', 'Its hub token and mailbox deleted', 'hub'], ['push', 'Its push handle removed from the relay', 'push']];
+const mark = (v) => (v === true ? '<span class="ok">confirmed</span>' : v === false ? '<span class="negT">not confirmed</span>' : '<span class="muted">not used yet</span>');
 action('phone-revoke', async (el) => {
   const { id, name } = el.dataset;
   if (!(await confirmDialog('Revoke ' + name, `Revoke <b>${esc(name)}</b>? It loses access to this computer at once: its connections are cut, its hub token and mailbox go, and the push relay forgets it. Pair it again to give it access.`, 'Revoke'))) return;
   const r = await mutate(() => call('phones_revoke', { id }));
   if (!r) return;
-  const a = r.acks || {}, mark = (v) => (v === true ? '<span class="ok">confirmed</span>' : v === false ? '<span class="negT">not confirmed</span>' : '<span class="muted">not used yet</span>');
+  const a = r.acks || {};
   openDialog(`${dlgHead(name + ' is revoked')}<div class="dlg-text" data-testid="phone-acks">${ACK.map(([k, t]) => `<div data-testid="phone-ack-${k}"><b>${t}</b>: ${mark(a[k])}</div>`).join('')}</div>
     <div class="modal-foot"><span class="acts"><button class="btn-primary" data-act="dialog-close">Close</button></span></div>`, { size: 'sm', label: name + ' is revoked' });
 });

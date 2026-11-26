@@ -2792,8 +2792,8 @@ description: Bulk skill ${i}
 
   // ---- phones (WP-M2): Pair a phone… and the Phones list, as the S24 frames draw them ----
   // The phone operations (phones_* and the phones-pairing event) come from WP-M1. The first two tests answer them from a
-  // fake layer, so the dialog's every state and the list are checked and photographed now; the last two need the real
-  // operations and say so in their names (they are skipped while the core answers "not built yet").
+  // fake layer, so the dialog's every state and the list are checked and photographed in a known state; the last two
+  // use the real operations and say so in their names.
   const phonesFakeOn = () => exec(`
     const t = window.__TAURI__, real = window.__phReal || t.core, now = Date.now(), D = 86400e3;
     window.__phReal = real;
@@ -2813,8 +2813,9 @@ description: Bulk skill ${i}
     const fake = {
       phones_list: () => ph.list,
       phones_set_grants: (a) => { const p = ph.list.find((x) => x.phone_id === a.id); p.grants = a.grants; return p; },
-      phones_revoke: (a) => { const p = ph.list.find((x) => x.phone_id === a.id); p.revoked_at = Date.now(); return { phone_id: a.id, revoked_at: p.revoked_at, acks: { connection: true, hub: false, push: null } }; },
-      phones_pair_start: () => ({ code: '481920', expires_at: Date.now() + 91000, host_hint: 'WORKSTATION:47100', port: 47100, qr: 'hm-phone:1?h=WORKSTATION:47100&c=481920&f=ab12', qr_svg: svg }),
+      phones_revoke: (a) => { const p = ph.list.find((x) => x.phone_id === a.id); p.revoked_at = Date.now(); p.acks = { connection: true, hub: false, push: null }; return { phone_id: a.id, revoked_at: p.revoked_at, acks: p.acks }; },
+      // each showing of a code is an attempt; the decisions name it
+      phones_pair_start: () => ({ attempt: (ph.attempt = 'att-' + (ph.n = (ph.n || 0) + 1)), state: 'waiting', code: '481920', expires_at: Date.now() + 91000, host_hint: 'WORKSTATION:47100', port: 47100, qr: 'hm-phone:1?h=WORKSTATION:47100&c=481920&f=ab12', qr_svg: svg }),
       phones_pair_status: () => ph.status || null,
       phones_pair_approve: (a) => (ph.status = { state: 'paired', phone: { name: 'iPhone 17', platform: 'ios' }, grants: a.grants }),
       phones_pair_refuse: () => (ph.status = { state: 'refused', phone: { name: 'iPhone 17', platform: 'ios' } }),
@@ -2823,7 +2824,7 @@ description: Bulk skill ${i}
     t.core = { ...real, invoke: (cmd, a, o) => (a && fake[a.op] ? (ph.calls.push([a.op, a.args]), Promise.resolve(fake[a.op](a.args || {}))) : real.invoke(cmd, a, o)) };`);
   const phonesFakeOff = () => exec('if (window.__phReal) { window.__TAURI__.core = window.__phReal; window.__phReal = null; } document.documentElement.dataset.theme = "light";');
   /** The phones-pairing event, as the core sends it, through Tauri's own event bus. */
-  const phoneEvent = (st) => exec('return window.__TAURI__.event.emit("phones-pairing", arguments[0])', [st]);
+  const phoneEvent = (st) => exec('return window.__TAURI__.event.emit("phones-pairing", { attempt: window.__ph.attempt, ...arguments[0] })', [st]);
   const phCalls = (op) => exec('return window.__ph.calls.filter((c) => c[0] === arguments[0]).map((c) => c[1])', [op]);
   const dialogGone = () => waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
   const confirmState = { state: 'confirm', phone: { name: 'iPhone 17', platform: 'ios' }, words: ['amber', 'otter', 'nine'] };
@@ -2845,6 +2846,10 @@ description: Bulk skill ${i}
       assert.match(d.ask, /When the phone has used the code/, 'step 2 waits for the phone');
       assert.deepEqual(d.acts, ['Cancel']);
       await shot('19p-phone-pair-waiting');
+      // news of another attempt (an older code) is not this dialog's
+      await phoneEvent({ ...confirmState, attempt: 'att-other' });
+      await sleep(300);
+      assert.ok(!(await exec("return !!document.querySelector('[data-testid=phone-words]')")), 'an event of another attempt is ignored');
       // the phone proved the code: its name and platform, the three words, the grants (Control off), Refuse and Approve
       await phoneEvent(confirmState);
       await $('[data-testid=phone-words]');
@@ -2869,7 +2874,7 @@ description: Bulk skill ${i}
       await click('[data-testid=phone-grant-transcripts]');
       await click('[data-testid=phone-approve]');
       await hasText('[data-testid=phone-pair-result]', 'Paired with iPhone 17');
-      assert.deepEqual(await phCalls('phones_pair_approve'), [{ grants: { summaries: true, transcripts: false, control: true } }]);
+      assert.deepEqual(await phCalls('phones_pair_approve'), [{ attempt: 'att-1', grants: { summaries: true, transcripts: false, control: true } }]);
       await phoneEvent({ state: 'paired', phone: { name: 'iPhone 17', platform: 'ios' } }); // the same news by event: drawn once
       assert.equal(await exec("return document.querySelectorAll('[data-testid=phone-pair-result]').length"), 1);
       await shot('19s-phone-pair-paired');
@@ -2949,15 +2954,15 @@ description: Bulk skill ${i}
       await shot('19w-phone-revoked');
       await click('.modal-card .btn-primary[data-act=dialog-close]');
       await dialogGone();
-      await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=phone-ph-pixel]')")), 'the revoked phone left the list');
+      // it stays a week, without its switches, with its acknowledgements as the list gives them
+      await waitFor(async () => (await exec("return !document.querySelector('[data-testid=phone-ph-pixel-control]')")), 'the revoked phone without its switches');
+      assert.match(await text('[data-testid=phone-ph-pixel] [data-testid=phone-line]'), /^Revoked \w+ \w+ · connection confirmed · hub not confirmed · push not used yet$/);
       assert.equal(await text('[data-testid=phones-count]'), '1');
+      await shot('19x-phones-list-revoked');
     } finally { await phonesFakeOff(); await nav('#home'); }
   });
 
-  /** The real phone operations are there (WP-M1 merged), not the stub's "not built yet". */
-  const phonesBuilt = () => exec("return window.__TAURI__.core.invoke('call', { op: 'phones_list', args: {} }).then(() => true, (e) => !/not built yet/.test(String(e)))");
   await test('phones (needs the phone operations): Pair a phone… shows the core\'s own QR code and six digits, and Cancel ends the pairing', async () => {
-    if (!(await phonesBuilt())) return console.log('     skipped: the phone operations are not built yet');
     await nav('#home');
     await nav('#computers');
     await click('[data-testid=phone-pair-head]');
@@ -2970,7 +2975,6 @@ description: Bulk skill ${i}
     await waitFor(async () => { const s = await exec("return window.__TAURI__.core.invoke('call', { op: 'phones_pair_status', args: {} })"); return !s || s.state !== 'waiting'; }, 'the pairing cancelled');
   });
   await test('phones (needs the phone operations): the Phones card from phones_list, empty on a computer with no phone', async () => {
-    if (!(await phonesBuilt())) return console.log('     skipped: the phone operations are not built yet');
     await nav('#home');
     await nav('#computers');
     await $('[data-testid=phones] [data-testid=phones-none]');
