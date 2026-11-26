@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Build Status</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f6f4;--surface:#fff;--ink:#16201f;--muted:#5d6b6a;--line:#dfe4e2;--soft:#eef2f0;--ac:#0f6b5f;--ac-soft:#e2f1ed;--warn:#a35d00;--warn-soft:#fbf0de;--neg:#b42318;--neg-soft:#fde8e6;--a:#1f2a4d;--b:#c2532f;--shadow:0 1px 2px rgba(16,24,23,.06),0 4px 16px rgba(16,24,23,.06)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975;--shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
+:root[data-theme="dark"]{--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--ac)}
+h1,h2,h3{margin:0;line-height:1.25}
+.wrap{max-width:1320px;margin:0 auto;padding:0 24px}
+header.top{padding:40px 0 16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:34px;letter-spacing:-.02em;margin:6px 0 8px}
+.lede{font-size:17px;color:var(--muted);max-width:880px;margin:0}
+.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:14px;min-height:56px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+nav.toc{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+nav.toc a{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;white-space:nowrap}
+nav.toc a:hover,nav.toc a.on{background:var(--surface);color:var(--ink)}
+.fbstat{font-size:13px;color:var(--muted)}
+.fbstat b{color:var(--ink)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-block;transition:border-color .15s,transform .12s}
+.btn:hover{border-color:var(--muted)}.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+section.s{padding:44px 0 8px}
+section.s>h2{font-size:24px;letter-spacing:-.01em;display:flex;gap:12px;align-items:baseline}
+.num{font-size:13px;color:var(--muted);font-weight:600;font-family:"JetBrains Mono",monospace}
+.intro{color:var(--muted);max-width:900px;margin:8px 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:960px){.duo{grid-template-columns:1fr}}
+.duo>*,.card{min-width:0}
+.shots img{max-width:none}
+@media (max-width:640px){.shots a img[width="560"],.shots a img[width="580"],.shots a img[width="520"]{width:min(560px,82vw)}}
+.side h3{font-size:17px;display:flex;align-items:center;gap:8px}
+.badge{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff}
+.badge.a{background:var(--a)}.badge.b{background:var(--b)}
+:root[data-theme="dark"] .badge{color:#111}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge{color:#111}}
+.who{font-size:13px;color:var(--muted);margin:2px 0 12px}
+.shots{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.shots a{flex:none;display:block;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#111;transition:transform .2s ease,box-shadow .2s ease}
+.shots a:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.shots img{display:block;height:auto}
+.tall{max-height:760px;overflow-y:auto;border-radius:12px}
+.cap{font-size:12px;color:var(--muted);margin-top:4px}
+.verdict{border-left:3px solid var(--ac);background:var(--ac-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0 0;font-size:14px}
+.verdict b{display:block;margin-bottom:2px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+.t th,.t td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.t th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.fb{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.fb .chips{display:flex;gap:4px;flex-wrap:wrap}
+.fb .chip{font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s ease}
+.fb .chip:hover{color:var(--ink);border-color:var(--muted)}
+.fb .chip.on.keep,.fb .chip.on.opt{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.on.change{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.fb .chip.on.drop{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.fb textarea{font:inherit;font-size:13px;width:100%;min-height:34px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:9px;padding:7px 10px;transition:border-color .15s,min-height .2s}
+.fb textarea:focus{outline:none;border-color:var(--ac);min-height:70px}
+.pick{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.pick .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+footer{padding:50px 0 80px;color:var(--muted);font-size:13px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:640px){.wrap{padding:0 16px}h1{font-size:27px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="eyebrow">Harness Manager · Mobile companion · Status · 26 Nov 2026</div>
+  <h1>The app runs on your phone</h1>
+  <p class="lede">Since the design was approved, the desktop learned to pair with phones and serve them, and the Flutter app was built and tested on your moto g15. On your network or VPN, the app pairs with your computer and answers its permission requests and questions, with an honest receipt for each. It also shows accounts, limits, sessions and computers, has the game layer, and has the Use next widget and the ongoing notification. Every security-relevant part went through independent Codex or Claude reviews until it passed, or was switched off when you chose so. This page shows what works, what is held back and why, and what I need from you next.</p>
+</div></header>
+
+<div class="bar"><div class="wrap">
+  <nav class="toc" id="toc"><a href="#works">What works</a><a href="#shots">On the phone</a><a href="#desktop">Desktop</a><a href="#held">Held back</a><a href="#reviews">Reviews</a><a href="#need">I need from you</a><a href="#next">Next</a></nav>
+  <span class="fbstat" id="fbstat"></span>
+  <button class="btn" id="copy">Copy as text</button>
+  <button class="btn pri" id="export">Export feedback</button>
+</div></div>
+
+<main class="wrap">
+
+<section class="s reveal" id="works">
+  <h2><span class="num">01</span>What works today</h2>
+  <div class="card">
+    <table class="t">
+      <tr><th>Area</th><th>State</th><th>Checked on</th></tr>
+      <tr><td><b>Pairing</b></td><td>Six digits or QR, the three words on both screens, your approval on the computer with the grants, the computer's certificate pinned. A phone never gets the ring key.</td><td>moto g15, against a sandboxed desktop</td></tr>
+      <tr><td><b>Home</b></td><td>Live from the computer: Needs you with timers, Use next with its reason, running sessions, next reset, today's cost and 30 days, the game strip; offline cache with ages; "not answering" vs "access removed" told apart</td><td>moto g15</td></tr>
+      <tr><td><b>Answering</b></td><td>Approve once / Deny a permission, pick a question's answers; an honest countdown (5 min for a phone at most); receipts: sent, already handled, expired, unavailable, unknown. The answer reaches Claude Code's hook.</td><td>moto g15, a real hook receiving allow / deny / the answer</td></tr>
+      <tr><td><b>Accounts, Computers, Settings</b></td><td>The reset clock with windows and forecast, the harvest window, other computers, grants shown, disconnect, app lock</td><td>moto g15</td></tr>
+      <tr><td><b>Game layer</b></td><td>XP only for room saved, harvests from 8 weeks of history, the streak across computers with unknown days dashed, badges with evidence, XP log, weekly recap and its share image, the moments with Reduce Motion, Customize Home; all switchable off</td><td>moto g15, with a real harvest watched live</td></tr>
+      <tr><td><b>Android widget and notification</b></td><td>Use next dial (2×1, 2×2, 4×2), the private ongoing notification with a countdown, no Approve on the lock screen</td><td>moto g15</td></tr>
+      <tr><td><b>iOS</b></td><td>The app, the widgets you picked and the Live Activity are written; not built yet</td><td>needs the Mac</td></tr>
+      <tr><td><b>Push</b></td><td>The relay is built and merged (content-free "A session needs you"); the desktop wakes it when a request opens</td><td>fake provider in tests; real delivery needs your credentials</td></tr>
+    </table>
+    <p class="intro" style="margin:12px 0 0;font-size:14px">App: 21 commits in <code>D:\Projects\abushanab-net\HarnessManager-mobile</code> (local only), 148 tests, release APK 41 MB. Desktop: <code>mobile/design</code> in this repository, all Rust tests green.</p>
+  </div>
+</section>
+
+<section class="s reveal" id="shots">
+  <h2><span class="num">02</span>On the phone</h2>
+  <p class="intro">Screenshots taken from the moto g15 during the scripted runs (sandbox data). Click to enlarge.</p>
+  <div class="card" data-fid="s-app" data-title="The app as built">
+    <div class="shots">
+      <a href="status-shots/journey-3-words.jpg" target="_blank"><img src="status-shots/journey-3-words.jpg" width="200" alt="Check the words"></a>
+      <a href="status-shots/m4-s7-home-request-light.jpg" target="_blank"><img src="status-shots/m4-s7-home-request-light.jpg" width="200" alt="Home with a request"></a>
+      <a href="status-shots/m4-s9-permission-light.jpg" target="_blank"><img src="status-shots/m4-s9-permission-light.jpg" width="200" alt="Permission"></a>
+      <a href="status-shots/journey-8-receipt.jpg" target="_blank"><img src="status-shots/journey-8-receipt.jpg" width="200" alt="Receipt"></a>
+      <a href="status-shots/m4-s10-question-light.jpg" target="_blank"><img src="status-shots/m4-s10-question-light.jpg" width="200" alt="Question"></a>
+      <a href="status-shots/m4-s15-account-dark.jpg" target="_blank"><img src="status-shots/m4-s15-account-dark.jpg" width="200" alt="Account detail"></a>
+      <a href="status-shots/m4-s17-computers-dark.jpg" target="_blank"><img src="status-shots/m4-s17-computers-dark.jpg" width="200" alt="Computers"></a>
+      <a href="status-shots/m4-s22-not-answering-light.jpg" target="_blank"><img src="status-shots/m4-s22-not-answering-light.jpg" width="200" alt="Not answering"></a>
+      <a href="status-shots/m4-s23-access-removed-light.jpg" target="_blank"><img src="status-shots/m4-s23-access-removed-light.jpg" width="200" alt="Access removed"></a>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="s-game" data-title="Game layer as built">
+    <div class="shots">
+      <a href="status-shots/game-1-home.jpg" target="_blank"><img src="status-shots/game-1-home.jpg" width="200" alt="Harvest on Home"></a>
+      <a href="status-shots/game-3-progress.jpg" target="_blank"><img src="status-shots/game-3-progress.jpg" width="200" alt="Progress"></a>
+      <a href="status-shots/game-5-badge.jpg" target="_blank"><img src="status-shots/game-5-badge.jpg" width="200" alt="Badge"></a>
+      <a href="status-shots/game-7-xp-log.jpg" target="_blank"><img src="status-shots/game-7-xp-log.jpg" width="200" alt="XP log"></a>
+      <a href="status-shots/game-8-recap.jpg" target="_blank"><img src="status-shots/game-8-recap.jpg" width="200" alt="Recap"></a>
+      <a href="status-shots/game-12-project.jpg" target="_blank"><img src="status-shots/game-12-project.jpg" width="200" alt="Project"></a>
+      <a href="status-shots/game-14-customize.jpg" target="_blank"><img src="status-shots/game-14-customize.jpg" width="200" alt="Customize Home"></a>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="s-widgets" data-title="Widget and notification as built">
+    <div class="shots">
+      <a href="status-shots/m7-widget-use-next-light.jpg" target="_blank"><img src="status-shots/m7-widget-use-next-light.jpg" width="200" alt="Widget light"></a>
+      <a href="status-shots/m7-widget-use-next-dark.jpg" target="_blank"><img src="status-shots/m7-widget-use-next-dark.jpg" width="200" alt="Widget dark"></a>
+      <a href="status-shots/m7-widget-use-next-stale-light.jpg" target="_blank"><img src="status-shots/m7-widget-use-next-stale-light.jpg" width="200" alt="Widget stale"></a>
+      <a href="status-shots/m7-notification-a1-light.jpg" target="_blank"><img src="status-shots/m7-notification-a1-light.jpg" width="320" alt="Ongoing notification"></a>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="desktop">
+  <h2><span class="num">03</span>Desktop side (branch <code>mobile/design</code>)</h2>
+  <div class="card">
+    <table class="t">
+      <tr><td><b>Phones</b></td><td>Pairing with approval, grants per phone, revocation with acknowledgements, the companion API on the existing listener, actions with receipts, Use next computed once in Rust</td></tr>
+      <tr><td><b>Desktop UI and CLI</b></td><td>Computers › Pair a phone… and the Phones list; <code>hrm phones list | pair | grants | revoke</code></td></tr>
+      <tr><td><b>Push relay</b></td><td><code>crates/push-relay</code> and <code>deploy/push-relay</code>: Docker beside the hub, signed wakes, no content, rate limits</td></tr>
+      <tr><td><b>Game history</b></td><td>Past resets with room left, run-outs, active days across computers, per-project usage</td></tr>
+      <tr><td><b>Hub mailbox</b></td><td>Merged <b>switched off</b> (experimental), as you decided</td></tr>
+      <tr><td><b>Unchanged</b></td><td>Desktop Reply and Stop, the CLI's <code>hrm reply/stop</code> and the hook behave as in 1.13.2; questions wait 15 s unless a phone with Control is paired (then 60 s)</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="held">
+  <h2><span class="num">04</span>Held back, and why</h2>
+  <div class="card">
+    <table class="t">
+      <tr><th>What</th><th>Why</th><th>Becomes</th></tr>
+      <tr><td>Reply and Stop from the phone</td><td>Typing into a terminal from afar kept showing races between the check and the keystroke; the rework also regressed the desktop. You chose to narrow wave 1.</td><td>WP-M8, its own design (needs help from the tool)</td></tr>
+      <tr><td>Away from home through the hub</td><td>Six review rounds kept finding delivery edge cases; you chose to merge it off</td><td>WP-M5b hardening; meanwhile use your VPN</td></tr>
+      <tr><td>A late answer's receipt</td><td>If the terminal answered first, the phone's answer can read "sent" while changing nothing. A real-Claude-Code spike proved the first decision always wins, so no wrong action is possible.</td><td>Accepted; the receipt says so. Later: read the prompt's state from the terminal</td></tr>
+      <tr><td>1.13 hub users</td><td>Their old hub login cannot be tied to its hub safely</td><td>A one-time re-join after upgrading, as you chose</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="reviews">
+  <h2><span class="num">05</span>How it was checked</h2>
+  <div class="card">
+    <table class="t">
+      <tr><td>Desktop phone core</td><td>Codex, 7 passes; terminal input moved to WP-M8; answer residual accepted by you</td></tr>
+      <tr><td>Push relay</td><td>Claude review: go with fixes; all fixed</td></tr>
+      <tr><td>Hub mailbox</td><td>Codex, 6 passes, including one redesign; merged off</td></tr>
+      <tr><td>Each fix</td><td>A test written to fail without it, run against the code before the fix from round 3 on</td></tr>
+      <tr><td>Real devices</td><td>moto g15 (Android 15): pairing, answers reaching a real hook, widgets, notification, game layer; timings 0.26 s warm / 1.0 s cold from alert to accepted answer</td></tr>
+      <tr><td>Your phone</td><td>Settings restored after every run; nothing placed on your home screen; screenshots cropped so other apps' notifications don't show</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="need">
+  <h2><span class="num">06</span>What I need from you</h2>
+  <p class="intro">None of these block the next coding work; each unlocks a step that cannot be done from here.</p>
+  <div class="card pick" data-fid="n-github" data-title="App repository on GitHub" data-opts="Create HarnessManager-mobile (private) and push|Not yet"><span class="lbl">Put the app repository on GitHub</span><p class="intro" style="margin:4px 0 0;font-size:14px">It is local only. A private repository lets CI build it and lets the app depend on a tagged companion-proto instead of a local path.</p></div>
+  <div class="card pick" data-fid="n-firebase" data-title="Firebase project" data-opts="I'll create it and share google-services.json and the service-account file|Not yet"><span class="lbl">Firebase project (Android push)</span><p class="intro" style="margin:4px 0 0;font-size:14px">Free. Needed for real alerts on Android and for the relay's FCM login.</p></div>
+  <div class="card pick" data-fid="n-apple" data-title="Apple Developer membership" data-opts="I'll enrol and create the APNs key|Not yet"><span class="lbl">Apple Developer membership (iOS push, Live Activity, TestFlight)</span></div>
+  <div class="card pick" data-fid="n-mac" data-title="Mac build" data-opts="MINI is on; build iOS there|Later"><span class="lbl">iOS build on the Mac (MINI)</span><p class="intro" style="margin:4px 0 0;font-size:14px">The app, widgets and Live Activity are written; a free Apple ID is enough to run them on your own iPhone.</p></div>
+  <div class="card pick" data-fid="n-relay" data-title="Deploy the push relay" data-opts="Deploy it next to my hub when the credentials exist|Not yet"><span class="lbl">Run the push relay beside your hub</span></div>
+  <div class="card pick" data-fid="n-unknown" data-title="The second phone" data-opts="Accept USB debugging on it|Ignore it"><span class="lbl">The second USB device (RFCY7199F6W) is unauthorized</span></div>
+</section>
+
+<section class="s reveal" id="next">
+  <h2><span class="num">07</span>What next</h2>
+  <div class="card" data-fid="next" data-title="Next step" data-opts="Release desktop 1.14 with phone support (beta) and keep going on the app|Harden first: WP-M5b hub mailbox|Design WP-M8 phone Reply and Stop|iOS build on the Mac first|Pause here">
+    <h3 style="font-size:17px">What should come next?</h3>
+    <p class="intro" style="margin:6px 0 0;font-size:14px">A desktop release would put pairing and the companion API in your installed app, so the phone works with your real data instead of the sandbox. The hub mailbox stays off in it.</p>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="general" data-title="Anything else" data-nochips="1"><h3 style="font-size:17px">Anything else</h3></div>
+</section>
+</main>
+<footer><div class="wrap">Harness Manager mobile · Status · plan: <code>docs/plans/mobile/PLAN.md</code> · app: <code>HarnessManager-mobile/docs/M4.1-status.md</code> · design: <code>docs/mobile-2026-11/</code></div></footer>
+<div class="toast" id="toast"></div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KEY = 'hm-mobile-status-1';
+let fb = {}; try { fb = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { fb = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {} stat(); };
+const items = [...document.querySelectorAll('[data-fid]')];
+items.forEach((el) => {
+  const id = el.dataset.fid, cur = fb[id] || {}, opts = el.dataset.opts ? el.dataset.opts.split('|') : null;
+  const w = document.createElement('div'); w.className = 'fb';
+  const chips = el.dataset.nochips ? '' : opts
+    ? `<div class="chips">${opts.map((o) => `<button type="button" class="chip opt ${cur.v === o ? 'on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<div class="chips">${[['keep','Keep'],['change','Change'],['drop','Drop']].map(([v,l]) => `<button type="button" class="chip ${v} ${cur.v === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  w.innerHTML = chips + `<textarea rows="1" placeholder="${el.dataset.nochips ? 'Your notes for the designers…' : 'Comment (optional)…'}" aria-label="Comment on ${esc(el.dataset.title)}">${esc(cur.c || '')}</textarea>`;
+  if (el.dataset.nochips) w.querySelector('textarea').style.minHeight = '120px';
+  el.appendChild(w);
+  w.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => {
+    const on = (fb[id] || {}).v === b.dataset.v; fb[id] = { ...(fb[id] || {}), v: on ? undefined : b.dataset.v };
+    w.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', !on && x === b)); save();
+  }));
+  const ta = w.querySelector('textarea'); ta.addEventListener('input', () => { fb[id] = { ...(fb[id] || {}), c: ta.value }; save(); });
+});
+function stat() { const n = items.filter((e) => !e.dataset.nochips).length, d = items.filter((e) => { const f = fb[e.dataset.fid]; return f && (f.v || (f.c || '').trim()); }).length; document.getElementById('fbstat').innerHTML = `<b>${d}</b> of ${n} reviewed`; }
+stat();
+const collect = () => items.map((e) => ({ id: e.dataset.fid, item: e.dataset.title, verdict: (fb[e.dataset.fid] || {}).v || null, comment: ((fb[e.dataset.fid] || {}).c || '').trim() || null })).filter((x) => x.verdict || x.comment);
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2400); }
+document.getElementById('export').addEventListener('click', () => {
+  const data = { review: 'mobile-status-1', exported_at: new Date().toISOString(), items: collect() };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); a.download = 'mobile-status-1-feedback.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${data.items.length} items to mobile-status-1-feedback.json`);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  const rows = collect(), text = '# Mobile build status: feedback\n\n' + rows.map((r) => `- **${r.item}** (${r.id})${r.verdict ? ` — ${r.verdict}` : ''}${r.comment ? `\n  ${r.comment.replace(/\n/g, '\n  ')}` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${rows.length} items: paste them into the chat`); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('Copied'); }
+});
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .05 });
+document.querySelectorAll('.reveal').forEach((e) => io.observe(e));
+const links = [...document.querySelectorAll('#toc a')];
+const so = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-40% 0px -55% 0px' });
+document.querySelectorAll('section.s').forEach((s) => so.observe(s));
+</script>
+</body>
+</html>
