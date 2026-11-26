@@ -81,3 +81,26 @@
 .way .two b { font-weight: 600; }
 .way .mono { font-size: var(--fs-small); }
 .way [data-testid=hub-line] { flex: none; }
+
+/* ---- Computers › Phones (S24): a row per phone with its three grants as switches; the Pair a phone dialog ---- */
+.ph-row .ctl { flex-wrap: nowrap; justify-content: flex-end; gap: 6px 14px; }
+.ph-row.gone .what { grid-column: 1 / -1; }
+.ph-sw { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-small); color: var(--ink-secondary); }
+.modal-card.ph { max-width: 680px; }
+.ph-pair { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 0; margin: 0 -2px; }
+.ph-step { display: flex; flex-direction: column; gap: 10px; min-width: 0; line-height: 18px; }
+.ph-step + .ph-step { border-left: 1px solid var(--line-subtle); padding-left: 18px; margin-left: 18px; }
+.ph-step h3 { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); font-weight: 600; }
+.ph-step h3 .n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 11px; background: var(--bg-card-hover); color: var(--ink-secondary); }
+.ph-step p { font-size: var(--fs-small); color: var(--ink-secondary); }
+.ph-step p.muted { color: var(--ink-muted); } .ph-step p.b-good { color: var(--ac); } .ph-step p.b-danger { color: var(--neg); }
+.ph-qr { position: relative; align-self: center; width: 176px; height: 176px; border-radius: 8px; overflow: hidden; border: 1px solid var(--line-default); background: #fff; }
+.ph-qr svg { display: block; width: 100%; height: 100%; }
+.ph-qr .used { display: none; }
+.ph-qr.done svg { opacity: .25; }
+.ph-qr.done .used { display: block; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 4px 12px; border-radius: 999px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); font-weight: 600; white-space: nowrap; color: #0d1f26; }
+.ph-words { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ph-words span { height: 36px; display: grid; place-items: center; border: 1px solid var(--line-default); border-radius: var(--radius-control); background: var(--bg-input); font-size: 15px; font-weight: 600; color: var(--ink-primary); }
+.ph-grant { align-items: flex-start; padding: 8px 0 0; border-top: 1px solid var(--line-subtle); line-height: 18px; color: var(--ink-muted); }
+.ph-grant input { margin-top: 2px; flex: none; }
+.ph-grant b { display: block; color: var(--ink-primary); font-weight: 600; }

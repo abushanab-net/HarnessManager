@@ -48,6 +48,10 @@ create index if not exists outbox_key on outbox(op, key);
 create table if not exists peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer,
   last_seq integer, applied_seq integer, roots text, transport text, presence text);
 create table if not exists cursors2(device_id text not null, incarnation text not null, seq integer not null, primary key(device_id, incarnation));
+create table if not exists phones(phone_id text primary key, name text, platform text, cert_pem text, pubkey text, x25519 text,
+  grants text, paired_at integer, last_seen integer, revoked_at integer, relay_handle text);
+create table if not exists phone_actions(action_id text primary key, phone_id text not null, kind text not null, target text not null,
+  status text not null, detail text not null, at integer not null);
 "#;
 
 /// A usage row's insert: the same request from two logs (a resumed session repeats earlier messages) keeps the
@@ -234,6 +238,29 @@ pub(crate) fn add_column(conn: &Connection, table: &str, col: &str, ty: &str) ->
     }
 }
 
+/// The columns the hook tables gained after their first version. `hrm hook` adds them too, before it writes: an
+/// `hrm run` started before an update keeps running, and its hooks run the updated `hrm` before anything migrates.
+pub(crate) fn hook_columns(conn: &Connection) -> rusqlite::Result<()> {
+    // the newest column is added last: when it is there, so are the others (one probe per hook, not eight)
+    if conn.prepare("select 1 from pragma_table_info('run_ask') where name = 'turn'")?.exists([])? { return Ok(()); }
+    for (table, col, ty) in [
+        ("run_state", "terminal_port", "integer"),
+        ("run_state", "terminal_token", "blob"),
+        ("run_ask", "hook_pid", "integer not null default 0"),
+        ("run_ask", "hook_started", "integer not null default 0"),
+        // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
+        ("run_state", "version", "integer not null default 0"),
+        // the turn a session is in (a submitted prompt starts one), and the turn a request was opened in
+        ("run_state", "turn", "integer not null default 0"),
+        ("run_ask", "turn", "integer not null default 0"),
+    ] {
+        if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
+            add_column(conn, table, col, ty)?;
+        }
+    }
+    Ok(())
+}
+
 impl Db {
     pub fn open(path: &Path, device: &str, journal: bool) -> Result<Db> {
         let mut conn = Connection::open(path)?;
@@ -247,16 +274,20 @@ impl Db {
         conn.execute_batch(SCHEMA)?;
         // what each session hrm run started last reported through its hooks (hooks.rs)
         conn.execute_batch(crate::hooks::TABLE)?;
+        hook_columns(&conn)?;
         for (table, col, ty) in [
-            ("run_state", "terminal_port", "integer"),
-            ("run_state", "terminal_token", "blob"),
-            ("run_ask", "hook_pid", "integer not null default 0"),
-            ("run_ask", "hook_started", "integer not null default 0"),
+            // a phone's enrollment, and the listener's acknowledgement of a revocation (phones.rs)
+            ("phones", "generation", "text not null default ''"),
+            ("phones", "cut_at", "integer"),
+            ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
                 add_column(&conn, table, col, ty)?;
             }
         }
+        // a phone paired before enrollments had generations gets one of its own; receipts kept from then name none,
+        // so no enrollment can read them (the id may have been paired again before this version)
+        conn.execute("update phones set generation = lower(hex(randomblob(16))) where generation = ''", [])?;
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
         if !has {

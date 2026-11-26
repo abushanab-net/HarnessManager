@@ -19,6 +19,8 @@ const CLI = [
     ['ring show | enter [key]', 'The recovery key: print it for your password manager, or enter it on a computer that is not paired'],
     ['computers pair', 'Show a six-digit code and wait for the other computer; --host for one on another network'], ['computers join <code>', 'Pair with the computer showing the code; --host name:port when not on this network'],
     ['computers peers', 'The paired computers, how each is reached and when it was last pulled'], ['computers forget <id or name>', 'Stop connecting to a computer; what it sent stays'], ['computers serve --seconds <n>', 'Run the listener without the app, for tests and headless use']]],
+  ['Phones', [['phones list', 'The phones paired with this computer: platform, route, last seen, grants; --json'], ['phones pair', 'Show a QR code and six digits, then check the three words and approve the phone with its grants'],
+    ['phones grants <phone> --summaries --transcripts --control on|off', 'What a phone may do; what is not given stays'], ['phones revoke <phone>', 'Take its access away, and show what the hub and the push relay confirmed']]],
 ];
 const EX = [['hrm list', 'Accounts, plans, limits, tokens and open consoles'], ['hrm start work-max --cwd D:\\Projects\\my-app', 'Start in that folder (a new terminal)'],
   ['hrm quota work-max --live', 'Limits straight from Anthropic'], ['hrm sessions --group project --json', "Every tool's sessions, for scripts"]];

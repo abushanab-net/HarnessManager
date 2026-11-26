@@ -856,6 +856,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "companion-proto"
+version = "1.13.2"
+dependencies = [
+ "anyhow",
+ "base64 0.23.1",
+ "bytes",
+ "chacha20poly1305",
+ "curve25519-dalek 5.0.0",
+ "ed25519-dalek",
+ "futures-util",
+ "getrandom 0.3.4",
+ "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "spake2",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2119,6 +2146,7 @@ dependencies = [
  "clap",
  "hrm-core",
  "hrm-router",
+ "qrcode",
  "rpassword",
  "rusqlite",
  "serde",
@@ -2136,6 +2164,7 @@ version = "1.13.2"
 dependencies = [
  "anyhow",
  "hrm-core",
+ "qrcode",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -2155,6 +2184,7 @@ dependencies = [
  "base64 0.23.1",
  "chacha20poly1305",
  "chrono",
+ "companion-proto",
  "data-encoding",
  "dirs",
  "ed25519-dalek",
@@ -2170,6 +2200,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rustls",
+ "rustls-webpki",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2179,6 +2210,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml_edit 0.25.17+spec-1.1.0",
+ "tower-layer",
  "windows-sys 0.61.2",
  "zip",
  "zstd",
@@ -3855,6 +3887,12 @@ checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ace1a365f55004297f2cf24acfd96d02966246ca423385273b58a7dc873ee14d"
 
 [[package]]
 name = "quick-xml"

@@ -12,9 +12,10 @@ are what other packages rely on. The plan's review page is `docs/plans/mobile/pl
 - **Away from home through the owner's hub from day one**, on top of direct LAN / VPN.
 - **Push through a small relay that we operate** for the store builds. Payloads carry no content ("A session needs
   you"); the phone fetches the details after unlock.
-- **Grants per computer:** Summaries and Transcripts on by default, **Control** (answer, reply, Stop) granted on the
-  computer.
-- **Question window:** 60 s when a phone with Control is paired, 15 s otherwise. A permission request waits up to 300 s.
+- **Grants per computer:** Summaries and Transcripts on by default, **Control** granted on the computer. In wave 1
+  Control answers requests; a phone's Reply and Stop come later, with their own design (WP-M8).
+- **Question window:** 60 s when a phone with Control is paired, 15 s otherwise. A phone answers a permission request up to 300 s
+  after it opened; the desktop waits as long as `request_seconds` says (up to 15 min), as in 1.13.2.
 - **Game layer: balanced.** XP, harvest, streak, levels (Connected → Organized → Planner → Strategist), badges with
   their rule, weekly recap. Points only for saving room or time. It can be switched off.
 - **Design:** Calibre. Every screen, state, moment, the three Android adaptations and the desktop S24 frames are
@@ -48,7 +49,7 @@ are what other packages rely on. The plan's review page is `docs/plans/mobile/pl
 | `core/sync/peer/listener.rs`: mutual TLS with a `Paired` client-certificate verifier | The companion API is served by the same listener, with phone certificates in their own table |
 | `core/sync/peer/mdns.rs` | The phone finds a computer showing a code on the LAN |
 | `core/hooks.rs`: `run_ask` rows, `answer()` updates only an open, unexpired row of a live hook | Answering from the phone goes through `answer()` unchanged |
-| `core/terminal.rs`: `reply()` and `stop()` for an owned Windows terminal | Reply and Stop from the phone |
+| `core/terminal.rs`: `reply()` and `stop()` for an owned Windows terminal | Reply and Stop from the phone, in WP-M8 (wave 2); unchanged in wave 1 |
 | `hub` + `core/sync/hub.rs`: device records, encrypted chunks, presence, `/v1/events` WebSocket | The phone mailbox is added to the hub |
 | `app/src-tauri/src/main.rs`: the session heartbeat runs in the background, not in the window | Requests wait for the phone while the app is in the tray |
 
@@ -82,22 +83,28 @@ phone gets neither.
 ```rust
 // crates/core/src/phones.rs
 pub fn list(ctx: &Ctx) -> Result<Value>;
-//   [{phone_id, name, platform, grants, paired_at, last_seen, revoked_at, route: "direct"|"hub"|null}]
+//   [{phone_id, name, platform, grants, paired_at, last_seen, revoked_at, route: "direct"|"hub"|null,
+//     acks?: {connection, hub, push}}]   acks on a revoked phone, as they stand now
 pub fn set_grants(ctx: &Ctx, phone_id: &str, grants: &Value) -> Result<Value>;   // the phone's row
 pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value>;
 //   {phone_id, revoked_at, acks: {connection: bool, hub: bool|null, push: bool|null}}
+//   connection: true once the listener holding the phone's connections has cut them (it may run in another process;
+//   revoke waits up to 3 s, and a later acknowledgement shows in list)
 
 // crates/core/src/sync/peer/mod.rs, on Runtime
 pub fn phone_pair_start(&self, ctx: &Arc<Ctx>, host_name: Option<&str>) -> Result<Value>;
-//   {code, expires_at, host_hint, port, qr}   qr = "hm-phone:1?h=<host:port>&c=<code>&f=<fingerprint>"
+//   {attempt, code, expires_at, host_hint, port, qr, state}   qr = "hm-phone:1?h=<host:port>&c=<code>&f=<fingerprint>"
 pub fn phone_pair_status(&self) -> Option<Value>;
-//   {state: "waiting"|"confirm"|"paired"|"refused"|"expired"|"failed", phone?: {name, platform}, words?: [3], error?}
-pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, grants: &Value) -> Result<Value>;  // the status after
-pub fn phone_pair_refuse(&self) -> Result<Value>;
-pub fn phone_pair_cancel(&self) -> Result<Value>;
+//   {attempt, state: "waiting"|"confirm"|"paired"|"refused"|"expired"|"failed", phone?: {name, platform}, words?: [3],
+//    error?, code, expires_at, host_hint, port, qr}
+pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, attempt: &str, grants: &Value) -> Result<Value>;  // the status after
+pub fn phone_pair_refuse(&self, attempt: &str) -> Result<Value>;
+pub fn phone_pair_cancel(&self, attempt: &str) -> Result<Value>;                // null
 ```
 
 Every status change is also sent as the event `phones-pairing` with the status value, as `computers-pairing` is today.
+`attempt` names one showing of a code: approve, refuse and cancel pass the `attempt` of the status the owner is looking
+at, and are refused for any other, so a decision taken on one phone's words never lands on another's.
 
 ## Contract: companion API (`/c1`, on the peer listener, phone certificates only)
 
@@ -125,21 +132,41 @@ to Rust), so the desktop, the phone and the widgets always agree.
 
 ```
 POST /c1/actions
-{ "action_id": uuid, "kind": "answer" | "reply" | "stop",
-  "target": { "run": str, "ask_id"?: str }, "state_version": int, "expires_at": ms,
-  "payload": { "behavior": "allow"|"deny" } | { "answers": {...} } | { "text": str } | {} }
-→ { "action_id", "status": "accepted" | "already_handled" | "expired" | "unavailable", "detail", "at": ms }
+{ "action_id": uuid, "kind": "answer",
+  "target": { "run": str, "ask_id": str }, "state_version": int, "expires_at": ms,
+  "payload": { "behavior": "allow"|"deny" } | { "answers": {...} } }
+→ { "action_id", "status": "accepted" | "already_handled" | "expired" | "unavailable" | "unknown", "detail", "at": ms }
 ```
 
+- **Wave 1 actions are `answer` only.** `reply` and `stop` (kept in `companion-proto` for WP-M8) are `unavailable`
+  with the detail "Reply and Stop from a phone are not available yet", and no setting turns them on. Each session's
+  `actions` says the same. The desktop's own Reply and Stop and `hrm reply` / `hrm stop` are unchanged.
 - The origin rechecks grant, run, request and state version immediately before it acts, serialises actions per run,
   and keeps each receipt 24 h in `phone_actions(action_id primary key, phone_id, kind, target, status, detail, at)`.
-- A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
-  automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
-  fails too.
-- `answer` goes through `hooks::answer()`, `reply` through `terminal::reply()`, `stop` through `terminal::stop()`;
-  reply and Stop keep today's rules (owned terminal, one line, at most 16 KiB, no reply while a prompt waits).
-- **Question window:** a launch writes the hook entry with a 60 s timeout, and the wait variable carries 60 when a phone
-  with Control is paired, else 15 (`QUESTION_SECONDS` becomes a function of the phones table).
+  One transaction claims the action: it consumes the state version (a second action on the same screen is `expired`)
+  and reserves the receipt before anything reaches the session. `unknown`: the computer stopped between reserving and
+  recording the outcome; the answer may have arrived and is never sent again. Where the answer is written (the same
+  write that takes the open request) the claimed run version, the action's deadline and the phone's Control are
+  checked once more, judged when that write gets the database.
+- **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
+  its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
+  to a request from another turn is refused. A hook opening its request keeps 1.13.2's order: in its event's
+  transaction it closes the run's open requests and inserts its own. Where the answer is written, the request must still be open and its hook live, the run at the claimed version and turn, both
+  deadlines unpassed, the request less than 300 s old, and the enrollment current with Control. A
+  hook that cannot record its event fails as it always did; the hook path does no file work beyond 1.13.2's (see the
+  release criteria for what a lost event leaves open). The person at the computer answers throughout.
+- A repeated `action_id` returns the stored receipt and does nothing again. An answer is never resent automatically.
+  When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that fails too.
+- `answer` goes through `hooks::answer()` with the phone's guard. An accepted answer's receipt reads "Sent to the
+  session. If the terminal answered first, nothing changed."
+- **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
+  (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is then 70 s, 10 s beyond the
+  window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before.
+  The desktop's permission wait is `request_seconds` (up to 15 min) and its hook entry 30 s more, as in 1.13.2; a
+  phone may answer only within 300 s of the request's opening (refused at the claim and at the write). Every phone
+  view shows that window: the request list, the `needs` event and the overview give `expires` as the earlier of the
+  request's own expiry and 300 s after it opened; past it, a request is listed with `at_computer` ("Answer it at the
+  computer: ...") and counted in the overview's `at_computer`, not in `needs_you` or the event's `count`.
 
 ## Contract: the hub, for phones
 
@@ -185,12 +212,48 @@ Phases 1 and 2 can overlap once the `/c1` contract is fixed: the app builds agai
 | WP-M2 desktop UI and CLI | `app/ui/computers*.js` (Pair a phone, Phones list), `app/src-tauri/src/computers.rs`, `crates/cli/src/**` (`hrm phones`), `e2e/` (phone tests) | `mobile/desktop-ui` |
 
 Wave 2: WP-M4 the Flutter app (its own repository), WP-M5 hub mailbox (`crates/hub/**`, `crates/core/src/sync/hub.rs`),
-WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository).
+WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository),
+WP-M8 phone Reply and Stop.
+
+**WP-M8 phone Reply and Stop** gets its own design before any code; wave 1's five reviews tried to bolt it onto the
+answer path and taught these inputs:
+
+- **The check-to-write gap.** Bytes typed into a terminal cannot be checked against the tool's turn at the instant
+  they are written: whatever is checked first, a prompt can open (or the turn end) before the bytes land, so a reply
+  or a Ctrl+C can reach a different moment than the one the phone was shown.
+- **Queue and cancel identity.** Every input needs an identity the relay checks: which Stop claimed which turn, which
+  reply is queued, and which one a cancel or a later outcome refers to, so a stale claim never releases or ends a
+  newer one and nothing is delivered twice.
+- **Turn versioning.** The state version moves on every hook event; a reply or Stop needs the tool's own turn, which
+  the hooks report only in part (no event follows an interrupt, a late hook from a stopped turn can arrive after it).
+- **Local typing interleaves.** Text the person at the computer is typing, or text a reply left unsent before its
+  Enter, mixes with remote input; a keystroke at the terminal settles nothing the desktop can see.
+- **Recovery control on the desktop.** An input whose outcome is not known has to be settled by someone: the desktop
+  needs a visible control to clear it, rather than a rule that waits for the next prompt.
+- **Needs help from the tool.** A reliable remote reply or interrupt wants the harness itself to accept input with a
+  turn id (or acknowledge one), rather than inferring the turn from terminal bytes and hook timing.
 
 ## Release criteria
 
-- **Zero stale approvals and zero repeated terminal inputs** across: the terminal answering first, two phones at once,
-  expiry during unlock, Wi-Fi to cellular, a receipt lost after a reply, two Stop taps.
+- **Zero stale approvals** across: the terminal answering first, two phones at once, expiry during unlock, Wi-Fi to
+  cellular, a receipt lost after an answer. (WP-M8 adds zero repeated terminal inputs: a receipt lost after a reply,
+  two Stop taps.)
+- **Known residual, accepted for wave 1: a phone's answer to a request the terminal already settled.** Claude Code
+  2.1.332 acts only on the first decision for a tool call, in both directions; a later one is read and ignored (the
+  real-Claude spike, `spikes/mobile-late-decision/README.md` on `mobile/spikes`, WP-M0). hrm learns of a terminal
+  answer only from a later hook event, so in these windows the request still looks open and a phone's answer to it
+  may be accepted:
+  - after a terminal **Yes**, until the tool's `PostToolUse`: as long as the command runs;
+  - after a terminal **No**, about 10–14 s, until Claude Code ends the waiting hook; no event comes at all, and then
+    the hook is no longer live and answers are refused;
+  - when the hook event that would close it cannot be saved (SQLite busy past the hook's 2 s timeout);
+  - when a hook delayed before it records reopens a request a later event already superseded.
+
+  In every case the late answer changes nothing in the session; only its receipt is wrong. The receipt says so: "Sent
+  to the session. If the terminal answered first, nothing changed." The desktop app behaves the same way in 1.13.2.
+  **Later work:** hrm owns the terminal of a session it launched, so it could read the prompt's state from the screen
+  (the prompt gone means the terminal answered) and close the request at once as already handled; the spike suggests
+  it and did not build it.
 - A summaries-only phone gets 403 on transcripts, actions and every `/v1` route; two computers with the same account
   and session names stay apart.
 - A revoked phone loses its connection, its hub token and its push handle within one minute while the computer is on.

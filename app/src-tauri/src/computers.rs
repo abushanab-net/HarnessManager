@@ -1,4 +1,5 @@
-//! Across computers: the shared folder, the direct connection and its pairing, the hub and the ring key.
+//! Across computers: the shared folder, the direct connection and its pairing, the hub and the ring key; and the
+//! phones: their pairing (a QR code, the three words, the grants), the phones paired, their grants and revoking one.
 
 use std::sync::Arc;
 
@@ -54,4 +55,44 @@ pub fn ring_key_show(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { Ok(j
 pub fn ring_key_enter(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
     hrm_core::sync::hub::ring_enter(ctx, &s(a, "key")?)?;
     Ok(if ctx.settings.sync_mode == "hub" { hrm_core::journal::round(ctx)? } else { hrm_core::journal::status(ctx)? })
+}
+
+// phones: paired with a QR code (or its six digits) and approved here with the three words and the grants
+pub fn phones_list(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { hrm_core::phones::list(ctx) }
+
+pub fn phones_set_grants(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::phones::set_grants(ctx, &s(a, "id")?, &a["grants"]) }
+
+pub fn phones_revoke(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> { hrm_core::phones::revoke(ctx, &s(a, "id")?) }
+
+/// The code for two minutes, with its QR code drawn as SVG (`qr_svg`) for the dialog.
+pub fn phones_pair_start(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> {
+    let mut v = state.peers()?.phone_pair_start(&state.ctx(), opt(a, "host").as_deref())?;
+    state.refresh();
+    if let Some(q) = v["qr"].as_str() { v["qr_svg"] = json!(qr_svg(q)?); }
+    Ok(v)
+}
+
+pub fn phones_pair_status(state: &AppState, _: &Ctx, _: &Value) -> Result<Value> { Ok(state.peers()?.phone_pair_status().unwrap_or(Value::Null)) }
+
+// each decision names the attempt (one showing of a code) the owner is looking at; the core refuses any other
+pub fn phones_pair_approve(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_approve(&state.ctx(), &s(a, "attempt")?, &a["grants"]) }
+
+pub fn phones_pair_refuse(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_refuse(&s(a, "attempt")?) }
+
+pub fn phones_pair_cancel(state: &AppState, _: &Ctx, a: &Value) -> Result<Value> { state.peers()?.phone_pair_cancel(&s(a, "attempt")?) }
+
+/// `text` as a QR code in SVG, black on white with its quiet zone (a phone camera reads it in either theme).
+fn qr_svg(text: &str) -> Result<String> {
+    let svg = qrcode::QrCode::new(text)?.render::<qrcode::render::svg::Color>().min_dimensions(176, 176).build();
+    // the XML declaration has no place inside the page
+    Ok(svg.find("<svg").map_or(svg.clone(), |i| svg[i..].to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn qr_svg_is_an_svg_element() {
+        let s = super::qr_svg("hm-phone:1?h=10.0.0.2:47100&c=481920&f=ab12").unwrap();
+        assert!(s.starts_with("<svg") && s.ends_with("</svg>") && s.contains("<path"), "{s}");
+    }
 }

@@ -10,6 +10,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.23.1"
 chacha20poly1305 = "0.11.0"
 chrono = "0.4.45"
+companion-proto = { path = "../companion-proto" }
 data-encoding = "2"
 dirs = "7.0.0"
 ed25519-dalek = "3.0.0"
@@ -31,6 +32,8 @@ sysinfo = "0.40.1"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 toml_edit = "0.25.17"
+tower-layer = "0.3.3"
+webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["alloc"] }
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
 zstd = "0.14.3"
 

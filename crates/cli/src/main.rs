@@ -130,6 +130,8 @@ enum Cmd {
     Settings { key: Option<String>, value: Option<String> },
     /// Across computers: the shared folder, this computer and the others
     Computers { #[command(subcommand)] cmd: ComputersCmd },
+    /// The phones paired with this computer: pair one, its grants, revoke it
+    Phones { #[command(subcommand)] cmd: PhonesCmd },
     /// Open the desktop app
     Open,
     /// Resume a session from another computer here, as a fork: <computer>/<tool>/<account>/<session id>
@@ -257,6 +259,31 @@ enum ComputersCmd {
     Peers { #[command(flatten)] j: Json },
     /// Run the direct connection's listener (and mDNS) for n seconds without the app
     Serve { #[arg(long)] seconds: u64 },
+}
+
+#[derive(Subcommand)]
+enum PhonesCmd {
+    /// The phones paired with this computer: platform, route, last seen, grants
+    List { #[command(flatten)] j: Json },
+    /// Show a QR code and six digits for two minutes, then the phone's three words: approve it with its grants here
+    Pair {
+        /// A name or address for the code's host instead of this computer's name (a VPN name, an IP)
+        #[arg(long)] host: Option<String>,
+    },
+    /// Change what a phone may do, each on or off; what is not given stays
+    Grants {
+        /// The phone's name or id
+        phone: String,
+        /// on or off: limits, sessions and usage
+        #[arg(long)] summaries: Option<String>,
+        /// on or off: what each session said and did
+        #[arg(long)] transcripts: Option<String>,
+        /// on or off: answer requests, reply and Stop
+        #[arg(long)] control: Option<String>,
+        #[command(flatten)] j: Json,
+    },
+    /// Take a phone's access away: its connections, its hub token and mailbox, its push handle
+    Revoke { phone: String, #[command(flatten)] j: Json },
 }
 
 #[derive(Subcommand)]
@@ -455,7 +482,7 @@ fn real_main(cli: Cli) -> Result<i32> {
     let ctx = Ctx::open()?;
     // commands that may change the registry hold its lock; ones that wait on the user or run long do not
     // (`add` takes the lock inside add_profile, before its sign-in)
-    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. } | Cmd::ResumeHere { .. } | Cmd::Hub { .. } | Cmd::Ring { .. }))
+    let _reg_lock = (!matches!(cli.cmd, Cmd::Run { .. } | Cmd::Login { .. } | Cmd::Add { .. } | Cmd::Key { .. } | Cmd::Router { .. } | Cmd::Quota { .. } | Cmd::Start { .. } | Cmd::Resume { .. } | Cmd::Open | Cmd::Computers { .. } | Cmd::Phones { .. } | Cmd::ResumeHere { .. } | Cmd::Hub { .. } | Cmd::Ring { .. }))
         .then(|| ctx.lock_registry());
     if !matches!(cli.cmd, Cmd::Init { .. } | Cmd::Run { .. }) {
         let _l = ctx.lock_registry();
@@ -722,10 +749,8 @@ fn real_main(cli: Cli) -> Result<i32> {
             let app = hrm_core::cli_path::desktop_exe(&ctx)?;
             std::process::Command::new(&app).spawn().with_context(|| format!("start {}", app.display()))?;
         }
+        Cmd::Phones { cmd } => return phones(ctx, cmd),
         Cmd::Computers { cmd } => {
-            let on_off = |s: &Option<String>| -> Result<Option<bool>> {
-                Ok(match s.as_deref() { None => None, Some("on") => Some(true), Some("off") => Some(false), Some(x) => bail!("'{x}' is not on or off") })
-            };
             let (st, j) = match cmd {
                 ComputersCmd::Status { j } => (hrm_core::journal::status(&ctx)?, j),
                 ComputersCmd::Now { j } => (hrm_core::journal::round(&ctx)?, j),
@@ -914,6 +939,127 @@ fn real_main(cli: Cli) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+fn on_off(s: &Option<String>) -> Result<Option<bool>> {
+    Ok(match s.as_deref() { None => None, Some("on") => Some(true), Some("off") => Some(false), Some(x) => bail!("'{x}' is not on or off") })
+}
+
+/// The grants a phone has, by name: "summaries, transcripts" or "none".
+fn grants_text(g: &serde_json::Value) -> String {
+    let on: Vec<&str> = ["summaries", "transcripts", "control"].into_iter().filter(|k| g[*k] == true).collect();
+    if on.is_empty() { "none".into() } else { on.join(", ") }
+}
+
+/// A paired phone (not revoked) by its id or name.
+fn phone_of(ctx: &Ctx, id_or_name: &str) -> Result<serde_json::Value> {
+    let list = hrm_core::phones::list(ctx)?;
+    let hit: Vec<&serde_json::Value> = list.as_array().into_iter().flatten()
+        .filter(|p| p["revoked_at"].is_null() && (p["phone_id"] == id_or_name || p["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(id_or_name)))).collect();
+    match hit.as_slice() {
+        [p] => Ok((*p).clone()),
+        [] => bail!("no paired phone is called {id_or_name}"),
+        _ => bail!("{id_or_name} names more than one phone; give its id"),
+    }
+}
+
+/// A yes or no typed at the console; Enter (or no console) takes the default.
+fn ask_yes(prompt: &str, default: bool) -> Result<bool> {
+    use std::io::Write;
+    print!("{prompt} [{}] ", if default { "Y/n" } else { "y/N" });
+    std::io::stdout().flush()?;
+    let mut l = String::new();
+    std::io::stdin().read_line(&mut l)?;
+    Ok(match l.trim().to_ascii_lowercase().as_str() { "y" | "yes" => true, "n" | "no" => false, _ => default })
+}
+
+/// A revocation's acknowledgement: true confirmed, false not (yet), null not used by this phone.
+fn ack(v: &serde_json::Value) -> &'static str { match v.as_bool() { Some(true) => "confirmed", Some(false) => "not confirmed", None => "not used yet" } }
+
+/// "481920" -> "481 920", as the dialog shows it.
+fn fmt_code(c: &str) -> String { if c.len() == 6 && c.is_ascii() { format!("{} {}", &c[..3], &c[3..]) } else { c.into() } }
+
+fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
+    match cmd {
+        PhonesCmd::List { j } => {
+            let list = hrm_core::phones::list(&ctx)?;
+            if j.json { return print_json(&list).map(|_| 0); }
+            let rows = list.as_array().cloned().unwrap_or_default();
+            if rows.is_empty() { println!("no phone is paired; `hrm phones pair` shows a code to scan"); }
+            for p in &rows {
+                let state = match p["revoked_at"].as_i64() { Some(at) => format!("revoked {}", fmt_reset(Some(at))), None => format!("seen {}", fmt_reset(p["last_seen"].as_i64())) };
+                let acks = if p["acks"].is_object() { format!("  connection {}, hub {}, push {}", ack(&p["acks"]["connection"]), ack(&p["acks"]["hub"]), ack(&p["acks"]["push"])) } else { String::new() };
+                println!("{:<24} {:<8} {:<7} {:<16} grants {}{acks}", p["name"].as_str().unwrap_or(""), p["platform"].as_str().unwrap_or(""), p["route"].as_str().unwrap_or("-"), state, grants_text(&p["grants"]));
+            }
+            Ok(0)
+        }
+        PhonesCmd::Grants { phone, summaries, transcripts, control, j } => {
+            let p = phone_of(&ctx, &phone)?;
+            let mut g = p["grants"].clone();
+            for (k, v) in [("summaries", summaries), ("transcripts", transcripts), ("control", control)] {
+                if let Some(b) = on_off(&v)? { g[k] = serde_json::json!(b); }
+            }
+            let row = hrm_core::phones::set_grants(&ctx, p["phone_id"].as_str().unwrap_or(""), &g)?;
+            if j.json { return print_json(&row).map(|_| 0); }
+            println!("{}  grants {}", row["name"].as_str().unwrap_or(""), grants_text(&row["grants"]));
+            Ok(0)
+        }
+        PhonesCmd::Revoke { phone, j } => {
+            let p = phone_of(&ctx, &phone)?;
+            let r = hrm_core::phones::revoke(&ctx, p["phone_id"].as_str().unwrap_or(""))?;
+            if j.json { return print_json(&r).map(|_| 0); }
+            println!("revoked {}", p["name"].as_str().unwrap_or(""));
+            println!("  connection  {}\n  hub         {}\n  push        {}", ack(&r["acks"]["connection"]), ack(&r["acks"]["hub"]), ack(&r["acks"]["push"]));
+            Ok(0)
+        }
+        PhonesCmd::Pair { host } => {
+            use qrcode::render::unicode::Dense1x2;
+            use std::io::Write;
+            let (rt, ctx) = peers_runtime(ctx)?;
+            let v = rt.phone_pair_start(&ctx, host.as_deref().filter(|h| !h.is_empty()))?;
+            // light modules as blocks: on a dark console the code then prints dark on light, as a camera wants it
+            println!("{}", qrcode::QrCode::new(v["qr"].as_str().unwrap_or(""))?.render::<Dense1x2>().dark_color(Dense1x2::Light).light_color(Dense1x2::Dark).build());
+            println!("code     {}", fmt_code(v["code"].as_str().unwrap_or("")));
+            println!("On the phone: Harness Manager > Pair with a computer, then scan the code or type the six digits.");
+            println!("waiting two minutes for the phone");
+            let _ = std::io::stdout().flush();
+            let mut n = 0;
+            let code = loop {
+                let st = rt.phone_pair_status().unwrap_or_default();
+                match st["state"].as_str() {
+                    Some("waiting") => {}
+                    Some("confirm") => {
+                        // the decision names the attempt whose words were printed
+                        let attempt = st["attempt"].as_str().unwrap_or("");
+                        let words: Vec<&str> = st["words"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
+                        println!("\n{} ({}) wants access.", st["phone"]["name"].as_str().unwrap_or("A phone"), st["phone"]["platform"].as_str().unwrap_or("phone"));
+                        println!("Check the phone shows the same words:   {}\n", words.join("   "));
+                        let grants = serde_json::json!({
+                            "summaries": ask_yes("Summaries: limits, sessions and usage?", true)?,
+                            "transcripts": ask_yes("Transcripts: what each session said and did?", true)?,
+                            "control": ask_yes("Control: answer requests, reply and Stop?", false)?,
+                        });
+                        let r = if ask_yes("Do the words match? Approve this phone?", false)? { rt.phone_pair_approve(&ctx, attempt, &grants)? } else { rt.phone_pair_refuse(attempt)? };
+                        match r["state"].as_str() {
+                            Some("paired") => { println!("paired with {}  grants {}", r["phone"]["name"].as_str().unwrap_or("the phone"), grants_text(&grants)); break 0 }
+                            Some("refused") => { println!("refused: the phone gets nothing from this computer"); break 1 }
+                            _ => { eprintln!("{}", r["error"].as_str().unwrap_or("the pairing ended")); break 1 }
+                        }
+                    }
+                    Some("paired") => { println!("paired with {}", st["phone"]["name"].as_str().unwrap_or("the phone")); break 0 }
+                    Some("refused") => { println!("refused"); break 1 }
+                    Some("failed") => { eprintln!("{}", st["error"].as_str().unwrap_or("the pairing failed")); break 1 }
+                    _ => { eprintln!("the code expired"); break 1 }
+                }
+                if n % 20 == 0 { rt.tick(&ctx); }
+                n += 1;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            };
+            let _ = rt.phone_pair_cancel(v["attempt"].as_str().unwrap_or(""));
+            rt.stop();
+            Ok(code)
+        }
+    }
 }
 
 /// The direct connection's runtime for one CLI command, bound to every interface; the setting is turned on.

@@ -1,6 +1,8 @@
 //! The direct connection's server: HTTPS on `listen_port` with mutual TLS, where the only client certificates
-//! let in are those of paired computers (read from `peers` at each handshake, so a forgotten computer is refused
-//! at once). Four routes: who this is, an origin's chunk list, a chunk, and what runs here now.
+//! let in are those of paired computers and phones (read from `peers` and `phones` at each handshake, so a
+//! forgotten computer or a revoked phone is refused at once). A computer gets the `/v1` routes: who this is, an
+//! origin's chunk list, a chunk, what runs here now and a transcript. A phone gets only the companion API (`/c1`,
+//! `crate::companion`): each connection carries who showed which certificate.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -22,7 +24,7 @@ use super::{identity, store};
 use crate::sync::folder;
 use crate::Ctx;
 
-/// Accepts a client certificate only when it is one of the paired computers'.
+/// Accepts a client certificate only when it is a paired computer's or a phone's that is not revoked.
 struct Paired {
     ctx: Arc<Ctx>,
     provider: Arc<rustls::crypto::CryptoProvider>,
@@ -37,7 +39,8 @@ impl ClientCertVerifier for Paired {
 
     fn verify_client_cert(&self, end_entity: &CertificateDer<'_>, _intermediates: &[CertificateDer<'_>], _now: UnixTime) -> Result<ClientCertVerified, Error> {
         let pems: Vec<String> = self.ctx.db.with(|c| {
-            let v = c.prepare("select cert_pem from peers where coalesce(cert_pem, '') <> ''")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            let v = c.prepare("select cert_pem from peers where coalesce(cert_pem, '') <> '' union all select cert_pem from phones where revoked_at is null and coalesce(cert_pem, '') <> ''")?
+                .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
             Ok(v)
         }).unwrap_or_default();
         if pems.iter().any(|p| identity::pem_to_der(p).ok().as_deref() == Some(end_entity.as_ref())) { Ok(ClientCertVerified::assertion()) }
@@ -58,6 +61,8 @@ impl ClientCertVerifier for Paired {
 pub struct Listener {
     handle: axum_server::Handle<SocketAddr>,
     pub port: u16,
+    data: std::path::PathBuf,
+    stopped: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Every paired computer asks for this computer's record and presence every ten seconds, and each costs a scan
@@ -87,7 +92,11 @@ pub(super) fn kept(slot: &Kept, make: impl FnOnce() -> Result<Value>) -> Result<
 }
 
 impl Listener {
-    pub fn stop(&self) { self.handle.shutdown(); }
+    pub fn stop(&self) {
+        self.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::companion::conn::listening(&self.data, false);
+        self.handle.shutdown();
+    }
 }
 
 /// Serve on `bind:port` (0: any free port; the one taken is in the result) from the runtime's threads.
@@ -107,13 +116,28 @@ pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, port: u16
         .route("/v1/chunk/{origin}/{file}", get(chunk))
         .route("/v1/presence", get(presence))
         .route("/v1/transcript/{origin}/{harness}/{profile}/{id}", get(transcript))
-        .with_state(Served { ctx, record: Kept::default(), presence: Kept::default() });
+        .route_layer(axum::middleware::from_fn(crate::companion::peers_only))
+        .with_state(Served { ctx: ctx.clone(), record: Kept::default(), presence: Kept::default() })
+        .merge(crate::companion::router(ctx.clone()));
     let _in_runtime = rt.enter();
-    let server = axum_server::from_tcp_rustls(l, axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(cfg)))?.handle(handle.clone());
+    let server = axum_server::from_tcp_rustls(l, axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(cfg)))?
+        .map(|inner| crate::companion::conn::Acceptor { inner, ctx: ctx.clone() })
+        .handle(handle.clone());
     rt.spawn(async move {
         if let Err(e) = server.serve(app.into_make_service()).await { crate::log::warn(&format!("computers: the listener stopped: {e}")); }
     });
-    Ok(Listener { handle, port })
+    // this listener holds the phones' connections: it cuts those revoked or paired again from any process
+    crate::companion::conn::listening(&ctx.data, true);
+    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (s2, data) = (stopped.clone(), ctx.data.clone());
+    rt.spawn(async move {
+        while !s2.load(std::sync::atomic::Ordering::SeqCst) {
+            let c = ctx.clone();
+            let _ = tokio::task::spawn_blocking(move || crate::companion::conn::sweep(&c)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    });
+    Ok(Listener { handle, port, data, stopped })
 }
 
 /// The database and process scans are blocking work: off the runtime's threads.

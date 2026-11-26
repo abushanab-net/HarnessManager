@@ -23,8 +23,15 @@ use crate::Ctx;
 pub const RUN_VAR: &str = "HRM_RUN";
 /// Set by `hrm run` beside `RUN_VAR`: how many seconds a request waits for the app (`request_seconds`).
 pub const WAIT_VAR: &str = "HRM_REQUEST_SECONDS";
-
-const QUESTION_SECONDS: u32 = 15;
+/// Set by `hrm run` beside `RUN_VAR`: how many seconds a question waits (`phones::question_seconds`, 60 while a phone
+/// with Control is paired, else 15). Claude draws the question in the terminal only once the hook exits.
+pub const QUESTION_VAR: &str = "HRM_QUESTION_SECONDS";
+/// The longest after a request opened that a phone may answer it (the plan's ceiling). The desktop's own wait is
+/// `request_seconds`, as in 1.13.2 (up to 15 min).
+pub const MAX_REQUEST_SECONDS: u32 = 300;
+/// What a hook entry's timeout allows beyond the window its request waits: the hook's start, its last poll and
+/// printing the decision, so an answer taken at the window's end still reaches the tool.
+const ENTRY_MARGIN: u32 = 10;
 pub(crate) const APP_HEARTBEAT: &str = "hooks:app-heartbeat";
 
 /// The desktop's session watcher calls this every second while it can offer answers.
@@ -42,7 +49,8 @@ fn app_is_present(c: &Connection) -> rusqlite::Result<bool> {
 pub const EVENTS: &[&str] = &["UserPromptSubmit", "PermissionRequest", "Notification", "PostToolUse", "Stop", "SessionEnd"];
 
 /// One row per `hrm run` in hm.db; `hwnd` is its console window (0 when unknown), to bring it to the front. `run_ask`:
-/// the requests the hook holds for an answer; `state` is open, answered (then `answer` holds it) or closed.
+/// the requests the hook holds for an answer; `state` is open, answered (then `answer` holds it), closed, or expired
+/// (the hook let it go at its deadline).
 pub const TABLE: &str = "create table if not exists run_state(run text primary key, pid integer not null, started integer not null,
   hwnd integer not null default 0, profile text not null, harness text not null, session_id text not null default '',
   cwd text not null default '', state text not null default '', reason text not null default '', ts integer not null default 0);
@@ -94,57 +102,111 @@ pub fn hook(input: &str) -> Result<Option<String>> {
     let Ok(run) = std::env::var(RUN_VAR) else { return Ok(None) };
     let v: Value = serde_json::from_str(input).context("the hook's input is not JSON")?;
     // not Ctx::open: no migrations, no settings, on every tool call; hm.db is there, hrm run opened it
-    let c = Connection::open_with_flags(crate::ctx::data_dir().join("hm.db"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    c.busy_timeout(Duration::from_secs(2))?;
+    let c = hook_connection(&crate::ctx::data_dir().join("hm.db"))?;
     let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u32);
-    Ok(handle(&c, &run, &v, Duration::from_secs(secs.into()))?.map(|d| d.to_string()))
+    let question = std::env::var(QUESTION_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(crate::phones::QUESTION_WITHOUT).min(crate::phones::QUESTION_WITH_PHONE);
+    Ok(handle_asking(&c, &run, &v, Duration::from_secs(secs.into()), Duration::from_secs(question.into()))?.map(|d| d.to_string()))
+}
+
+/// The database as `hrm hook` writes it. An `hrm run` started before an update may still run, and its hooks run the
+/// updated `hrm` before anything else migrated: the columns this version writes are made first.
+pub fn hook_connection(path: &std::path::Path) -> Result<Connection> {
+    let c = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    c.busy_timeout(Duration::from_secs(2))?;
+    crate::db::hook_columns(&c)?;
+    Ok(c)
+}
+
+/// A request an event opens, written in the same transaction as the event.
+struct Opening<'a> {
+    id: String,
+    kind: &'a str,
+    what: String,
+    created: i64,
+    expires: i64,
+    pid: u32,
+    started: i64,
+}
+
+/// What an event says about its session, written in one transaction with the request it opens (bound to the run's
+/// current turn), so no later event can come between the two.
+fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>) -> rusqlite::Result<()> {
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let input = v["tool_input"].to_string();
+    let event = v["hook_event_name"].as_str().unwrap_or("");
+    let tx = c.unchecked_transaction()?;
+    // a submitted prompt starts a new turn
+    if event == "UserPromptSubmit" { tx.execute("update run_state set turn = turn + 1 where run = ?", [run])?; }
+    // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
+    // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
+    let closed = match event {
+        "Notification" if v["notification_type"] != "idle_prompt" => 0,
+        "PostToolUse" => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?,
+        _ => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?,
+    };
+    if let Some((state, reason)) = state_of(v) {
+        tx.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
+            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
+    } else if closed > 0 {
+        tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
+    }
+    if let Some(o) = opening {
+        // the request and the version it moves come together: nobody sees the request beside the version before it
+        tx.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started, turn)
+            values(?,?,?,?,?,?,?,?,?,?,?, (select turn from run_state where run = ?2))",
+            params![o.id, run, s("session_id"), o.kind, s("tool_name"), o.what, input, o.created, o.expires, o.pid, o.started])?;
+        tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
+    }
+    tx.commit()
+}
+
+/// `handle_asking` with the question window of a computer without a phone.
+pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Option<Value>> {
+    handle_asking(c, run, v, wait, Duration::from_secs(crate::phones::QUESTION_WITHOUT.into()))
 }
 
 /// The event for run `run`: later events close what the terminal answered, the state is recorded, and a request
-/// waits up to `wait` for the app's answer. Answers the decision for the tool, or None: no decision, the terminal
-/// prompt stands.
-pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Option<Value>> {
-    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
-    let input = v["tool_input"].to_string();
-    // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
-    // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
-    match v["hook_event_name"].as_str().unwrap_or("") {
-        "Notification" if v["notification_type"] != "idle_prompt" => {}
-        "PostToolUse" => { c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?; }
-        _ => { c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?; }
-    }
-    if let Some((state, reason)) = state_of(v) {
-        c.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
-            state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms()])?;
-    }
-    let Some(kind) = kind_of(v) else { return Ok(None) };
-    let wait = if kind == "question" { wait.min(Duration::from_secs(QUESTION_SECONDS.into())) } else { wait };
-    // only for a session hrm run started, and while the app offers answers
-    if wait.is_zero() || !app_is_present(c)? || c.query_row("select 1 from run_state where run = ?", [run], |_| Ok(())).optional()?.is_none() { return Ok(None); }
-    let pid = std::process::id();
-    let Some(started) = crate::procs::start_ms(pid) else { return Ok(None) };
-    let what = if kind == "question" { question_text(v) } else {
-        v["tool_input"]["command"].as_str().or(v["tool_input"]["file_path"].as_str()).unwrap_or("").to_string()
+/// waits up to `wait` for the app's answer (a question up to `question`). Answers the decision for the tool, or None:
+/// no decision, the terminal prompt stands. The run's `version` moves with every change of its state or of its
+/// requests, so a phone's action names the state it was shown. An event that cannot be written fails as it always
+/// did (see the release criteria in docs/plans/mobile/PLAN.md for what that leaves open).
+pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration) -> Result<Option<Value>> {
+    let kind = kind_of(v);
+    let wait = if kind == Some("question") { wait.min(question) } else { wait };
+    // whether the event holds a request is decided first, so the request is written with the event: only for a
+    // session hrm run started, and while the app offers answers
+    let opening = match kind {
+        Some(kind) if !wait.is_zero() && app_is_present(c)? && c.query_row("select 1 from run_state where run = ?", [run], |_| Ok(())).optional()?.is_some() => {
+            let pid = std::process::id();
+            crate::procs::start_ms(pid).map(|started| {
+                let what = if kind == "question" { question_text(v) } else {
+                    v["tool_input"]["command"].as_str().or(v["tool_input"]["file_path"].as_str()).unwrap_or("").to_string()
+                };
+                let created = now_ms();
+                Opening { id: crate::util::uuid4(), kind, what, created, expires: created + wait.as_millis() as i64, pid, started }
+            })
+        }
+        _ => None,
     };
-    let (id, created) = (crate::util::uuid4(), now_ms());
-    let expires = created + wait.as_millis() as i64;
+    record(c, run, v, opening.as_ref())?;
+    let Some(Opening { id, kind, expires, .. }) = opening else { return Ok(None) };
     let deadline = Instant::now() + wait;
-    c.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started) values(?,?,?,?,?,?,?,?,?,?,?)",
-        params![id, run, s("session_id"), kind, s("tool_name"), what, input, created, expires, pid, started])?;
     loop {
         // a busy database is waited out: leaving would strand an answer the app then reports as given
         let row: rusqlite::Result<Option<(String, String)>> = c.query_row("select state, answer from run_ask where id = ?", [&id], |r| Ok((r.get(0)?, r.get(1)?))).optional();
         match row.as_ref().map(|r| r.as_ref().map(|(s, a)| (s.as_str(), a.as_str()))) {
             Ok(Some(("answered", a))) => {
-                let _ = c.execute("update run_state set state = 'working', reason = '', ts = ?2 where run = ?1", params![run, now_ms()]);
+                let _ = c.execute("update run_state set version = version + 1, state = 'working', reason = '', ts = ?2 where run = ?1", params![run, now_ms()]);
                 return Ok(Some(decision(kind, &v["tool_input"], a)));
             }
             Ok(Some(("open", _))) | Err(_) => {}
             Ok(_) => return Ok(None), // closed, or gone with its run
         }
-        // The close and an answer both update only an open row.
-        if (Instant::now() >= deadline || now_ms() >= expires || matches!(app_is_present(c), Ok(false)))
-            && c.execute("update run_ask set state = 'closed' where id = ? and state = 'open'", [&id])? == 1 {
+        // The close and an answer both update only an open row; a close at the deadline says so, for a phone's receipt
+        let timed_out = Instant::now() >= deadline || now_ms() >= expires;
+        if (timed_out || matches!(app_is_present(c), Ok(false)))
+            && c.execute("update run_ask set state = ?2 where id = ?1 and state = 'open'", params![id, if timed_out { "expired" } else { "closed" }])? == 1 {
+            let _ = c.execute("update run_state set version = version + 1 where run = ?", [run]);
             return Ok(None);
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -173,7 +235,11 @@ fn hook_is_live(pid: u32, started: i64) -> bool {
 /// The app's answer to request `id`: `{"behavior": "allow" | "deny"}` for a permission, `{"answers": {question:
 /// [label, ...]}}` for a question, with one of each question's own options (several where it allows several).
 /// False when the request is no longer open (the terminal answered, or it expired): the answer is dropped.
-pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
+pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> { answer_guarded(ctx, id, a, None) }
+
+/// `answer`, for a phone: the run must still be at the version its action claimed, and the action's deadline not
+/// passed, when the answer is written.
+pub fn answer_guarded(ctx: &Ctx, id: &str, a: &Value, guard: Option<&Guard>) -> Result<bool> {
     let row: Option<(String, String, u32, i64)> = ctx.db.read(|c| Ok(c.query_row(
         "select kind, input, hook_pid, hook_started from run_ask where id = ?1 and state = 'open' and expires > ?2",
         params![id, now_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?))?;
@@ -196,9 +262,33 @@ pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
         match a["behavior"].as_str() { Some(b @ ("allow" | "deny")) => b.to_string(), _ => bail!("the answer is allow or deny") }
     };
     ctx.db.with(|c| {
+        // the write lock first, then the clock: a write that waited for another writer is judged at its own time
+        let tx = c.transaction()?;
         if !hook_is_live(pid, started) { return Ok(false); }
-        Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3", params![id, answer, now_ms()])? == 1)
+        let now = now_ms();
+        // a phone's answer also names the run version it claimed, its own deadline and its enrollment, which must
+        // still have Control: all hold in the same write that takes the open request
+        let (version, deadline) = guard.map(|g| (Some(g.version), g.deadline)).unwrap_or((None, i64::MAX));
+        let phone_window = guard.map(|_| i64::from(MAX_REQUEST_SECONDS) * 1000);
+        let (phone, generation) = guard.and_then(|g| g.phone.clone()).map(|(p, g)| (Some(p), Some(g))).unwrap_or((None, None));
+        let n = tx.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3 and ?3 < ?5
+            and (?4 is null or ?4 = (select version from run_state where run_state.run = run_ask.run))
+            and (?6 is null or exists (select 1 from phones where phone_id = ?6 and generation = ?7 and revoked_at is null and json_extract(grants, '$.control') = 1))
+            and (?6 is null or turn = (select turn from run_state where run_state.run = run_ask.run))
+            and (?8 is null or ?3 < created + ?8)",
+            params![id, answer, now, version, deadline, phone, generation, phone_window])?;
+        tx.commit()?;
+        Ok(n == 1)
     })
+}
+
+/// What a phone's answer carries to the write that takes its request: the run version its claim left, its deadline
+/// (ms), and the enrollment it came from (`phone_id`, `generation`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Guard {
+    pub version: i64,
+    pub deadline: i64,
+    pub phone: Option<(String, String)>,
 }
 
 /// `hrm run`, before the tool starts: its row, and the variables that let the tool's hooks find it. Answers the run
@@ -212,6 +302,7 @@ pub fn start_run(ctx: &Ctx, p: &Profile, env: &mut Vec<(String, String)>) -> Opt
     if let Err(e) = r { crate::log::info(&format!("run state for {}: {e:#}", p.name)); return None; }
     env.push((RUN_VAR.into(), run.clone()));
     env.push((WAIT_VAR.into(), ctx.settings.request_seconds.to_string()));
+    env.push((QUESTION_VAR.into(), crate::phones::question_seconds(ctx).to_string()));
     Some(run)
 }
 
@@ -238,6 +329,8 @@ pub struct Run {
     pub state: String,
     pub reason: String,
     pub ts: i64,
+    /// Moves with every change of its state or its requests: what a phone's action must name (`companion::actions`).
+    pub version: i64,
     /// It owns its terminal (`own_terminal`), so `terminal::reply` and `terminal::stop` reach it.
     pub terminal: bool,
     /// The request its hook holds open for an answer, if any.
@@ -263,9 +356,9 @@ pub struct Ask {
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
     let rows: Vec<(Run, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null from run_state order by ts")?;
+        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
-            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires, hook_pid, hook_started from run_ask where state = 'open' and expires > ? order by created")?;
         let asks = st.query_map([now_ms()], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
             input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? }, r.get::<_, u32>(8)?, r.get::<_, i64>(9)?)))?;
@@ -298,8 +391,9 @@ pub fn command() -> String {
 }
 
 /// The settings Claude Code is started with: only our hook entries, one group under each of `EVENTS`, and one for
-/// PreToolUse of `AskUserQuestion`. Permission hooks can outlast their own wait, but questions have a short
-/// timeout because Claude draws the terminal question only after the hook exits.
+/// PreToolUse of `AskUserQuestion`. Permission hooks can outlast their own wait. A question's entry is 15 s, as
+/// before, or 70 s while a phone with Control is paired (its 60 s window and the hook's start and print); Claude
+/// draws the terminal question only after the hook exits.
 fn settings(ctx: &Ctx) -> Value {
     #[cfg(not(target_os = "linux"))]
     let command = command();
@@ -309,7 +403,9 @@ fn settings(ctx: &Ctx) -> Value {
         .unwrap_or_else(command);
     let (entry, held) = (|timeout: u32| json!({"type": "command", "command": command, "timeout": timeout}), ctx.settings.request_seconds.saturating_add(30));
     let mut hooks: Map<String, Value> = EVENTS.iter().map(|e| (e.to_string(), json!([{"hooks": [entry(if *e == "PermissionRequest" { held } else { 10 })]}]))).collect();
-    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(QUESTION_SECONDS)]}]));
+    let question = crate::phones::question_seconds(ctx);
+    let question = if question > crate::phones::QUESTION_WITHOUT { question + ENTRY_MARGIN } else { question };
+    hooks.insert("PreToolUse".into(), json!([{"matcher": "AskUserQuestion", "hooks": [entry(question)]}]));
     json!({"hooks": hooks})
 }
 
@@ -523,6 +619,224 @@ mod tests {
             "updatedInput": {"questions": questions, "answers": {"Which colour?": "Blue", "Which sizes?": "S, L"}}}})));
         // another tool's PreToolUse is no request
         assert_eq!(handle(&conn(&ctx), &run, &json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}), std::time::Duration::from_secs(5)).unwrap(), None);
+    }
+
+    #[test]
+    fn a_question_waits_the_window_its_launch_was_given_and_the_version_moves_with_the_state() {
+        let (_d, ctx, run) = live_run();
+        let version = || runs(&ctx).unwrap()[0].version;
+        let ev: Value = json!({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Go?", "options": [{"label": "Yes"}]}]}});
+        heartbeat(&ctx).unwrap();
+        let (c, run2, ev2) = (conn(&ctx), run.clone(), ev.clone());
+        let h = std::thread::spawn(move || handle_asking(&c, &run2, &ev2, Duration::from_secs(300), Duration::from_secs(crate::phones::QUESTION_WITH_PHONE.into())).unwrap());
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        let a = loop {
+            if let Some(a) = runs(&ctx).unwrap().into_iter().find_map(|r| r.ask) { break a; }
+            assert!(std::time::Instant::now() < end, "the request never showed");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(a.expires - a.created, 60_000, "a phone with Control gets a minute");
+        let asked = version();
+        assert!(asked >= 2, "waiting, then the request: {asked}");
+        // a notification that changes nothing leaves it; the answer moves it
+        handle(&conn(&ctx), &run, &json!({"hook_event_name": "Notification", "notification_type": "permission_prompt"}), Duration::ZERO).unwrap();
+        assert_eq!(version(), asked);
+        assert!(answer(&ctx, &a.id, &json!({"answers": {"Go?": ["Yes"]}})).unwrap());
+        assert!(h.join().unwrap().is_some());
+        assert!(version() > asked);
+        let mut env = vec![];
+        let p = Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
+        start_run(&ctx, &p, &mut env);
+        assert!(env.contains(&(QUESTION_VAR.to_string(), crate::phones::QUESTION_WITHOUT.to_string())), "{env:?}");
+    }
+
+    /// #3: a phone's answer is written only while the run is at the version its action claimed and before the
+    /// action's deadline, in the same write that takes the open request.
+    #[test]
+    fn a_guarded_answer_holds_only_at_the_claimed_version_and_before_the_deadline() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let v: i64 = ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?)).unwrap();
+        let allow = json!({"behavior": "allow"});
+        let g = |version: i64, deadline: i64| Guard { version, deadline, phone: None };
+        // the hook lets a request go once the app's heartbeat is 3 s old: a loaded test run must not get there first
+        heartbeat(&ctx).unwrap();
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v - 1, now_ms() + 60_000))).unwrap(), "another version");
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() - 1))).unwrap(), "past the deadline");
+        assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() + 60_000))).unwrap());
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// (a): a phone's answer is judged at the moment its write gets the database: an action whose deadline passed while
+    /// another writer held it is refused, and so is one from a phone whose Control was withdrawn after its last check.
+    #[test]
+    fn an_answer_is_judged_when_its_write_gets_the_database() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let v: i64 = ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?)).unwrap();
+        let allow = json!({"behavior": "allow"});
+        // a phone with Control, then without it
+        let me = companion_proto::PhoneIdentity::generate().unwrap();
+        crate::phones::add(&ctx, &companion_proto::pairing::PhonePayload::of(&me, "P", "ios").unwrap(), companion_proto::api::Grants { summaries: true, transcripts: true, control: true }).unwrap();
+        let phone = crate::phones::get(&ctx, &me.id).unwrap().unwrap();
+        let g = |deadline: i64| Guard { version: v, deadline, phone: Some((phone.id.clone(), phone.generation.clone())) };
+        crate::phones::set_grants(&ctx, &me.id, &json!({"control": false})).unwrap();
+        heartbeat(&ctx).unwrap();
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 60_000))).unwrap(), "Control was withdrawn");
+        crate::phones::set_grants(&ctx, &me.id, &json!({"control": true})).unwrap();
+        // another writer holds the database past the action's deadline
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        let release = std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(400)); other.execute_batch("commit").unwrap(); });
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 150))).unwrap(), "the deadline passed while the write waited");
+        release.join().unwrap();
+        heartbeat(&ctx).unwrap();
+        assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g(now_ms() + 60_000))).unwrap());
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// (f): the hook of an `hrm run` started before an update writes a database the update has not migrated yet.
+    #[test]
+    fn a_hook_writes_a_database_from_before_the_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hm.db");
+        let pid = std::process::id();
+        {
+            // the hook tables as the release before them made them, and a run going on
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch("create table kv(k text primary key, v text not null);
+                create table run_state(run text primary key, pid integer not null, started integer not null, hwnd integer not null default 0, profile text not null,
+                  harness text not null, session_id text not null default '', cwd text not null default '', state text not null default '', reason text not null default '',
+                  ts integer not null default 0, terminal_port integer, terminal_token blob);
+                create table run_ask(id text primary key, run text not null, session_id text not null default '', kind text not null, tool text not null,
+                  what text not null default '', input text not null default '{}', created integer not null, expires integer not null, state text not null default 'open',
+                  answer text not null default '', hook_pid integer not null default 0, hook_started integer not null default 0);").unwrap();
+            c.execute("insert into run_state(run, pid, started, profile, harness) values('r', ?1, ?2, 'work', 'claude')", params![pid, crate::procs::start_ms(pid).unwrap()]).unwrap();
+        }
+        let c = hook_connection(&path).unwrap();
+        handle(&c, "r", &json!({"hook_event_name": "UserPromptSubmit", "session_id": "s"}), Duration::ZERO).unwrap();
+        let state: String = c.query_row("select state from run_state where run = 'r'", [], |r| r.get(0)).unwrap();
+        assert_eq!(state, "working");
+    }
+
+    /// A phone with Control: its id and enrollment.
+    fn a_phone(ctx: &Ctx) -> (String, String) {
+        let me = companion_proto::PhoneIdentity::generate().unwrap();
+        crate::phones::add(ctx, &companion_proto::pairing::PhonePayload::of(&me, "P", "ios").unwrap(), companion_proto::api::Grants { summaries: true, transcripts: true, control: true }).unwrap();
+        let p = crate::phones::get(ctx, &me.id).unwrap().unwrap();
+        (p.id, p.generation)
+    }
+    fn version_of(ctx: &Ctx, run: &str) -> i64 { ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [run], |r| r.get(0))?)).unwrap() }
+
+    /// A request is made in the write that records its event and belongs to that turn. If the turn moved on without
+    /// the request being closed (the event that closed it was lost), a phone's answer is refused; the desktop's is not.
+    #[test]
+    fn a_request_belongs_to_the_turn_that_opened_it() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let (asked, now): (i64, i64) = c.query_row("select (select turn from run_ask where id = ?1), (select turn from run_state where run = ?2)", params![a.id, run], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((asked, now), (1, 1));
+        c.execute("update run_state set turn = turn + 1 where run = ?", [&run]).unwrap();
+        let phone = a_phone(&ctx);
+        heartbeat(&ctx).unwrap();
+        let g = Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone) };
+        assert!(!answer_guarded(&ctx, &a.id, &json!({"behavior": "allow"}), Some(&g)).unwrap(), "another turn's request");
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap(), "the person at the computer still can");
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// Final check, finding 3: a phone may answer a request only within 300 s of its opening, though the desktop
+    /// waits as long as it is set to.
+    #[test]
+    fn a_phone_answers_a_request_only_within_300_s_of_its_opening() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        ctx.db.with(|c| Ok(c.execute("update run_ask set created = created - 301000 where id = ?", [&a.id])?)).unwrap();
+        let phone = a_phone(&ctx);
+        heartbeat(&ctx).unwrap();
+        let allow = json!({"behavior": "allow"});
+        let g = Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone) };
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g)).unwrap(), "older than a phone may answer");
+        assert!(answer(&ctx, &a.id, &allow).unwrap(), "the desktop still answers");
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// The files under the data folder, other than SQLite's own.
+    fn files(dir: &std::path::Path) -> Vec<String> {
+        let mut out = vec![];
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("hm.db") { continue; }
+            if e.path().is_dir() { out.extend(files(&e.path()).into_iter().map(|f| format!("{name}/{f}"))); } else { out.push(name); }
+        }
+        out.sort();
+        out
+    }
+
+    /// A hook that cannot record its event (the database held past its busy wait) fails as it always did, at once,
+    /// without a retry, and the desktop still answers the request it left open.
+    #[test]
+    fn a_hook_that_cannot_record_fails_at_once_and_the_desktop_still_answers() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let c = Connection::open(ctx.data.join("hm.db")).unwrap();
+        c.busy_timeout(Duration::from_millis(50)).unwrap();
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        let mut ran: Value = serde_json::from_str(BASH).unwrap();
+        ran["hook_event_name"] = json!("PostToolUse");
+        let t = Instant::now();
+        assert!(handle(&c, &run, &ran, Duration::ZERO).is_err());
+        assert!(t.elapsed() < Duration::from_secs(2), "no retry: {:?}", t.elapsed());
+        other.execute_batch("commit").unwrap();
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap());
+        assert!(h.join().unwrap().is_some());
+    }
+
+    /// The hook path of a session with no phone does no filesystem work beyond hm.db, as in 1.13.2: every event, a
+    /// request answered, one that times out, and an event that cannot be written leave the data folder as it was.
+    #[test]
+    fn the_hook_path_without_a_phone_touches_no_file() {
+        let (_d, ctx, run) = live_run();
+        let before = files(&ctx.data);
+        let c = hook_connection(&ctx.data.join("hm.db")).unwrap();
+        for e in ["UserPromptSubmit", "Notification", "PostToolUse", "Stop", "SessionEnd"] {
+            handle(&c, &run, &json!({"hook_event_name": e, "notification_type": "permission_prompt", "tool_name": "Bash", "tool_input": {}}), Duration::ZERO).unwrap();
+        }
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "deny"})).unwrap());
+        assert!(h.join().unwrap().is_some());
+        let (h, _) = hold(&ctx, &run, BASH, 300);
+        assert_eq!(h.join().unwrap(), None);
+        let busy = Connection::open(ctx.data.join("hm.db")).unwrap();
+        busy.busy_timeout(Duration::from_millis(50)).unwrap();
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        assert!(handle(&busy, &run, &json!({"hook_event_name": "Stop"}), Duration::ZERO).is_err());
+        other.execute_batch("commit").unwrap();
+        end_run(&ctx, &run);
+        assert_eq!(files(&ctx.data), before, "no marker or other file");
+        assert!(!ctx.data.join("run-unknown").exists());
+    }
+
+    #[test]
+    fn a_hook_entry_outlasts_its_window_and_the_desktop_waits_as_long_as_it_is_set_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = Ctx::open_at(&dir.path().join("data"), &dir.path().join("home")).unwrap();
+        ctx.settings.request_seconds = 900;
+        let v = settings(&ctx);
+        assert_eq!(v["hooks"]["PermissionRequest"][0]["hooks"][0]["timeout"], json!(930), "15 min, as in 1.13.2");
+        let question = v["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"].as_u64().unwrap();
+        assert_eq!(question, 15, "no phone: the question's entry is 1.13.2's");
+        a_phone(&ctx);
+        let question = settings(&ctx)["hooks"]["PreToolUse"][0]["hooks"][0]["timeout"].as_u64().unwrap();
+        assert!(question >= u64::from(crate::phones::QUESTION_WITH_PHONE + ENTRY_MARGIN), "the tool would end the hook before an answer taken at the window's end prints: {question}");
+        let p = Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
+        let mut env = vec![];
+        start_run(&ctx, &p, &mut env);
+        assert!(env.contains(&(WAIT_VAR.to_string(), "900".to_string())), "{env:?}");
     }
 
     #[test]

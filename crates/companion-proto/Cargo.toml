@@ -1,0 +1,34 @@
+[package]
+name = "companion-proto"
+version.workspace = true
+edition.workspace = true
+
+# the phone's side of pairing, sealing, the /c1 types and the phone's network client, shared with the desktop; the app
+# builds it for Android and iOS through flutter_rust_bridge, so nothing here may need the desktop. TLS is rustls with
+# aws-lc-rs, as on the desktop (dart:io cannot verify the desktop's Ed25519 certificate); HTTP is hyper's own client,
+# not reqwest, whose rustls features bring the platform verifier
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+bytes = "1.12.1"
+chacha20poly1305 = "0.11.0"
+curve25519-dalek = "5.0.0"
+ed25519-dalek = "3.0.0"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+getrandom = "0.3"
+hex = "0.4.3"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["client", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["pem"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.10.9"
+spake2 = { version = "0.4", features = ["getrandom"] }
+tokio = { version = "1.54.1", features = ["rt", "net", "time", "sync"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["tls12"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "net", "time", "sync", "macros"] }
