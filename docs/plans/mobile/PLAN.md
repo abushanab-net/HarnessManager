@@ -149,21 +149,18 @@ POST /c1/actions
   checked once more, judged when that write gets the database.
 - **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
   its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
-  to a request from another turn is refused. Before it touches the database each hook makes its own in-flight marker
-  (`run-unknown/<run>/<begun>-<id>`, holding its pid and start) and removes only that one once its event commits; a
-  hook that fails anywhere, from reading its input to the commit, fails as it always did and leaves its marker. A
-  phone's answer is admitted (when it is claimed, and again where it is written) only if the run's marker folder lists
-  and lists nothing, and no hook since the last settling event found the markers unavailable (`run_state.unsure`, set
-  in the event's own transaction); any error refuses. An event that closes every open request removes, after its
-  commit, the markers of hooks that began before it and have exited; a hook still running or begun later keeps its
-  own. The end of the run removes its markers. The person at the computer answers throughout.
+  to a request from another turn is refused. Where the answer is written, the request must still be open and its hook
+  live, the run at the claimed version and turn, both deadlines unpassed, and the enrollment current with Control. A
+  hook that cannot record its event fails as it always did; the hook path does no file work beyond 1.13.2's (see the
+  release criteria for what a lost event leaves open). The person at the computer answers throughout.
 - A repeated `action_id` returns the stored receipt and does nothing again. An answer is never resent automatically.
   When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that fails too.
-- `answer` goes through `hooks::answer()` with the phone's guard.
+- `answer` goes through `hooks::answer()` with the phone's guard. An accepted answer's receipt reads "Sent to the
+  session. If the terminal answered first, nothing changed."
 - **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
   (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is then 70 s, 10 s beyond the
-  window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before. A permission request waits at most 300 s
-  whatever `request_seconds` says.
+  window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before.
+  A permission request waits at most 300 s whatever `request_seconds` says.
 
 ## Contract: the hub, for phones
 
@@ -233,8 +230,13 @@ answer path and taught these inputs:
 ## Release criteria
 
 - **Zero stale approvals** across: the terminal answering first, two phones at once, expiry during unlock, Wi-Fi to
-  cellular, a receipt lost after an answer, a hook event that could not be recorded. (WP-M8 adds zero repeated
-  terminal inputs: a receipt lost after a reply, two Stop taps.)
+  cellular, a receipt lost after an answer. (WP-M8 adds zero repeated terminal inputs: a receipt lost after a reply,
+  two Stop taps.)
+- **Known residual, accepted for wave 1:** if the terminal answers first and that hook event cannot be saved (SQLite
+  busy past the hook's 2 s timeout), the request stays open in hm.db and a phone's answer to it may be accepted.
+  Claude Code acts only on the first decision for a tool call, so the late one changes nothing (a spike is verifying
+  this now); the desktop app behaves the same way in 1.13.2. The receipt says so: "Sent to the session. If the
+  terminal answered first, nothing changed."
 - A summaries-only phone gets 403 on transcripts, actions and every `/v1` route; two computers with the same account
   and session names stay apart.
 - A revoked phone loses its connection, its hub token and its push handle within one minute while the computer is on.
