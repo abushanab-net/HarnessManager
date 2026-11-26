@@ -33,7 +33,11 @@ struct Look {
 fn look(ctx: &Ctx, phone: &Phone) -> Option<Look> {
     phones::get(ctx, &phone.id).ok().flatten().filter(|p| p.revoked_at.is_none() && p.generation == phone.generation && p.grants.summaries)?;
     let runs = hooks::runs(ctx).unwrap_or_default();
-    let needs: Vec<Value> = runs.iter().filter_map(|r| r.ask.as_ref().map(|a| json!({"run": r.run, "ask_id": a.id, "expires": a.expires, "state_version": r.version}))).collect();
+    let now = now_ms();
+    let needs: Vec<Value> = runs.iter().filter_map(|r| r.ask.as_ref().map(|a| {
+        let (expires, at_computer) = super::phone_view(a, now);
+        json!(companion_proto::api::Need { run: r.run.clone(), ask_id: a.id.clone(), expires, state_version: r.version, at_computer })
+    })).collect();
     let changed = ctx.db.read(|c| Ok(c.query_row("select (select coalesce(max(rowid), 0) from usage), (select coalesce(max(updated_at), 0) from quota)", [], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap_or((0, 0));
     Some(Look { needs: json!(needs), runs: runs.iter().map(|r| (r.run.clone(), r.state.clone(), r.version)).collect(), changed })
 }
@@ -50,7 +54,9 @@ async fn run(mut socket: WebSocket, ctx: Arc<Ctx>, phone: Phone) {
             return;
         };
         let mut out = vec![];
-        if last.as_ref().is_none_or(|l| l.needs != now.needs) { out.push(event("needs", json!({"count": now.needs.as_array().map(Vec::len).unwrap_or(0), "requests": now.needs}))); }
+        // the count is what a phone may answer; a request past its window is listed, marked for the computer
+        let count = now.needs.as_array().map(|n| n.iter().filter(|r| r.get("at_computer").is_none()).count()).unwrap_or(0);
+        if last.as_ref().is_none_or(|l| l.needs != now.needs) { out.push(event("needs", json!({"count": count, "requests": now.needs}))); }
         for r in &now.runs {
             if last.as_ref().is_none_or(|l| !l.runs.contains(r)) { out.push(event("run-state", json!({"run": r.0, "state": r.1, "state_version": r.2}))); }
         }

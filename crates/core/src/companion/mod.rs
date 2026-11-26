@@ -112,14 +112,15 @@ fn today(ctx: &Ctx) -> anyhow::Result<Value> {
 pub(crate) fn overview_of(ctx: &Ctx) -> anyhow::Result<api::Overview> {
     let now = now_ms();
     let runs = hooks::runs(ctx)?;
-    let asks: Vec<&hooks::Ask> = runs.iter().filter_map(|r| r.ask.as_ref()).collect();
+    let asks: Vec<(i64, Option<String>)> = runs.iter().filter_map(|r| r.ask.as_ref()).map(|a| phone_view(a, now)).collect();
+    let answerable: Vec<i64> = asks.iter().filter(|a| a.1.is_none()).map(|a| a.0).collect();
     let views = service::list_views(ctx)?;
     let listed = recommend::listed(ctx);
     let views: Vec<service::ProfileView> = views.into_iter().filter(|p| listed.contains(&p.harness)).collect();
     let next_reset = views.iter().flat_map(|p| p.quota.iter().flat_map(|q| &q.tiers).filter_map(move |t| t.resets_at.filter(|r| *r > now).map(|r| (r, p, t))))
         .min_by_key(|x| x.0).map(|(at, p, t)| json!({"profile": p.name, "name": p.label, "window": t.label, "at": at}));
     Ok(api::Overview {
-        computer: computer(ctx), observed_at: now, needs_you: asks.len() as u32, soonest_expiry: asks.iter().map(|a| phone_expiry(a.created, a.expires)).min(),
+        computer: computer(ctx), observed_at: now, needs_you: answerable.len() as u32, soonest_expiry: answerable.iter().copied().min(), at_computer: (asks.len() - answerable.len()) as u32,
         running: views.iter().map(|p| p.running.len() as u32).sum(), next_reset, today: today(ctx)?, use_next: recommend::use_next(ctx, &views, now)?,
     })
 }
@@ -311,9 +312,20 @@ fn summary(kind: &str, input: &Value) -> Value {
 /// When a request stops being a phone's to answer: its own expiry, or `MAX_REQUEST_SECONDS` after it opened.
 pub(crate) fn phone_expiry(created: i64, expires: i64) -> i64 { expires.min(created + i64::from(hooks::MAX_REQUEST_SECONDS) * 1000) }
 
+pub(crate) const AT_COMPUTER: &str = "Answer it at the computer: a phone answers a request within 5 minutes of its opening";
+
+/// A request as every phone view shows it (list, `needs` event, overview): its phone expiry, and why it is the
+/// computer's to answer once that passed.
+pub(crate) fn phone_view(a: &hooks::Ask, now: i64) -> (i64, Option<String>) {
+    let expires = phone_expiry(a.created, a.expires);
+    (expires, (expires <= now).then(|| AT_COMPUTER.to_string()))
+}
+
 pub(crate) fn requests_of(ctx: &Ctx) -> anyhow::Result<Vec<api::Request>> {
-    Ok(hooks::runs(ctx)?.into_iter().filter_map(|r| r.ask.clone().map(|a| api::Request {
-        input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires: phone_expiry(a.created, a.expires), state_version: r.version,
+    let now = now_ms();
+    Ok(hooks::runs(ctx)?.into_iter().filter_map(|r| r.ask.clone().map(|a| {
+        let (expires, at_computer) = phone_view(&a, now);
+        api::Request { input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires, state_version: r.version, at_computer }
     })).collect())
 }
 

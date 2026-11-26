@@ -145,7 +145,7 @@ fn ask_gone(c: &Connection, run: &str, ask_id: &str) -> Result<Option<(Status, S
         Some((state, _, _)) if state == "expired" => Some((Status::Expired, "the request expired".into())),
         Some((state, _, _)) if state != "open" => Some((Status::AlreadyHandled, "it was answered already, in the terminal or elsewhere".into())),
         Some((_, expires, _)) if expires <= now_ms() => Some((Status::Expired, "the request expired".into())),
-        Some((_, _, created)) if super::phone_expiry(created, i64::MAX) <= now_ms() => Some((Status::Expired, "a phone answers a request within 5 minutes of its opening; answer it at the computer".into())),
+        Some((_, _, created)) if super::phone_expiry(created, i64::MAX) <= now_ms() => Some((Status::Expired, super::AT_COMPUTER.into())),
         _ => None,
     })
 }

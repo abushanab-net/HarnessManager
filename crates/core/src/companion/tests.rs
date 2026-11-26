@@ -980,6 +980,49 @@ fn a_request_older_than_300_s_is_not_a_phones_to_answer() {
     assert!(crate::hooks::answer(&ctx, &ask, &json!({"behavior": "allow"})).unwrap());
 }
 
+/// Final check, finding 4: the request list, the overview and the `needs` event show a phone the same window (the
+/// earlier of the request's own expiry and 300 s after it opened), and once it passed, the request is the
+/// computer's: listed with why, not counted as one the phone may answer.
+#[test]
+fn every_phone_view_shows_the_phones_window_and_then_the_computers_request() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({"control": true}));
+    let (_, ask, _) = waiting(&d.ctx, 900_000);
+    rt.block_on(async {
+        let reqs = p.c.requests().await.unwrap();
+        let r = reqs.requests.iter().find(|r| r.ask_id == ask).unwrap().clone();
+        assert!(r.expires <= now_ms() + 300_000 && r.expires > now_ms() + 290_000, "the phone's window, not the desktop's 15 min: {}", r.expires - now_ms());
+        assert_eq!(r.at_computer, None);
+        let o = p.c.overview().await.unwrap();
+        assert_eq!((o.needs_you, o.at_computer, o.soonest_expiry), (1, 0, Some(r.expires)));
+        let mut ev = p.c.events().await.unwrap();
+        let (first, update) = tokio::time::timeout(Duration::from_secs(5), ev.next()).await.unwrap().unwrap().unwrap();
+        assert_eq!(first.data["count"], 1);
+        let Update::Needs(n) = update else { panic!("{update:?}") };
+        assert_eq!((n[0].expires, n[0].at_computer.as_deref()), (r.expires, None));
+
+        // past the phone's window: the computer's to answer
+        d.ctx.db.with(|c| Ok(c.execute("update run_ask set created = created - 301000 where id = ?", [&ask])?)).unwrap();
+        let reqs = p.c.requests().await.unwrap();
+        let r = reqs.requests.iter().find(|r| r.ask_id == ask).unwrap().clone();
+        assert!(r.expires <= now_ms());
+        assert_eq!(r.at_computer.as_deref(), Some(super::AT_COMPUTER));
+        let o = p.c.overview().await.unwrap();
+        assert_eq!((o.needs_you, o.at_computer, o.soonest_expiry), (0, 1, None));
+        let end = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            assert!(std::time::Instant::now() < end, "no needs event for the computer's request");
+            let (e, update) = tokio::time::timeout(Duration::from_secs(5), ev.next()).await.unwrap().unwrap().unwrap();
+            if let Update::Needs(n) = update {
+                assert_eq!((e.data["count"].as_u64(), n[0].expires, n[0].at_computer.as_deref()), (Some(0), r.expires, Some(super::AT_COMPUTER)));
+                break;
+            }
+        }
+    });
+}
+
 /// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of
 /// characters JSON writes six bytes each still fit the budget.
 #[test]

@@ -62,9 +62,12 @@ pub struct UseNext {
 pub struct Overview {
     pub computer: Computer,
     pub observed_at: i64,
-    /// Open requests, and when the first of them expires.
+    /// Open requests a phone may answer, and when the first of them stops being a phone's to answer.
     pub needs_you: u32,
     pub soonest_expiry: Option<i64>,
+    /// Open requests past a phone's window: they are answered at the computer.
+    #[serde(default)]
+    pub at_computer: u32,
     pub running: u32,
     /// The soonest reset of an open window, with its account.
     pub next_reset: Option<Value>,
@@ -127,9 +130,13 @@ pub struct Request {
     /// options (label, description); `{}` for a permission, whose command or file is `what`.
     pub input: Value,
     pub profile: String,
+    /// When it stops being a phone's to answer: its own expiry, or 300 s after it opened, whichever comes first.
     pub expires: i64,
     /// What the phone sends back in an action, so a stale screen cannot act.
     pub state_version: i64,
+    /// Set once the request is past a phone's window: why it is answered at the computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_computer: Option<String>,
 }
 
 /// A WebSocket message on `GET /c1/events`.
@@ -288,8 +295,11 @@ pub struct Requests {
 pub struct Need {
     pub run: String,
     pub ask_id: String,
+    /// As `Request::expires`: the phone's window.
     pub expires: i64,
     pub state_version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at_computer: Option<String>,
 }
 
 /// An event read: what it says.
