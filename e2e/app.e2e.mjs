@@ -3652,6 +3652,8 @@ description: Bulk skill ${i}
     assert.deepEqual(await shown(), { panes: ['sec-connections'], on: ['Connections'], hash: '#settings?tab=connections' });
     assert.ok(!(await exec("return !!document.querySelector('[data-testid=st-theme]')")), 'the rows of the other sections are not on the page');
     assert.deepEqual(await exec("return [document.querySelector('[data-testid=nav-settings]').getAttribute('aria-current'), document.querySelector('.set-pane .pane-head').innerText.replace(/\\s+/g, ' ').trim()]"), ['page', 'Connections 3 settings'], 'Settings stays lit in the sidebar; the card names the section and counts its rows');
+    assert.equal(await page.getAttribute('[data-testid=tip-push-relay]', 'aria-describedby'), 'tip-push-relay');
+    assert.match(await page.textContent('#tip-push-relay'), /A session needs you/);
     for (const origin of ['https://push.example.test', '']) {
       await page.fill('#st-push-relay', origin);
       await click('[data-testid=st-push-relay-save]');
