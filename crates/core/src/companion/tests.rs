@@ -214,11 +214,22 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     assert_eq!(refused(rt.block_on(c.transcript("claude", "claude-main", "../s1", None))), 404, "a name with a slash is one segment");
     let r = rt.block_on(c.requests()).unwrap();
     assert_eq!((r.requests.len(), r.actions.answer.ok), (0, true));
-    rt.block_on(c.push_register("h-1")).unwrap();
-    assert_eq!(d.ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones", [], |r| r.get::<_, String>(0))?)).unwrap(), "h-1");
+    let handle = "ab".repeat(24);
+    assert_eq!(refused(rt.block_on(c.push_register("h-1"))), 400);
+    assert_eq!(refused(rt.block_on(c.push_register(&"xy".repeat(24)))), 400);
+    rt.block_on(c.push_register(&handle)).unwrap();
+    let error = rt.block_on(c.push_register_signed(&handle, "bad-key")).unwrap_err().downcast::<Refused>().unwrap();
+    assert_eq!((error.status, error.error.as_str()), (400, "the relay secret must be 64 hex digits"));
+    let secret = "23".repeat(32);
+    rt.block_on(c.push_register_signed(&handle, &secret)).unwrap();
+    let slot: String = d.ctx.db.read(|c| Ok(c.query_row("select push_key_id from phones", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(crate::secrets::get_key(&crate::phones::push_target(&slot)), Some(secret));
+    assert_eq!(d.ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones", [], |r| r.get::<_, String>(0))?)).unwrap(), handle);
     assert_eq!(refused(rt.block_on(c.push_register(" "))), 400);
     rt.block_on(c.push_remove()).unwrap();
     assert_eq!(count(&d.ctx, "select count(*) from phones where relay_handle is not null"), 0);
+    assert_eq!(crate::secrets::get_key(&crate::phones::push_target(&slot)), None);
+    assert!(!rt.block_on(c.hello()).unwrap().push_needs_reregistering);
     assert_eq!(rt.block_on(c.receipt("never-sent")).unwrap(), None);
     // a phone is refused on every computer route
     let me = d.ctx.settings.device_id.clone();
@@ -238,7 +249,7 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     // nothing granted: hello and the push handle only
     let none = pair(&rt, &d, json!({"summaries": false, "transcripts": false, "control": false}));
     assert!(rt.block_on(none.c.hello()).is_ok());
-    rt.block_on(none.c.push_register("h-2")).unwrap();
+    rt.block_on(none.c.push_register(&"cd".repeat(24))).unwrap();
     assert_eq!(refused(rt.block_on(none.c.overview())), 403);
     assert_eq!(refused(rt.block_on(none.c.accounts())), 403);
     assert_eq!(refused(rt.block_on(none.c.sessions(None))), 403);
@@ -316,6 +327,88 @@ fn answer(run: &str, ask: &str, version: i64, id: &str) -> Action {
 }
 
 fn ask_state(ctx: &Ctx, ask: &str) -> (String, String) { ctx.db.read(|c| Ok(c.query_row("select state, answer from run_ask where id = ?", [ask], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() }
+
+#[test]
+fn desktop_snapshots_wake_once_and_report_permanent_rejection_to_the_enrolled_phone() {
+    use axum::{body::Bytes, http::{HeaderMap, StatusCode}, routing::post, Router};
+    use companion_proto::push as wire;
+    use std::sync::atomic::{AtomicU16, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let d = desk(dir.path(), "desktop");
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({}));
+    let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+    let ctx = Arc::new(crate::service::settings_set(&d.ctx, "push_relay_url", json!(format!("http://{}", listener.local_addr().unwrap()))).unwrap());
+    let reply = Arc::new(AtomicU16::new(204));
+    let status = reply.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let server = Router::new().route(wire::WAKE_PATH, post(move |headers: HeaderMap, body: Bytes| {
+        tx.send((headers, body)).unwrap();
+        let code = status.load(Ordering::SeqCst);
+        async move { StatusCode::from_u16(code).unwrap() }
+    }));
+    rt.spawn(async move { axum::serve(listener, server).await.unwrap() });
+    let key = [7u8; 32];
+    let handle = "ab".repeat(24);
+    let mut last = vec![];
+    for code in [204, 503, 404, 410] {
+        rt.block_on(p.c.push_register_signed(&handle, &hex::encode(key))).unwrap();
+        assert!(!rt.block_on(p.c.hello()).unwrap().push_needs_reregistering);
+        let slot: String = ctx.db.read(|c| Ok(c.query_row("select push_key_id from phones", [], |r| r.get(0))?)).unwrap();
+        reply.store(code, Ordering::SeqCst);
+        let (_, ask, _) = waiting(&ctx, 60_000);
+        let now = crate::hooks::runs(&ctx).unwrap();
+        rt.block_on(super::push::notify(ctx.clone(), super::push::new_requests(&last, &now))).unwrap();
+        rt.block_on(super::push::notify(ctx.clone(), super::push::new_requests(&now, &now))).unwrap();
+        rt.block_on(super::push::notify(ctx.clone(), super::push::new_requests(&[], &now))).unwrap();
+        last = now;
+        let (headers, body) = rx.try_recv().unwrap();
+        assert!(rx.try_recv().is_err());
+        let ts = headers[wire::TIMESTAMP].to_str().unwrap().parse().unwrap();
+        assert_eq!(headers[wire::SIGNATURE].to_str().unwrap(), wire::signature(&key,"POST",wire::WAKE_PATH,ts,&body));
+        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"relay_handle":handle,"kind":"needs","collapse_id":ask}));
+        let rejected = matches!(code, 404 | 410);
+        assert_eq!(rt.block_on(p.c.hello()).unwrap().push_needs_reregistering, rejected);
+        assert_eq!(crate::secrets::get_key(&crate::phones::push_target(&slot)).is_none(), rejected);
+        assert_eq!(count(&ctx,"select count(*) from phones where relay_handle is null and push_key_id is null"), i64::from(rejected));
+        if rejected {
+            rt.block_on(p.c.push_register_signed(&handle,&hex::encode(key))).unwrap();
+            crate::phones::rejected_push(&ctx,&slot).unwrap();
+            assert!(!rt.block_on(p.c.hello()).unwrap().push_needs_reregistering, "a late response cannot clear a replacement");
+        }
+    }
+    rt.block_on(p.c.push_remove()).unwrap();
+}
+
+#[test]
+fn a_desktop_upgrade_moves_existing_secrets_and_retires_them_on_repair_or_revocation() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = desk(dir.path(), "upgrade");
+    let p = enrolled(&d.ctx, true);
+    let handle = "ab".repeat(24);
+    let secret = "12".repeat(32);
+    d.ctx.db.with(|c| {
+        c.execute("alter table phones add column relay_secret text", [])?;
+        c.execute("update phones set relay_handle=?,relay_secret=?", params![handle,secret])?;
+        c.execute_batch("pragma wal_checkpoint(truncate)")?;
+        Ok(())
+    }).unwrap();
+    let ctx = Ctx::open_at(&d.ctx.data,&d.ctx.home).unwrap();
+    assert_eq!(count(&ctx,"select count(*) from pragma_table_info('phones') where name='relay_secret'"),0);
+    let bytes = std::fs::read(ctx.data.join("hm.db")).unwrap();
+    assert!(!bytes.windows(secret.len()).any(|chunk| chunk == secret.as_bytes()));
+    let slot = || ctx.db.read(|c| Ok(c.query_row("select push_key_id from phones", [], |r| r.get::<_,String>(0))?)).unwrap();
+    let migrated = crate::phones::push_target(&slot());
+    assert_eq!(crate::secrets::get_key(&migrated).as_deref(),Some(secret.as_str()));
+    let again = PhoneIdentity::from_secrets(&p.id,&[5;32],&[6;32]).unwrap();
+    crate::phones::add(&ctx,&pairing::PhonePayload::of(&again,"Phone","ios").unwrap(),Grants::default()).unwrap();
+    assert!(crate::secrets::get_key(&migrated).is_none());
+    let current = crate::phones::get(&ctx,&p.id).unwrap().unwrap();
+    crate::phones::set_push(&ctx,&current,Some(&handle),Some(&secret)).unwrap();
+    let retired = crate::phones::push_target(&slot());
+    crate::phones::revoke(&ctx,&p.id).unwrap();
+    assert!(crate::secrets::get_key(&retired).is_none());
+}
 
 #[test]
 fn the_action_contract_holds_without_a_terminal() {
@@ -895,10 +988,10 @@ fn a_push_handle_change_belongs_to_its_enrollment() {
     let old = enrolled(&ctx, false);
     let again = PhoneIdentity::from_secrets(&old.id, &[5; 32], &[6; 32]).unwrap();
     crate::phones::add(&ctx, &pairing::PhonePayload::of(&again, "P", "ios").unwrap(), Grants::default()).unwrap();
-    assert!(crate::phones::set_push(&ctx, &old, Some("stale")).is_err());
+    assert!(crate::phones::set_push(&ctx, &old, Some("stale"), None).is_err());
     let handle: Option<String> = ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones where phone_id = ?", [&old.id], |r| r.get(0))?)).unwrap();
     assert_eq!(handle, None);
-    crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h")).unwrap();
+    crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h"), None).unwrap();
 }
 
 // ---------- the third review (Codex, at fe1dcd5) ----------

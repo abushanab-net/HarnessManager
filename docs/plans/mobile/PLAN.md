@@ -210,6 +210,9 @@ POST /c1/actions
   or the hub. `DELETE /v1/register/{handle}`.
 - A wake becomes "A session needs you" (alert) or a Live Activity / data message with no content. The relay keeps no
   log of handles against senders, rate-limits each handle, and drops tokens the providers reject.
+- The desktop app compares open request IDs on its one-second session heartbeat and sends a best-effort wake for each newly observed request. A request answered between observations needs no wake. The hook only records and waits for the request.
+- The phone shares one handle and signing secret for its device token across the owner's enrolled computers. Each desktop keeps its signing secret in its credential store. Removing a computer is a rotation trigger: the phone registers the same device token again, which retires the old handle, and sends the new pair over `PUT /c1/push` to every remaining computer, including offline ones when they reconnect. Local revocation alone cannot invalidate a lost computer's copy.
+- A desktop receiving 404 or 410 for its current registration clears it and returns `push_needs_reregistering: true` on that phone's `GET /c1/hello`. If the phone has already rotated, it supplies its current pair to that computer. Otherwise it registers once and distributes the replacement to all remaining computers. A signed PUT clears the flag, as does an intentional DELETE.
 
 ## Phases
 

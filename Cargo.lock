@@ -868,6 +868,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "hmac 0.12.1",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2236,6 +2237,27 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "hrm-push-relay"
+version = "1.13.2"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.23.1",
+ "companion-proto",
+ "getrandom 0.3.4",
+ "hex",
+ "hmac 0.12.1",
+ "pem",
+ "reqwest",
+ "ring",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]
@@ -4144,6 +4166,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -4160,6 +4183,7 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",

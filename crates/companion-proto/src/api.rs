@@ -46,6 +46,8 @@ pub struct Hello {
     pub api: u32,
     pub grants: Grants,
     pub server_time: i64,
+    #[serde(default)]
+    pub push_needs_reregistering: bool,
     /// The other computers this one knows (paired, or seen through the hub or a shared folder), for the Computers
     /// screen; empty without Summaries.
     #[serde(default)]
@@ -294,7 +296,7 @@ pub struct Receipt {
     pub at: i64,
 }
 
-/// `PUT /c1/push`: the relay handle the phone registered (wave 2 gives it meaning).
+/// Handle-only enrollment from earlier phones. A signed enrollment also supplies the relay secret.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PushHandle {
     pub relay_handle: String,

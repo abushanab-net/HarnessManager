@@ -332,6 +332,10 @@ fn watch_runs(app: tauri::AppHandle, st: Arc<AppState>) {
             {
                 let mut last = RUNS.lock().unwrap_or_else(|e| e.into_inner());
                 if *last == now { return; }
+                if !ctx.settings.push_relay_url.is_empty() {
+                    let ids = hrm_core::companion::push::new_requests(&last, &now);
+                    if !ids.is_empty() { tauri::async_runtime::spawn(hrm_core::companion::push::notify(ctx.clone(), ids)); }
+                }
                 *last = now.clone();
             }
             let _ = app.emit("needs", &now);

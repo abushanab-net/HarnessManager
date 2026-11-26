@@ -10,6 +10,7 @@ pub mod identity;
 pub mod join;
 pub mod net;
 pub mod pairing;
+pub mod push;
 pub mod seal;
 mod words;
 

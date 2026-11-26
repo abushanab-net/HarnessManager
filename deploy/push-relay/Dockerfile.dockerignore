@@ -1,0 +1,11 @@
+**
+!Cargo.toml
+!Cargo.lock
+!crates/
+!crates/*/
+!crates/*/Cargo.toml
+!crates/*/src/
+!crates/*/src/**
+!app/
+!app/src-tauri/
+!app/src-tauri/Cargo.toml
