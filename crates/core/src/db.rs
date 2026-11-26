@@ -48,6 +48,10 @@ create index if not exists outbox_key on outbox(op, key);
 create table if not exists peers(device_id text primary key, name text, os text, app_version text, incarnation text, last_seen integer,
   last_seq integer, applied_seq integer, roots text, transport text, presence text);
 create table if not exists cursors2(device_id text not null, incarnation text not null, seq integer not null, primary key(device_id, incarnation));
+create table if not exists phones(phone_id text primary key, name text, platform text, cert_pem text, pubkey text, x25519 text,
+  grants text, paired_at integer, last_seen integer, revoked_at integer, relay_handle text);
+create table if not exists phone_actions(action_id text primary key, phone_id text not null, kind text not null, target text not null,
+  status text not null, detail text not null, at integer not null);
 "#;
 
 /// A usage row's insert: the same request from two logs (a resumed session repeats earlier messages) keeps the
@@ -252,6 +256,8 @@ impl Db {
             ("run_state", "terminal_token", "blob"),
             ("run_ask", "hook_pid", "integer not null default 0"),
             ("run_ask", "hook_started", "integer not null default 0"),
+            // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
+            ("run_state", "version", "integer not null default 0"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
                 add_column(&conn, table, col, ty)?;

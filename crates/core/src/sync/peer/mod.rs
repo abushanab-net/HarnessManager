@@ -1,7 +1,8 @@
 //! The direct connection: paired computers talk over mutual TLS, found by mDNS or an address, pulling each
 //! other's journals with cursors (and relaying those of computers they both know) and presence every ten
 //! seconds. The folder keeps working underneath. `Runtime` owns the listener, the mDNS daemon and a pairing in
-//! progress for one process (the app or `hrm computers serve`); the pulls need none of it.
+//! progress for one process (the app or `hrm computers serve`), a computer's or a phone's; the pulls need none of it.
+//! Phones are served by the same listener (`crate::companion`).
 
 pub mod client;
 pub mod identity;
@@ -23,7 +24,8 @@ pub use client::pull_all;
 use crate::util::now_ms;
 use crate::{journal, Ctx};
 
-/// Told of what happens (`computers-pairing` with `{ok, peer?, error?}`); the app forwards it to the window.
+/// Told of what happens (`computers-pairing` with `{ok, peer?, error?}`, `phones-pairing` with the phone pairing's
+/// status); the app forwards it to the window.
 pub type OnEvent = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
 pub struct Runtime {
@@ -32,6 +34,7 @@ pub struct Runtime {
     listener: Mutex<Option<listener::Listener>>,
     mdns: Mutex<Option<mdns::Mdns>>,
     host: Mutex<Option<pairing::Host>>,
+    phone: Mutex<Option<pairing::PhoneHost>>,
     on_event: OnEvent,
 }
 
@@ -39,7 +42,7 @@ impl Runtime {
     /// `bind`: every interface for the app and the CLI, loopback in tests.
     pub fn new(bind: IpAddr, on_event: OnEvent) -> Result<Runtime> {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
-        Ok(Runtime { rt, bind, listener: Mutex::new(None), mdns: Mutex::new(None), host: Mutex::new(None), on_event })
+        Ok(Runtime { rt, bind, listener: Mutex::new(None), mdns: Mutex::new(None), host: Mutex::new(None), phone: Mutex::new(None), on_event })
     }
 
     /// The listener and mDNS follow the setting. Returns the context to go on with: a fresh one when the port
@@ -88,6 +91,7 @@ impl Runtime {
 
     pub fn stop(&self) {
         self.pair_cancel_inner();
+        let _ = self.phone_pair_cancel();
         if let Some(l) = self.listener.lock().unwrap_or_else(|e| e.into_inner()).take() { l.stop(); }
         if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
     }
@@ -131,6 +135,44 @@ impl Runtime {
 
     /// The pairing shown now: `{ok, peer?, error?}` once it ended, `null` while it waits; `None` without one.
     pub fn pair_result(&self) -> Option<Option<Value>> { self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result()) }
+
+    /// Show a code to a phone for two minutes: `{code, expires_at, host_hint, port, qr, state}`; the QR code says
+    /// `hm-phone:1?h=<host:port>&c=<code>&f=<this computer's certificate fingerprint>`. `host_name` as for computers.
+    pub fn phone_pair_start(&self, ctx: &Arc<Ctx>, host_name: Option<&str>) -> Result<Value> {
+        let ctx = self.ready(ctx)?;
+        let _ = self.phone_pair_cancel();
+        let h = pairing::start_phone(ctx, self.rt.handle(), self.bind, host_name, self.on_event.clone())?;
+        let v = h.status();
+        *self.phone.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
+        Ok(v)
+    }
+
+    /// The phone pairing shown: `{state: waiting|confirm|paired|refused|expired|failed, phone?: {name, platform},
+    /// words?, error?, code, expires_at, host_hint, port, qr}`; None without one.
+    pub fn phone_pair_status(&self) -> Option<Value> { self.phone.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.status()) }
+
+    /// The owner approved the phone shown, with `grants` (`{summaries, transcripts, control}`; missing ones as the
+    /// defaults: summaries and transcripts on, Control off). Answers the status after.
+    pub fn phone_pair_approve(&self, ctx: &Arc<Ctx>, grants: &Value) -> Result<Value> {
+        let g: companion_proto::api::Grants = if grants.is_null() { Default::default() } else {
+            let d = companion_proto::api::Grants::default();
+            let b = |k: &str, def: bool| -> Result<bool> { match &grants[k] { Value::Null => Ok(def), Value::Bool(b) => Ok(*b), _ => bail!("{k} is on or off") } };
+            companion_proto::api::Grants { summaries: b("summaries", d.summaries)?, transcripts: b("transcripts", d.transcripts)?, control: b("control", d.control)? }
+        };
+        let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        h.as_ref().context("no phone is pairing")?.approve(ctx, g)
+    }
+
+    pub fn phone_pair_refuse(&self) -> Result<Value> {
+        let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        h.as_ref().context("no phone is pairing")?.refuse()
+    }
+
+    /// Stop showing the code: answers null, as `phone_pair_status` has nothing to show after.
+    pub fn phone_pair_cancel(&self) -> Result<Value> {
+        if let Some(h) = self.phone.lock().unwrap_or_else(|e| e.into_inner()).take() { h.cancel(); }
+        Ok(Value::Null)
+    }
 }
 
 /// A peer's id from its id or name.

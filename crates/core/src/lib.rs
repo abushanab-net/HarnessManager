@@ -25,6 +25,8 @@ pub mod sync;
 pub mod testenv;
 pub mod transcripts;
 pub mod recommend;
+pub mod phones;
+pub mod companion;
 pub mod util;
 pub mod watch;
 pub mod apps;

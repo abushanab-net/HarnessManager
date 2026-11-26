@@ -3,6 +3,11 @@
 //! identities, the joiner as A), both derive a key, and exchange their identity payloads encrypted with it: the
 //! joiner's first, so the host's is only sealed for someone who has shown the code. A wrong code fails at
 //! decryption; three failures or two minutes end it. Both sides then hold the other's certificate and key.
+//!
+//! A phone pairs the same way on its own routes (`/pair/phone/*`, the exchange in `companion_proto::pairing`), with
+//! one step more: once its payload opens, the owner sees its name and three words derived from the key, and grants
+//! it what it may do; only then is this computer's payload sealed for it. It is stored in `phones`, never in `peers`,
+//! and gets no ring key.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -10,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -20,6 +25,9 @@ use chacha20poly1305::aead::Aead;
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 use rusqlite::params;
 use serde_json::{json, Value};
+use companion_proto::api::Grants;
+use companion_proto::pairing::{DesktopPayload, PairResult, PhonePayload};
+use companion_proto::Keyed;
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 
 use super::{identity, mdns, OnEvent};
@@ -231,4 +239,194 @@ pub fn join(ctx: &Ctx, code: &str, host: Option<&str>) -> Result<Value> {
     let their_address = if via_host { format!("{addr}:{their_port}") } else { String::new() };
     store_peer(ctx, &theirs, &their_address)?;
     journal::status(ctx)
+}
+
+// ---------- a phone: the same exchange on its own routes; the owner approves before anything is sealed back ----------
+
+/// Where a phone pairing stands, and what the owner is shown.
+#[derive(Default)]
+struct PhoneSt {
+    /// "waiting", "confirm", "paired", "refused", "expired" or "failed".
+    state: &'static str,
+    phone: Option<PhonePayload>,
+    key: Option<Keyed>,
+    sealed: Option<String>,
+    /// The phone read the result: the port can close.
+    delivered: bool,
+    error: Option<String>,
+}
+
+struct PhoneShared {
+    ctx: Arc<Ctx>,
+    code: String,
+    keys: Mutex<Vec<(String, Keyed)>>,
+    failures: AtomicU32,
+    st: Mutex<PhoneSt>,
+    handle: axum_server::Handle<SocketAddr>,
+    on_event: OnEvent,
+    /// `{code, expires_at, host_hint, port, qr}`.
+    shown: Value,
+}
+
+impl PhoneShared {
+    fn status(&self) -> Value {
+        let st = self.st.lock().unwrap_or_else(|e| e.into_inner());
+        let mut v = self.shown.clone();
+        v["state"] = json!(st.state);
+        if let Some(p) = &st.phone { v["phone"] = json!({"name": p.name, "platform": p.platform}); }
+        if let Some(k) = &st.key { v["words"] = json!(k.words()); }
+        if let Some(e) = &st.error { v["error"] = json!(e); }
+        v
+    }
+
+    /// A change of state, told as `phones-pairing`; false when the pairing is not at one of `from` any more.
+    fn set(&self, from: &[&str], f: impl FnOnce(&mut PhoneSt)) -> bool {
+        {
+            let mut st = self.st.lock().unwrap_or_else(|e| e.into_inner());
+            if !from.contains(&st.state) { return false; }
+            f(&mut st);
+        }
+        (self.on_event)("phones-pairing", self.status());
+        true
+    }
+
+    fn state(&self) -> &'static str { self.st.lock().unwrap_or_else(|e| e.into_inner()).state }
+}
+
+/// The computer showing a code to a phone.
+pub struct PhoneHost {
+    pub expires_at: i64,
+    pub port: u16,
+    shared: Arc<PhoneShared>,
+}
+
+impl PhoneHost {
+    pub fn status(&self) -> Value { self.shared.status() }
+
+    pub fn cancel(&self) { self.shared.handle.shutdown(); }
+
+    /// The owner approved the phone shown, with these grants: it is stored, and this computer's payload is sealed
+    /// for it to fetch. Never the ring key: a phone is not a computer.
+    pub fn approve(&self, ctx: &Ctx, grants: Grants) -> Result<Value> {
+        let s = &self.shared;
+        let (phone, sealed) = {
+            let st = s.st.lock().unwrap_or_else(|e| e.into_inner());
+            let (Some(phone), Some(key)) = (st.phone.clone().filter(|_| st.state == "confirm"), st.key.as_ref()) else { bail!("no phone waits for approval") };
+            let id = identity::load(ctx)?;
+            let port = s.ctx.settings.listen_port;
+            let shown = s.shown["host_hint"].as_str().and_then(|h| h.rsplit_once(':')).map(|(h, _)| h.to_string()).unwrap_or_default();
+            let mut hints = vec![format!("{shown}:{port}")];
+            let me = format!("{}:{port}", crate::util::hostname());
+            if !hints.contains(&me) { hints.push(me); }
+            let p = DesktopPayload { id: ctx.settings.device_id.clone(), name: ctx.settings.device_name.clone(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(),
+                address_hints: hints, hub_url: None, hub_token: None, grants };
+            (phone, key.seal(&p)?)
+        };
+        crate::phones::add(ctx, &phone, grants)?;
+        s.set(&["confirm"], |st| { st.state = "paired"; st.sealed = Some(sealed); });
+        Ok(self.status())
+    }
+
+    /// The owner refused the phone, or stopped waiting for one.
+    pub fn refuse(&self) -> Result<Value> {
+        if !self.shared.set(&["waiting", "confirm"], |st| st.state = "refused") { bail!("the pairing already ended"); }
+        Ok(self.status())
+    }
+}
+
+/// Show a code for a phone: the pairing routes on a free port for two minutes.
+pub fn start_phone(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, host_name: Option<&str>, on_event: OnEvent) -> Result<PhoneHost> {
+    let id = identity::load(&ctx)?;
+    let code = format!("{:06}", getrandom::u32().map_err(|e| anyhow!("random bytes: {e}"))? % 1_000_000);
+    let l = std::net::TcpListener::bind(SocketAddr::new(bind, 0))?;
+    l.set_nonblocking(true)?;
+    let port = l.local_addr()?.port();
+    let expires_at = now_ms() + LIVES_MS;
+    let host_hint = format!("{}:{port}", host_name.map(String::from).unwrap_or_else(crate::util::hostname));
+    let qr = companion_proto::pairing::qr(&host_hint, &code, &companion_proto::pairing::fingerprint(&id.cert_der));
+    let handle = axum_server::Handle::new();
+    let shown = json!({"code": code, "expires_at": expires_at, "host_hint": host_hint, "port": port, "qr": qr});
+    let shared = Arc::new(PhoneShared { ctx: ctx.clone(), code, keys: Mutex::new(vec![]), failures: AtomicU32::new(0), st: Mutex::new(PhoneSt { state: "waiting", ..Default::default() }),
+        handle: handle.clone(), on_event, shown });
+    let app = Router::new().route("/pair/hello", get(phone_hello)).route("/pair/phone/start", post(phone_start)).route("/pair/phone/finish", post(phone_finish))
+        .route("/pair/phone/result", get(phone_result)).with_state(shared.clone());
+    let _in_runtime = rt.enter();
+    let server = axum_server::from_tcp(l)?.handle(handle.clone());
+    rt.spawn(async move { let _ = server.serve(app.into_make_service()).await; });
+    let s2 = shared.clone();
+    rt.spawn(async move {
+        tokio::time::sleep(Duration::from_millis(LIVES_MS as u64)).await;
+        s2.set(&["waiting", "confirm"], |st| { st.state = "expired"; st.error = Some("the code expired".into()); });
+        // a phone approved in the last seconds still has a moment to fetch its result
+        let waits = { let st = s2.st.lock().unwrap_or_else(|e| e.into_inner()); st.state == "paired" && !st.delivered };
+        if waits { tokio::time::sleep(Duration::from_secs(30)).await; }
+        s2.handle.shutdown();
+    });
+    Ok(PhoneHost { expires_at, port, shared })
+}
+
+async fn phone_hello(State(s): State<Arc<PhoneShared>>) -> Json<Value> { Json(json!({"id": s.ctx.settings.device_id, "name": s.ctx.settings.device_name})) }
+
+fn refused(code: StatusCode, why: &str) -> Response { (code, Json(json!({"ok": false, "error": why}))).into_response() }
+
+/// The phone's SPAKE2 message in, ours out; nothing sealed with it, as for computers.
+async fn phone_start(State(s): State<Arc<PhoneShared>>, Json(a): Json<Value>) -> Response {
+    if s.state() != "waiting" { return refused(StatusCode::CONFLICT, "another phone is pairing"); }
+    let phone = a["id"].as_str().unwrap_or("").to_string();
+    if phone.is_empty() { return StatusCode::BAD_REQUEST.into_response(); }
+    let Ok((key, msg)) = companion_proto::pairing::answer(&s.code, &phone, &s.ctx.settings.device_id, a["msg"].as_str().unwrap_or("")) else { return StatusCode::BAD_REQUEST.into_response() };
+    let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner());
+    keys.retain(|(id, _)| id != &phone);
+    if keys.len() >= OPEN_STARTS { keys.remove(0); }
+    keys.push((phone, key));
+    Json(json!({"id": s.ctx.settings.device_id, "msg": msg})).into_response()
+}
+
+/// The phone's sealed payload: opened, it waits for the owner with its words; otherwise one failure more.
+async fn phone_finish(State(s): State<Arc<PhoneShared>>, Json(a): Json<Value>) -> Response {
+    let phone = a["id"].as_str().unwrap_or("").to_string();
+    let key = { let mut keys = s.keys.lock().unwrap_or_else(|e| e.into_inner()); keys.iter().position(|(id, _)| id == &phone).map(|i| keys.remove(i).1) };
+    let Some(key) = key else { return refused(StatusCode::BAD_REQUEST, "start first") };
+    match key.open::<PhonePayload>(a["payload"].as_str().unwrap_or("")) {
+        Ok(p) => {
+            if p.id != phone || identity::pem_to_der(&p.cert_pem).is_err() { return refused(StatusCode::BAD_REQUEST, "the phone's payload is not usable"); }
+            let (name, platform) = (p.name.clone(), p.platform.clone());
+            if !s.set(&["waiting"], |st| { st.state = "confirm"; st.phone = Some(p); st.key = Some(key); }) { return refused(StatusCode::CONFLICT, "another phone is pairing"); }
+            crate::log::info(&format!("phones: {name} ({platform}) waits for approval"));
+            Json(json!({"ok": true, "name": s.ctx.settings.device_name})).into_response()
+        }
+        Err(_) => {
+            let n = s.failures.fetch_add(1, Ordering::SeqCst) + 1;
+            crate::log::warn(&format!("phones: a pairing attempt with a wrong code ({n} of {FAILURES})"));
+            if n >= FAILURES {
+                s.set(&["waiting"], |st| { st.state = "failed"; st.error = Some("three wrong codes; show a new one".into()); });
+                s.handle.graceful_shutdown(Some(Duration::from_secs(2)));
+            }
+            refused(StatusCode::FORBIDDEN, "the code did not match")
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct Of {
+    id: String,
+}
+
+/// What the owner decided, for the phone that finished: `pending`, `approved` with the sealed payload, `refused`.
+async fn phone_result(State(s): State<Arc<PhoneShared>>, Query(q): Query<Of>) -> Response {
+    let (state, sealed) = {
+        let mut st = s.st.lock().unwrap_or_else(|e| e.into_inner());
+        if st.phone.as_ref().map(|p| p.id.as_str()) != Some(q.id.as_str()) { return refused(StatusCode::NOT_FOUND, "no such phone is pairing"); }
+        if matches!(st.state, "paired" | "refused") { st.delivered = true; }
+        (st.state, st.sealed.clone())
+    };
+    let expires_in = (s.shown["expires_at"].as_i64().unwrap_or(0) - now_ms()).max(0);
+    let r = match state {
+        "confirm" | "waiting" => PairResult { state: "pending".into(), payload: None, expires_in },
+        "paired" => PairResult { state: "approved".into(), payload: sealed, expires_in },
+        "refused" => PairResult { state: "refused".into(), payload: None, expires_in },
+        _ => PairResult { state: "expired".into(), payload: None, expires_in: 0 },
+    };
+    if r.state != "pending" { s.handle.graceful_shutdown(Some(Duration::from_secs(2))); }
+    Json(r).into_response()
 }
