@@ -1,17 +1,16 @@
-//! A fake phone (companion-proto) paired with a real Runtime on loopback: the pairing, every `/c1` route, the
-//! grant boundaries, revocation and the action contract's cases that need no terminal.
+//! A fake phone paired with a real Runtime on loopback, end to end over real TLS: the phone is companion-proto's own
+//! clients (`join` for pairing, `Client` and `Events` for the companion API), as the app will be. The pairing, every
+//! `/c1` route, the grant boundaries, revocation and the action contract's cases that need no terminal.
 
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use companion_proto::api::{Grants, Receipt, Status};
-use companion_proto::pairing::{self, DesktopPayload, PairResult, PhonePayload};
-use companion_proto::{Pairing, PhoneIdentity};
+use companion_proto::api::{Action, ActionKind, Grants, Refused, Status, Target, Update};
+use companion_proto::join::{self, Joining, Outcome};
+use companion_proto::pairing::DesktopPayload;
+use companion_proto::{pairing, Client, PhoneIdentity};
 use rusqlite::params;
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
-use rustls::{CertificateError, DigitallySignedStruct, Error, SignatureScheme};
 use serde_json::{json, Value};
 
 use crate::sync::peer::{identity, Runtime};
@@ -46,106 +45,52 @@ fn desk(dir: &std::path::Path, name: &str) -> Desk {
     Desk { ctx, rt, events }
 }
 
-/// Accepts exactly the computer's certificate, as the phone pins it.
-#[derive(Debug)]
-struct Pinned {
-    der: Vec<u8>,
-    provider: Arc<rustls::crypto::CryptoProvider>,
-}
+/// The phone's own runtime, as the app's wrapper gives it one.
+fn phone_rt() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap() }
 
-impl ServerCertVerifier for Pinned {
-    fn verify_server_cert(&self, end_entity: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: &ServerName<'_>, _: &[u8], _: UnixTime) -> Result<ServerCertVerified, Error> {
-        if end_entity.as_ref() == self.der.as_slice() { Ok(ServerCertVerified::assertion()) } else { Err(Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure)) }
-    }
-    fn verify_tls12_signature(&self, m: &[u8], c: &CertificateDer<'_>, d: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
-        rustls::crypto::verify_tls12_signature(m, c, d, &self.provider.signature_verification_algorithms)
-    }
-    fn verify_tls13_signature(&self, m: &[u8], c: &CertificateDer<'_>, d: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
-        rustls::crypto::verify_tls13_signature(m, c, d, &self.provider.signature_verification_algorithms)
-    }
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { self.provider.signature_verification_algorithms.supported_schemes() }
-}
-
-/// A phone as the app will be: its identity, and the computer it paired with.
+/// A phone as the app will be: its identity, the computer it paired with and its client.
 struct Phone {
     me: PhoneIdentity,
     desk: DesktopPayload,
-    port: u16,
+    c: Client,
 }
 
 impl Phone {
-    fn tls(&self) -> Arc<rustls::ClientConfig> {
-        let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-        let (_, der) = self.me.cert().unwrap();
-        Arc::new(rustls::ClientConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions().unwrap().dangerous()
-            .with_custom_certificate_verifier(Arc::new(Pinned { der: identity::pem_to_der(&self.desk.cert_pem).unwrap(), provider }))
-            .with_client_auth_cert(vec![CertificateDer::from(der)], PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(self.me.key_der()))).unwrap())
-    }
-
-    fn http(&self) -> reqwest::blocking::Client {
-        reqwest::blocking::Client::builder().no_proxy().use_preconfigured_tls((*self.tls()).clone()).timeout(Duration::from_secs(20)).build().unwrap()
-    }
-
-    fn url(&self, path: &str) -> String { format!("https://127.0.0.1:{}{path}", self.port) }
-
-    /// Status and JSON of a request; an error when the connection is refused.
-    fn send(&self, method: &str, path: &str, body: Option<Value>) -> reqwest::Result<(u16, Value)> {
-        let c = self.http();
-        let r = match method { "GET" => c.get(self.url(path)), "POST" => c.post(self.url(path)), "PUT" => c.put(self.url(path)), _ => c.delete(self.url(path)) };
-        let r = match body { Some(b) => r.json(&b), None => r }.send()?;
-        let status = r.status().as_u16();
-        Ok((status, r.json().unwrap_or(Value::Null)))
-    }
-
-    fn get(&self, path: &str) -> (u16, Value) { self.send("GET", path, None).unwrap() }
-
-    fn act(&self, body: Value) -> Receipt {
-        let (s, v) = self.send("POST", "/c1/actions", Some(body)).unwrap();
-        assert_eq!(s, 200, "{v}");
-        serde_json::from_value(v).unwrap()
+    /// A raw request with the phone's own TLS client, for routes the phone's client does not call (`/v1`).
+    fn status_of(&self, path: &str) -> u16 {
+        let cfg = companion_proto::net::tls_config(&self.me, &self.desk.cert_pem).unwrap();
+        let http = reqwest::blocking::Client::builder().no_proxy().use_preconfigured_tls((*cfg).clone()).timeout(Duration::from_secs(20)).build().unwrap();
+        http.get(format!("https://{}{path}", self.desk.address_hints[0])).send().unwrap().status().as_u16()
     }
 }
 
-fn plain() -> reqwest::blocking::Client { reqwest::blocking::Client::builder().no_proxy().timeout(Duration::from_secs(10)).build().unwrap() }
+/// The status a refused call answered with.
+fn refused<T: std::fmt::Debug>(r: anyhow::Result<T>) -> u16 { r.unwrap_err().downcast::<Refused>().expect("an answer from the computer").status }
 
-/// The phone's half of the pairing up to the owner's approval: the key, from the code in the QR code.
-fn start_and_finish(d: &Desk, me: &PhoneIdentity, code: &str) -> (pairing::Keyed, reqwest::StatusCode, String) {
-    let st = d.rt.phone_pair_status().unwrap();
-    let base = format!("http://127.0.0.1:{}", st["port"]);
-    let hello: Value = plain().get(format!("{base}/pair/hello")).send().unwrap().json().unwrap();
-    let (p, msg) = Pairing::start(code, &me.id, hello["id"].as_str().unwrap()).unwrap();
-    let r: Value = plain().post(format!("{base}/pair/phone/start")).json(&json!({"id": me.id, "msg": msg})).send().unwrap().json().unwrap();
-    let key = p.finish(r["msg"].as_str().unwrap()).unwrap();
-    let f = plain().post(format!("{base}/pair/phone/finish")).json(&json!({"id": me.id, "payload": key.seal(&PhonePayload::of(me, "Pixel 9", "android").unwrap()).unwrap()})).send().unwrap();
-    (key, f.status(), base)
-}
-
-fn result(base: &str, id: &str) -> PairResult { plain().get(format!("{base}/pair/phone/result?id={id}")).send().unwrap().json().unwrap() }
-
-/// A phone paired with `d` and approved with `grants`.
-fn pair(d: &Desk, grants: Value) -> Phone {
+/// The phone joined with the QR code, up to the owner's decision; the computer shows the same words.
+fn joined(rt: &tokio::runtime::Runtime, d: &Desk) -> (PhoneIdentity, Joining) {
     let v = d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap();
-    let (host, code, fp) = pairing::parse_qr(v["qr"].as_str().unwrap()).unwrap();
+    let qr = v["qr"].as_str().unwrap().to_string();
+    let (host, code, _) = pairing::parse_qr(&qr).unwrap();
     assert_eq!((host, code.as_str()), (format!("127.0.0.1:{}", v["port"]), v["code"].as_str().unwrap()));
     let me = PhoneIdentity::generate().unwrap();
-    let (key, status, base) = start_and_finish(d, &me, &code);
-    assert!(status.is_success(), "{status}");
+    let j = rt.block_on(join::join_qr(&qr, &me, "Pixel 9", "android")).unwrap();
     let st = d.rt.phone_pair_status().unwrap();
     assert_eq!((st["state"].as_str(), st["phone"]["name"].as_str()), (Some("confirm"), Some("Pixel 9")));
-    assert_eq!(st["words"], json!(key.words()), "both sides show the same three words");
-    let wait = result(&base, &me.id);
-    assert_eq!((wait.state.as_str(), wait.payload.as_deref()), ("pending", None), "nothing sealed before the owner approves");
-    assert!(wait.expires_in > 0);
+    assert_eq!(st["words"], json!(j.words()), "both sides show the same three words");
+    assert_eq!((j.desktop_id.as_str(), j.desktop_name.as_str()), (d.ctx.settings.device_id.as_str(), d.ctx.settings.device_name.as_str()));
+    (me, j)
+}
+
+/// A phone paired with `d` and approved with `grants`.
+fn pair(rt: &tokio::runtime::Runtime, d: &Desk, grants: Value) -> Phone {
+    let (me, j) = joined(rt, d);
+    assert!(matches!(rt.block_on(j.result()).unwrap(), Outcome::Pending(ms) if ms > 0), "nothing sealed before the owner approves");
     d.rt.phone_pair_approve(&d.ctx, &grants).unwrap();
-    let r = result(&base, &me.id);
-    assert_eq!(r.state, "approved");
-    let raw: Value = key.open(r.payload.as_deref().unwrap()).unwrap();
-    assert!(raw.get("ring").is_none(), "a phone never gets the ring key: {raw}");
-    let desk: DesktopPayload = serde_json::from_value(raw).unwrap();
-    assert_eq!(pairing::fingerprint(&identity::pem_to_der(&desk.cert_pem).unwrap()), fp, "the certificate the QR code named");
-    let port = desk.address_hints[0].rsplit_once(':').unwrap().1.parse().unwrap();
-    assert_eq!(port, d.ctx.settings.listen_port);
-    Phone { me, desk, port }
+    let Outcome::Approved(desk) = rt.block_on(j.wait(Duration::from_millis(100))).unwrap() else { panic!("not approved") };
+    assert_eq!(desk.address_hints[0], format!("127.0.0.1:{}", d.ctx.settings.listen_port));
+    let c = Client::new(&me, &desk.cert_pem, &desk.address_hints[0]).unwrap();
+    Phone { me, desk, c }
 }
 
 fn count(ctx: &Ctx, sql: &str) -> i64 { ctx.db.with(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() }
@@ -154,54 +99,81 @@ fn count(ctx: &Ctx, sql: &str) -> i64 { ctx.db.with(|c| Ok(c.query_row(sql, [], 
 fn a_phone_pairs_with_the_owners_approval_and_is_never_a_peer() {
     let t = tempfile::tempdir().unwrap();
     let d = desk(t.path(), "A");
-    let p = pair(&d, json!({"control": true}));
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({"control": true}));
     assert_eq!(p.desk.grants, Grants { summaries: true, transcripts: true, control: true });
-    assert_eq!(p.desk.hub_token, None);
+    assert_eq!((p.desk.hub_url.as_deref(), p.desk.hub_token.as_deref()), (None, None));
+    // the payload is typed: a ring key has no field to travel in, and the phone is no peer
     assert_eq!((count(&d.ctx, "select count(*) from peers"), count(&d.ctx, "select count(*) from phones")), (0, 1));
     let list = crate::phones::list(&d.ctx).unwrap();
     assert_eq!((list[0]["phone_id"].as_str(), list[0]["platform"].as_str()), (Some(p.me.id.as_str()), Some("android")));
     assert_eq!(crate::phones::question_seconds(&d.ctx), 60, "a phone with Control lengthens the question window");
     let states: Vec<String> = d.events.lock().unwrap().iter().filter(|(k, _)| k == "phones-pairing").map(|(_, v)| v["state"].as_str().unwrap().to_string()).collect();
     assert_eq!(states, ["confirm", "paired"]);
-    assert_eq!(d.rt.phone_pair_status().unwrap()["state"], "paired");
-    // the pairing port closes once the phone read its result
-    std::thread::sleep(Duration::from_millis(2500));
-    assert!(plain().get(format!("http://127.0.0.1:{}/pair/hello", d.rt.phone_pair_status().unwrap()["port"])).send().is_err());
-    // and the phone reaches the companion API with its certificate
-    let (s, h) = p.get("/c1/hello");
-    assert_eq!((s, h["api"].as_u64(), h["computer"]["name"].as_str()), (200, Some(1), Some("A")), "{h}");
+    // the phone reaches the companion API over mutual TLS, keeps its connection, and opens a fresh one on resume
+    let h = rt.block_on(p.c.hello()).unwrap();
+    assert_eq!((h.api, h.computer.name.as_str(), h.grants), (1, "A", p.desk.grants));
+    assert_eq!(rt.block_on(p.c.hello()).unwrap().computer.id, d.ctx.settings.device_id);
+    assert_eq!(crate::phones::list(&d.ctx).unwrap()[0]["route"], "direct", "the kept connection is open");
+    assert_eq!(rt.block_on(p.c.resume()).unwrap().api, 1);
+    // the computer's listener restarts under the kept connection: the next call opens a new one by itself
+    d.rt.stop();
+    d.rt.ensure(&d.ctx).unwrap();
+    assert_eq!(rt.block_on(p.c.overview()).unwrap().computer.name, "A");
     assert!(crate::phones::list(&d.ctx).unwrap()[0]["last_seen"].is_i64(), "heard from");
+    // a stranger's certificate, or a computer not the one pinned, gets no further than the handshake
+    let stranger = Client::new(&PhoneIdentity::generate().unwrap(), &p.desk.cert_pem, &p.desk.address_hints[0]).unwrap();
+    assert!(rt.block_on(stranger.hello()).unwrap_err().downcast_ref::<Refused>().is_none());
+    let other = PhoneIdentity::generate().unwrap();
+    let wrong_pin = Client::new(&p.me, &other.cert().unwrap().0, &p.desk.address_hints[0]).unwrap();
+    assert!(rt.block_on(wrong_pin.hello()).is_err());
 }
 
 #[test]
 fn three_wrong_codes_end_the_phone_pairing_and_the_owner_can_refuse() {
     let t = tempfile::tempdir().unwrap();
     let d = desk(t.path(), "A");
+    let rt = phone_rt();
     let v = d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap();
     let wrong = format!("{:06}", (v["code"].as_str().unwrap().parse::<u32>().unwrap() + 1) % 1_000_000);
     let me = PhoneIdentity::generate().unwrap();
     for i in 0..3 {
-        let (_, status, _) = start_and_finish(&d, &me, &wrong);
-        assert_eq!(status, reqwest::StatusCode::FORBIDDEN, "try {i}");
+        let e = rt.block_on(join::join(v["host_hint"].as_str().unwrap(), &wrong, None, &me, "Pixel 9", "android")).err().unwrap_or_else(|| panic!("try {i} paired"));
+        assert_eq!(format!("{e:#}"), "the code did not match; check it and try again", "try {i}");
     }
     let st = d.rt.phone_pair_status().unwrap();
     assert_eq!((st["state"].as_str(), st["error"].as_str()), (Some("failed"), Some("three wrong codes; show a new one")));
     assert!(d.rt.phone_pair_approve(&d.ctx, &json!({})).is_err());
     // a new code; the owner refuses the phone shown
-    let v = d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap();
-    let (_, status, base) = start_and_finish(&d, &me, v["code"].as_str().unwrap());
-    assert!(status.is_success());
+    let (_, j) = joined(&rt, &d);
     assert_eq!(d.rt.phone_pair_refuse().unwrap()["state"], "refused");
-    assert_eq!(result(&base, &me.id).state, "refused");
+    assert_eq!(rt.block_on(j.wait(Duration::from_millis(100))).unwrap(), Outcome::Refused);
     assert_eq!(count(&d.ctx, "select count(*) from phones"), 0);
     assert_eq!(d.rt.phone_pair_cancel().unwrap(), Value::Null);
     assert!(d.rt.phone_pair_status().is_none());
 }
 
 #[test]
+fn a_phone_that_scanned_another_computers_code_does_not_trust_this_one() {
+    let t = tempfile::tempdir().unwrap();
+    let (a, b) = (desk(t.path(), "A"), desk(t.path(), "B"));
+    let rt = phone_rt();
+    let va = a.rt.phone_pair_start(&a.ctx, Some("127.0.0.1")).unwrap();
+    let vb = b.rt.phone_pair_start(&b.ctx, Some("127.0.0.1")).unwrap();
+    // A's address and code, with B's fingerprint: the payload opens, but names a certificate the QR code did not
+    let (_, _, fb) = pairing::parse_qr(vb["qr"].as_str().unwrap()).unwrap();
+    let me = PhoneIdentity::generate().unwrap();
+    let j = rt.block_on(join::join(va["host_hint"].as_str().unwrap(), va["code"].as_str().unwrap(), Some(&fb), &me, "Pixel 9", "android")).unwrap();
+    a.rt.phone_pair_approve(&a.ctx, &json!({})).unwrap();
+    let e = rt.block_on(j.result()).unwrap_err();
+    assert_eq!(format!("{e:#}"), "that is not the computer the QR code named");
+}
+
+#[test]
 fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     let t = tempfile::tempdir().unwrap();
     let d = desk(t.path(), "A");
+    let rt = phone_rt();
     // one account with one session on this computer, for the lists and a transcript
     let mut reg = d.ctx.registry().unwrap();
     reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true,
@@ -216,56 +188,59 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
         json!({"type": "assistant", "sessionId": "s1", "cwd": cwd, "timestamp": stamp, "message": {"id": "m1", "model": "claude-opus-5-5", "usage": {"input_tokens": 10, "output_tokens": 5}, "content": [{"type": "text", "text": "done"}]}})]
         .iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
 
-    let full = pair(&d, json!({"control": true}));
-    let (s, o) = full.get("/c1/overview");
-    assert_eq!(s, 200, "{o}");
-    assert!(o["use_next"].is_array() && o["today"]["tokens"].is_i64() && o["needs_you"] == 0 && o["observed_at"].is_i64(), "{o}");
-    assert_eq!(o["computer"]["id"], d.ctx.settings.device_id.as_str());
-    let (s, a) = full.get("/c1/accounts");
-    assert_eq!(s, 200, "{a}");
-    assert!(a["accounts"].is_array());
-    let (s, _) = full.get("/c1/accounts/nobody");
-    assert_eq!(s, 404);
-    let (s, l) = full.get("/c1/sessions");
-    assert_eq!(s, 200, "{l}");
-    let one = l["sessions"].as_array().unwrap().iter().find(|x| x["id"] == "s1").unwrap_or_else(|| panic!("{l}"));
-    assert_eq!((one["title"].as_str().is_some(), one["computer"]["name"].as_str()), (true, Some("A")));
-    let (s, tr) = full.get("/c1/sessions/claude/claude-main/s1/transcript");
-    assert_eq!(s, 200, "{tr}");
-    assert_eq!((tr["turns"][0]["prompt"].as_str(), tr["next"].is_null(), tr["total"].as_u64()), (Some("fix the build"), true, Some(1)));
-    let (s, _) = full.get("/c1/sessions/codex/claude-main/s1/transcript");
-    assert_eq!(s, 404, "another tool's session of that id");
-    let (s, r) = full.get("/c1/requests");
-    assert_eq!((s, r["requests"].as_array().map(Vec::len), r["actions"]["answer"]["ok"].as_bool()), (200, Some(0), Some(true)), "{r}");
-    let (s, _) = full.send("PUT", "/c1/push", Some(json!({"relay_handle": "h-1"}))).unwrap();
-    assert_eq!(s, 200);
+    let full = pair(&rt, &d, json!({"control": true}));
+    let c = &full.c;
+    let o = rt.block_on(c.overview()).unwrap();
+    assert_eq!((o.needs_you, o.computer.id.as_str()), (0, d.ctx.settings.device_id.as_str()));
+    assert!(o.today["tokens"].is_i64() && o.observed_at > 0, "{o:?}");
+    let a = rt.block_on(c.accounts()).unwrap();
+    assert_eq!(a.computer.name, "A");
+    for acct in &a.accounts { assert_eq!(rt.block_on(c.account(&acct.profile)).unwrap().account, *acct); }
+    assert_eq!(refused(rt.block_on(c.account("nobody"))), 404);
+    let page = rt.block_on(c.sessions(None)).unwrap();
+    let one = page.sessions.iter().find(|x| x.session.id == "s1").unwrap_or_else(|| panic!("{page:?}"));
+    assert_eq!((one.session.computer.name.as_str(), one.session.profile.as_str(), page.next_cursor), ("A", "claude-main", None));
+    assert!(rt.block_on(c.sessions(Some(1))).unwrap().sessions.is_empty(), "past the last page");
+    let tr = rt.block_on(c.transcript("claude", "claude-main", "s1", None)).unwrap();
+    assert_eq!((tr.turns[0]["prompt"].as_str(), tr.next, tr.total), (Some("fix the build"), None, 1));
+    assert!(rt.block_on(c.transcript("claude", "claude-main", "s1", Some(1))).unwrap().turns.is_empty());
+    assert_eq!(refused(rt.block_on(c.transcript("codex", "claude-main", "s1", None))), 404, "another tool's session of that id");
+    assert_eq!(refused(rt.block_on(c.transcript("claude", "claude-main", "../s1", None))), 404, "a name with a slash is one segment");
+    let r = rt.block_on(c.requests()).unwrap();
+    assert_eq!((r.requests.len(), r.actions.answer.ok), (0, true));
+    rt.block_on(c.push_register("h-1")).unwrap();
     assert_eq!(d.ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones", [], |r| r.get::<_, String>(0))?)).unwrap(), "h-1");
-    let (s, _) = full.send("DELETE", "/c1/push", None).unwrap();
-    assert_eq!(s, 200);
+    assert_eq!(refused(rt.block_on(c.push_register(" "))), 400);
+    rt.block_on(c.push_remove()).unwrap();
     assert_eq!(count(&d.ctx, "select count(*) from phones where relay_handle is not null"), 0);
-    let (s, _) = full.get("/c1/actions/never-sent");
-    assert_eq!(s, 404);
+    assert_eq!(rt.block_on(c.receipt("never-sent")).unwrap(), None);
     // a phone is refused on every computer route
     let me = d.ctx.settings.device_id.clone();
     for path in ["/v1/hello".to_string(), format!("/v1/chunks/{me}"), format!("/v1/chunk/{me}/x.jsonl"), "/v1/presence".into(), format!("/v1/transcript/{me}/claude/claude-main/s1")] {
-        assert_eq!(full.get(&path).0, 403, "{path}");
+        assert_eq!(full.status_of(&path), 403, "{path}");
     }
 
-    // summaries only: no transcripts, no actions
-    let small = pair(&d, json!({"summaries": true, "transcripts": false, "control": false}));
-    assert_eq!(small.get("/c1/overview").0, 200);
-    assert_eq!(small.get("/c1/requests").1["actions"]["answer"]["ok"], false);
-    assert_eq!(small.get("/c1/sessions/claude/claude-main/s1/transcript").0, 403);
-    assert_eq!(small.send("POST", "/c1/actions", Some(json!({}))).unwrap().0, 403);
-    assert_eq!(small.get("/c1/actions/x").0, 403);
-    for path in ["/v1/hello".to_string(), format!("/v1/chunks/{me}"), "/v1/presence".into()] { assert_eq!(small.get(&path).0, 403, "{path}"); }
+    // summaries only: no transcripts, no actions, no computer routes
+    let small = pair(&rt, &d, json!({"summaries": true, "transcripts": false, "control": false}));
+    assert!(rt.block_on(small.c.overview()).is_ok());
+    assert!(!rt.block_on(small.c.requests()).unwrap().actions.answer.ok);
+    assert_eq!(refused(rt.block_on(small.c.transcript("claude", "claude-main", "s1", None))), 403);
+    let act = Action { action_id: "x".into(), kind: ActionKind::Stop, target: Target { run: "1:2".into(), ask_id: None }, state_version: 0, expires_at: now_ms() + 30_000, payload: json!({}) };
+    assert_eq!(refused(rt.block_on(small.c.act(&act))), 403);
+    assert_eq!(refused(rt.block_on(small.c.receipt("x"))), 403);
+    for path in ["/v1/hello".to_string(), format!("/v1/chunks/{me}"), "/v1/presence".into()] { assert_eq!(small.status_of(&path), 403, "{path}"); }
     // nothing granted: hello and the push handle only
-    let none = pair(&d, json!({"summaries": false, "transcripts": false, "control": false}));
-    assert_eq!(none.get("/c1/hello").0, 200);
-    for path in ["/c1/overview", "/c1/accounts", "/c1/sessions", "/c1/requests"] { assert_eq!(none.get(path).0, 403, "{path}"); }
-    // a grant switched off holds at the next request
+    let none = pair(&rt, &d, json!({"summaries": false, "transcripts": false, "control": false}));
+    assert!(rt.block_on(none.c.hello()).is_ok());
+    rt.block_on(none.c.push_register("h-2")).unwrap();
+    assert_eq!(refused(rt.block_on(none.c.overview())), 403);
+    assert_eq!(refused(rt.block_on(none.c.accounts())), 403);
+    assert_eq!(refused(rt.block_on(none.c.sessions(None))), 403);
+    assert_eq!(refused(rt.block_on(none.c.requests())), 403);
+    assert!(rt.block_on(none.c.events()).is_err(), "no events without Summaries");
+    // a grant switched off holds at the next request, on the same kept connection
     crate::phones::set_grants(&d.ctx, &full.me.id, &json!({"transcripts": false})).unwrap();
-    assert_eq!(full.get("/c1/sessions/claude/claude-main/s1/transcript").0, 403);
+    assert_eq!(refused(rt.block_on(c.transcript("claude", "claude-main", "s1", None))), 403);
 }
 
 #[test]
@@ -284,36 +259,33 @@ fn a_paired_computer_is_refused_on_the_companion_api() {
 }
 
 #[test]
-fn revoking_a_phone_cuts_its_events_and_refuses_it_from_then_on() {
+fn revoking_a_phone_closes_its_open_events_and_refuses_it_from_then_on() {
     let t = tempfile::tempdir().unwrap();
     let d = desk(t.path(), "A");
-    let p = pair(&d, json!({}));
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({}));
     rt.block_on(async {
-        use futures_util::StreamExt;
-        let url = format!("wss://127.0.0.1:{}/c1/events", p.port);
-        let (mut ws, _) = tokio_tungstenite::connect_async_tls_with_config(url, None, false, Some(tokio_tungstenite::Connector::Rustls(p.tls()))).await.expect("the socket opens");
-        let first = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
-        let ev: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
-        assert_eq!((ev["kind"].as_str(), ev["data"]["count"].as_u64()), (Some("needs"), Some(0)), "{ev}");
-        assert!(crate::phones::list(&d.ctx).unwrap()[0]["route"] == "direct");
-        let (c2, id) = (d.ctx.clone(), p.me.id.clone());
-        let v = tokio::task::spawn_blocking(move || crate::phones::revoke(&c2, &id).unwrap()).await.unwrap();
+        let mut ev = p.c.events().await.expect("the socket opens");
+        let (first, update) = tokio::time::timeout(Duration::from_secs(5), ev.next()).await.unwrap().unwrap().unwrap();
+        assert_eq!((first.kind.as_str(), update), ("needs", Update::Needs(vec![])));
+        assert_eq!(crate::phones::list(&d.ctx).unwrap()[0]["route"], "direct");
+        let (ctx, id) = (d.ctx.clone(), p.me.id.clone());
+        let v = tokio::task::spawn_blocking(move || crate::phones::revoke(&ctx, &id).unwrap()).await.unwrap();
         assert_eq!(v["acks"], json!({"connection": true, "hub": null, "push": null}));
         // the socket ends at once: cut under its TLS session, or told `revoked` first
         let end = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                match ws.next().await {
-                    Some(Ok(m)) if m.is_text() => { let e: Value = serde_json::from_str(m.to_text().unwrap()).unwrap(); if e["kind"] == "revoked" { continue; } }
-                    Some(Ok(m)) if m.is_close() => return,
+                match ev.next().await {
+                    Some(Ok((_, Update::Revoked))) => continue,
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => return,
                 }
             }
         }).await;
         assert!(end.is_ok(), "the socket stayed open after revoke");
+        let e = p.c.resume().await.unwrap_err();
+        assert!(e.downcast_ref::<Refused>().is_none(), "refused at the handshake, not by a route: {e:#}");
     });
-    assert!(p.send("GET", "/c1/hello", None).is_err(), "a revoked certificate fails its handshake");
     assert_eq!(crate::phones::list(&d.ctx).unwrap()[0]["route"], Value::Null);
 }
 
@@ -333,8 +305,8 @@ fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
     (run, ask, 3)
 }
 
-fn answer(run: &str, ask: &str, version: i64, id: &str) -> Value {
-    json!({"action_id": id, "kind": "answer", "target": {"run": run, "ask_id": ask}, "state_version": version, "expires_at": now_ms() + 30_000, "payload": {"behavior": "allow"}})
+fn answer(run: &str, ask: &str, version: i64, id: &str) -> Action {
+    Action { action_id: id.into(), kind: ActionKind::Answer, target: Target { run: run.into(), ask_id: Some(ask.into()) }, state_version: version, expires_at: now_ms() + 30_000, payload: json!({"behavior": "allow"}) }
 }
 
 fn ask_state(ctx: &Ctx, ask: &str) -> (String, String) { ctx.db.read(|c| Ok(c.query_row("select state, answer from run_ask where id = ?", [ask], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap() }
@@ -343,67 +315,66 @@ fn ask_state(ctx: &Ctx, ask: &str) -> (String, String) { ctx.db.read(|c| Ok(c.qu
 fn the_action_contract_holds_without_a_terminal() {
     let t = tempfile::tempdir().unwrap();
     let d = desk(t.path(), "A");
-    let p = pair(&d, json!({"control": true}));
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({"control": true}));
+    let act = |a: Action| rt.block_on(p.c.act(&a)).unwrap();
 
     // the request is listed with the version an answer must name
     let (run, ask, v) = waiting(&d.ctx, 60_000);
-    let reqs = p.get("/c1/requests").1;
-    assert_eq!((reqs["requests"][0]["ask_id"].as_str(), reqs["requests"][0]["state_version"].as_i64()), (Some(ask.as_str()), Some(v)), "{reqs}");
-    let o = p.get("/c1/overview").1;
-    assert_eq!(o["needs_you"], 1);
+    let reqs = rt.block_on(p.c.requests()).unwrap();
+    assert_eq!((reqs.requests[0].ask_id.as_str(), reqs.requests[0].state_version, reqs.requests[0].what.as_str()), (ask.as_str(), v, "npm test"));
+    assert_eq!(rt.block_on(p.c.overview()).unwrap().needs_you, 1);
+    let mine = rt.block_on(p.c.sessions(None)).unwrap();
+    assert!(mine.sessions.iter().all(|s| s.run.is_none()), "no session file for this run: {mine:?}");
 
     // accepted, once: the same action_id again is the stored receipt and changes nothing
-    let first = p.act(answer(&run, &ask, v, "a-1"));
+    let first = act(answer(&run, &ask, v, "a-1"));
     assert_eq!((first.status, first.detail.as_str()), (Status::Accepted, "answered"));
     assert_eq!(ask_state(&d.ctx, &ask), ("answered".into(), "allow".into()));
     d.ctx.db.with(|c| Ok(c.execute("update run_ask set answer = 'deny-marker' where id = ?", [&ask])?)).unwrap();
-    assert_eq!(p.act(answer(&run, &ask, v, "a-1")), first);
+    assert_eq!(act(answer(&run, &ask, v, "a-1")), first);
     assert_eq!(ask_state(&d.ctx, &ask).1, "deny-marker", "nothing done again");
-    let (s, stored) = p.get("/c1/actions/a-1");
-    assert_eq!((s, serde_json::from_value::<Receipt>(stored).unwrap()), (200, first.clone()));
+    assert_eq!(rt.block_on(p.c.receipt("a-1")).unwrap(), Some(first.clone()), "the receipt for delivery unknown");
 
     // the terminal answered first: the request closed and the version moved on
     let (run, ask, v) = waiting(&d.ctx, 60_000);
     d.ctx.db.with(|c| { c.execute("update run_ask set state = 'closed' where id = ?", [&ask])?; c.execute("update run_state set state = 'working', version = version + 1 where run = ?", [&run])?; Ok(()) }).unwrap();
-    assert_eq!(p.act(answer(&run, &ask, v, "a-2")).status, Status::AlreadyHandled);
+    assert_eq!(act(answer(&run, &ask, v, "a-2")).status, Status::AlreadyHandled);
 
     // expiry: the request's, and the action's own while the phone unlocked
     let (run, ask, v) = waiting(&d.ctx, -1);
-    assert_eq!(p.act(answer(&run, &ask, v, "a-3")).status, Status::Expired);
+    assert_eq!(act(answer(&run, &ask, v, "a-3")).status, Status::Expired);
     let (run, ask, v) = waiting(&d.ctx, 60_000);
     let mut late = answer(&run, &ask, v, "a-4");
-    late["expires_at"] = json!(now_ms() - 1);
-    assert_eq!(p.act(late).status, Status::Expired);
+    late.expires_at = now_ms() - 1;
+    assert_eq!(act(late).status, Status::Expired);
     assert_eq!(ask_state(&d.ctx, &ask).0, "open", "an expired action does nothing");
 
     // a state the phone did not see
-    assert_eq!(p.act(answer(&run, &ask, v + 1, "a-5")).status, Status::Expired);
+    assert_eq!(act(answer(&run, &ask, v + 1, "a-5")).status, Status::Expired);
 
     // two answers at once, from two phones: one is accepted
-    let other = pair(&d, json!({"control": true}));
-    let (body1, body2) = (answer(&run, &ask, v, "b-1"), answer(&run, &ask, v, "b-2"));
-    let (r1, r2) = std::thread::scope(|s| {
-        let h1 = s.spawn(|| p.act(body1));
-        let h2 = s.spawn(|| other.act(body2));
-        (h1.join().unwrap(), h2.join().unwrap())
-    });
+    let other = pair(&rt, &d, json!({"control": true}));
+    let (a1, a2) = (answer(&run, &ask, v, "b-1"), answer(&run, &ask, v, "b-2"));
+    let (r1, r2) = rt.block_on(async { tokio::join!(p.c.act(&a1), other.c.act(&a2)) });
+    let (r1, r2) = (r1.unwrap(), r2.unwrap());
     let mut both = [r1.status, r2.status];
     both.sort_by_key(|s| s.as_str());
     assert_eq!(both, [Status::Accepted, Status::AlreadyHandled], "{r1:?} {r2:?}");
     // another phone's action id is not this phone's receipt
-    assert_eq!(other.get("/c1/actions/a-1").0, 404);
+    assert_eq!(rt.block_on(other.c.receipt("a-1")).unwrap(), None);
 
     // reply and Stop keep the desktop's rules: no owned terminal here
     let (run, _, v) = waiting(&d.ctx, 60_000);
-    for (kind, payload) in [("reply", json!({"text": "go on"})), ("stop", json!({}))] {
-        let r = p.act(json!({"action_id": format!("c-{kind}"), "kind": kind, "target": {"run": run}, "state_version": v, "expires_at": now_ms() + 30_000, "payload": payload}));
-        assert_eq!((r.status, r.detail.as_str()), (Status::Unavailable, "Needs Harness Manager's own terminal"), "{kind}");
+    for (kind, payload) in [(ActionKind::Reply, json!({"text": "go on"})), (ActionKind::Stop, json!({}))] {
+        let r = act(Action { action_id: format!("c-{kind:?}"), kind, target: Target { run: run.clone(), ask_id: None }, state_version: v, expires_at: now_ms() + 30_000, payload });
+        assert_eq!((r.status, r.detail.as_str()), (Status::Unavailable, "Needs Harness Manager's own terminal"), "{kind:?}");
     }
-    let r = p.act(json!({"action_id": "c-gone", "kind": "stop", "target": {"run": "1:2"}, "state_version": 0, "expires_at": now_ms() + 30_000, "payload": {}}));
-    assert_eq!(r.status, Status::Unavailable);
+    let gone = act(Action { action_id: "c-gone".into(), kind: ActionKind::Stop, target: Target { run: "1:2".into(), ask_id: None }, state_version: 0, expires_at: now_ms() + 30_000, payload: json!({}) });
+    assert_eq!(gone.status, Status::Unavailable);
 
     // Control taken away between the screen and the tap
     crate::phones::set_grants(&d.ctx, &p.me.id, &json!({"control": false})).unwrap();
-    assert_eq!(p.send("POST", "/c1/actions", Some(answer(&run, "x", v, "d-1"))).unwrap().0, 403);
+    assert_eq!(refused(rt.block_on(p.c.act(&answer(&run, "x", v, "d-1")))), 403);
     assert!(count(&d.ctx, "select count(*) from phone_actions") >= 10, "each receipt kept");
 }
