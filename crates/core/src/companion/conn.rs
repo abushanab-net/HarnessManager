@@ -33,40 +33,66 @@ pub enum Caller {
 struct Flag {
     cut: AtomicBool,
     waker: AtomicWaker,
+    /// The connection got as far as serving requests; one dropped before that was refused.
+    served: AtomicBool,
 }
 
 /// A stream that fails once cut, waking whoever waits on it.
-pub struct Cuttable<I> {
-    inner: I,
+pub struct Cuttable<I: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
+    /// Taken only when it is dropped unserved, to linger.
+    inner: Option<I>,
     flag: Arc<Flag>,
 }
 
-impl<I> Cuttable<I> {
+impl<I: AsyncRead + AsyncWrite + Unpin + Send + 'static> Cuttable<I> {
+    fn new(inner: I, flag: Arc<Flag>) -> Self { Cuttable { inner: Some(inner), flag } }
+
+    fn io(&mut self) -> Pin<&mut I> { Pin::new(self.inner.as_mut().expect("taken only when dropped")) }
+
     fn check(&self, cx: &Context<'_>) -> Option<io::Error> {
         self.flag.waker.register(cx.waker());
         self.flag.cut.load(Ordering::SeqCst).then(|| io::Error::new(io::ErrorKind::ConnectionAborted, "the phone was revoked"))
     }
 }
 
-impl<I: AsyncRead + Unpin> AsyncRead for Cuttable<I> {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        if let Some(e) = self.check(cx) { return Poll::Ready(Err(e)); }
-        Pin::new(&mut self.inner).poll_read(cx, buf)
+/// A connection refused before it was served (its certificate turned away at the handshake, or a phone revoked
+/// since) is closed only once what the other side already sent is read, for half a second at most: a socket closed
+/// with unread data is reset, and the phone would lose the TLS alert that tells it it was refused, not dropped.
+impl<I: AsyncRead + AsyncWrite + Unpin + Send + 'static> Drop for Cuttable<I> {
+    fn drop(&mut self) {
+        if self.flag.served.load(Ordering::SeqCst) { return; }
+        let (Some(mut io), Ok(rt)) = (self.inner.take(), tokio::runtime::Handle::try_current()) else { return };
+        rt.spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 4096];
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), async {
+                let mut n = 0;
+                while n < 64 * 1024 { match io.read(&mut buf).await { Ok(0) | Err(_) => break, Ok(k) => n += k } }
+            }).await;
+            let _ = io.shutdown().await;
+        });
     }
 }
 
-impl<I: AsyncWrite + Unpin> AsyncWrite for Cuttable<I> {
+impl<I: AsyncRead + AsyncWrite + Unpin + Send + 'static> AsyncRead for Cuttable<I> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        if let Some(e) = self.check(cx) { return Poll::Ready(Err(e)); }
+        self.io().poll_read(cx, buf)
+    }
+}
+
+impl<I: AsyncRead + AsyncWrite + Unpin + Send + 'static> AsyncWrite for Cuttable<I> {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
         if let Some(e) = self.check(cx) { return Poll::Ready(Err(e)); }
-        Pin::new(&mut self.inner).poll_write(cx, buf)
+        self.io().poll_write(cx, buf)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if let Some(e) = self.check(cx) { return Poll::Ready(Err(e)); }
-        Pin::new(&mut self.inner).poll_flush(cx)
+        self.io().poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> { Pin::new(&mut self.inner).poll_shutdown(cx) }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> { self.io().poll_shutdown(cx) }
 }
 
 /// A phone connection open now, on the listener of the data folder `data`.
@@ -166,7 +192,7 @@ where
         let (inner, ctx) = (self.inner.clone(), self.ctx.clone());
         Box::pin(async move {
             let flag = Arc::new(Flag::default());
-            let (stream, service) = inner.accept(Cuttable { inner: stream, flag: flag.clone() }, service).await?;
+            let (stream, service) = inner.accept(Cuttable::new(stream, flag.clone()), service).await?;
             let der = stream.get_ref().1.peer_certificates().and_then(|c| c.first()).map(|c| c.to_vec()).unwrap_or_default();
             let f2 = flag.clone();
             let caller = tokio::task::spawn_blocking(move || {
@@ -178,6 +204,7 @@ where
                 }
                 Some(caller)
             }).await.ok().flatten().ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "not a paired computer or phone"))?;
+            flag.served.store(true, Ordering::SeqCst);
             Ok((stream, Extension(caller).layer(service)))
         })
     }
@@ -196,7 +223,7 @@ mod tests {
         rt.block_on(async {
             let (a, mut b) = tokio::io::duplex(64);
             let flag = Arc::new(Flag::default());
-            let mut s = Cuttable { inner: a, flag: flag.clone() };
+            let mut s = Cuttable::new(a, flag.clone());
             register(&ctx.data, "phone-cut", "g1", &flag);
             b.write_all(b"x").await.unwrap();
             let mut one = [0u8; 1];

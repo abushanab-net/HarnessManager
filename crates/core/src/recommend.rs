@@ -94,7 +94,60 @@ pub fn use_next(ctx: &crate::Ctx, views: &[ProfileView], now: i64) -> anyhow::Re
     let listed = listed(ctx);
     let accts: Vec<Acct> = views.iter().filter(|p| listed.contains(&p.harness)).map(|p| acct(p, &forecast, now)).collect();
     let five = five_hour_first(ctx);
-    Ok(listed.iter().filter_map(|t| recommended_for(&accts, t, five).map(|(a, reason)| companion_proto::api::UseNext { tool: t.clone(), profile: a.p.name.clone(), name: a.p.label.clone(), reason })).collect())
+    Ok(listed.iter().filter_map(|t| next_for(&accts, t, five, now)).collect())
+}
+
+/// Use next for `tool`, with the lines the desktop's Overview shows: why, and the runner-up.
+fn next_for(accts: &[Acct], t: &str, five: bool, now: i64) -> Option<companion_proto::api::UseNext> {
+    recommended_for(accts, t, five).map(|(a, reason)| {
+        // the line under the name, as the desktop's Overview draws it (its "left" form)
+        let soon = five && a.w5().is_some_and(|w| w.open && w.left >= 50);
+        let w = if soon { a.w5() } else { a.wk() };
+        let out_at = w.and_then(|w| w.out_ms).map(|m| now + m);
+        let why = match w {
+            Some(w) if soon => format!("{} · resets in {}", share(w), duration(w.reset_ms)),
+            Some(w) => format!("{} · {}", share(w), out_at.map(|o| format!("≈ out {}", day_of(o, now))).unwrap_or_else(|| "lasts until its reset".into())),
+            None if a.p.kind == Kind::Subscription => "No plan limits to run out".into(),
+            None => "Pay per use · no plan limits".into(),
+        };
+        // the runner-up: the next account by room, as the desktop's line under the card
+        let runner_up = a.measured().then(|| {
+            let mut rest: Vec<&Acct> = accts.iter().filter(|b| b.p.harness == t && b.p.name != a.p.name && b.eligible()).collect();
+            let left = |w: Option<&Win>| w.map(|w| w.left).unwrap_or(0);
+            rest.sort_by(|x, y| left(y.wk()).cmp(&left(x.wk())).then(left(y.w5()).cmp(&left(x.w5()))));
+            rest.first().and_then(|b| b.wk().map(|w| {
+                let out_at = w.out_ms.map(|m| now + m);
+                let when = out_at.map(|o| format!("≈ out {}", day_of(o, now).split(' ').next().unwrap_or(""))).unwrap_or_else(|| "lasts".into());
+                companion_proto::api::RunnerUp { profile: b.p.name.clone(), name: b.p.label.clone(), left: w.left, out_at, line: format!("{}% left · {when}", w.left) }
+            }))
+        }).flatten();
+        companion_proto::api::UseNext { tool: t.to_string(), profile: a.p.name.clone(), name: a.p.label.clone(), reason, why, window: w.map(|w| w.label.clone()), left: w.map(|w| w.left),
+            resets_at: w.and_then(|w| w.resets_at), out_at, runner_up }
+    })
+}
+
+/// "64% of the week left", as the desktop says a window's room.
+fn share(w: &Win) -> String {
+    let of = match w.kind { "week" => "the week".to_string(), "5h" => "the 5-hour window".to_string(), _ => w.label.clone() };
+    format!("{}% of {of} left", w.left)
+}
+
+/// The desktop's `fmtDuration`: "40 m", "2 h 05 m", "3 d 4 h".
+fn duration(ms: i64) -> String {
+    let m = ((ms as f64) / 60_000.0).round().max(1.0) as i64;
+    if m < 60 { return format!("{m} m"); }
+    let (h, rm) = (m / 60, m % 60);
+    if h < 24 { return if rm > 0 { format!("{h} h {rm:02} m") } else { format!("{h} h") }; }
+    let (d, rh) = (h / 24, h % 24);
+    if rh > 0 { format!("{d} d {rh} h") } else { format!("{d} d") }
+}
+
+/// The desktop's `dayOf`, in this computer's time: "today 15:00" within the next 18 hours, else "Sat 15:00".
+fn day_of(at: i64, now: i64) -> String {
+    use chrono::TimeZone;
+    let Some(t) = chrono::Local.timestamp_millis_opt(at).single() else { return String::new() };
+    let hhmm = t.format("%H:%M");
+    if at >= now && at - now < 18 * 3_600_000 { format!("today {hhmm}") } else { format!("{} {hhmm}", t.format("%a")) }
 }
 
 #[cfg(test)]
@@ -112,6 +165,31 @@ mod tests {
             identity: Identity { logged_in: true, ..Default::default() }, email_mismatch: false, quota: Some(Quota { tiers, ..Default::default() }).filter(|q| !q.tiers.is_empty()),
             running: vec![], tokens_7d: 0, days_7d: vec![], sessions_7d: 0, last_used: None, home: String::new(), caps: crate::harness::all()[0].caps(), base_url: None,
             model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }
+    }
+
+    /// Use next and its lines, as the phone is given them: the desktop's words, the runner-up.
+    #[test]
+    fn use_next_says_what_the_desktop_overview_says() {
+        let f: Map<String, Value> = [("b|week".to_string(), json!({"runs_out": NOW + 30 * H}))].into_iter().collect();
+        let v = [
+            view("a", "claude", Kind::Subscription, &[("session", 20.0, Some(NOW + 2 * H + 5 * 60_000)), ("week", 36.0, Some(NOW + 50 * H))]),
+            view("b", "claude", Kind::Subscription, &[("session", 10.0, Some(NOW + 4 * H)), ("week", 40.0, Some(NOW + 50 * H))]),
+        ];
+        let accts: Vec<Acct> = v.iter().map(|p| acct(p, &f, NOW)).collect();
+        let n = next_for(&accts, "claude", false, NOW).unwrap();
+        assert_eq!((n.profile.as_str(), n.why.as_str(), n.left, n.out_at), ("a", "64% of the week left · lasts until its reset", Some(64), None));
+        let r = n.runner_up.unwrap();
+        assert_eq!((r.profile.as_str(), r.left, r.out_at), ("b", 60, Some(NOW + 30 * H)));
+        assert_eq!(r.line, format!("60% left · ≈ out {}", day_of(NOW + 30 * H, NOW).split(' ').next().unwrap()));
+        // "5h first": the 5-hour window that resets soonest, the soonest loss
+        let n = next_for(&accts, "claude", true, NOW).unwrap();
+        assert_eq!((n.profile.as_str(), n.why.as_str(), n.window.as_deref()), ("a", "80% of the 5-hour window left · resets in 2 h 05 m", Some("5-hour")));
+        // with no plan limits, as the desktop says it
+        let api = [view("k", "claude", Kind::ApiKey, &[])];
+        let accts: Vec<Acct> = api.iter().map(|p| acct(p, &f, NOW)).collect();
+        let n = next_for(&accts, "claude", false, NOW).unwrap();
+        assert_eq!((n.why.as_str(), n.runner_up), ("Pay per use · no plan limits", None));
+        assert_eq!((duration(40 * 60_000), duration(26 * H)), ("40 m".to_string(), "1 d 2 h".to_string()));
     }
 
     fn pick(views: &[ProfileView], tool: &str, five: bool) -> Option<(String, String)> {

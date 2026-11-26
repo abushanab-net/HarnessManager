@@ -103,9 +103,13 @@ impl Listener {
 pub fn start(ctx: Arc<Ctx>, rt: &tokio::runtime::Handle, bind: IpAddr, port: u16) -> Result<Listener> {
     let id = identity::load(&ctx)?;
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let cfg = rustls::ServerConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions()?
+    let mut cfg = rustls::ServerConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions()?
         .with_client_cert_verifier(Arc::new(Paired { ctx: ctx.clone(), provider }))
         .with_single_cert(vec![CertificateDer::from(id.cert_der.clone())], PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(id.key_der.clone())))?;
+    // no session resumption: a resumed session skips the client certificate, so a removed phone would get past the
+    // handshake (then be closed without the alert that tells it it was refused); every connection is verified
+    cfg.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    cfg.send_tls13_tickets = 0;
     let l = std::net::TcpListener::bind(SocketAddr::new(bind, port))?;
     l.set_nonblocking(true)?;
     let port = l.local_addr()?.port();

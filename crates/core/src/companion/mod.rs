@@ -95,8 +95,14 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
 }
 
 async fn hello(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Json<api::Hello> {
+    let c = ctx.clone();
+    // the other computers' names and systems are a summary: only with Summaries
+    let computers = if p.grants.summaries {
+        blocking(move || crate::journal::peers(&c).unwrap_or_default()).await.into_iter()
+            .map(|k| api::KnownComputer { id: k.id, name: k.name, os: k.os, last_seen: k.last_seen }).collect()
+    } else { vec![] };
     let now = now_ms();
-    Json(api::Hello { computer: computer(&ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now })
+    Json(api::Hello { computer: computer(&ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers })
 }
 
 /// What this phone may do with requests now, and why not.
@@ -117,11 +123,19 @@ pub(crate) fn overview_of(ctx: &Ctx) -> anyhow::Result<api::Overview> {
     let views = service::list_views(ctx)?;
     let listed = recommend::listed(ctx);
     let views: Vec<service::ProfileView> = views.into_iter().filter(|p| listed.contains(&p.harness)).collect();
+    // a session runs when the desktop sees its console or its `hrm run` reports it (working, waiting or at its
+    // prompt); one seen both ways, by its session or its folder under the same account, counts once
+    let consoles: Vec<(&str, &crate::model::RunningConsole)> = views.iter().flat_map(|p| p.running.iter().map(move |c| (p.name.as_str(), c))).collect();
+    let same = |r: &hooks::Run, (profile, c): &(&str, &crate::model::RunningConsole)| *profile == r.profile
+        && (c.session_id.as_deref().is_some_and(|s| !s.is_empty() && s == r.session_id) || (c.session_id.is_none() && c.cwd.as_deref().is_some_and(|d| !d.is_empty() && d == r.cwd)));
+    let running = consoles.len() + runs.iter().filter(|r| !consoles.iter().any(|c| same(r, c))).count();
+    let here = service::overview(ctx, Some(30), None, Some("here"))?;
+    let daily_tokens = here.heatmap[here.heatmap.len().saturating_sub(30)..].iter().map(|d| api::DayTokens { day: d.day.clone(), tokens: d.tokens }).collect();
     let next_reset = views.iter().flat_map(|p| p.quota.iter().flat_map(|q| &q.tiers).filter_map(move |t| t.resets_at.filter(|r| *r > now).map(|r| (r, p, t))))
         .min_by_key(|x| x.0).map(|(at, p, t)| json!({"profile": p.name, "name": p.label, "window": t.label, "at": at}));
     Ok(api::Overview {
         computer: computer(ctx), observed_at: now, needs_you: answerable.len() as u32, soonest_expiry: answerable.iter().copied().min(), at_computer: (asks.len() - answerable.len()) as u32,
-        running: views.iter().map(|p| p.running.len() as u32).sum(), next_reset, today: today(ctx)?, use_next: recommend::use_next(ctx, &views, now)?,
+        running: running as u32, next_reset, today: today(ctx)?, use_next: recommend::use_next(ctx, &views, now)?, today_cost: here.today_cost, daily_tokens,
     })
 }
 
@@ -136,9 +150,26 @@ fn accounts_of(ctx: &Ctx, only: Option<&str>) -> anyhow::Result<Vec<api::Account
         let a = recommend::acct(p, &forecast, now);
         let plan = match p.kind { crate::registry::Kind::ApiKey => Some("API key".to_string()), crate::registry::Kind::Routed => Some("Routed".to_string()), _ => p.identity.plan.clone() };
         let read_at = p.quota.as_ref().and_then(|q| q.fetched_at);
-        api::Account { profile: p.name.clone(), name: p.label.clone(), tool: p.harness.clone(), plan, windows: a.windows.iter().map(|w| api::Window { id: w.id.clone(), label: w.label.clone(), left: w.left, resets_at: w.resets_at }).collect(),
+        let windows = a.windows.iter().map(|w| {
+            let at_reset = forecast.get(&format!("{}|{}", p.name, w.id)).and_then(|f| f["at_reset"].as_f64()).filter(|_| w.open);
+            api::Window { id: w.id.clone(), label: w.label.clone(), left: w.left, resets_at: w.resets_at, hours: window_hours(&w.id),
+                left_at_reset: at_reset.map(|u| (100.0 - u).clamp(0.0, 100.0).round() as i64), runs_out_at: w.out_ms.map(|m| now + m) }
+        }).collect();
+        api::Account { profile: p.name.clone(), name: p.label.clone(), tool: p.harness.clone(), plan, windows,
             read_at, reading_age_ms: read_at.map(|t| (now - t).max(0)), login_attention: a.needs_login, tokens_7d: p.tokens_7d }
     }).collect())
+}
+
+/// A limit window's length from its id: the 5-hour window, a week (the account's or a model's), or Codex's
+/// `window:<minutes>`; None for one the id does not say.
+fn window_hours(id: &str) -> Option<f64> {
+    let (base, rest) = id.split_once(':').unwrap_or((id, ""));
+    match base {
+        "session" => Some(5.0),
+        "week" => Some(168.0),
+        "window" => rest.parse::<f64>().ok().map(|m| m / 60.0),
+        _ => None,
+    }
 }
 
 async fn accounts(State(ctx): State<Arc<Ctx>>) -> Response {
@@ -321,16 +352,39 @@ pub(crate) fn phone_view(a: &hooks::Ask, now: i64) -> (i64, Option<String>) {
     (expires, (expires <= now).then(|| AT_COMPUTER.to_string()))
 }
 
-pub(crate) fn requests_of(ctx: &Ctx) -> anyhow::Result<Vec<api::Request>> {
+/// How long a question whose window ended stays listed, as expired.
+const ENDED_KEPT_MS: i64 = 10 * 60_000;
+
+/// The open requests, then the questions whose window ended in the last ten minutes. Claude's last line before a
+/// request is transcript content: given only with `transcripts`.
+pub(crate) fn requests_of(ctx: &Ctx, transcripts: bool) -> anyhow::Result<Vec<api::Request>> {
     let now = now_ms();
-    Ok(hooks::runs(ctx)?.into_iter().filter_map(|r| r.ask.clone().map(|a| {
-        let (expires, at_computer) = phone_view(&a, now);
-        api::Request { input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires, state_version: r.version, at_computer }
-    })).collect())
+    let runs = hooks::runs(ctx)?;
+    let ended = hooks::ended_questions(ctx, now - ENDED_KEPT_MS)?;
+    let open = runs.iter().filter_map(|r| r.ask.as_ref().map(|a| (r, a, false)));
+    let late = ended.iter().filter_map(|(run, a)| runs.iter().find(|r| &r.run == run).map(|r| (r, a, true)));
+    Ok(open.chain(late).map(|(r, a, ended)| request(ctx, r, a, now, transcripts, ended)).collect())
+}
+
+/// One request as a phone is shown it: what it asks (a permission's command or file, and its description; a
+/// question's text and options; nothing else of the tool's input), when it opened, the session (its folder, its
+/// title and Claude's last line before it when its transcript is here; a session without one is still named).
+fn request(ctx: &Ctx, r: &hooks::Run, a: &hooks::Ask, now: i64, transcripts: bool, ended: bool) -> api::Request {
+    let (expires, at_computer) = if ended { (a.expires, None) } else { phone_view(a, now) };
+    let t = (!r.session_id.is_empty()).then(|| transcript_of(ctx, &r.harness, &r.profile, &r.session_id).ok()).flatten();
+    let title = t.as_ref().map(|t| t.meta.title.chars().take(200).collect::<String>()).filter(|s| !s.is_empty());
+    let last_line = t.filter(|_| transcripts).and_then(|t| {
+        let text = t.turns.last()?.answer.iter().rev().find(|s| !s.trim().is_empty())?;
+        Some(text.lines().rev().map(str::trim).find(|l| !l.is_empty())?.chars().take(300).collect())
+    });
+    let description = (a.kind == "permission").then(|| a.input["description"].as_str()).flatten().map(|d| d.chars().take(500).collect());
+    api::Request { input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id.clone(), kind: a.kind.clone(), tool: a.tool.clone(), what: a.what.clone(), profile: r.profile.clone(),
+        expires, state_version: r.version, at_computer, state: if ended { "expired" } else { "open" }.into(), ended_at: ended.then_some(a.expires), opened_at: a.created,
+        session_id: r.session_id.clone(), cwd: r.cwd.clone(), title, last_line, description }
 }
 
 async fn requests(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    answer(blocking(move || Ok(stamped(&ctx, json!({"requests": requests_of(&ctx)?, "actions": {"answer": may_answer(&p)}})))).await)
+    answer(blocking(move || Ok(stamped(&ctx, json!({"requests": requests_of(&ctx, p.grants.transcripts)?, "actions": {"answer": may_answer(&p)}})))).await)
 }
 
 async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<api::PushHandle>) -> Response {

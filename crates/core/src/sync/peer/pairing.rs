@@ -261,6 +261,8 @@ struct PhoneSt {
     key: Option<Keyed>,
     sealed: Option<String>,
     error: Option<String>,
+    /// The phone fetched the owner's decision: whoever shows the code may close the port now.
+    fetched: bool,
 }
 
 struct PhoneShared {
@@ -284,6 +286,7 @@ impl PhoneShared {
         if let Some(p) = &st.phone { v["phone"] = json!({"name": p.name, "platform": p.platform}); }
         if let Some(k) = &st.key { v["words"] = json!(k.words()); }
         if let Some(e) = &st.error { v["error"] = json!(e); }
+        if matches!(st.state, "paired" | "refused") { v["fetched"] = json!(st.fetched); }
         v
     }
 
@@ -333,9 +336,11 @@ impl PhoneHost {
     }
 
     /// The owner approved the phone shown, with these grants: it is stored, and this computer's payload is sealed
-    /// for it to fetch. Never the ring key: a phone is not a computer. Decided under the pairing's lock, with the
-    /// deadline: the expiry cannot come between the check and the stored phone, and what is stored is what is told.
-    pub fn approve(&self, ctx: &Ctx, grants: Grants) -> Result<Value> {
+    /// for it to fetch, naming `port`, where this computer's listener takes phones. Never the ring key: a phone is not
+    /// a computer. Decided under the pairing's lock, with the deadline: the expiry cannot come between the check and
+    /// the stored phone, and what is stored is what is told.
+    pub fn approve(&self, ctx: &Ctx, grants: Grants, port: u16) -> Result<Value> {
+        if port == 0 { bail!("the direct connection has no port yet; turn it on and pair again"); }
         let s = &self.shared;
         let v = {
             let mut st = s.st.lock().unwrap_or_else(|e| e.into_inner());
@@ -350,7 +355,6 @@ impl PhoneHost {
             }
             let (Some(phone), Some(key)) = (st.phone.clone(), st.key.as_ref()) else { bail!("no phone waits for approval") };
             let id = identity::load(ctx)?;
-            let port = s.ctx.settings.listen_port;
             let shown = s.shown["host_hint"].as_str().and_then(|h| h.rsplit_once(':')).map(|(h, _)| h.to_string()).unwrap_or_default();
             let mut hints = vec![format!("{shown}:{port}")];
             let me = format!("{}:{port}", crate::util::hostname());
@@ -460,11 +464,15 @@ struct Of {
 /// The answer can be fetched again until the attempt ends (a moment past the code's expiry), so one lost on the way
 /// is not lost for good.
 async fn phone_result(State(s): State<Arc<PhoneShared>>, Query(q): Query<Of>) -> Response {
-    let (state, sealed) = {
-        let st = s.st.lock().unwrap_or_else(|e| e.into_inner());
+    let (state, sealed, told) = {
+        let mut st = s.st.lock().unwrap_or_else(|e| e.into_inner());
         if st.phone.as_ref().map(|p| p.id.as_str()) != Some(q.id.as_str()) { return refused(StatusCode::NOT_FOUND, "no such phone is pairing"); }
-        (st.state, st.sealed.clone())
+        // the decision is on its way to the phone: the first time, whoever shows the code is told
+        let told = matches!(st.state, "paired" | "refused") && !st.fetched;
+        if told { st.fetched = true; }
+        (st.state, st.sealed.clone(), told.then(|| s.status_of(&st)))
     };
+    if let Some(v) = told { (s.on_event)("phones-pairing", v); }
     let expires_in = (s.deadline.load(Ordering::SeqCst) - now_ms()).max(0);
     Json(match state {
         "confirm" | "waiting" => PairResult { state: "pending".into(), payload: None, expires_in },

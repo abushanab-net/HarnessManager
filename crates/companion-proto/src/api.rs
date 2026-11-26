@@ -46,6 +46,19 @@ pub struct Hello {
     pub api: u32,
     pub grants: Grants,
     pub server_time: i64,
+    /// The other computers this one knows (paired, or seen through the hub or a shared folder), for the Computers
+    /// screen; empty without Summaries.
+    #[serde(default)]
+    pub computers: Vec<KnownComputer>,
+}
+
+/// Another computer this one knows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnownComputer {
+    pub id: String,
+    pub name: String,
+    pub os: String,
+    pub last_seen: Option<i64>,
 }
 
 /// The account to use next for one tool, and why.
@@ -54,7 +67,44 @@ pub struct UseNext {
     pub tool: String,
     pub profile: String,
     pub name: String,
+    /// Why, in a word: the rule that chose it ("Most room: 80% of its week left").
     pub reason: String,
+    /// The line the desktop's Overview shows under the name: "80% of the week left · ≈ out Sat 15:00", or with "5h
+    /// first", "60% of the 5-hour window left · resets in 2 h 10 m" (the soonest loss).
+    #[serde(default)]
+    pub why: String,
+    /// The window that line speaks of: its label, room left, reset and the time this pace runs it out first, if it does.
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub left: Option<i64>,
+    #[serde(default)]
+    pub resets_at: Option<i64>,
+    #[serde(default)]
+    pub out_at: Option<i64>,
+    /// The next best account, as the desktop's Runner-up line: "teksa 75% left · lasts".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_up: Option<RunnerUp>,
+}
+
+/// The runner-up under Use next.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunnerUp {
+    pub profile: String,
+    pub name: String,
+    /// Room left in its week (or first window), and when this pace runs it out, if it does.
+    pub left: i64,
+    pub out_at: Option<i64>,
+    /// "75% left · ≈ out Sat", or "75% left · lasts".
+    pub line: String,
+}
+
+/// One day's tokens on this computer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DayTokens {
+    /// "YYYY-MM-DD", this computer's calendar.
+    pub day: String,
+    pub tokens: i64,
 }
 
 /// `GET /c1/overview`.
@@ -74,6 +124,12 @@ pub struct Overview {
     /// Today's tokens and requests here.
     pub today: Value,
     pub use_next: Vec<UseNext>,
+    /// Today's estimated cost here at API list prices (USD); None when no model's price is known.
+    #[serde(default)]
+    pub today_cost: Option<f64>,
+    /// The last 30 days' tokens here, oldest first, ending today: the desktop Overview's series.
+    #[serde(default)]
+    pub daily_tokens: Vec<DayTokens>,
 }
 
 /// One limit window of an account.
@@ -83,6 +139,15 @@ pub struct Window {
     pub label: String,
     pub left: i64,
     pub resets_at: Option<i64>,
+    /// How long the window is, in hours (5 for the 5-hour window, 168 for a week); None when not known.
+    #[serde(default)]
+    pub hours: Option<f64>,
+    /// The desktop's forecast from the readings in this window: the room left at the reset at this pace, and when it
+    /// runs out before the reset, if it does. None without two readings far enough apart.
+    #[serde(default)]
+    pub left_at_reset: Option<i64>,
+    #[serde(default)]
+    pub runs_out_at: Option<i64>,
 }
 
 /// One account, as `GET /c1/accounts` lists them.
@@ -137,6 +202,27 @@ pub struct Request {
     /// Set once the request is past a phone's window: why it is answered at the computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at_computer: Option<String>,
+    /// "open", or "expired": a question whose window ended, listed for ten minutes after `ended_at`.
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub ended_at: Option<i64>,
+    /// When the request opened (ms).
+    #[serde(default)]
+    pub opened_at: i64,
+    /// The session it belongs to (its id, the folder it runs in); the title and Claude's last line before the request
+    /// come from its transcript, and are None without one. The last line needs Transcripts.
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub last_line: Option<String>,
+    /// A permission's own description of the command, when the tool gave one.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// A WebSocket message on `GET /c1/events`.
@@ -318,6 +404,9 @@ pub enum Update {
 }
 
 impl Event {
+    /// For `revoked`: when the computer removed this phone (ms); None when it lost Summaries instead.
+    pub fn revoked_at(&self) -> Option<i64> { self.data["revoked_at"].as_i64() }
+
     pub fn update(&self) -> serde_json::Result<Update> {
         Ok(match self.kind.as_str() {
             "needs" => Update::Needs(serde_json::from_value(self.data["requests"].clone())?),
@@ -342,6 +431,27 @@ impl std::fmt::Display for Refused {
 }
 
 impl std::error::Error for Refused {}
+
+/// Why a call reached no answer, so the phone tells a computer that removed it from one it cannot reach.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectError {
+    /// The computer refused this phone at TLS (a fatal alert it sent): the phone was removed there, or never paired.
+    Revoked(String),
+    /// Nothing answered, the connection dropped or was refused, the answer did not come in time, or the computer is
+    /// not the one paired with.
+    Unreachable(String),
+}
+
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectError::Revoked(e) => write!(f, "the computer refused this phone: {e}"),
+            ConnectError::Unreachable(e) => write!(f, "the computer was not reached: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ConnectError {}
 
 #[cfg(test)]
 mod tests {

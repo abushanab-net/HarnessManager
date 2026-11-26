@@ -114,8 +114,8 @@ fn a_phone_pairs_with_the_owners_approval_and_is_never_a_peer() {
     let list = crate::phones::list(&d.ctx).unwrap();
     assert_eq!((list[0]["phone_id"].as_str(), list[0]["platform"].as_str()), (Some(p.me.id.as_str()), Some("android")));
     assert_eq!(crate::phones::question_seconds(&d.ctx), 60, "a phone with Control lengthens the question window");
-    let states: Vec<String> = d.events.lock().unwrap().iter().filter(|(k, _)| k == "phones-pairing").map(|(_, v)| v["state"].as_str().unwrap().to_string()).collect();
-    assert_eq!(states, ["confirm", "paired"]);
+    let states: Vec<String> = d.events.lock().unwrap().iter().filter(|(k, _)| k == "phones-pairing").map(|(_, v)| format!("{}{}", v["state"].as_str().unwrap(), if v["fetched"] == true { " fetched" } else { "" })).collect();
+    assert_eq!(states, ["confirm", "paired", "paired fetched"], "the window is told when the phone has its answer");
     // the phone reaches the companion API over mutual TLS, keeps its connection, and opens a fresh one on resume
     let h = rt.block_on(p.c.hello()).unwrap();
     assert_eq!((h.api, h.computer.name.as_str(), h.grants), (1, "A", p.desk.grants));
@@ -970,7 +970,7 @@ fn a_request_older_than_300_s_is_not_a_phones_to_answer() {
     let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
     let p = enrolled(&ctx, true);
     let (run, ask, v) = waiting(&ctx, 900_000);
-    let listed = super::requests_of(&ctx).unwrap().into_iter().find(|r| r.ask_id == ask).unwrap();
+    let listed = super::requests_of(&ctx, true).unwrap().into_iter().find(|r| r.ask_id == ask).unwrap();
     assert!(listed.expires <= now_ms() + 300_000, "the phone is shown its own window: {}", listed.expires - now_ms());
     ctx.db.with(|c| Ok(c.execute("update run_ask set created = created - 301000 where id = ?", [&ask])?)).unwrap();
     let before = dispatched();
@@ -1023,6 +1023,197 @@ fn every_phone_view_shows_the_phones_window_and_then_the_computers_request() {
     });
 }
 
+// ---------- what the app found on a real phone (M4.1, docs/M4.1-status.md in the app's repository) ----------
+
+/// The phone joined `rt_desk`'s pairing shown, started with `ctx`, up to the owner's decision.
+fn join_on(rt: &tokio::runtime::Runtime, desk_rt: &Runtime, ctx: &Arc<Ctx>, me: &PhoneIdentity) -> (String, Joining) {
+    let v = desk_rt.phone_pair_start(ctx, Some("127.0.0.1")).unwrap();
+    let j = rt.block_on(join::join_qr(v["qr"].as_str().unwrap(), me, "Pixel 9", "android")).unwrap();
+    (v["attempt"].as_str().unwrap().to_string(), j)
+}
+
+/// Gap 1: once the owner decided, the pairing port stays up until the phone fetched the decision (`hrm phones
+/// pair` used to close it at once: the phone, asking a second later, found no port). The window is told it has it.
+#[test]
+fn a_decided_pairing_stays_up_until_the_phone_has_its_answer() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    let rt = phone_rt();
+    let me = PhoneIdentity::generate().unwrap();
+    let (attempt, j) = join_on(&rt, &d.rt, &d.ctx, &me);
+    d.rt.phone_pair_approve(&d.ctx, &attempt, &json!({})).unwrap();
+    let (d_rt, a2) = (&d.rt, attempt.clone());
+    std::thread::scope(|s| {
+        // as `hrm phones pair` does after the decision
+        let end = s.spawn(move || d_rt.phone_pair_end(&a2, Duration::from_secs(30)).unwrap());
+        std::thread::sleep(Duration::from_millis(1200)); // the phone asks once a second
+        let Outcome::Approved(desk) = rt.block_on(j.wait(Duration::from_millis(100))).unwrap() else { panic!("the phone did not get its approval") };
+        assert_eq!(desk.id, d.ctx.settings.device_id);
+        assert!(end.join().unwrap(), "the phone has its answer");
+    });
+    assert!(d.rt.phone_pair_status().is_none(), "then the code is no longer shown");
+    // a phone that never asks: the wait ends at its limit, and says so
+    let (attempt, _j) = join_on(&rt, &d.rt, &d.ctx, &PhoneIdentity::generate().unwrap());
+    d.rt.phone_pair_refuse(&attempt).unwrap();
+    assert!(!d.rt.phone_pair_end(&attempt, Duration::from_millis(300)).unwrap());
+}
+
+/// Gap 10 (and 1): the approval names the port the listener holds, not the one a context opened before it said (0
+/// on a data folder new to the direct connection); and `hrm phones pair` pairs beside a listener another process
+/// holds, giving the phone that listener's port.
+#[test]
+fn the_approval_names_the_port_the_listener_holds_and_pairing_runs_beside_it() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    let rt = phone_rt();
+    let port = d.ctx.settings.listen_port;
+    assert_ne!(port, 0);
+    let mut stale = Ctx::open_at(&d.ctx.data, &d.ctx.home).unwrap();
+    stale.settings.listen_port = 0;
+    let stale = Arc::new(stale);
+    let me = PhoneIdentity::generate().unwrap();
+    let (attempt, j) = join_on(&rt, &d.rt, &stale, &me);
+    d.rt.phone_pair_approve(&stale, &attempt, &json!({})).unwrap();
+    let Outcome::Approved(desk) = rt.block_on(j.wait(Duration::from_millis(100))).unwrap() else { panic!("not approved") };
+    assert!(desk.address_hints.iter().all(|h| h.ends_with(&format!(":{port}"))), "{:?}", desk.address_hints);
+
+    // another process (as the CLI beside the app) pairs while this one holds the listener
+    let cli = Runtime::new(Ipv4Addr::LOCALHOST.into(), Arc::new(|_, _| {})).unwrap();
+    let me = PhoneIdentity::generate().unwrap();
+    let (attempt, j) = join_on(&rt, &cli, &d.ctx, &me);
+    cli.phone_pair_approve(&d.ctx, &attempt, &json!({})).unwrap();
+    let Outcome::Approved(desk) = rt.block_on(j.wait(Duration::from_millis(100))).unwrap() else { panic!("not approved") };
+    assert_eq!(desk.address_hints[0], format!("127.0.0.1:{port}"));
+    let c = Client::new(&me, &desk.cert_pem, &desk.address_hints[0]).unwrap();
+    assert_eq!(rt.block_on(c.hello()).unwrap().computer.id, d.ctx.settings.device_id, "the listener the phone was given takes it");
+    cli.stop();
+}
+
+/// Gap 2: the phone's error says whether the computer refused it (a removed phone: a TLS alert) or was not reached.
+#[test]
+fn a_removed_phone_reads_revoked_and_a_computer_not_there_reads_unreachable() {
+    use companion_proto::api::ConnectError;
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({}));
+    rt.block_on(p.c.hello()).unwrap();
+    crate::phones::revoke(&d.ctx, &p.me.id).unwrap();
+    let e = rt.block_on(p.c.resume()).unwrap_err();
+    assert!(matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Revoked(_))), "{e:#}");
+    // every fresh connection is told: the computer reads what the phone sent before closing, so no reset loses the alert
+    for _ in 0..5 {
+        let fresh = Client::new(&p.me, &p.desk.cert_pem, &p.desk.address_hints[0]).unwrap();
+        let e = rt.block_on(fresh.hello()).unwrap_err();
+        assert!(matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Revoked(_))), "{e:#}");
+    }
+    let e = rt.block_on(async { p.c.events().await.map(|_| ()) });
+    if let Err(e) = e { assert!(matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Revoked(_))), "{e:#}"); }
+    // nothing at that port, and a computer that stopped
+    let none = Client::new(&p.me, &p.desk.cert_pem, "127.0.0.1:1").unwrap();
+    let e = rt.block_on(none.hello()).unwrap_err();
+    assert!(matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Unreachable(_))), "{e:#}");
+    let q = pair(&rt, &d, json!({}));
+    rt.block_on(q.c.hello()).unwrap();
+    d.rt.stop();
+    let e = rt.block_on(q.c.resume()).unwrap_err();
+    assert!(matches!(e.downcast_ref::<ConnectError>(), Some(ConnectError::Unreachable(_))), "{e:#}");
+}
+
+/// Gap 6: the `revoked` event says when the computer removed the phone, why, and which computer.
+#[test]
+fn the_revoked_event_says_when_and_why() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    crate::phones::set_grants(&ctx, &p.id, &json!({"summaries": false})).unwrap();
+    assert_eq!(super::events::revoked_data(&ctx, &p)["why"], "summaries withdrawn");
+    let v = crate::phones::revoke(&ctx, &p.id).unwrap();
+    let data = super::events::revoked_data(&ctx, &p);
+    assert_eq!((data["revoked_at"].clone(), data["why"].as_str(), data["by"]["id"].as_str()), (v["revoked_at"].clone(), Some("revoked"), Some(ctx.settings.device_id.as_str())));
+    assert!(data["revoked_at"].as_i64().is_some());
+    let e = companion_proto::api::Event { kind: "revoked".into(), at: now_ms(), data };
+    assert_eq!((e.update().unwrap(), e.revoked_at()), (Update::Revoked, v["revoked_at"].as_i64()));
+}
+
+/// Gap 3 and 9: a request carries when it opened, its session (id, folder, title and Claude's last line from the
+/// transcript, the last line only with Transcripts) and a permission's own description, and still nothing else of
+/// the tool's input; a session with no transcript is still named; a question whose window ended stays listed, as
+/// expired with its end, for ten minutes.
+#[test]
+fn a_request_carries_its_session_and_an_ended_question_stays_a_while() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    claude_account(&d.ctx);
+    let cwd = t.path().join("proj");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let f = session_file(&d.ctx, &cwd, "s-tr", "fix the build");
+    let mut lines = std::fs::read_to_string(&f).unwrap();
+    lines.push_str(&format!("{}\n", json!({"type": "assistant", "sessionId": "s-tr", "cwd": cwd, "timestamp": chrono::Utc::now().to_rfc3339(), "message": {"id": "m2", "model": "claude-opus-5-5", "usage": {"input_tokens": 1, "output_tokens": 1}, "content": [{"type": "text", "text": "Looking at it.\n\nI will run the tests now."}]}})));
+    std::fs::write(&f, lines).unwrap();
+    crate::index::refresh(&d.ctx, crate::index::Scope::All).unwrap();
+    let rt = phone_rt();
+    let full = pair(&rt, &d, json!({"control": true}));
+    let brief = pair(&rt, &d, json!({"transcripts": false}));
+    let pid = std::process::id();
+    let started = crate::procs::start_ms(pid).unwrap();
+    let opened = now_ms() - 5000;
+    d.ctx.db.with(|c| {
+        c.execute("insert into run_state(run, pid, started, profile, harness, session_id, cwd, state) values('r1', ?1, ?2, 'claude-main', 'claude', 's-tr', ?3, 'waiting'),
+            ('r2', ?1, ?2, 'claude-main', 'claude', 's-none', ?3, 'waiting')", params![pid, started, cwd.to_string_lossy()])?;
+        c.execute("insert into run_ask(id, run, kind, tool, what, input, created, expires, hook_pid, hook_started) values('k1', 'r1', 'permission', 'Bash', 'npm test', ?1, ?2, ?3, ?4, ?5),
+            ('k2', 'r2', 'question', 'AskUserQuestion', 'Which?', '{}', ?2, ?3, ?4, ?5)",
+            params![json!({"command": "npm test", "description": "Run the tests", "env": "SECRET-ENV"}).to_string(), opened, now_ms() + 60_000, pid, started])?;
+        // a question that timed out three minutes ago, and one twelve minutes ago
+        c.execute("insert into run_ask(id, run, kind, tool, what, created, expires, state) values('q-late', 'r2', 'question', 'AskUserQuestion', 'Late?', ?1, ?2, 'expired'),
+            ('q-old', 'r2', 'question', 'AskUserQuestion', 'Old?', ?3, ?4, 'expired')", params![now_ms() - 240_000, now_ms() - 180_000, now_ms() - 780_000, now_ms() - 720_000])?;
+        Ok(())
+    }).unwrap();
+    let r = rt.block_on(full.c.requests()).unwrap();
+    let k1 = r.requests.iter().find(|x| x.ask_id == "k1").unwrap();
+    assert_eq!((k1.opened_at, k1.session_id.as_str(), k1.cwd.as_str(), k1.state.as_str()), (opened, "s-tr", cwd.to_string_lossy().as_ref(), "open"));
+    assert_eq!((k1.title.as_deref(), k1.last_line.as_deref(), k1.description.as_deref()), (Some("fix the build"), Some("I will run the tests now."), Some("Run the tests")));
+    assert!(!serde_json::to_string(&r).unwrap().contains("SECRET-ENV"), "nothing else of the tool's input");
+    let k2 = r.requests.iter().find(|x| x.ask_id == "k2").unwrap();
+    assert_eq!((k2.session_id.as_str(), k2.title.as_deref(), k2.last_line.as_deref(), k2.description.as_deref()), ("s-none", None, None, None), "no transcript: still named");
+    let late = r.requests.iter().find(|x| x.ask_id == "q-late").unwrap();
+    assert_eq!((late.state.as_str(), late.ended_at, late.what.as_str()), ("expired", Some(late.expires), "Late?"));
+    assert!(r.requests.iter().all(|x| x.ask_id != "q-old"), "gone after ten minutes");
+    assert_eq!(rt.block_on(full.c.overview()).unwrap().needs_you, 2, "an ended question is not one to answer");
+    let b = rt.block_on(brief.c.requests()).unwrap();
+    let k1 = b.requests.iter().find(|x| x.ask_id == "k1").unwrap();
+    assert_eq!((k1.title.as_deref(), k1.last_line.as_deref()), (Some("fix the build"), None), "Claude's words need Transcripts");
+}
+
+/// Gap 4 and 5: the overview counts a session waiting on a request as running, gives today's cost at list prices and
+/// the last 30 days' tokens; an account's windows say their length and the forecast.
+#[test]
+fn the_overview_counts_waiting_sessions_and_accounts_carry_length_and_forecast() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let o = super::overview_of(&ctx).unwrap();
+    assert_eq!((o.running, o.daily_tokens.len()), (0, 30));
+    assert_eq!(o.daily_tokens.last().unwrap().day, chrono::Local::now().format("%Y-%m-%d").to_string());
+    let (_run, _ask, _) = waiting(&ctx, 60_000);
+    let (_run2, _) = working(&ctx);
+    assert_eq!(super::overview_of(&ctx).unwrap().running, 2, "waiting and working sessions run");
+    assert_eq!((super::window_hours("session"), super::window_hours("week:opus"), super::window_hours("window:1440"), super::window_hours("monthly")), (Some(5.0), Some(168.0), Some(24.0), None));
+}
+
+/// Gap 7: hello names the other computers this one knows, for a phone with Summaries.
+#[test]
+fn hello_names_the_other_computers_with_summaries() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    d.ctx.db.with(|c| Ok(c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, transport, presence) values('pc-2', 'LAPTOP', 'macos', '1.0', 'i', 1234, 0, 0, 'direct', '{}')", [])?)).unwrap();
+    let rt = phone_rt();
+    let p = pair(&rt, &d, json!({}));
+    let h = rt.block_on(p.c.hello()).unwrap();
+    assert_eq!(h.computers, vec![companion_proto::api::KnownComputer { id: "pc-2".into(), name: "LAPTOP".into(), os: "macos".into(), last_seen: Some(1234) }]);
+    let none = pair(&rt, &d, json!({"summaries": false}));
+    assert!(rt.block_on(none.c.hello()).unwrap().computers.is_empty());
+}
+
 /// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of
 /// characters JSON writes six bytes each still fit the budget.
 #[test]
@@ -1063,3 +1254,4 @@ fn a_read_that_began_on_a_fresh_file_is_not_kept() {
     super::transcript_of(&ctx, "claude", "claude-main", "n6b").unwrap();
     assert_eq!(reads(), before + 2, "the first read was not kept");
 }
+

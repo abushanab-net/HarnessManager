@@ -352,6 +352,17 @@ pub struct Ask {
     pub expires: i64,
 }
 
+/// The questions whose hook let them go at their window's end (`expired`) since `since`, with their run: a phone
+/// lists them a while longer, as ended, instead of losing them. Their `expires` is when the window ended.
+pub fn ended_questions(ctx: &Ctx, since: i64) -> Result<Vec<(String, Ask)>> {
+    ctx.db.read(|c| {
+        let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires from run_ask where state = 'expired' and kind = 'question' and expires >= ? order by created")?;
+        let v = st.query_map([since], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
+            input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? })))?.collect::<rusqlite::Result<_>>()?;
+        Ok(v)
+    })
+}
+
 /// The sessions that reported a state, oldest report first, each with its open request. The rows of an `hrm run`
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {

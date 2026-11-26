@@ -1040,6 +1040,12 @@ fn phones(ctx: Ctx, cmd: PhonesCmd) -> Result<i32> {
                             "control": ask_yes("Control: answer requests, reply and Stop?", false)?,
                         });
                         let r = if ask_yes("Do the words match? Approve this phone?", false)? { rt.phone_pair_approve(&ctx, attempt, &grants)? } else { rt.phone_pair_refuse(attempt)? };
+                        if matches!(r["state"].as_str(), Some("paired" | "refused")) {
+                            // the port stays open until the phone fetched the decision (it asks once a second)
+                            print!("waiting for the phone to collect the answer... ");
+                            let _ = std::io::stdout().flush();
+                            println!("{}", if rt.phone_pair_end(attempt, std::time::Duration::from_secs(30))? { "done" } else { "it did not ask within 30 s; if the phone says it was not paired, pair again" });
+                        }
                         match r["state"].as_str() {
                             Some("paired") => { println!("paired with {}  grants {}", r["phone"]["name"].as_str().unwrap_or("the phone"), grants_text(&grants)); break 0 }
                             Some("refused") => { println!("refused: the phone gets nothing from this computer"); break 1 }

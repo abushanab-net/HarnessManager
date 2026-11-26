@@ -43,8 +43,13 @@ impl Client {
 
     async fn open(&self) -> Result<Sender> { net::handshake(net::tls(&self.tls, &self.host, self.port).await?).await }
 
-    /// One request on the kept connection (HTTP/1.1 carries one at a time), opened again when it no longer works.
+    /// One request on the kept connection (HTTP/1.1 carries one at a time), opened again when it no longer works. A
+    /// failure is a `ConnectError`: the computer refused this phone, or was not reached.
     async fn call(&self, method: &str, path: &str, body: Option<Vec<u8>>) -> Result<(u16, bytes::Bytes)> {
+        self.call_once(method, path, body).await.map_err(net::classify)
+    }
+
+    async fn call_once(&self, method: &str, path: &str, body: Option<Vec<u8>>) -> Result<(u16, bytes::Bytes)> {
         let req = || net::request(method, &self.host, path, body.clone());
         let mut kept = self.kept.lock().await;
         let alive = match kept.as_mut() { Some(s) => !s.is_closed() && s.ready().await.is_ok(), None => false };
@@ -54,6 +59,8 @@ impl Client {
             Ok(r) => Ok(r),
             // an action may have been done: never sent twice
             Err(e) if method == "POST" => { *kept = None; Err(e) }
+            // refused by the computer: asking again would only lose the refusal
+            Err(e) if net::alerted(&e) => { *kept = None; Err(e) }
             Err(_) => {
                 let s = kept.insert(self.open().await?);
                 net::send(s, req()?).await
@@ -110,7 +117,9 @@ impl Client {
     pub async fn push_remove(&self) -> Result<()> { net::json::<serde_json::Value>(self.call("DELETE", "/c1/push", None).await?).map(|_| ()) }
 
     /// What changes on the computer, as it happens: a WebSocket on a connection of its own.
-    pub async fn events(&self) -> Result<Events> {
+    pub async fn events(&self) -> Result<Events> { self.events_once().await.map_err(net::classify) }
+
+    async fn events_once(&self) -> Result<Events> {
         let tls = net::tls(&self.tls, &self.host, self.port).await?;
         let host = if self.host.contains(':') { format!("[{}]", self.host) } else { self.host.clone() };
         let url = format!("wss://{host}:{}/c1/events", self.port);
@@ -155,7 +164,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Events<S> {
             };
             match tokio::time::timeout(wait, self.ws.next()).await {
                 Ok(None) => return None,
-                Ok(Some(Err(e))) => return Some(Err(e.into())),
+                Ok(Some(Err(e))) => return Some(Err(net::classify(e.into()))),
                 Ok(Some(Ok(m))) => {
                     (self.heard, self.pinged) = (Instant::now(), None);
                     match m {
@@ -164,13 +173,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Events<S> {
                         _ => continue,
                     }
                 }
-                Err(_) if self.pinged.is_some() => return Some(Err(anyhow!("the computer stopped answering"))),
+                Err(_) if self.pinged.is_some() => return Some(Err(net::classify(anyhow!("the computer stopped answering")))),
                 Err(_) => {
                     // a ping that cannot even be written (a socket backed up) counts against the same answer time
                     match tokio::time::timeout(self.answer_within, self.ws.send(Message::Ping(Vec::new().into()))).await {
                         Ok(Ok(())) => {}
-                        Ok(Err(e)) => return Some(Err(e.into())),
-                        Err(_) => return Some(Err(anyhow!("the computer stopped answering"))),
+                        Ok(Err(e)) => return Some(Err(net::classify(e.into()))),
+                        Err(_) => return Some(Err(net::classify(anyhow!("the computer stopped answering")))),
                     }
                     self.pinged = Some(Instant::now());
                 }

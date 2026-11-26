@@ -79,6 +79,12 @@ impl Runtime {
         if let Some(lis) = l.as_ref() {
             // mDNS that could not start is started again: a phone given the six digits finds the computer through it
             if !self.bind.is_loopback() && self.mdns.lock().unwrap_or_else(|e| e.into_inner()).is_none() { self.start_mdns(ctx, lis.port); }
+            // a context opened before the listener chose its port says 0: the one going on says the port it holds
+            if ctx.settings.listen_port != lis.port {
+                let mut c = Ctx::open_at(&ctx.data, &ctx.home)?;
+                c.settings.listen_port = lis.port;
+                return Ok(Arc::new(c));
+            }
             return Ok(ctx.clone());
         }
         let lis = listener::start(ctx.clone(), self.rt.handle(), self.bind, ctx.settings.listen_port)?;
@@ -131,10 +137,25 @@ impl Runtime {
         if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
     }
 
-    /// The direct connection on (saved) and the listener up, for the pairing ops.
+    /// The direct connection on (saved) and the listener up, for the pairing ops. When another process already
+    /// holds this computer's listener (the app, or `hrm computers serve`, beside `hrm phones pair`), pairing goes on
+    /// beside it: the phone is given that listener's port, which it saved.
     fn ready(&self, ctx: &Arc<Ctx>) -> Result<Arc<Ctx>> {
         let ctx = if ctx.settings.direct_connection { ctx.clone() } else { Arc::new(journal::configure(&ctx.data, &ctx.home, &json!({"direct_connection": true}))?) };
-        self.ensure(&ctx)
+        match self.ensure(&ctx) {
+            Err(e) if ctx.settings.listen_port != 0 && e.chain().any(|c| c.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse)) => {
+                crate::log::info(&format!("computers: port {} is held by this computer's running listener; pairing beside it", ctx.settings.listen_port));
+                Ok(ctx)
+            }
+            r => r,
+        }
+    }
+
+    /// The port this computer's listener takes phones on: its own listener's, or the one another process holds
+    /// (saved in the settings); 0 when there is none.
+    fn listen_port(&self, ctx: &Ctx) -> u16 {
+        if let Some(l) = self.listener.lock().unwrap_or_else(|e| e.into_inner()).as_ref() { return l.port; }
+        Ctx::open_at(&ctx.data, &ctx.home).map(|c| c.settings.listen_port).unwrap_or(ctx.settings.listen_port)
     }
 
     /// Show a code for two minutes; `host_name` goes into the host hint instead of this computer's name.
@@ -240,8 +261,25 @@ impl Runtime {
             let b = |k: &str, def: bool| -> Result<bool> { match &grants[k] { Value::Null => Ok(def), Value::Bool(b) => Ok(*b), _ => bail!("{k} is on or off") } };
             companion_proto::api::Grants { summaries: b("summaries", d.summaries)?, transcripts: b("transcripts", d.transcripts)?, control: b("control", d.control)? }
         };
+        // the port the listener holds now, not the one `ctx` was opened with (0 on a data folder new to it)
+        let port = self.listen_port(ctx);
         let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
-        Self::shown(&h, attempt)?.approve(ctx, g)
+        Self::shown(&h, attempt)?.approve(ctx, g, port)
+    }
+
+    /// After the owner decided on pairing `attempt`: wait until the phone fetched the decision, at most `within`,
+    /// then stop showing the code. True when the phone has it. For a caller that ends once paired (`hrm phones
+    /// pair`); the app keeps the attempt to its end instead.
+    pub fn phone_pair_end(&self, attempt: &str, within: std::time::Duration) -> Result<bool> {
+        let until = std::time::Instant::now() + within;
+        let fetched = loop {
+            let st = self.phone_pair_status().filter(|s| s["attempt"] == attempt).context("that phone pairing is no longer shown")?;
+            if st["fetched"] == true { break true; }
+            if std::time::Instant::now() >= until { break false; }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        let _ = self.phone_pair_cancel(attempt);
+        Ok(fetched)
     }
 
     pub fn phone_pair_refuse(&self, attempt: &str) -> Result<Value> {

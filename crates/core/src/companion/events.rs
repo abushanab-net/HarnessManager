@@ -42,6 +42,19 @@ fn look(ctx: &Ctx, phone: &Phone) -> Option<Look> {
     Some(Look { needs: json!(needs), runs: runs.iter().map(|r| (r.run.clone(), r.state.clone(), r.version)).collect(), changed })
 }
 
+/// What the `revoked` event says: when the computer removed the phone, why (removed, paired again, Summaries
+/// withdrawn), and which computer.
+pub(super) fn revoked_data(ctx: &Ctx, phone: &Phone) -> Value {
+    let row = phones::get(ctx, &phone.id).ok().flatten();
+    let why = match &row {
+        Some(r) if r.revoked_at.is_some() => "revoked",
+        Some(r) if r.generation != phone.generation => "paired again",
+        Some(_) => "summaries withdrawn",
+        None => "removed",
+    };
+    json!({"revoked_at": row.as_ref().and_then(|r| r.revoked_at), "why": why, "by": super::computer(ctx)})
+}
+
 fn event(kind: &str, data: Value) -> Message { Message::Text(serde_json::to_string(&Event { kind: kind.into(), at: now_ms(), data }).unwrap_or_default().into()) }
 
 async fn run(mut socket: WebSocket, ctx: Arc<Ctx>, phone: Phone) {
@@ -49,7 +62,9 @@ async fn run(mut socket: WebSocket, ctx: Arc<Ctx>, phone: Phone) {
     loop {
         let (c, id) = (ctx.clone(), phone.clone());
         let Some(now) = super::blocking(move || look(&c, &id)).await else {
-            let _ = socket.send(event("revoked", json!({}))).await;
+            let (c, id) = (ctx.clone(), phone.clone());
+            let data = super::blocking(move || revoked_data(&c, &id)).await;
+            let _ = socket.send(event("revoked", data)).await;
             let _ = socket.send(Message::Close(None)).await;
             return;
         };

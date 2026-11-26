@@ -18,7 +18,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 
-use crate::api::Refused;
+use crate::api::{ConnectError, Refused};
 use crate::PhoneIdentity;
 
 pub(crate) const CONNECT: Duration = Duration::from_secs(5);
@@ -79,6 +79,23 @@ pub(crate) async fn tls(cfg: &Arc<rustls::ClientConfig>, host: &str, port: u16) 
     let name = ServerName::try_from(host.to_string()).unwrap_or_else(|_| ServerName::try_from("harness-manager.invalid").expect("a valid name"));
     tokio::time::timeout(CONNECT, tokio_rustls::TlsConnector::from(cfg.clone()).connect(name, tcp)).await.map_err(|_| anyhow!("{host}:{port} did not finish the handshake"))?
         .with_context(|| format!("{host}:{port} refused this phone, or is not the computer it paired with"))
+}
+
+/// A failure on the way to an answer, typed: `Revoked` when the computer sent a TLS alert (as it does to a removed
+/// phone, on the handshake or on the first read after it), else `Unreachable`. A `Refused` (an HTTP answer) and an
+/// error already typed pass through.
+pub(crate) fn classify(e: anyhow::Error) -> anyhow::Error {
+    if e.downcast_ref::<Refused>().is_some() || e.downcast_ref::<ConnectError>().is_some() { return e; }
+    let why = format!("{e:#}");
+    if alerted(&e) { ConnectError::Revoked(why).into() } else { ConnectError::Unreachable(why).into() }
+}
+
+/// The computer sent a TLS alert: it refused this phone.
+pub(crate) fn alerted(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        let tls = c.downcast_ref::<Error>().or_else(|| c.downcast_ref::<std::io::Error>().and_then(|io| io.get_ref()).and_then(|i| i.downcast_ref::<Error>()));
+        matches!(tls, Some(Error::AlertReceived(_)))
+    })
 }
 
 pub(crate) type Sender = SendRequest<Full<Bytes>>;
