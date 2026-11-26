@@ -861,16 +861,25 @@ version = "1.13.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
+ "bytes",
  "chacha20poly1305",
  "curve25519-dalek 5.0.0",
  "ed25519-dalek",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "spake2",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
 ]
 
 [[package]]

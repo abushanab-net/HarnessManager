@@ -1,14 +1,19 @@
 //! The phone's side of the companion: its identity, its side of pairing, the `/c1` types and the sealing of the hub
 //! mailbox. The desktop uses the same crate for its side of pairing and in its tests (a fake phone), so both run one
-//! derivation of the keys and of the three verification words. Nothing here touches the network or a file: the app
-//! keeps the secrets in the platform's key store and does its own HTTP.
+//! derivation of the keys and of the three verification words. The phone's network is here too (`join` for pairing,
+//! `client` for the companion API and its events): dart:io cannot verify the computer's Ed25519 certificate, so the
+//! app only wraps these. Nothing here touches a file: the app keeps the secrets in the platform's key store.
 
 pub mod api;
+pub mod client;
 pub mod identity;
+pub mod join;
+pub mod net;
 pub mod pairing;
 pub mod seal;
 mod words;
 
+pub use client::{Client, Events};
 pub use identity::PhoneIdentity;
 pub use pairing::{Keyed, Pairing};
 

@@ -203,6 +203,132 @@ pub struct PushHandle {
     pub relay_handle: String,
 }
 
+/// `GET /c1/accounts`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Accounts {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub accounts: Vec<Account>,
+}
+
+/// `GET /c1/accounts/{profile}`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AccountOne {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub account: Account,
+}
+
+/// Reply and Stop for a run, each with the reason when this phone may not.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunActions {
+    pub reply: Allowed,
+    pub stop: Allowed,
+}
+
+/// A session in `GET /c1/sessions`; one `hrm run` started also names its run, state version and actions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionItem {
+    #[serde(flatten)]
+    pub session: Session,
+    #[serde(default)]
+    pub run: Option<String>,
+    #[serde(default)]
+    pub state_version: Option<i64>,
+    #[serde(default)]
+    pub actions: Option<RunActions>,
+}
+
+/// `GET /c1/sessions?cursor=`: a page, and the cursor of the next one.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionPage {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub sessions: Vec<SessionItem>,
+    pub next_cursor: Option<i64>,
+}
+
+/// `GET /c1/sessions/{harness}/{profile}/{id}/transcript?after=`: turns `after..` up to a bounded page.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TranscriptPage {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub harness: String,
+    pub profile: String,
+    pub id: String,
+    pub title: String,
+    pub after: usize,
+    /// The turns as the desktop draws them: prompt, steps, answer.
+    pub turns: Vec<Value>,
+    pub next: Option<usize>,
+    pub total: usize,
+}
+
+/// What this phone may do with the open requests.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RequestActions {
+    pub answer: Allowed,
+}
+
+/// `GET /c1/requests`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Requests {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub requests: Vec<Request>,
+    pub actions: RequestActions,
+}
+
+/// An open request as the `needs` event names it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Need {
+    pub run: String,
+    pub ask_id: String,
+    pub expires: i64,
+    pub state_version: i64,
+}
+
+/// An event read: what it says.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Update {
+    /// The open requests now.
+    Needs(Vec<Need>),
+    /// A run's state moved; "ended" once the run is gone.
+    RunState { run: String, state: String, state_version: i64 },
+    /// Usage or limits changed: read the overview again.
+    Changed,
+    /// This phone was revoked or lost Summaries; the socket closes.
+    Revoked,
+    /// A kind this version does not know.
+    Other(String),
+}
+
+impl Event {
+    pub fn update(&self) -> serde_json::Result<Update> {
+        Ok(match self.kind.as_str() {
+            "needs" => Update::Needs(serde_json::from_value(self.data["requests"].clone())?),
+            "run-state" => Update::RunState { run: serde_json::from_value(self.data["run"].clone())?, state: serde_json::from_value(self.data["state"].clone())?,
+                state_version: serde_json::from_value(self.data["state_version"].clone())? },
+            "changed" => Update::Changed,
+            "revoked" => Update::Revoked,
+            k => Update::Other(k.to_string()),
+        })
+    }
+}
+
+/// An answer the computer refused, with its HTTP status: 403 outside the grants, 404 for nothing there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refused {
+    pub status: u16,
+    pub error: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "the computer answered {}: {}", self.status, self.error) }
+}
+
+impl std::error::Error for Refused {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

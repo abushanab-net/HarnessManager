@@ -31,6 +31,12 @@ impl rcgen::SigningKey for Ed {
     fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, rcgen::Error> { Ok(self.0.sign(msg).to_bytes().to_vec()) }
 }
 
+/// A PEM certificate's DER bytes.
+pub fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
+    let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
+    crate::unb64(&body).map_err(|_| anyhow::anyhow!("not a PEM certificate"))
+}
+
 impl PhoneIdentity {
     /// A new phone: a random id and both keys.
     pub fn generate() -> Result<PhoneIdentity> {
