@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::api::{AccountOne, Accounts, Action, Event, Hello, Overview, PushHandle, Receipt, Refused, Requests, SessionPage, TranscriptPage, Update};
+use crate::api::{AccountOne, Accounts, Action, Event, Hello, Overview, ProjectUsage, PushHandle, Receipt, Refused, Requests, SessionPage, TranscriptPage, Update};
 use crate::net::{self, Sender};
 use crate::PhoneIdentity;
 
@@ -83,6 +83,8 @@ impl Client {
     pub async fn accounts(&self) -> Result<Accounts> { self.get("/c1/accounts").await }
 
     pub async fn account(&self, profile: &str) -> Result<AccountOne> { self.get(&format!("/c1/accounts/{}", seg(profile))).await }
+
+    pub async fn project(&self, key: &str) -> Result<ProjectUsage> { self.get(&format!("/c1/projects/{}", seg(key))).await }
 
     /// A page of sessions; `cursor` from the page before (`next_cursor`).
     pub async fn sessions(&self, cursor: Option<i64>) -> Result<SessionPage> {
