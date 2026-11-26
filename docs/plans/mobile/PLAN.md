@@ -131,7 +131,8 @@ refused on `/c1`, and phone certificates on `/v1`.
 | `GET /c1/hello` | any | computer, app version, `api: 1`, grants, server time; with Summaries, `computers`: the other computers this one knows (id, name, os, last seen) |
 | `GET /c1/overview` | summaries | needs-you count and soonest expiry, `at_computer` count, running (sessions working, waiting or at their prompt, seen by their console or reported by `hrm run`, each once), next reset, today, `today_cost` (list prices, USD, null when no price is known), `daily_tokens` (the last 30 days here, oldest first), `use_next` with its reason, the desktop's `why` line, its window (label, left, reset, `out_at`) and `runner_up` (profile, name, left, `out_at`, the desktop's line) |
 | `GET /c1/accounts`, `/c1/accounts/{profile}` | summaries | windows (left %, reset at, `hours` long, the forecast: `left_at_reset`, `runs_out_at` before the reset), plan, reading age, login attention, 7-day tokens |
-| `GET /c1/sessions?cursor=` | summaries | sessions with state, project, account, computer |
+| `GET /c1/sessions?cursor=` | summaries | sessions with state, project, account, computer and optional `project_key` for the project detail route |
+| `GET /c1/projects/{key}` | summaries | 30-day usage for one project across the merged request log, including per-model counts and the daily token series (below) |
 | `GET /c1/sessions/{harness}/{profile}/{id}/transcript?after=` | transcripts | transcript pages, bounded |
 | `GET /c1/requests` | summaries | open requests: kind, tool, what (command or question), expires, state version, `opened_at`, `session_id`, `cwd`, the session's `title`, a permission's `description`, and Claude's `last_line` before the request (from the transcript; only with Transcripts); `title` and `last_line` are null without a transcript, and the request is listed all the same. A question whose window ended is listed for ten minutes more with `state: "expired"` and `ended_at`; open ones say `state: "open"` |
 | `GET /c1/events` | summaries | WebSocket: `needs`, `changed`, `run-state`, `revoked` (`revoked_at`, `why`: revoked, paired again, summaries withdrawn or removed, `by`: the computer) |
@@ -141,6 +142,32 @@ refused on `/c1`, and phone certificates on `/v1`.
 
 Nothing of a request's tool input reaches a phone beyond its command or file (`what`), a permission's `description`,
 and a question's text and options.
+
+### Game history under Summaries
+
+Older desktops may omit all of these additions. Readers treat a missing history as unavailable. An empty array
+from a desktop that serves history means it found no matching observations. Times are Unix milliseconds.
+
+- Each account on either accounts route includes `past_resets`, oldest first. Each entry has `window` (tier ID),
+  `resets_at`, `read_at` and `left` (percent). The range includes both endpoints of the past 56 days. Each reset
+  time comes from a stored reading. The last reading for that window and reset strictly before the reset supplies
+  `read_at`. Its room is usable through six hours of age, inclusive. Older readings retain their timestamp and
+  report null room. If there was no pre-reset reading, both fields are null.
+- The account's `run_outs` lists `{window, at}` oldest first over the same 56 days. The time is the first stored
+  reading at 100% used for an episode in that window. A later reading below 100% or a new reset starts a new
+  episode. Remote readings require a matching login for the same profile.
+- The overview's `request_days` contains 60 local calendar days through today, oldest first, each with `day`
+  (YYYY-MM-DD), `requests` and `known`. Requests count merged records, including zero-token requests. Any request
+  establishes a worked day even if more requests could arrive. For an empty day, a skipped sequence range, a
+  pending backlog or a peer with no sync evidence makes activity unknown. A caught-up peer establishes empty days
+  only before its last synchronized calendar day. With no peers, local records determine every day.
+- Sessions supply an opaque `project_key`. Pass it as one URL segment to the project route. An encoded desktop
+  project key also works. An unknown key returns 404. The response contains the usual stamp, the opaque `key`,
+  `tokens`, `cost_usd`, `requests`, `by_model` (model name to `{tokens, cost_usd, requests}`) and `daily_tokens`
+  (30 `{day, tokens}` entries, oldest first, including today). All totals cover those same local calendar days.
+  Tokens include input, output, cache reads and cache writes. Costs sum the priced requests at their stored USD
+  list prices and are null when none are priced. An indexed project with no usage returns an empty model map,
+  zero requests and tokens, and a zero-filled series.
 
 The phone tells a removed phone from a computer it cannot reach by companion-proto's `ConnectError`: `Revoked` when the
 computer sent a TLS alert, `Unreachable` for everything else on the way (no answer, a dropped or refused connection, a
@@ -333,6 +360,9 @@ before it is turned on by default is WP-M5b below.
   or the hub. `DELETE /v1/register/{handle}`.
 - A wake becomes "A session needs you" (alert) or a Live Activity / data message with no content. The relay keeps no
   log of handles against senders, rate-limits each handle, and drops tokens the providers reject.
+- The desktop app compares open request IDs on its one-second session heartbeat and sends a best-effort wake for each newly observed request. A request answered between observations needs no wake. The hook only records and waits for the request.
+- The phone shares one handle and signing secret for its device token across the owner's enrolled computers. Each desktop keeps its signing secret in its credential store. Removing a computer is a rotation trigger: the phone registers the same device token again, which retires the old handle, and sends the new pair over `PUT /c1/push` to every remaining computer, including offline ones when they reconnect. Local revocation alone cannot invalidate a lost computer's copy.
+- A desktop receiving 404 or 410 for its current registration clears it and returns `push_needs_reregistering: true` on that phone's `GET /c1/hello`. If the phone has already rotated, it supplies its current pair to that computer. Otherwise it registers once and distributes the replacement to all remaining computers. A signed PUT clears the flag, as does an intentional DELETE.
 
 ## Phases
 

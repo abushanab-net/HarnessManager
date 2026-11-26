@@ -173,10 +173,10 @@ impl Paired {
 /// The enrollments paired through hub `hub_url` (or the one of `only`), not revoked, each from one row. A phone
 /// paired through another hub is served by none of this computer's passes until it is back on that hub.
 fn enrolled(c: &Connection, only: Option<&str>, hub_url: &str) -> rusqlite::Result<Vec<Paired>> {
-    c.prepare("select phone_id, coalesce(name, ''), coalesce(grants, ''), revoked_at, coalesce(x25519, ''), generation, hub_mailbox, coalesce(pubkey, ''), hub_pairing from phones
+    c.prepare("select phone_id, coalesce(name, ''), coalesce(grants, ''), revoked_at, coalesce(x25519, ''), generation, hub_mailbox, coalesce(pubkey, ''), hub_pairing, push_needs_reregistering or (relay_handle is not null and push_key_id is null) from phones
         where hub_mailbox is not null and revoked_at is null and hub_url = ?2 and (?1 is null or phone_id = ?1)")?
         .query_map(params![only, hub_url], |r| Ok(Paired {
-            phone: Phone { id: r.get(0)?, name: r.get(1)?, grants: phones::grants_of(&r.get::<_, String>(2)?), revoked_at: r.get(3)?, x25519: r.get(4)?, generation: r.get(5)? },
+            phone: Phone { id: r.get(0)?, name: r.get(1)?, grants: phones::grants_of(&r.get::<_, String>(2)?), revoked_at: r.get(3)?, x25519: r.get(4)?, generation: r.get(5)?, push_needs_reregistering: r.get(9)? },
             mailbox: r.get(6)?, pubkey: r.get(7)?, decision: r.get(8)?,
         }))?.collect()
 }

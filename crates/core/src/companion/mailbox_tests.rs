@@ -1037,3 +1037,45 @@ fn r7_a_legacy_token_asks_for_a_join_and_is_never_sent() {
     assert!(format!("{e:#}").contains(crate::sync::hub::REJOIN), "{e:#}");
     assert!(!String::from_utf8_lossy(&seen.lock().unwrap()).contains("legacy-token-113"));
 }
+
+// ---------- with the push relay and the game history ----------
+
+/// The mailbox snapshot carries the history the /c1 routes give (the overview's request days) only with Summaries.
+#[test]
+fn m_the_snapshot_carries_the_history_only_with_summaries() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (_j, _desk, m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    assert!(w.rt.block_on(m.overview()).unwrap().request_days.is_some(), "the request days come with the overview");
+    crate::phones::set_grants(&w.ctx, &me.id, &json!({"summaries": false})).unwrap();
+    pass(&w.ctx).unwrap();
+    assert_eq!(status_of(w.rt.block_on(m.overview())), 403);
+    assert_eq!(status_of(w.rt.block_on(m.accounts())), 403, "nor the accounts' past resets and run-outs");
+}
+
+/// Revoking a phone paired through the hub forgets its push key and owes (and settles) its hub deletion.
+#[test]
+fn m_revoke_forgets_the_push_key_and_owes_the_hub_deletion() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    let slot = format!("test-{}", crate::util::uuid4());
+    let target = crate::phones::push_target(&slot);
+    let _forget = Forget(vec![target.clone()]);
+    crate::secrets::write(&target, "hrm", b"push-secret").unwrap();
+    w.ctx.db.with(|c| Ok(c.execute("update phones set relay_handle = 'h', push_key_id = ? where phone_id = ?", rusqlite::params![slot, me.id])?)).unwrap();
+    // the hub cannot answer at the revocation: the deletion stays owed
+    let hub_db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    hub_db.execute_batch("begin exclusive").unwrap();
+    let r = crate::phones::revoke(&w.ctx, &me.id).unwrap();
+    assert_eq!(r["acks"]["hub"], false);
+    assert!(crate::secrets::read(&target).is_none(), "the push key is forgotten");
+    let (handle, key): (Option<String>, Option<String>) = w.ctx.db.read(|c| Ok(c.query_row("select relay_handle, push_key_id from phones where phone_id = ?", [&me.id], |r| Ok((r.get(0)?, r.get(1)?)))?)).unwrap();
+    assert_eq!((handle, key), (None, None));
+    let owed: i64 = w.ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_hub_deletes where mailbox = ?", [&j.mailbox], |r| r.get(0))?)).unwrap();
+    assert_eq!(owed, 1);
+    hub_db.execute_batch("commit").unwrap();
+    pass(&w.ctx).unwrap();
+    assert_eq!(raw(&w, &j.token, reqwest::Method::GET, &format!("/v1/mail/{}/down", j.mailbox), None), 401);
+}

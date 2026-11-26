@@ -6,9 +6,11 @@
 pub mod actions;
 pub mod conn;
 mod events;
+mod history;
 pub mod mailbox;
 #[cfg(test)]
 mod mailbox_tests;
+pub mod push;
 #[cfg(test)]
 mod tests;
 
@@ -88,6 +90,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/c1/overview", get(overview))
         .route("/c1/accounts", get(accounts))
         .route("/c1/accounts/{profile}", get(account))
+        .route("/c1/projects/{key}", get(project))
         .route("/c1/sessions", get(sessions))
         .route("/c1/requests", get(requests))
         .route("/c1/events", get(events::events))
@@ -105,7 +108,7 @@ pub(crate) fn hello_of(ctx: &Ctx, p: &Phone) -> api::Hello {
         crate::journal::peers(ctx).unwrap_or_default().into_iter().map(|k| api::KnownComputer { id: k.id, name: k.name, os: k.os, last_seen: k.last_seen }).collect()
     } else { vec![] };
     let now = now_ms();
-    api::Hello { computer: computer(ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers }
+    api::Hello { computer: computer(ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers, push_needs_reregistering: p.push_needs_reregistering }
 }
 
 /// What this phone may do with requests now, and why not.
@@ -139,6 +142,7 @@ pub(crate) fn overview_of(ctx: &Ctx) -> anyhow::Result<api::Overview> {
     Ok(api::Overview {
         computer: computer(ctx), observed_at: now, needs_you: answerable.len() as u32, soonest_expiry: answerable.iter().copied().min(), at_computer: (asks.len() - answerable.len()) as u32,
         running: running as u32, next_reset, today: today(ctx)?, use_next: recommend::use_next(ctx, &views, now)?, today_cost: here.today_cost, daily_tokens,
+        request_days: Some(history::request_days(ctx)?),
     })
 }
 
@@ -149,7 +153,7 @@ fn accounts_of(ctx: &Ctx, only: Option<&str>) -> anyhow::Result<Vec<api::Account
     let listed = recommend::listed(ctx);
     let views: Vec<service::ProfileView> = service::list_views(ctx)?.into_iter().filter(|p| listed.contains(&p.harness) && only.is_none_or(|n| p.name == n)).collect();
     let forecast = crate::dash::forecasts(ctx, now)?;
-    Ok(views.iter().map(|p| {
+    views.iter().map(|p| {
         let a = recommend::acct(p, &forecast, now);
         let plan = match p.kind { crate::registry::Kind::ApiKey => Some("API key".to_string()), crate::registry::Kind::Routed => Some("Routed".to_string()), _ => p.identity.plan.clone() };
         let read_at = p.quota.as_ref().and_then(|q| q.fetched_at);
@@ -158,9 +162,11 @@ fn accounts_of(ctx: &Ctx, only: Option<&str>) -> anyhow::Result<Vec<api::Account
             api::Window { id: w.id.clone(), label: w.label.clone(), left: w.left, resets_at: w.resets_at, hours: window_hours(&w.id),
                 left_at_reset: at_reset.map(|u| (100.0 - u).clamp(0.0, 100.0).round() as i64), runs_out_at: w.out_ms.map(|m| now + m) }
         }).collect();
-        api::Account { profile: p.name.clone(), name: p.label.clone(), tool: p.harness.clone(), plan, windows,
-            read_at, reading_age_ms: read_at.map(|t| (now - t).max(0)), login_attention: a.needs_login, tokens_7d: p.tokens_7d }
-    }).collect())
+        let (past_resets, run_outs) = history::quota(ctx, &p.name, p.identity.email.as_deref().or(p.expected_email.as_deref()), now)?;
+        Ok(api::Account { profile: p.name.clone(), name: p.label.clone(), tool: p.harness.clone(), plan, windows,
+            read_at, reading_age_ms: read_at.map(|t| (now - t).max(0)), login_attention: a.needs_login, tokens_7d: p.tokens_7d,
+            past_resets: Some(past_resets), run_outs: Some(run_outs) })
+    }).collect()
 }
 
 /// A limit window's length from its id: the 5-hour window, a week (the account's or a model's), or Codex's
@@ -191,6 +197,10 @@ struct Cursor {
     cursor: Option<i64>,
 }
 
+async fn project(State(ctx): State<Arc<Ctx>>, Path(key): Path<String>) -> Response {
+    answer(blocking(move || Ok(serde_json::to_value(history::project(&ctx, &key)?)?)).await)
+}
+
 /// Reply and Stop for a run: not from a phone in wave 1.
 pub(crate) fn run_actions() -> Value {
     let n = json!({"ok": false, "reason": actions::NOT_YET});
@@ -208,7 +218,8 @@ async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(_p): Extension<Phone>, 
         let me = computer(&ctx);
         let items: Vec<Value> = list.iter().map(|s| {
             let run = runs.iter().find(|r| !s.id.is_empty() && r.session_id == s.id && r.profile == s.profile);
-            let mut v = json!(api::Session { harness: s.harness.clone(), profile: s.profile.clone(), id: s.id.clone(), title: s.title.clone(), project: s.project_name.clone(), computer: me.clone(),
+            let mut v = json!(api::Session { harness: s.harness.clone(), profile: s.profile.clone(), id: s.id.clone(), title: s.title.clone(), project: s.project_name.clone(),
+                project_key: (!s.project_key.is_empty()).then(|| history::project_key(&s.project_key)), computer: me.clone(),
                 state: run.map(|r| r.state.clone()).unwrap_or_default(), open: s.open, last_active_at: s.last_active_at });
             if let Some(r) = run { v["run"] = json!(r.run); v["state_version"] = json!(r.version); v["actions"] = run_actions(); }
             v
@@ -390,12 +401,21 @@ async fn requests(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -
     answer(blocking(move || Ok(stamped(&ctx, json!({"requests": requests_of(&ctx, p.grants.transcripts)?, "actions": {"answer": may_answer(&p)}})))).await)
 }
 
-async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<api::PushHandle>) -> Response {
-    let h = h.relay_handle.trim().to_string();
-    if h.is_empty() || h.len() > 200 { return (StatusCode::BAD_REQUEST, Json(json!({"error": "give the relay handle"}))).into_response(); }
-    answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h))?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+#[derive(Deserialize)]
+struct PushEnrollment { relay_handle: String, secret: Option<String> }
+
+async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<PushEnrollment>) -> Response {
+    let secret = h.secret;
+    if secret.as_ref().is_some_and(|s| hex::decode_to_slice(s, &mut [0; 32]).is_err()) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error":"the relay secret must be 64 hex digits"}))).into_response();
+    }
+    if !phones::valid_handle(&h.relay_handle) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error":"the relay handle must be 48 hex digits"}))).into_response();
+    }
+    let h = h.relay_handle.to_ascii_lowercase();
+    answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h), secret.as_deref())?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }
 
 async fn push_delete(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    answer(blocking(move || { phones::set_push(&ctx, &p, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+    answer(blocking(move || { phones::set_push(&ctx, &p, None, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }

@@ -46,6 +46,8 @@ pub struct Hello {
     pub api: u32,
     pub grants: Grants,
     pub server_time: i64,
+    #[serde(default)]
+    pub push_needs_reregistering: bool,
     /// The other computers this one knows (paired, or seen through the hub or a shared folder), for the Computers
     /// screen; empty without Summaries.
     #[serde(default)]
@@ -130,6 +132,16 @@ pub struct Overview {
     /// The last 30 days' tokens here, oldest first, ending today: the desktop Overview's series.
     #[serde(default)]
     pub daily_tokens: Vec<DayTokens>,
+    #[serde(default)]
+    pub request_days: Option<Vec<RequestDay>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RequestDay {
+    pub day: String,
+    pub requests: i64,
+    /// Whether the merged journal establishes activity or inactivity on this day.
+    pub known: bool,
 }
 
 /// One limit window of an account.
@@ -164,6 +176,44 @@ pub struct Account {
     /// Signed out, or a login to renew.
     pub login_attention: bool,
     pub tokens_7d: i64,
+    #[serde(default)]
+    pub past_resets: Option<Vec<PastReset>>,
+    #[serde(default)]
+    pub run_outs: Option<Vec<RunOut>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PastReset {
+    pub window: String,
+    pub resets_at: i64,
+    pub read_at: Option<i64>,
+    pub left: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RunOut {
+    pub window: String,
+    pub at: i64,
+}
+
+/// A project's request log over the last 30 local calendar days.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectUsage {
+    pub computer: Computer,
+    pub observed_at: i64,
+    pub key: String,
+    pub tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub requests: i64,
+    pub by_model: std::collections::BTreeMap<String, ModelUsage>,
+    pub daily_tokens: Vec<DayTokens>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ModelUsage {
+    pub tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub requests: i64,
 }
 
 /// One session, as `GET /c1/sessions` lists them.
@@ -174,6 +224,8 @@ pub struct Session {
     pub id: String,
     pub title: String,
     pub project: String,
+    #[serde(default)]
+    pub project_key: Option<String>,
     pub computer: Computer,
     /// "working", "waiting", "done", or "" when no hook reported it.
     pub state: String,
@@ -294,7 +346,7 @@ pub struct Receipt {
     pub at: i64,
 }
 
-/// `PUT /c1/push`: the relay handle the phone registered (wave 2 gives it meaning).
+/// Handle-only enrollment from earlier phones. A signed enrollment also supplies the relay secret.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PushHandle {
     pub relay_handle: String,

@@ -292,8 +292,10 @@ impl Db {
             ("phones", "hub_pairing", "text"),
             // the hub a phone was paired through (companion/mailbox.rs)
             ("phones", "hub_url", "text"),
-
+            ("phones", "push_key_id", "text"),
+            ("phones", "push_needs_reregistering", "integer not null default 0"),
             ("phone_actions", "generation", "text not null default ''"),
+            ("run_ask", "push_claimed", "integer not null default 0"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
                 add_column(&conn, table, col, ty)?;
@@ -302,6 +304,7 @@ impl Db {
         // a phone paired before enrollments had generations gets one of its own; receipts kept from then name none,
         // so no enrollment can read them (the id may have been paired again before this version)
         conn.execute("update phones set generation = lower(hex(randomblob(16))) where generation = ''", [])?;
+        crate::phones::migrate_push_keys(&mut conn)?;
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
         if !has {

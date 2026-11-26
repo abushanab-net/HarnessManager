@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::api::{AccountOne, Accounts, Action, Event, Hello, Overview, PushHandle, Receipt, Refused, Requests, SessionPage, TranscriptPage, Update};
+use crate::api::{AccountOne, Accounts, Action, Event, Hello, Overview, ProjectUsage, PushHandle, Receipt, Refused, Requests, SessionPage, TranscriptPage, Update};
 use crate::net::{self, Sender};
 use crate::PhoneIdentity;
 
@@ -84,6 +84,8 @@ impl Client {
 
     pub async fn account(&self, profile: &str) -> Result<AccountOne> { self.get(&format!("/c1/accounts/{}", seg(profile))).await }
 
+    pub async fn project(&self, key: &str) -> Result<ProjectUsage> { self.get(&format!("/c1/projects/{}", seg(key))).await }
+
     /// A page of sessions; `cursor` from the page before (`next_cursor`).
     pub async fn sessions(&self, cursor: Option<i64>) -> Result<SessionPage> {
         self.get(&match cursor { Some(c) => format!("/c1/sessions?cursor={c}"), None => "/c1/sessions".into() }).await
@@ -111,7 +113,15 @@ impl Client {
 
     /// The relay handle the computer wakes this phone through.
     pub async fn push_register(&self, relay_handle: &str) -> Result<()> {
-        net::json::<serde_json::Value>(self.call("PUT", "/c1/push", Some(serde_json::to_vec(&PushHandle { relay_handle: relay_handle.into() })?)).await?).map(|_| ())
+        self.put_push(PushHandle { relay_handle: relay_handle.into() }).await
+    }
+
+    pub async fn push_register_signed(&self, relay_handle: &str, secret: &str) -> Result<()> {
+        self.put_push(crate::push::Registration { relay_handle: relay_handle.into(), secret: secret.into() }).await
+    }
+
+    async fn put_push(&self, registration: impl serde::Serialize) -> Result<()> {
+        net::json::<serde_json::Value>(self.call("PUT", "/c1/push", Some(serde_json::to_vec(&registration)?)).await?).map(|_| ())
     }
 
     pub async fn push_remove(&self) -> Result<()> { net::json::<serde_json::Value>(self.call("DELETE", "/c1/push", None).await?).map(|_| ()) }
