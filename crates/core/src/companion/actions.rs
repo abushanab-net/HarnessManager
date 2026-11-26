@@ -139,12 +139,13 @@ fn dispatch(ctx: &Ctx, p: &Phone, a: &Action) -> (Status, String) {
 
 /// Why an answer's request is no longer open: the terminal or another phone answered it, or it expired.
 fn ask_gone(c: &Connection, run: &str, ask_id: &str) -> Result<Option<(Status, String)>> {
-    let row: Option<(String, i64)> = c.query_row("select state, expires from run_ask where id = ?1 and run = ?2", [ask_id, run], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    let row: Option<(String, i64, i64)> = c.query_row("select state, expires, created from run_ask where id = ?1 and run = ?2", [ask_id, run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     Ok(match row {
         None => un("that request is gone with its session"),
-        Some((state, _)) if state == "expired" => Some((Status::Expired, "the request expired".into())),
-        Some((state, _)) if state != "open" => Some((Status::AlreadyHandled, "it was answered already, in the terminal or elsewhere".into())),
-        Some((_, expires)) if expires <= now_ms() => Some((Status::Expired, "the request expired".into())),
+        Some((state, _, _)) if state == "expired" => Some((Status::Expired, "the request expired".into())),
+        Some((state, _, _)) if state != "open" => Some((Status::AlreadyHandled, "it was answered already, in the terminal or elsewhere".into())),
+        Some((_, expires, _)) if expires <= now_ms() => Some((Status::Expired, "the request expired".into())),
+        Some((_, _, created)) if super::phone_expiry(created, i64::MAX) <= now_ms() => Some((Status::Expired, "a phone answers a request within 5 minutes of its opening; answer it at the computer".into())),
         _ => None,
     })
 }

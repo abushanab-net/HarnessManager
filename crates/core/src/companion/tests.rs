@@ -961,6 +961,25 @@ fn a_phones_reply_and_stop_are_refused_and_answers_still_work() {
     assert_eq!(r.status, Status::Accepted, "answers are not affected");
 }
 
+/// Final check: a phone answers a request within 300 s of its opening, though the desktop waits as long as it is set
+/// to (up to 15 min, as in 1.13.2): the request list shows the phone's expiry, and an older request is refused at the
+/// claim without being dispatched.
+#[test]
+fn a_request_older_than_300_s_is_not_a_phones_to_answer() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    let (run, ask, v) = waiting(&ctx, 900_000);
+    let listed = super::requests_of(&ctx).unwrap().into_iter().find(|r| r.ask_id == ask).unwrap();
+    assert!(listed.expires <= now_ms() + 300_000, "the phone is shown its own window: {}", listed.expires - now_ms());
+    ctx.db.with(|c| Ok(c.execute("update run_ask set created = created - 301000 where id = ?", [&ask])?)).unwrap();
+    let before = dispatched();
+    let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "old-ask")).unwrap();
+    assert_eq!((r.status, dispatched()), (Status::Expired, before), "{r:?}");
+    assert_eq!(ask_state(&ctx, &ask).0, "open", "still the desktop's to answer");
+    assert!(crate::hooks::answer(&ctx, &ask, &json!({"behavior": "allow"})).unwrap());
+}
+
 /// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of
 /// characters JSON writes six bytes each still fit the budget.
 #[test]

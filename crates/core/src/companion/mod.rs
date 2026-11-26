@@ -119,7 +119,7 @@ pub(crate) fn overview_of(ctx: &Ctx) -> anyhow::Result<api::Overview> {
     let next_reset = views.iter().flat_map(|p| p.quota.iter().flat_map(|q| &q.tiers).filter_map(move |t| t.resets_at.filter(|r| *r > now).map(|r| (r, p, t))))
         .min_by_key(|x| x.0).map(|(at, p, t)| json!({"profile": p.name, "name": p.label, "window": t.label, "at": at}));
     Ok(api::Overview {
-        computer: computer(ctx), observed_at: now, needs_you: asks.len() as u32, soonest_expiry: asks.iter().map(|a| a.expires).min(),
+        computer: computer(ctx), observed_at: now, needs_you: asks.len() as u32, soonest_expiry: asks.iter().map(|a| phone_expiry(a.created, a.expires)).min(),
         running: views.iter().map(|p| p.running.len() as u32).sum(), next_reset, today: today(ctx)?, use_next: recommend::use_next(ctx, &views, now)?,
     })
 }
@@ -308,9 +308,12 @@ fn summary(kind: &str, input: &Value) -> Value {
 }
 
 /// The open requests, each with the state version an answer must name.
+/// When a request stops being a phone's to answer: its own expiry, or `MAX_REQUEST_SECONDS` after it opened.
+pub(crate) fn phone_expiry(created: i64, expires: i64) -> i64 { expires.min(created + i64::from(hooks::MAX_REQUEST_SECONDS) * 1000) }
+
 pub(crate) fn requests_of(ctx: &Ctx) -> anyhow::Result<Vec<api::Request>> {
     Ok(hooks::runs(ctx)?.into_iter().filter_map(|r| r.ask.clone().map(|a| api::Request {
-        input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires: a.expires, state_version: r.version,
+        input: summary(&a.kind, &a.input), run: r.run.clone(), ask_id: a.id, kind: a.kind, tool: a.tool, what: a.what, profile: r.profile.clone(), expires: phone_expiry(a.created, a.expires), state_version: r.version,
     })).collect())
 }
 
