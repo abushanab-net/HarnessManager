@@ -168,8 +168,10 @@ fn a_phone_answers_a_request_through_the_hub_within_its_grants_and_is_cut_off_wh
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{next}", j.mailbox), Some(sealed.to_string().into_bytes())), 204);
     let moved = mailbox::seal_mail(me.signing_key(), x, &j.mailbox, "up", next + 1, &body).unwrap();
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{}", j.mailbox, next + 2), Some(moved)), 204);
+    // both looked at, neither moving the cursor the computer keeps
+    eventually("both are read", || (super::mailbox::was_skipped(&j.mailbox, next) && super::mailbox::was_skipped(&j.mailbox, next + 2)).then_some(()));
     let k = format!("mail:{}:up", j.mailbox);
-    eventually("both are read", || (w.ctx.db.kv_get(&k).unwrap().and_then(|s| s.parse::<i64>().ok()) >= Some(next + 2)).then_some(()));
+    assert!(w.ctx.db.kv_get(&k).unwrap().and_then(|s| s.parse::<i64>().ok()) < Some(next));
     assert_eq!(ask_state(&w.ctx, &ask2).0, "open", "neither reached the session");
     assert_eq!(w.rt.block_on(m.receipt("t-1")).unwrap(), None, "the computer never took it");
 
@@ -330,16 +332,16 @@ fn an_approval_not_signed_by_the_computer_is_refused() {
 fn one_pass_reads_a_bounded_number_of_a_phones_messages() {
     let w = world();
     let me = PhoneIdentity::generate().unwrap();
-    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    let (j, desk, _m) = paired(&w, &me, Grants::default());
+    pass(&w.ctx).unwrap();
     let k = format!("mail:{}:up", j.mailbox);
     let cursor = || w.ctx.db.kv_get(&k).unwrap().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
-    let start = up_max(&w, &j);
-    for seq in start + 1..=start + 25 { assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(b"{}".to_vec())), 204); }
     let before = cursor();
+    for i in 0..25 { put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": format!("b-{i}"), "query": format!("q{i}")})); }
     pass(&w.ctx).unwrap();
     assert_eq!(cursor(), before + 20);
     pass(&w.ctx).unwrap();
-    assert_eq!(cursor(), start + 25);
+    assert_eq!(cursor(), before + 25);
 }
 
 /// #7: a deletion the hub could not do is kept and done later, after the phone was paired again too, and its
@@ -370,11 +372,16 @@ fn a_message_claimed_when_the_computer_stopped_is_answered_by_the_next_pass() {
     let w = world();
     let me = PhoneIdentity::generate().unwrap();
     let (j, desk, m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    // the phone's word in slot 3 read first, so the stop lands on the action's own claim
+    pass(&w.ctx).unwrap();
     let (run, ask, v) = waiting(&w.ctx, 60_000);
     put_act(&w, &j, &me, &desk, answer(&run, &ask, v, "s-1"));
+    let k = format!("mail:{}:up", j.mailbox);
+    let before = w.ctx.db.kv_get(&k).unwrap();
     super::mailbox::STOP_AFTER_CLAIM.with(|c| c.set(true));
     assert!(pass(&w.ctx).is_err());
-    assert_eq!(ask_state(&w.ctx, &ask).0, "open");
+    assert_ne!(w.ctx.db.kv_get(&k).unwrap(), before, "stopped after the action's slot was claimed");
+    assert_eq!((ask_state(&w.ctx, &ask).0.as_str(), actions_named(&w.ctx, "s-1")), ("open", 0), "and before its reservation");
     pass(&w.ctx).unwrap();
     assert_eq!(ask_state(&w.ctx, &ask), ("answered".into(), "allow".into()));
     let _desk = desk_loop(&w.ctx);
@@ -395,4 +402,180 @@ fn only_the_phone_can_say_it_read_the_approval() {
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(p.status()["fetched"], false);
     assert!(matches!(w.rt.block_on(j.result()).unwrap(), Outcome::Approved(_)));
+}
+
+// ---------- the second review's findings ----------
+
+/// A message sealed by the phone's key for its next slot up (4 at the least: 1 to 3 are the pairing's).
+fn put_sealed(w: &World, j: &HubJoining, me: &PhoneIdentity, desk: &DesktopPayload, body: Value) {
+    let seq = (up_max(w, j) + 1).max(4);
+    let m = mailbox::seal_mail(me.signing_key(), desk.x25519.as_deref().unwrap(), &j.mailbox, "up", seq, &body).unwrap();
+    assert_eq!(raw(w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(m)), 204);
+}
+
+fn kept_count(ctx: &Ctx) -> i64 { ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_mail_in", [], |r| r.get(0))?)).unwrap() }
+
+/// Another hub on loopback.
+fn second_hub(w: &World) -> (String, axum_server::Handle<SocketAddr>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = hrm_hub::Config { data_dir: dir.path().to_path_buf(), admin_token: ADMIN.into(), bind: "127.0.0.1:0".parse().unwrap(), max_blob_mb: 64, retain_mb: 2048 };
+    let (addr, handle) = w.rt.block_on(hrm_hub::serve(cfg)).unwrap();
+    (format!("http://{addr}"), handle, dir)
+}
+
+/// P1: a phone paired through hub A, revoked once this computer moved to hub B: B saying "no such phone" settles
+/// nothing; the deletion stays owed to A.
+#[test]
+fn a_revocation_is_settled_only_by_the_hub_the_phone_was_paired_through() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    let (url_b, _hb, _db) = second_hub(&w);
+    let ctx_b = Arc::new(crate::sync::hub::join(&w.ctx, &url_b, None, Some(ADMIN)).unwrap());
+    let r = crate::phones::revoke(&ctx_b, &me.id).unwrap();
+    assert_eq!(r["acks"]["hub"], false, "hub B cannot settle a mailbox on hub A");
+    pass(&ctx_b).unwrap();
+    assert_eq!(crate::phones::list(&ctx_b).unwrap()[0]["acks"]["hub"], false);
+    let owed: Vec<String> = ctx_b.db.read(|c| Ok(c.prepare("select hub_url from phone_hub_deletes")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).unwrap();
+    assert_eq!(owed, std::slice::from_ref(&w.url));
+    assert_eq!(raw(&w, &j.token, reqwest::Method::GET, &format!("/v1/mail/{}/down", j.mailbox), None), 200, "the token on A is untouched and still owed");
+}
+
+/// P1: a revocation from before the deletions were kept (revoked, not acknowledged, nothing owed) is taken up.
+#[test]
+fn a_revocation_from_before_the_queue_is_taken_up() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    w.ctx.db.with(|c| Ok(c.execute("update phones set revoked_at = 1 where phone_id = ?", [&me.id])?)).unwrap();
+    pass(&w.ctx).unwrap();
+    assert_eq!(raw(&w, &j.token, reqwest::Method::GET, &format!("/v1/mail/{}/down", j.mailbox), None), 401);
+    assert_eq!(crate::phones::list(&w.ctx).unwrap()[0]["acks"]["hub"], true);
+}
+
+/// P1: a refusal that could not be delivered is delivered as decided: Control granted meanwhile does not make the
+/// same message an answer.
+#[test]
+fn a_decided_reply_is_kept_and_sent_as_decided() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "d-1")}));
+    super::mailbox::FAIL_SEND.with(|c| c.set(1));
+    assert!(pass(&w.ctx).is_err());
+    crate::phones::set_grants(&w.ctx, &me.id, &json!({"control": true})).unwrap();
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "open", "the message was decided once, refused");
+    assert_eq!(actions_named(&w.ctx, "d-1"), 0);
+    let _ = m;
+}
+
+/// P1: an enrollment read that fails keeps the claimed message for the next pass instead of losing it.
+#[test]
+fn a_failed_enrollment_read_keeps_the_claimed_message() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "r-1")}));
+    super::mailbox::FAIL_RELOAD.with(|c| c.set(true));
+    let _ = pass(&w.ctx);
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask), ("answered".into(), "allow".into()), "the claimed message was answered on the next pass");
+}
+
+/// P1: a slot the hub fills with something that does not open, numbered high, does not move the cursor past the
+/// phone's real messages below it.
+#[test]
+fn a_slot_that_does_not_open_does_not_move_the_cursor() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    let hub_db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    hub_db.execute("insert into mail(phone, dir, seq, at, bytes, body) values(?, 'up', 500, ?, 2, x'7b7d')", rusqlite::params![j.mailbox, crate::util::now_ms()]).unwrap();
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "c-1")}));
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
+}
+
+/// P2: replies that keep failing do not let the claimed backlog grow past one pass's worth; a revoked phone's
+/// claims go.
+#[test]
+fn a_backlog_stays_bounded_and_goes_with_its_enrollment() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants::default());
+    pass(&w.ctx).unwrap();
+    for i in 0..25 { put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": format!("x-{i}"), "query": format!("q{i}")})); }
+    super::mailbox::FAIL_SEND.with(|c| c.set(1000));
+    for _ in 0..3 { let _ = pass(&w.ctx); }
+    assert!(kept_count(&w.ctx) <= 20, "{} claimed and kept", kept_count(&w.ctx));
+    super::mailbox::FAIL_SEND.with(|c| c.set(0));
+    crate::phones::revoke(&w.ctx, &me.id).unwrap();
+    let _ = pass(&w.ctx);
+    assert_eq!(kept_count(&w.ctx), 0, "a revoked enrollment's claims go");
+}
+
+/// P2: a computer that stops dead after the phone redeemed its invite, before any decision: the invite is kept, and
+/// once its time is up its token is deleted on the hub.
+#[test]
+fn an_interrupted_pairing_does_not_leave_a_live_token() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (p, j) = joined(&w, &me);
+    p.crash();
+    eventually("the pairing stopped", || p.ended().then_some(()));
+    let _ = w.ctx.db.with(|c| Ok(c.execute("update phone_hub_invites set expires_at = 0", [])?));
+    pass(&w.ctx).unwrap();
+    assert_eq!(raw(&w, &j.token, reqwest::Method::GET, &format!("/v1/mail/{}/down", j.mailbox), None), 401);
+}
+
+/// #4: Summaries withdrawn just before the PUT (after the slot was found) stops the snapshot.
+#[test]
+fn a_grant_withdrawn_just_before_the_put_stops_the_snapshot() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (_j, _desk, m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    assert!(w.rt.block_on(m.requests()).unwrap().requests.is_empty());
+    let (_, ask, _) = waiting(&w.ctx, 60_000);
+    let (ctx, id) = (w.ctx.clone(), me.id.clone());
+    super::mailbox::BEFORE_PUT.with(|s| *s.borrow_mut() = Some(Box::new(move || { crate::phones::set_grants(&ctx, &id, &json!({"summaries": false})).unwrap(); })));
+    let _ = pass(&w.ctx);
+    if let Ok(r) = w.rt.block_on(m.requests()) { assert!(!r.requests.iter().any(|q| q.ask_id == ask), "the request built under Summaries reached the phone"); }
+}
+
+/// #5: the computer's own key signing an approval for an exchange other than the one this phone saw is refused.
+#[test]
+fn a_correctly_signed_approval_of_another_exchange_is_refused() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let inv = crate::sync::hub::phone_invite(&w.ctx).unwrap();
+    let (code, mb) = (inv["code"].as_str().unwrap().to_string(), inv["phone_id"].as_str().unwrap().to_string());
+    let id = identity::load(&w.ctx).unwrap();
+    let fp = companion_proto::pairing::fingerprint(&id.cert_der);
+    let (url, me2, c2) = (w.url.clone(), me.clone(), code.clone());
+    let joining = w.rt.spawn(async move { mailbox::join_hub(&url, &c2, Some(&fp), &me2, "Pixel 9", "android").await });
+    let tok = crate::sync::hub::token(&w.ctx).unwrap();
+    let get = |seq: i64| reqwest::blocking::Client::new().get(format!("{}/v1/mail/{mb}/up/{seq}", w.url)).bearer_auth(&tok).send().unwrap();
+    let up1: Value = eventually("the phone's first message", || { let r = get(1); (r.status() == 200).then(|| r.json().unwrap()) });
+    let (key, back) = companion_proto::pairing::answer(&code, &me.id, &w.ctx.settings.device_id, up1["msg"].as_str().unwrap()).unwrap();
+    let down1 = json!({"kind": "pair-start", "msg": back}).to_string().into_bytes();
+    assert_eq!(raw(&w, &tok, reqwest::Method::PUT, &format!("/v1/mail/{mb}/down/1"), Some(down1.clone())), 204);
+    let j = w.rt.block_on(joining).unwrap().unwrap();
+    let up2 = get(2).bytes().unwrap().to_vec();
+    let p = DesktopPayload { id: w.ctx.settings.device_id.clone(), name: "Desk".into(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(), address_hints: vec![], hub_url: Some(w.url.clone()),
+        hub_token: None, grants: Grants { summaries: true, transcripts: true, control: true }, x25519: Some(super::mailbox::keys(&w.ctx).unwrap().x_public) };
+    // the computer's real key, over an exchange whose first message is not the phone's
+    let other = br#"{"kind":"pair-start","id":"someone-else","msg":"x"}"#.to_vec();
+    let sig = id.sign(&mailbox::approval_binding(&mb, &me.id, &me.pubkey(), &me.x25519_public(), &p, [&other, &down1, &up2]));
+    let decision = json!({"kind": "pair-result", "state": "approved", "payload": key.seal(&p).unwrap(), "sig": sig});
+    assert_eq!(raw(&w, &tok, reqwest::Method::PUT, &format!("/v1/mail/{mb}/down/2"), Some(decision.to_string().into_bytes())), 204);
+    assert!(w.rt.block_on(j.result()).is_err());
 }

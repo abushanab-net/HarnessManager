@@ -332,9 +332,8 @@ impl HubJoining {
 
 // ---------- the mailbox, as the direct client ----------
 
-/// The most messages one look reads: after a long absence the older ones are passed over (and counted as missed),
-/// since a newer snapshot supersedes them and a receipt is asked for again. One look also asks for at most
-/// `LOOK_PAGES` listings and lasts at most `LOOK_TIME`, whatever the hub answers.
+/// The most messages one look reads, oldest first (after a long absence the next looks read on). One look also asks
+/// for at most `LOOK_PAGES` listings and lasts at most `LOOK_TIME`, whatever the hub answers.
 const READ_AT_MOST: i64 = 50;
 const LOOK_PAGES: usize = 5;
 const LOOK_TIME: Duration = Duration::from_secs(10);
@@ -363,8 +362,9 @@ pub struct Freshness {
 struct MailSt {
     /// The last message read that opened: the cursor the app keeps.
     down_seen: i64,
-    /// The last slot looked at, whether it opened or not: where the next listing starts; never kept.
-    inspected: i64,
+    /// Slots looked at that did not open, or were gone: passed over from then on (the newest 1000). They never move the
+    /// cursor, so one the hub made up never hides the computer's real messages below it.
+    skip: std::collections::BTreeSet<i64>,
     snapshot: Option<Value>,
     /// When the newest snapshot arrived, and when the hub last answered, by this phone's monotonic clock.
     snapshot_got: Option<Instant>,
@@ -378,9 +378,8 @@ impl MailSt {
     /// One message read from slot `seq`: when it opened, the cursor moves up to it (the slots it jumped counted as
     /// missed) and its body is kept or handed back as an answer; one that did not open moves nothing the app keeps.
     fn take(&mut self, seq: i64, opened: Result<Value>) -> Option<Value> {
-        self.inspected = self.inspected.max(seq);
         if seq <= self.down_seen { return None; }
-        let Ok(body) = opened else { self.dropped += 1; return None };
+        let Ok(body) = opened else { self.dropped += 1; self.pass_over(seq); return None };
         self.missed += (seq - self.down_seen - 1) as u64;
         self.down_seen = seq;
         match body["kind"].as_str() {
@@ -388,6 +387,11 @@ impl MailSt {
             Some("receipt" | "refused") => Some(body),
             _ => None,
         }
+    }
+
+    fn pass_over(&mut self, seq: i64) {
+        self.skip.insert(seq);
+        while self.skip.len() > 1000 { self.skip.pop_first(); }
     }
 
     fn freshness(&self, now_ms: i64, now: Instant) -> Freshness {
@@ -457,24 +461,20 @@ impl Mailbox {
     pub async fn sync(&self) -> Result<()> {
         let until = Instant::now() + LOOK_TIME;
         let mut st = self.st.lock().await;
-        let mut after = st.down_seen.max(st.inspected);
+        // oldest first from the cursor: the hub's word on where the newest is cannot be checked, so it is not followed
+        let mut after = st.down_seen;
         let mut list = self.hub.list(&self.mailbox, "down", after).await?;
         (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
-        // far behind: start with the newest, the rest counted as missed once a newer one opens
-        let max = list["max"].as_i64().unwrap_or(0).clamp(0, MAX_SEQ);
-        if max.saturating_sub(after) > READ_AT_MOST {
-            after = max - READ_AT_MOST;
-            list = self.hub.list(&self.mailbox, "down", after).await?;
-        }
         let mut read = 0;
         for _ in 0..LOOK_PAGES {
             let seqs = ahead(&list, after);
             if seqs.is_empty() { return Ok(()); }
             for seq in seqs {
                 if read >= READ_AT_MOST || Instant::now() >= until { return Ok(()); }
-                read += 1;
                 after = seq;
-                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.inspected = st.inspected.max(seq); continue };
+                if st.skip.contains(&seq) { continue; }
+                read += 1;
+                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.pass_over(seq); continue };
                 let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, "down", seq, &bytes);
                 if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
             }
@@ -619,7 +619,7 @@ mod tests {
         assert_eq!((st.down_seen, st.missed, st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64()), (6, 1, Some(10)), "an older snapshot is not taken back");
         // one that does not open moves nothing the app keeps
         st.take(7, Err(anyhow!("changed")));
-        assert_eq!((st.down_seen, st.inspected, st.dropped), (6, 7, 1));
+        assert_eq!((st.down_seen, st.skip.contains(&7), st.dropped), (6, true, 1));
     }
 
     /// #8: a snapshot that is not renewed, or a hub that stops answering, reads as stale.
@@ -810,5 +810,26 @@ mod hostile_hub {
         hand(&mut ws.lock().unwrap(), &json!({"kind": "receipt", "action_id": "a", "receipt": {}}));
         drop(Leave(&ws, 1));
         assert!(ws.lock().unwrap().iter().find(|w| w.id == 2).is_some_and(|w| w.answer.is_some()), "the second call lost its answer");
+    }
+
+    /// P1: a slot the hub made up high does not hide the computer's real message below it, listed later.
+    #[tokio::test]
+    async fn a_made_up_high_slot_does_not_hide_a_real_one_below_it() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
+        let looks = Arc::new(StdMutex::new(0));
+        let (url, _) = hub(Arc::new(move |_, p, _| {
+            if p.contains("?after=") {
+                let mut n = looks.lock().unwrap();
+                *n += 1;
+                return ok(if *n == 1 { json!({"max": 500, "mail": [{"seq": 500}], "more": false}) } else { json!({"max": 500, "mail": [{"seq": 3}, {"seq": 500}], "more": false}) });
+            }
+            if p.ends_with("/down/3") { (200, snap.clone()) } else { (200, b"{}".to_vec()) }
+        })).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_from(2).await;
+        m.sync().await.unwrap();
+        m.sync().await.unwrap();
+        assert_eq!(m.down_seen().await, 3, "the real message under the made-up one was read");
     }
 }

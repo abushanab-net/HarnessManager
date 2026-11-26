@@ -109,9 +109,11 @@ pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     // the deletion owed on the hub is written with the revocation: it is tried until the hub confirms it
     let (at, mailbox) = ctx.db.with(|c| {
         let tx = c.transaction()?;
-        let (mailbox, generation, gone): (Option<String>, String, Option<i64>) = tx.query_row("select hub_mailbox, generation, hub_gone from phones where phone_id = ?", [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let (mailbox, generation, gone, hub): (Option<String>, String, Option<i64>, String) = tx.query_row("select hub_mailbox, generation, hub_gone, coalesce(hub_url, ?2) from phones where phone_id = ?1",
+            params![id, ctx.settings.hub_url], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         tx.execute("update phones set revoked_at = ?2, relay_handle = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
-        if let (Some(mb), None) = (&mailbox, gone) { crate::companion::mailbox::delete_later(&tx, &ctx.settings.hub_url, mb, &id, &generation)?; }
+        // owed to the hub the phone was paired through: only that hub's answer settles it
+        if let (Some(mb), None) = (&mailbox, gone) { crate::companion::mailbox::delete_later(&tx, &hub, mb, &id, &generation)?; }
         let at = tx.query_row("select revoked_at from phones where phone_id = ?", [&id], |r| r.get::<_, i64>(0))?;
         tx.commit()?;
         Ok((at, mailbox))
@@ -216,14 +218,20 @@ pub(crate) fn add_with(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Opt
     let earlier: Option<String> = ctx.db.with(|c| {
         let tx = c.transaction()?;
         if cert_taken(&tx, &der, Some(&p.id))? { bail!("that certificate already belongs to another phone or computer"); }
-        let earlier: Option<(String, String)> = tx.query_row("select hub_mailbox, generation from phones where phone_id = ? and hub_mailbox is not null and hub_gone is null", [&p.id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-        let earlier = earlier.filter(|(mb, _)| Some(mb.as_str()) != mailbox);
-        if let Some((mb, generation)) = &earlier { crate::companion::mailbox::delete_later(&tx, &ctx.settings.hub_url, mb, &p.id, generation)?; }
-        tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at, hub_mailbox, hub_gone, hub_pairing) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null,?10,null,?11)
-            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null, hub_mailbox=?10, hub_gone=null, hub_pairing=?11",
-            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4(), mailbox, decision])?;
+        let earlier: Option<(String, String, String)> = tx.query_row("select hub_mailbox, generation, coalesce(hub_url, ?2) from phones where phone_id = ?1 and hub_mailbox is not null and hub_gone is null",
+            params![p.id, ctx.settings.hub_url], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let earlier = earlier.filter(|(mb, _, _)| Some(mb.as_str()) != mailbox);
+        if let Some((mb, generation, hub)) = &earlier { crate::companion::mailbox::delete_later(&tx, hub, mb, &p.id, generation)?; }
+        tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at, hub_mailbox, hub_gone, hub_pairing, hub_url) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null,?10,null,?11,?12)
+            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null, hub_mailbox=?10, hub_gone=null, hub_pairing=?11, hub_url=?12",
+            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4(), mailbox, decision, mailbox.map(|_| ctx.settings.hub_url.as_str())])?;
+        if let Some(mb) = mailbox {
+            // the invite is now this enrollment, and the pairing's own messages are not the mailbox pass's: one step
+            tx.execute("delete from phone_hub_invites where mailbox = ?", [mb])?;
+            tx.execute("insert into kv(k, v) values(?1, '2') on conflict(k) do update set v = '2'", [crate::companion::mailbox::cursor_key(mb)])?;
+        }
         tx.commit()?;
-        Ok(earlier.map(|(mb, _)| mb))
+        Ok(earlier.map(|(mb, _, _)| mb))
     })?;
     if let Some(mb) = earlier { crate::companion::mailbox::delete_now(ctx, &mb); }
     crate::companion::conn::cut(ctx, &p.id);
