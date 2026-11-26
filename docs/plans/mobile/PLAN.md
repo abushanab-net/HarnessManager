@@ -12,8 +12,8 @@ are what other packages rely on. The plan's review page is `docs/plans/mobile/pl
 - **Away from home through the owner's hub from day one**, on top of direct LAN / VPN.
 - **Push through a small relay that we operate** for the store builds. Payloads carry no content ("A session needs
   you"); the phone fetches the details after unlock.
-- **Grants per computer:** Summaries and Transcripts on by default, **Control** (answer, reply, Stop) granted on the
-  computer.
+- **Grants per computer:** Summaries and Transcripts on by default, **Control** granted on the computer. In wave 1
+  Control answers requests; a phone's Reply and Stop come later, with their own design (WP-M8).
 - **Question window:** 60 s when a phone with Control is paired, 15 s otherwise. A permission request waits up to 300 s.
 - **Game layer: balanced.** XP, harvest, streak, levels (Connected → Organized → Planner → Strategist), badges with
   their rule, weekly recap. Points only for saving room or time. It can be switched off.
@@ -48,7 +48,7 @@ are what other packages rely on. The plan's review page is `docs/plans/mobile/pl
 | `core/sync/peer/listener.rs`: mutual TLS with a `Paired` client-certificate verifier | The companion API is served by the same listener, with phone certificates in their own table |
 | `core/sync/peer/mdns.rs` | The phone finds a computer showing a code on the LAN |
 | `core/hooks.rs`: `run_ask` rows, `answer()` updates only an open, unexpired row of a live hook | Answering from the phone goes through `answer()` unchanged |
-| `core/terminal.rs`: `reply()` and `stop()` for an owned Windows terminal | Reply and Stop from the phone |
+| `core/terminal.rs`: `reply()` and `stop()` for an owned Windows terminal | Reply and Stop from the phone, in WP-M8 (wave 2); unchanged in wave 1 |
 | `hub` + `core/sync/hub.rs`: device records, encrypted chunks, presence, `/v1/events` WebSocket | The phone mailbox is added to the hub |
 | `app/src-tauri/src/main.rs`: the session heartbeat runs in the background, not in the window | Requests wait for the phone while the app is in the tray |
 
@@ -131,35 +131,31 @@ to Rust), so the desktop, the phone and the widgets always agree.
 
 ```
 POST /c1/actions
-{ "action_id": uuid, "kind": "answer" | "reply" | "stop",
-  "target": { "run": str, "ask_id"?: str }, "state_version": int, "expires_at": ms,
-  "payload": { "behavior": "allow"|"deny" } | { "answers": {...} } | { "text": str } | {} }
+{ "action_id": uuid, "kind": "answer",
+  "target": { "run": str, "ask_id": str }, "state_version": int, "expires_at": ms,
+  "payload": { "behavior": "allow"|"deny" } | { "answers": {...} } }
 → { "action_id", "status": "accepted" | "already_handled" | "expired" | "unavailable" | "unknown", "detail", "at": ms }
 ```
 
+- **Wave 1 actions are `answer` only.** `reply` and `stop` (kept in `companion-proto` for WP-M8) are `unavailable`
+  with the detail "Reply and Stop from a phone are not available yet", and no setting turns them on. Each session's
+  `actions` says the same. The desktop's own Reply and Stop and `hrm reply` / `hrm stop` are unchanged.
 - The origin rechecks grant, run, request and state version immediately before it acts, serialises actions per run,
   and keeps each receipt 24 h in `phone_actions(action_id primary key, phone_id, kind, target, status, detail, at)`.
   One transaction claims the action: it consumes the state version (a second action on the same screen is `expired`)
   and reserves the receipt before anything reaches the session. `unknown`: the computer stopped between reserving and
-  recording the outcome, or the terminal took the input and its acknowledgement was lost; the action may have arrived
-  and is never sent again. Where the effect is committed (the hook's write of an answer, the terminal relay before the
-  first byte and again before a reply's Enter) the claimed run version, the action's deadline and the phone's Control
-  are checked once more, and an answer is judged when its write gets the database. Terminal input is recorded as
-  begun in a short write before its first byte, written outside any transaction within a deadline, and its outcome
-  recorded in a second short write; a run with input begun or not known takes no other remote input until a new
-  prompt or the person at the computer settles it. A reply typed but stopped before its Enter, or written part way,
-  keeps remote replies out the same way, and a keystroke at the terminal settles nothing. Every Stop (desktop or
-  phone) claims its turn with a token the relay requires; a Stop with no claim is unavailable, and the turn a Stop
-  ended stays ended for late hooks until a new prompt. A relay older than this protocol is sent nothing. A hook
-  that cannot record its event leaves the run's state unknown, which refuses remote input until an event records.
-- **Phone Reply and Stop are off unless the owner turns them on** (`phones:terminal_input`): bytes typed into a
-  terminal cannot be checked against the tool's own turn at the instant they are written, so a reply or a Ctrl+C
-  could still land a few milliseconds late. Answers are not affected.
-- A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
-  automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
-  fails too.
-- `answer` goes through `hooks::answer()`, `reply` through `terminal::reply()`, `stop` through `terminal::stop()`;
-  reply and Stop keep today's rules (owned terminal, one line, at most 16 KiB, no reply while a prompt waits).
+  recording the outcome; the answer may have arrived and is never sent again. Where the answer is written (the same
+  write that takes the open request) the claimed run version, the action's deadline and the phone's Control are
+  checked once more, judged when that write gets the database.
+- **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
+  its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
+  to a request from another turn is refused. A hook that cannot record its event fails as it always did and marks the
+  run's state unknown; a phone's answer is refused (before it is claimed, and again where it is written) until an
+  event that closes every open request is recorded. The person at the computer answers throughout, and a hook for a
+  session with no phone paired behaves as in 1.13.2.
+- A repeated `action_id` returns the stored receipt and does nothing again. An answer is never resent automatically.
+  When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that fails too.
+- `answer` goes through `hooks::answer()` with the phone's guard.
 - **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
   (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is 70 s, 10 s beyond the window
   for the hook's start and for printing an answer taken at the window's end. A permission request waits at most 300 s
@@ -209,12 +205,32 @@ Phases 1 and 2 can overlap once the `/c1` contract is fixed: the app builds agai
 | WP-M2 desktop UI and CLI | `app/ui/computers*.js` (Pair a phone, Phones list), `app/src-tauri/src/computers.rs`, `crates/cli/src/**` (`hrm phones`), `e2e/` (phone tests) | `mobile/desktop-ui` |
 
 Wave 2: WP-M4 the Flutter app (its own repository), WP-M5 hub mailbox (`crates/hub/**`, `crates/core/src/sync/hub.rs`),
-WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository).
+WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository),
+WP-M8 phone Reply and Stop.
+
+**WP-M8 phone Reply and Stop** gets its own design before any code; wave 1's five reviews tried to bolt it onto the
+answer path and taught these inputs:
+
+- **The check-to-write gap.** Bytes typed into a terminal cannot be checked against the tool's turn at the instant
+  they are written: whatever is checked first, a prompt can open (or the turn end) before the bytes land, so a reply
+  or a Ctrl+C can reach a different moment than the one the phone was shown.
+- **Queue and cancel identity.** Every input needs an identity the relay checks: which Stop claimed which turn, which
+  reply is queued, and which one a cancel or a later outcome refers to, so a stale claim never releases or ends a
+  newer one and nothing is delivered twice.
+- **Turn versioning.** The state version moves on every hook event; a reply or Stop needs the tool's own turn, which
+  the hooks report only in part (no event follows an interrupt, a late hook from a stopped turn can arrive after it).
+- **Local typing interleaves.** Text the person at the computer is typing, or text a reply left unsent before its
+  Enter, mixes with remote input; a keystroke at the terminal settles nothing the desktop can see.
+- **Recovery control on the desktop.** An input whose outcome is not known has to be settled by someone: the desktop
+  needs a visible control to clear it, rather than a rule that waits for the next prompt.
+- **Needs help from the tool.** A reliable remote reply or interrupt wants the harness itself to accept input with a
+  turn id (or acknowledge one), rather than inferring the turn from terminal bytes and hook timing.
 
 ## Release criteria
 
-- **Zero stale approvals and zero repeated terminal inputs** across: the terminal answering first, two phones at once,
-  expiry during unlock, Wi-Fi to cellular, a receipt lost after a reply, two Stop taps.
+- **Zero stale approvals** across: the terminal answering first, two phones at once, expiry during unlock, Wi-Fi to
+  cellular, a receipt lost after an answer, a hook event that could not be recorded. (WP-M8 adds zero repeated
+  terminal inputs: a receipt lost after a reply, two Stop taps.)
 - A summaries-only phone gets 403 on transcripts, actions and every `/v1` route; two computers with the same account
   and session names stay apart.
 - A revoked phone loses its connection, its hub token and its push handle within one minute while the computer is on.
