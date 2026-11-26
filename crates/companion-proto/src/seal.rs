@@ -40,6 +40,9 @@ fn cipher(shared: &MontgomeryPoint, e: &[u8], to: &[u8]) -> Result<ChaCha20Poly1
     Ok(ChaCha20Poly1305::new_from_slice(&k)?)
 }
 
+/// The X25519 public key (base64) of a secret: what a sender seals to.
+pub fn x25519_public(secret: &[u8; 32]) -> String { b64(&MontgomeryPoint::mul_base_clamped(*secret).to_bytes()) }
+
 /// `plaintext` sealed to the holder of X25519 key `to` (base64), signed by `sender`.
 pub fn seal_to(sender: &SigningKey, to: &str, plaintext: &[u8]) -> Result<Sealed> {
     let to = x25519_key(to)?;

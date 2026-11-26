@@ -880,6 +880,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "webpki-root-certs",
 ]
 
 [[package]]
