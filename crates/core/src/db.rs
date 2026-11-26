@@ -52,6 +52,9 @@ create table if not exists phones(phone_id text primary key, name text, platform
   grants text, paired_at integer, last_seen integer, revoked_at integer, relay_handle text);
 create table if not exists phone_actions(action_id text primary key, phone_id text not null, kind text not null, target text not null,
   status text not null, detail text not null, at integer not null);
+create table if not exists phone_hub_deletes(hub_url text not null, mailbox text not null, phone_id text not null, generation text not null, at integer not null,
+  primary key(hub_url, mailbox));
+create table if not exists phone_mail_in(mailbox text not null, seq integer not null, generation text not null, body text not null, primary key(mailbox, seq));
 "#;
 
 /// A usage row's insert: the same request from two logs (a resumed session repeats earlier messages) keeps the
@@ -282,6 +285,7 @@ impl Db {
             // a phone paired through the hub: its mailbox there, and when the hub acknowledged deleting it (companion/mailbox.rs)
             ("phones", "hub_mailbox", "text"),
             ("phones", "hub_gone", "integer"),
+            ("phones", "hub_pairing", "text"),
             ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
