@@ -71,11 +71,8 @@ pub fn stop_guarded(data: &Path, run: &str, guard: Option<&Guard>) -> Result<()>
     {
         let c = rusqlite::Connection::open(data.join("hm.db"))?;
         c.busy_timeout(std::time::Duration::from_secs(2))?;
-        let Some(claim) = crate::hooks::claim_stop(&c, run, guard.map(|g| g.version))? else {
-            if guard.is_some() { anyhow::bail!("that session is no longer running here"); }
-            // no row names it: the terminal says it has none
-            return control::send(data, run, control::Action::Stop, None);
-        };
+        // no claim, no Stop: the relay takes none without one
+        let Some(claim) = crate::hooks::claim_stop(&c, run, guard.map(|g| g.version))? else { anyhow::bail!("run '{run}' has no owned terminal") };
         let g = Guard { version: claim.version, deadline: guard.map_or(claim.deadline, |g| g.deadline.min(claim.deadline)), phone: guard.and_then(|g| g.phone.clone()), stop: Some(claim.token.clone()) };
         return match control::send(data, &claim.run, control::Action::Stop, Some(&g)) {
             Ok(()) => Ok(()),

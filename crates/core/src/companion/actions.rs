@@ -24,6 +24,16 @@ use crate::{hooks, Ctx};
 const KEPT_MS: i64 = 24 * 3_600_000;
 pub(crate) const UNSENT: &str = "Text from an earlier reply waits unsent in the session's input; finish or clear it in the terminal";
 pub(crate) const NO_TURNS: &str = "This session does not report its turns; reply in its terminal";
+pub(crate) const TERMINAL_INPUT_OFF: &str = "Reply and Stop from a phone are off on this computer; answers still work";
+
+/// The one switch for a phone's Reply and Stop (answers are not affected). Off unless the owner turns it on: input
+/// typed into a terminal cannot be checked against the tool's own turn at the instant it is written, so a reply or
+/// a Ctrl+C can still land a few milliseconds late. `phones:terminal_input` = "1" turns it on.
+pub const TERMINAL_INPUT: &str = "phones:terminal_input";
+
+pub fn terminal_input_on(c: &Connection) -> bool {
+    c.query_row("select v from kv where k = ?", [TERMINAL_INPUT], |r| r.get::<_, String>(0)).optional().ok().flatten().as_deref() == Some("1")
+}
 /// A reply's text as the terminal takes it (control.rs): one line, no control characters, at most 16 KiB.
 const MAX_TEXT: usize = 16 * 1024;
 
@@ -99,8 +109,9 @@ fn reply_text(a: &Action) -> Option<&str> {
     a.payload["text"].as_str().filter(|t| !t.trim().is_empty() && t.len() <= MAX_TEXT && !t.chars().any(char::is_control))
 }
 
-/// A run as the claim reads it: state, version, owned terminal, pid, start, Stop claimed at, unsent text waiting.
-type RunNow = (String, i64, bool, u32, i64, Option<i64>, bool);
+/// A run as the claim reads it: state, version, owned terminal, pid, start, Stop claimed at, unsent text waiting, an
+/// input not confirmed.
+type RunNow = (String, i64, bool, u32, i64, Option<i64>, bool, bool);
 
 /// In the claiming transaction: the outcome when the action cannot go ahead; None when it may, its run's version is
 /// then consumed.
@@ -113,16 +124,19 @@ fn claim(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, String
         let Some(ask) = a.target.ask_id.as_deref() else { return Ok(un("an answer names its request")) };
         if let Some(gone) = ask_gone(c, run, ask)? { return Ok(Some(gone)); }
     }
-    let row: Option<RunNow> = c.query_row("select state, version, terminal_port is not null, pid, started, stopping, needs_terminal <> 0 from run_state where run = ?", [run],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))).optional()?;
-    let Some((state, version, terminal, _, _, stopping, unsent)) = row.filter(|r| crate::procs::start_ms(r.3).is_some_and(|s| r.4 == 0 || s == r.4)) else { return Ok(un("that session is no longer running here")) };
+    let row: Option<RunNow> = c.query_row("select state, version, terminal_port is not null, pid, started, stopping, needs_terminal <> 0, delivery_state is not null from run_state where run = ?", [run],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))).optional()?;
+    let Some((state, version, terminal, _, _, stopping, unsent, pending)) = row.filter(|r| crate::procs::start_ms(r.3).is_some_and(|s| r.4 == 0 || s == r.4)) else { return Ok(un("that session is no longer running here")) };
+    let unconfirmed = pending || hooks::state_unknown(c, run);
     let stopping = hooks::stop_pending(stopping, now_ms());
     if version != a.state_version { return Ok(Some((Status::Expired, "the session changed since this was shown; look again".into()))); }
     // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
     let asked = c.query_row("select count(*) from run_ask where run = ?1 and state = 'open' and expires > ?2", params![run, now_ms()], |r| r.get::<_, i64>(0))? > 0;
     match a.kind {
         ActionKind::Answer => {}
+        ActionKind::Reply | ActionKind::Stop if !terminal_input_on(c) => return Ok(un(TERMINAL_INPUT_OFF)),
         ActionKind::Reply | ActionKind::Stop if !terminal => return Ok(un("Needs Harness Manager's own terminal")),
+        ActionKind::Reply | ActionKind::Stop if unconfirmed => return Ok(un(hooks::UNCONFIRMED)),
         ActionKind::Reply | ActionKind::Stop if stopping => return Ok(un("a Stop is already on its way to this session")),
         ActionKind::Reply if state == "waiting" || asked => return Ok(un("Answer the request first")),
         ActionKind::Reply if unsent => return Ok(un(UNSENT)),

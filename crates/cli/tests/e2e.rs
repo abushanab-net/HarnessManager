@@ -1374,8 +1374,15 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
             // the text waits unsent: no remote reply may submit it with its own, until the terminal settles it
             assert!(e.fail(&["reply", &id, "-next"]).contains("waits unsent"), "{}", trace());
             assert!(!out().contains("typed-next"), "{}", trace());
+            // a cursor key at the terminal settles nothing: the text is still there
+            owned.0.stdin.as_mut().unwrap().write_all(b"[37;75;0;1;256;1_[37;75;0;0;256;1_").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(e.fail(&["reply", &id, "-next"]).contains("waits unsent"), "{}", trace());
+            // Enter at the terminal submits it, but only a hook (a new prompt) or the person settling it confirms that
             owned.0.stdin.as_mut().unwrap().write_all(b"[13;28;13;1;0;1_[13;28;13;0;0;1_").unwrap();
             until(|| out().contains(&line("typed")).then_some(()), trace);
+            assert!(e.fail(&["reply", &id, "after"]).contains("waits unsent"), "{}", trace());
+            hrm_core::hooks::settle_at_terminal(&db, &id).unwrap();
             e.ok(&["reply", &id, "after"]);
             until(|| out().contains(&line("after")).then_some(()), trace);
         }

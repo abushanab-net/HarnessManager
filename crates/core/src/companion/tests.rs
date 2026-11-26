@@ -371,6 +371,7 @@ fn the_action_contract_holds_without_a_terminal() {
     assert_eq!(rt.block_on(other.c.receipt("a-1")).unwrap(), None);
 
     // reply and Stop keep the desktop's rules: no owned terminal here
+    input_on(&d.ctx);
     let (run, _, v) = waiting(&d.ctx, 60_000);
     for (kind, payload) in [(ActionKind::Reply, json!({"text": "go on"})), (ActionKind::Stop, json!({}))] {
         let r = act(Action { action_id: format!("c-{kind:?}"), kind, target: Target { run: run.clone(), ask_id: None }, state_version: v, expires_at: now_ms() + 30_000, payload });
@@ -397,12 +398,16 @@ fn enrolled(ctx: &Ctx, control: bool) -> crate::phones::Phone {
 /// A live run (this process) working in an owned terminal that is not there: an action is claimed and dispatched,
 /// and the dispatch fails without reaching anything.
 fn working(ctx: &Ctx) -> (String, i64) {
+    input_on(ctx);
     let pid = std::process::id();
     let run = format!("{pid}:{}", crate::util::uuid4());
     ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness, session_id, state, version, terminal_port, terminal_token) values(?, ?, ?, 'work', 'claude', 's-2', 'working', 5, 9, x'00')",
         params![run, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
     (run, 5)
 }
+
+/// The owner turned on a phone's Reply and Stop (`actions::TERMINAL_INPUT`).
+fn input_on(ctx: &Ctx) { ctx.db.kv_set(super::actions::TERMINAL_INPUT, "1").unwrap(); }
 
 fn act_now(kind: ActionKind, run: &str, version: i64, id: &str, payload: Value) -> Action {
     Action { action_id: id.into(), kind, target: Target { run: run.into(), ask_id: None }, state_version: version, expires_at: now_ms() + 30_000, payload }
@@ -866,7 +871,7 @@ fn an_open_request_blocks_a_reply_whatever_the_state_says() {
     let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "n1-1", json!({"text": "yes"}))).unwrap();
     assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, "Answer the request first", before));
     let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
-    assert_eq!(super::run_actions(&p, &shown)["reply"]["ok"], false);
+    assert_eq!(super::run_actions(&p, &shown, true)["reply"]["ok"], false);
 }
 
 /// A claude session file with one turn, as Claude Code writes it.
@@ -967,7 +972,7 @@ fn a_phone_reply_waits_for_unsent_text_and_needs_reported_turns() {
     let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-1", json!({"text": "next"}))).unwrap();
     assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::UNSENT, before));
     let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
-    assert_eq!(super::run_actions(&p, &shown)["reply"]["reason"], super::actions::UNSENT);
+    assert_eq!(super::run_actions(&p, &shown, true)["reply"]["reason"], super::actions::UNSENT);
     let (run, v) = working(&ctx);
     ctx.db.with(|c| Ok(c.execute("update run_state set state = '' where run = ?", [&run])?)).unwrap();
     let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "c-2", json!({"text": "next"}))).unwrap();
@@ -1007,4 +1012,67 @@ fn an_announcement_mdns_did_not_take_is_tried_again() {
     assert!(!d.rt.phone_registered());
     d.rt.tick_phone();
     assert!(d.rt.phone_registered(), "registered at the next tick");
+}
+
+// ---------- the fourth review (Codex, at eafb449) ----------
+
+/// The switch: a phone's Reply and Stop are off until the owner turns them on; its answers work either way.
+#[test]
+fn a_phones_reply_and_stop_are_off_by_default_and_answers_still_work() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    let (run, v) = working(&ctx);
+    ctx.db.kv_set(super::actions::TERMINAL_INPUT, "0").unwrap();
+    let before = dispatched();
+    for (kind, payload, id) in [(ActionKind::Reply, json!({"text": "go on"}), "off-1"), (ActionKind::Stop, json!({}), "off-2")] {
+        let r = super::actions::act(&ctx, &p, &act_now(kind, &run, v, id, payload)).unwrap();
+        assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, super::actions::TERMINAL_INPUT_OFF, before), "{kind:?}");
+    }
+    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
+    assert_eq!(super::run_actions(&p, &shown, false)["stop"]["reason"], super::actions::TERMINAL_INPUT_OFF);
+    let (run, ask, v) = waiting(&ctx, 60_000);
+    let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "off-3")).unwrap();
+    assert_eq!(r.status, Status::Accepted, "answers are not affected");
+}
+
+/// #11: the last resort for a turn too big for a page (its prompt alone) is measured too: a long prompt and model of
+/// characters JSON writes six bytes each still fit the budget.
+#[test]
+fn the_last_resort_for_a_huge_turn_fits_its_budget() {
+    let turn = json!({"prompt": "\u{1}".repeat(100_000), "model": "\u{1}".repeat(100_000), "prompt_at": 1, "answer_at": 2, "steps": [], "answer": vec!["a"; 10], "answer_pos": vec![0; 10]});
+    let v = super::bounded(turn, 4096);
+    assert!(v.to_string().len() <= 4096, "{} bytes", v.to_string().len());
+    assert_eq!(v["truncated"], true);
+}
+
+/// #14: with no mDNS running, an announcement is in place only on a loopback listener; elsewhere it is tried again.
+#[test]
+fn no_mdns_on_a_reachable_listener_is_an_announcement_to_try_again() {
+    use crate::sync::peer::registration_took;
+    assert!(registration_took(None, true));
+    assert!(!registration_took(None, false));
+    assert!(!registration_took(Some(false), true));
+    assert!(registration_took(Some(true), false));
+}
+
+/// N6: whether a read may be kept is decided before it starts: a file still fresh when its read began is not kept,
+/// however long the read took.
+#[test]
+fn a_read_that_began_on_a_fresh_file_is_not_kept() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    claude_account(&ctx);
+    let cwd = t.path().join("n6b");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let f = session_file(&ctx, &cwd, "n6b", "hi");
+    crate::index::refresh(&ctx, crate::index::Scope::All).unwrap();
+    // written 1.8 s ago: fresh when the read begins, not by the time it ends
+    std::fs::File::options().write(true).open(&f).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_millis(1800)).unwrap();
+    super::BEFORE_READ.with(|b| *b.borrow_mut() = Some(Box::new(|| std::thread::sleep(Duration::from_millis(400)))));
+    let reads = || super::READS.with(|r| r.get());
+    let before = reads();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6b").unwrap();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6b").unwrap();
+    assert_eq!(reads(), before + 2, "the first read was not kept");
 }

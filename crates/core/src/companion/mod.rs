@@ -158,10 +158,12 @@ struct Cursor {
 
 /// Reply and Stop for a run, by today's rules: an owned terminal; no reply while a prompt waits; Stop only while a
 /// turn runs or a prompt waits (at the idle prompt Ctrl+C would exit the tool).
-pub(crate) fn run_actions(p: &Phone, r: &hooks::Run) -> Value {
+pub(crate) fn run_actions(p: &Phone, r: &hooks::Run, terminal_input: bool) -> Value {
     let no = |why: &str| json!({"ok": false, "reason": why});
     if !p.grants.control { let n = no("Control is not granted to this phone; grant it on the computer"); return json!({"reply": n, "stop": n}); }
+    if !terminal_input { let n = no(actions::TERMINAL_INPUT_OFF); return json!({"reply": n, "stop": n}); }
     if !r.terminal { let n = no("Needs Harness Manager's own terminal"); return json!({"reply": n, "stop": n}); }
+    if r.unconfirmed { let n = no(hooks::UNCONFIRMED); return json!({"reply": n, "stop": n}); }
     if r.stopping { let n = no("a Stop is already on its way to this session"); return json!({"reply": n, "stop": n}); }
     // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
     let reply = if r.state == "waiting" || r.ask.is_some() { no("Answer the request first") } else if r.needs_terminal { no(actions::UNSENT) }
@@ -178,12 +180,13 @@ async fn sessions(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Q
         let f = SessionFilter { scope: Some("here".into()), per: Some(SESSIONS_PER_PAGE), page: Some(page), ..Default::default() };
         let list = service::sessions(&ctx, &f)?;
         let runs = hooks::runs(&ctx)?;
+        let input_on = ctx.db.read(|c| Ok(actions::terminal_input_on(c)))?;
         let me = computer(&ctx);
         let items: Vec<Value> = list.iter().map(|s| {
             let run = runs.iter().find(|r| !s.id.is_empty() && r.session_id == s.id && r.profile == s.profile);
             let mut v = json!(api::Session { harness: s.harness.clone(), profile: s.profile.clone(), id: s.id.clone(), title: s.title.clone(), project: s.project_name.clone(), computer: me.clone(),
                 state: run.map(|r| r.state.clone()).unwrap_or_default(), open: s.open, last_active_at: s.last_active_at });
-            if let Some(r) = run { v["run"] = json!(r.run); v["state_version"] = json!(r.version); v["actions"] = run_actions(&p, r); }
+            if let Some(r) = run { v["run"] = json!(r.run); v["state_version"] = json!(r.version); v["actions"] = run_actions(&p, r, input_on); }
             v
         }).collect();
         let next = (items.len() as i64 == SESSIONS_PER_PAGE).then_some(page + 1);
@@ -218,6 +221,9 @@ fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::R
     let s = service::sessions(ctx, &f)?.into_iter().find(here).ok_or_else(|| anyhow::anyhow!("no such session"))?;
     let path = std::path::Path::new(&s.source_path);
     let sig: Sig = [crate::util::file_sig(path), crate::util::file_sig(&std::path::PathBuf::from(format!("{}-wal", s.source_path)))];
+    // whether this read may be kept is decided before it starts: a file written in the last two seconds can change
+    // again without its size or time showing it (OpenCode's log keeps its size), however long the read takes
+    let keep = sig.iter().all(|s| crate::util::still(*s));
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((p, g, tr)) = last.as_ref() { if p == &s.source_path && g == &sig && here(&tr.meta) { return Ok(tr.clone()); } }
     #[cfg(test)]
@@ -230,9 +236,9 @@ fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::R
     #[cfg(test)]
     READS.with(|r| r.set(r.get() + 1));
     let t = Arc::new(t);
-    // a file written in the last two seconds can change again without its size or time showing it (OpenCode's log
-    // keeps its size): such a read is served, not kept, as the session reader does
-    if sig.iter().all(|s| crate::util::still(*s)) { *last = Some((t.meta.source_path.clone(), sig, t.clone())); }
+    // and it is kept only when the files are still as they were when it began
+    let after: Sig = [crate::util::file_sig(std::path::Path::new(&t.meta.source_path)), crate::util::file_sig(&std::path::PathBuf::from(format!("{}-wal", t.meta.source_path)))];
+    if keep && after == sig { *last = Some((t.meta.source_path.clone(), sig, t.clone())); }
     Ok(t)
 }
 
@@ -260,7 +266,13 @@ fn bounded(mut v: Value, budget: usize) -> Value {
     if !fits(&v) {
         // a character takes at most 6 bytes in JSON (``): the prompt alone, cut to what the budget holds
         let mut p = json!({"prompt": v["prompt"], "prompt_at": v["prompt_at"], "answer_at": v["answer_at"], "model": v["model"], "steps": [], "answer": [], "answer_pos": [], "truncated": true});
-        cut(&mut p, (budget.saturating_sub(512) / 6).min(2000));
+        // measured, and the prompt and the model cut shorter until the turn fits; at last both go
+        let mut chars = 2000;
+        while !fits(&p) && chars > 0 {
+            for k in ["prompt", "model"] { cut(&mut p[k], chars); }
+            chars /= 2;
+        }
+        if !fits(&p) { p["prompt"] = json!(""); p["model"] = json!(""); }
         v = p;
     }
     v

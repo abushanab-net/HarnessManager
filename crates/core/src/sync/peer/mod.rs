@@ -76,7 +76,11 @@ impl Runtime {
             if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).take() { m.stop(); }
             return Ok(ctx.clone());
         }
-        if l.is_some() { return Ok(ctx.clone()); }
+        if let Some(lis) = l.as_ref() {
+            // mDNS that could not start is started again: a phone given the six digits finds the computer through it
+            if !self.bind.is_loopback() && self.mdns.lock().unwrap_or_else(|e| e.into_inner()).is_none() { self.start_mdns(ctx, lis.port); }
+            return Ok(ctx.clone());
+        }
         let lis = listener::start(ctx.clone(), self.rt.handle(), self.bind, ctx.settings.listen_port)?;
         let mut ctx = ctx.clone();
         if ctx.settings.listen_port != lis.port {
@@ -87,14 +91,21 @@ impl Runtime {
         }
         crate::log::info(&format!("computers: listening for paired computers on port {}", lis.port));
         // a loopback-only listener (the tests) cannot be reached at the addresses mDNS would announce
-        if !self.bind.is_loopback() {
-            match mdns::Mdns::start(&ctx.settings.device_id, &ctx.settings.device_name, lis.port) {
-                Ok(m) => *self.mdns.lock().unwrap_or_else(|e| e.into_inner()) = Some(m),
-                Err(e) => crate::log::warn(&format!("computers: mDNS is not available: {e}")),
-            }
-        }
+        if !self.bind.is_loopback() { self.start_mdns(&ctx, lis.port); }
         *l = Some(lis);
         Ok(ctx)
+    }
+
+    fn start_mdns(&self, ctx: &Ctx, port: u16) {
+        match mdns::Mdns::start(&ctx.settings.device_id, &ctx.settings.device_name, port) {
+            Ok(mut m) => {
+                // what was shown before mDNS came up is announced now
+                let announced = *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some((p, _)) = announced { let _ = m.advertise_phone(Some(p)); }
+                *self.mdns.lock().unwrap_or_else(|e| e.into_inner()) = Some(m);
+            }
+            Err(e) => crate::log::warn(&format!("computers: mDNS is not available: {e}")),
+        }
     }
 
     /// Every ten seconds while on: the listener up, what is new here published, every peer pulled.
@@ -162,8 +173,8 @@ impl Runtime {
 
     /// Announce the port of the phone pairing shown, or none; the caller holds `phone`, so the port is the attempt's.
     fn advertise_phone(&self, _shown: &Option<pairing::PhoneHost>, port: Option<u16>) {
-        // without mDNS (a loopback listener) there is nothing to register
-        let took = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut().is_none_or(|m| m.advertise_phone(port).is_ok());
+        let registered = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut().map(|m| m.advertise_phone(port).is_ok());
+        let took = registration_took(registered, self.bind.is_loopback());
         #[cfg(test)]
         let took = took && !FAILED_REGISTRATIONS.with(|n| { let failing = n.get() > 0; n.set(n.get().saturating_sub(1)); failing });
         if !took { crate::log::warn("phones: mDNS did not take the pairing announcement; trying again"); }
@@ -272,6 +283,10 @@ impl Runtime {
         Ok(Value::Null)
     }
 }
+
+/// Whether an announcement is in place: what mDNS said, and with no mDNS running, nothing to announce only on a
+/// loopback listener (nobody could reach it); elsewhere its absence is a failure to try again.
+pub(crate) fn registration_took(registered: Option<bool>, loopback: bool) -> bool { registered.unwrap_or(loopback) }
 
 /// A peer's id from its id or name.
 fn peer_id(ctx: &Ctx, id_or_name: &str) -> Result<String> {

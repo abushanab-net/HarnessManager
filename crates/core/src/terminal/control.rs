@@ -19,6 +19,9 @@ use super::{Guard, MaybeDelivered, Withheld};
 use crate::Ctx;
 
 const MAX_TEXT: usize = 16 * 1024;
+/// This relay's protocol: it records input before writing it and takes a Stop only with its claim. It is registered
+/// with the endpoint, and a sender refuses a relay older than it (an `hrm run` started before an update).
+pub(super) const RELAY_VERSION: i64 = 2;
 /// The most a command's guard takes on the wire.
 const MAX_GUARD: usize = 1024;
 const TAG_LEN: usize = 16;
@@ -99,6 +102,7 @@ impl<'a> Command<'a> {
 
 /// What the relay did: written whole; nothing written (busy, closed, or the guard no longer held); a reply typed but
 /// its Enter withheld; or a write that failed part way, so the input may have arrived.
+#[derive(Debug, PartialEq)]
 #[repr(u8)]
 pub(super) enum Outcome {
     Sent = 0,
@@ -109,6 +113,8 @@ pub(super) enum Outcome {
     Broken = 5,
     /// Nothing written: text an earlier reply left unsent waits in the input.
     Unsent = 6,
+    /// Nothing written: an earlier input's outcome, or the run's state, is not confirmed.
+    Unconfirmed = 7,
 }
 
 pub(super) struct Control {
@@ -126,8 +132,8 @@ impl Control {
         let stored = dpapi(&key, true)?;
         ctx.db.with(|c| {
             let changed = c.execute(
-                "update run_state set terminal_port = ?1, terminal_token = ?2 where run = ?3",
-                params![port, stored, run],
+                "update run_state set terminal_port = ?1, terminal_token = ?2, relay_version = ?4 where run = ?3",
+                params![port, stored, run, RELAY_VERSION],
             )?;
             ensure!(changed == 1, "could not register the terminal endpoint");
             Ok(())
@@ -297,30 +303,34 @@ fn endpoint(data: &Path, run: &str) -> Result<(u16, XChaCha20Poly1305)> {
     {
         return Err(unavailable());
     }
-    let mut stmt = c.prepare("select pid, started, terminal_port, terminal_token from run_state
-        where run = ?1 or (?1 <> '' and session_id = ?1 and not exists (select 1 from run_state where run = ?1))")?;
+    // a database from before relays registered their protocol: every relay in it is older
+    let versioned = c.prepare("select 1 from pragma_table_info('run_state') where name = 'relay_version'")?.exists([])?;
+    let mut stmt = c.prepare(&format!("select pid, started, terminal_port, terminal_token, {} from run_state
+        where run = ?1 or (?1 <> '' and session_id = ?1 and not exists (select 1 from run_state where run = ?1))", if versioned { "relay_version" } else { "0" }))?;
     let rows = stmt.query_map([run], |r| {
         Ok((
             r.get::<_, u32>(0)?,
             r.get::<_, i64>(1)?,
             r.get::<_, Option<u16>>(2)?,
             r.get::<_, Option<Vec<u8>>>(3)?,
+            r.get::<_, i64>(4)?,
         ))
     })?;
     let mut live = None;
     for row in rows {
-        let (pid, started, port, token) = row?;
+        let (pid, started, port, token, version) = row?;
         if crate::procs::start_ms(pid).is_some_and(|time| started == 0 || started == time) {
             ensure!(
                 live.is_none(),
                 "session '{run}' has several live runs. Use the run ID"
             );
-            live = Some((port, token));
+            live = Some((port, token, version));
         }
     }
-    let (Some(port), Some(token)) = live.ok_or_else(unavailable)? else {
+    let (Some(port), Some(token), version) = live.ok_or_else(unavailable)? else {
         return Err(unavailable());
     };
+    ensure!(version >= RELAY_VERSION, "run '{run}' was started by an earlier Harness Manager; restart it to send it input from here");
     let key =
         dpapi(&token, false).context("cannot open the terminal token for this Windows user")?;
     let cipher =
@@ -365,6 +375,7 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>, guard: Option<&Gu
         [code] if *code == Outcome::Withheld as u8 => Err(Withheld("the reply was typed into the session but not sent: it changed before Enter; the text waits in its input".into()).into()),
         [code] if *code == Outcome::Broken as u8 => Err(maybe("the terminal failed while writing the input")),
         [code] if *code == Outcome::Unsent as u8 => bail!("{}", crate::hooks::UNSENT_TEXT),
+        [code] if *code == Outcome::Unconfirmed as u8 => bail!("{}", crate::hooks::UNCONFIRMED),
         _ => Err(maybe("invalid terminal response")),
     }
 }
@@ -449,5 +460,18 @@ mod tests {
         let e = send(&ctx.data, "r", Action::Reply("hello"), None).unwrap_err();
         assert!(relay.join().unwrap() > 24, "the command was sent");
         assert!(e.downcast_ref::<MaybeDelivered>().is_some(), "{e:#}");
+    }
+
+    /// (2): a relay from before this protocol (an `hrm run` started before an update) is sent nothing.
+    #[test]
+    fn an_older_relay_is_sent_nothing() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let pid = std::process::id();
+        ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness) values('r', ?1, ?2, 'p', 'claude')", params![pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
+        let _control = Control::listen(&ctx, "r").unwrap();
+        ctx.db.with(|c| Ok(c.execute("update run_state set relay_version = 1", [])?)).unwrap();
+        let e = send(&ctx.data, "r", Action::Reply("hello"), None).unwrap_err();
+        assert!(format!("{e:#}").contains("earlier Harness Manager"), "{e:#}");
     }
 }

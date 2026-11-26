@@ -116,6 +116,75 @@ pub fn hook_connection(path: &std::path::Path) -> Result<Connection> {
     Ok(c)
 }
 
+/// How long a hook tries to record its event while the database is busy.
+fn record_budget() -> Duration {
+    #[cfg(test)]
+    if let Some(ms) = RECORD_BUDGET_MS.with(|b| b.get()) { return Duration::from_millis(ms); }
+    Duration::from_secs(5)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: a shorter budget for recording a hook's event.
+    pub(crate) static RECORD_BUDGET_MS: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+fn busy(e: &rusqlite::Error) -> bool { matches!(e.sqlite_error_code(), Some(rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked)) }
+
+/// What an event says about its session, recorded in one write. True when the event comes from a turn a Stop ended
+/// and is not a new prompt: it changes nothing, so a late hook from that turn cannot make the run working again.
+fn record(c: &Connection, run: &str, v: &Value) -> rusqlite::Result<bool> {
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let input = v["tool_input"].to_string();
+    let event = v["hook_event_name"].as_str().unwrap_or("");
+    let tx = c.unchecked_transaction()?;
+    // a submitted prompt starts a new turn: what an earlier input left unconfirmed or unsent is settled by it
+    let new_turn = event == "UserPromptSubmit";
+    if new_turn {
+        tx.execute("update run_state set turn = turn + 1, delivery_id = null, delivery_kind = null, delivery_state = null, delivery_at = null, needs_terminal = 0 where run = ?", [run])?;
+    }
+    let stopped: bool = tx.query_row("select coalesce(stopped_turn = turn, 0) from run_state where run = ?", [run], |r| r.get(0)).optional()?.unwrap_or(false);
+    if stopped && !new_turn { tx.commit()?; return Ok(true); }
+    // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
+    // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
+    let closed = match event {
+        "Notification" if v["notification_type"] != "idle_prompt" => 0,
+        "PostToolUse" => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?,
+        _ => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?,
+    };
+    if let Some((state, reason)) = state_of(v) {
+        tx.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
+            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6,
+            stopping = case when state <> ?4 then null else stopping end, stop_token = case when state <> ?4 then null else stop_token end where run = ?1",
+            // a new state ends a Stop's claim (a repeated one does not)
+            params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
+    } else if closed > 0 {
+        tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
+    }
+    tx.commit()?;
+    Ok(false)
+}
+
+/// The marker that says a run's state could not be recorded: beside the database, so it is written even when the
+/// database could not be.
+fn unknown_marker(c: &Connection, run: &str) -> Option<std::path::PathBuf> {
+    let db = c.path().filter(|p| !p.is_empty())?;
+    let name: String = run.chars().map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' { ch } else { '_' }).collect();
+    Some(std::path::Path::new(db).with_file_name("run-unknown").join(name))
+}
+
+fn set_state_unknown(c: &Connection, run: &str, unknown: bool) {
+    let Some(m) = unknown_marker(c, run) else { return };
+    if unknown {
+        let _ = std::fs::create_dir_all(m.parent().unwrap_or(&m)).and_then(|_| std::fs::write(&m, b""));
+    } else if m.exists() {
+        let _ = std::fs::remove_file(&m);
+    }
+}
+
+/// The run's state could not be recorded: no remote input until an event is.
+pub fn state_unknown(c: &Connection, run: &str) -> bool { unknown_marker(c, run).is_some_and(|m| m.exists()) }
+
 /// `handle_asking` with the question window of a computer without a phone.
 pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Option<Value>> {
     handle_asking(c, run, v, wait, Duration::from_secs(crate::phones::QUESTION_WITHOUT.into()))
@@ -126,25 +195,23 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
 /// no decision, the terminal prompt stands. The run's `version` moves with every change of its state or of its
 /// requests, so a phone's action names the state it was shown.
 pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration) -> Result<Option<Value>> {
+    // the event is recorded, with tries again while the database is busy; one that cannot be recorded leaves the run's
+    // state unknown (a marker beside the database), and remote input to it is refused until a later event records
+    let budget = Instant::now() + record_budget();
+    let recorded = loop {
+        match record(c, run, v) {
+            Err(e) if busy(&e) && Instant::now() < budget => std::thread::sleep(Duration::from_millis(50)),
+            r => break r,
+        }
+    };
+    let stopped = match recorded {
+        Ok(stopped) => { set_state_unknown(c, run, false); stopped }
+        Err(e) => { set_state_unknown(c, run, true); return Err(e.into()); }
+    };
+    // an event from a turn a Stop ended holds nothing: the tool is at its prompt
+    if stopped { return Ok(None); }
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let input = v["tool_input"].to_string();
-    // the terminal answered first, or the turn moved on: the waiting hook sees its request closed and steps aside.
-    // A tool ran: the request for that very call. Other notifications can come while the prompt still shows.
-    let closed = match v["hook_event_name"].as_str().unwrap_or("") {
-        "Notification" if v["notification_type"] != "idle_prompt" => 0,
-        "PostToolUse" => c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?,
-        _ => c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?,
-    };
-    if let Some((state, reason)) = state_of(v) {
-        c.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
-            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6,
-            stopping = case when state <> ?4 then null else stopping end, stop_token = case when state <> ?4 then null else stop_token end,
-            needs_terminal = case when ?8 then 0 else needs_terminal end where run = ?1",
-            // a new state ends a Stop's claim (a repeated one does not); a submitted prompt took what waited in the input
-            params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64, v["hook_event_name"] == "UserPromptSubmit"])?;
-    } else if closed > 0 {
-        c.execute("update run_state set version = version + 1 where run = ?", [run])?;
-    }
     let Some(kind) = kind_of(v) else { return Ok(None) };
     let wait = if kind == "question" { wait.min(question) } else { wait };
     // only for a session hrm run started, and while the app offers answers
@@ -329,10 +396,13 @@ pub fn stop_pending(stopping: Option<i64>, now: i64) -> bool { stopping.is_some_
 pub fn claim_stop(c: &Connection, run: &str, expected: Option<i64>) -> Result<Option<StopClaim>> {
     let Some(run) = live_run(c, run)? else { return Ok(None) };
     let (now, token) = (now_ms(), crate::util::uuid4());
+    if state_unknown(c, &run) { bail!("{UNCONFIRMED}"); }
     let version: Option<i64> = c.query_row("update run_state set stopping = ?2, stop_token = ?5, version = version + 1 where run = ?1 and state in ('working', 'waiting', '')
-        and (stopping is null or stopping <= ?3) and (?4 is null or version = ?4) returning version", params![run, now, now - STOP_WINDOW_MS, expected, token], |r| r.get(0)).optional()?;
+        and (stopping is null or stopping <= ?3) and (?4 is null or version = ?4) and delivery_state is null returning version",
+        params![run, now, now - STOP_WINDOW_MS, expected, token], |r| r.get(0)).optional()?;
     let Some(version) = version else {
-        let (stopping, version): (Option<i64>, i64) = c.query_row("select stopping, version from run_state where run = ?", [&run], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let (stopping, version, delivery): (Option<i64>, i64, Option<String>) = c.query_row("select stopping, version, delivery_state from run_state where run = ?", [&run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        if delivery.is_some() { bail!("{UNCONFIRMED}"); }
         if expected.is_some_and(|v| v != version) { bail!("the session changed since this was shown; look again"); }
         if stop_pending(stopping, now) { bail!("a Stop is already on its way to this session"); }
         bail!("Nothing to stop: the session is at its prompt");
@@ -351,28 +421,88 @@ pub fn release_stop(c: &Connection, run: &str, token: &str) -> Result<()> {
 pub fn stop_landed(c: &Connection, run: &str, token: &str) -> Result<bool> {
     let Some(at) = c.query_row("select stopping from run_state where run = ?1 and stop_token = ?2", [run, token], |r| r.get::<_, i64>(0)).optional()? else { return Ok(false) };
     c.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and created <= ?2", params![run, at])?;
-    c.execute("update run_state set state = 'done', reason = '', stopping = null, stop_token = null, version = version + 1, ts = ?3 where run = ?1 and stop_token = ?2",
-        params![run, token, now_ms()])?;
+    // the turn it ended is kept: a late hook from that turn changes nothing (`record`)
+    c.execute("update run_state set state = 'done', reason = '', stopping = null, stop_token = null, version = version + 1, ts = ?3, stopped_turn = turn,
+        delivery_id = null, delivery_kind = null, delivery_state = null, delivery_at = null where run = ?1 and stop_token = ?2", params![run, token, now_ms()])?;
     Ok(true)
 }
 
 /// What a remote reply is told while text an earlier one left unsent waits in the input.
 pub const UNSENT_TEXT: &str = "text from an earlier reply waits unsent in the session's input; finish or clear it in the terminal";
 
-/// Text a reply left unsent waits in the run's input (read inside the relay's held write): no remote reply now.
-pub fn unsent_waits(c: &Connection, run: &str) -> bool {
-    c.query_row("select needs_terminal <> 0 from run_state where run = ?", [run], |r| r.get(0)).optional().ok().flatten().unwrap_or(true)
+/// What remote input is told while an earlier input's outcome, or the run's own state, is not confirmed.
+pub const UNCONFIRMED: &str = "an earlier input to this session, or its state, is not confirmed yet; use its terminal, or wait for its next prompt";
+
+/// Why remote input may not go now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Text an earlier reply left unsent waits in the input.
+    Unsent,
+    /// An earlier input's outcome, or the run's state, is not confirmed.
+    Unconfirmed,
+    /// The guard (a phone's, or a Stop's claim) does not hold, or no Stop claim was carried.
+    Refused,
 }
 
-/// A reply's text was typed and its Enter withheld: remote replies stop until the terminal settles it.
-pub fn withheld(c: &Connection, run: &str) -> Result<()> {
-    c.execute("update run_state set needs_terminal = 1 where run = ?", [run])?;
-    Ok(())
+/// Remote input about to go to `run`'s terminal, recorded first in a short write of its own (in `c`'s transaction,
+/// committed before any byte goes out). The run must be eligible: no earlier input unconfirmed, its state known, for a
+/// reply no text an earlier one left unsent, for a Stop its claim, and the guard holding. Once recorded the run takes
+/// no other remote input until the record is settled (`finish_delivery`, a new turn, or `settle_at_terminal`).
+/// Answers the record's id and the run's version.
+pub fn begin_delivery(c: &Connection, run: &str, guard: Option<&Guard>, stop: bool) -> std::result::Result<(String, i64), Refusal> {
+    let row: Option<(Option<String>, bool, i64)> = c.query_row("select delivery_state, needs_terminal <> 0, version from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .optional().map_err(|_| Refusal::Refused)?;
+    let Some((pending, unsent, version)) = row else { return Err(Refusal::Refused) };
+    if pending.is_some() || state_unknown(c, run) { return Err(Refusal::Unconfirmed); }
+    if !stop && unsent { return Err(Refusal::Unsent); }
+    // every Stop carries its claim, from the desktop and from a phone: the relay takes no other
+    if stop && guard.and_then(|g| g.stop.as_ref()).is_none() { return Err(Refusal::Refused); }
+    if let Some(g) = guard { guard_holds(c, run, g, !stop).map_err(|_| Refusal::Refused)?; }
+    let id = guard.and_then(|g| g.stop.clone()).unwrap_or_else(crate::util::uuid4);
+    c.execute("update run_state set delivery_id = ?2, delivery_kind = ?3, delivery_state = 'begun', delivery_at = ?4 where run = ?1",
+        params![run, id, if stop { "stop" } else { "reply" }, now_ms()]).map_err(|_| Refusal::Refused)?;
+    Ok((id, version))
 }
 
-/// Someone typed at the terminal: what a withheld reply left there is theirs now.
-pub fn terminal_typed(c: &Connection, run: &str) -> Result<()> {
-    c.execute("update run_state set needs_terminal = 0 where run = ?1 and needs_terminal <> 0", [run])?;
+/// Before a reply's Enter (a short read of its own): the record is still this input's, nothing moved the run since it
+/// began (no hook, no other input), its state is known, and its guard still holds.
+pub fn delivery_holds(c: &Connection, run: &str, id: &str, version: i64, guard: Option<&Guard>) -> bool {
+    let row: Option<(i64, Option<String>)> = c.query_row("select version, delivery_id from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
+    row.is_some_and(|(v, d)| v == version && d.as_deref() == Some(id)) && !state_unknown(c, run) && guard.is_none_or(|g| guard_holds(c, run, g, true).is_ok())
+}
+
+/// How remote input ended at the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settled {
+    /// Written whole.
+    Sent,
+    /// A reply's text typed, its Enter withheld.
+    Withheld,
+    /// Written part way, or not known to be written (a stalled or broken write): what reached the tool is not known.
+    Maybe,
+}
+
+/// The input's outcome, recorded in a short write after the bytes (only its own record): a Stop that went out ends
+/// its turn; a reply that went out settles; text left unsent, or a write not known to be whole, keeps remote replies
+/// out (`needs_terminal`), and a write not known to be whole stays unconfirmed until a new turn or the person at the
+/// terminal settles it. False when this input's record was no longer the run's.
+pub fn finish_delivery(c: &Connection, run: &str, id: &str, stop: bool, how: Settled) -> Result<bool> {
+    let mine = c.query_row("select 1 from run_state where run = ?1 and delivery_id = ?2", [run, id], |_| Ok(())).optional()?.is_some();
+    if !mine { return Ok(false); }
+    let clear = "delivery_id = null, delivery_kind = null, delivery_state = null, delivery_at = null";
+    match (how, stop) {
+        (Settled::Sent, true) => { stop_landed(c, run, id)?; }
+        (Settled::Sent, false) => { c.execute(&format!("update run_state set {clear} where run = ?"), [run])?; }
+        (Settled::Withheld, _) => { c.execute(&format!("update run_state set {clear}, needs_terminal = 1 where run = ?"), [run])?; }
+        (Settled::Maybe, _) => { c.execute("update run_state set delivery_state = 'unknown', needs_terminal = needs_terminal or ?2 where run = ?1", params![run, !stop])?; }
+    }
+    Ok(true)
+}
+
+/// The person at the computer settled what remote input left in the terminal (unsent text, an input whose outcome
+/// was not known): remote input may go again.
+pub fn settle_at_terminal(c: &Connection, run: &str) -> Result<()> {
+    c.execute("update run_state set needs_terminal = 0, delivery_id = null, delivery_kind = null, delivery_state = null, delivery_at = null where run = ?", [run])?;
     Ok(())
 }
 
@@ -420,6 +550,8 @@ pub struct Run {
     pub stopping: bool,
     /// Text a reply left unsent waits in its input: no remote reply until the terminal settles it.
     pub needs_terminal: bool,
+    /// An earlier remote input's outcome, or the run's state, is not confirmed: no remote input until it is.
+    pub unconfirmed: bool,
     /// It owns its terminal (`own_terminal`), so `terminal::reply` and `terminal::stop` reach it.
     pub terminal: bool,
     /// The request its hook holds open for an answer, if any.
@@ -445,9 +577,10 @@ pub struct Ask {
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
     let rows: Vec<(Run, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version, stopping, needs_terminal <> 0 from run_state order by ts")?;
+        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version, stopping, needs_terminal <> 0, delivery_state is not null from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
-            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, stopping: stop_pending(r.get(13)?, now_ms()), needs_terminal: r.get(14)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, stopping: stop_pending(r.get(13)?, now_ms()), needs_terminal: r.get(14)?, unconfirmed: r.get(15)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (r, _) in v.iter_mut() { r.unconfirmed = r.unconfirmed || state_unknown(c, &r.run); }
         let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires, hook_pid, hook_started from run_ask where state = 'open' and expires > ? order by created")?;
         let asks = st.query_map([now_ms()], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
             input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? }, r.get::<_, u32>(8)?, r.get::<_, i64>(9)?)))?;
@@ -859,6 +992,67 @@ mod tests {
         handle(&c, "r", &json!({"hook_event_name": "UserPromptSubmit", "session_id": "s"}), Duration::ZERO).unwrap();
         let state: String = c.query_row("select state from run_state where run = 'r'", [], |r| r.get(0)).unwrap();
         assert_eq!(state, "working");
+    }
+
+    /// (4): a hook from the turn a Stop ended (delayed behind the Stop) changes nothing: the run stays done and Stop is
+    /// not offered again until a new prompt starts a new turn.
+    #[test]
+    fn a_late_hook_from_a_stopped_turn_does_not_reopen_it() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        let claim = claim_stop(&c, &run, None).unwrap().unwrap();
+        let g = Guard { version: claim.version, deadline: claim.deadline, phone: None, stop: Some(claim.token.clone()) };
+        let (id, _) = begin_delivery(&c, &run, Some(&g), true).unwrap();
+        assert!(finish_delivery(&c, &run, &id, true, Settled::Sent).unwrap());
+        handle(&c, &run, &json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {}}), Duration::ZERO).unwrap();
+        assert_eq!(runs(&ctx).unwrap()[0].state, "done", "the stopped turn's late hook");
+        assert_eq!(format!("{:#}", claim_stop(&c, &run, None).unwrap_err()), "Nothing to stop: the session is at its prompt");
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        assert_eq!(runs(&ctx).unwrap()[0].state, "working", "a new prompt is a new turn");
+        assert!(claim_stop(&c, &run, None).unwrap().is_some());
+    }
+
+    /// (1): remote input recorded as begun keeps every other remote input out until its outcome is settled; one whose
+    /// outcome is not known stays unsettled until a new turn (or the person at the computer settles it).
+    #[test]
+    fn remote_input_begun_keeps_other_input_out_until_settled() {
+        let (_d, ctx, run) = live_run();
+        let c = conn(&ctx);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        let (id, version) = begin_delivery(&c, &run, None, false).unwrap();
+        assert_eq!(begin_delivery(&c, &run, None, false).unwrap_err(), Refusal::Unconfirmed);
+        assert_eq!(format!("{:#}", claim_stop(&c, &run, None).unwrap_err()), UNCONFIRMED);
+        assert!(delivery_holds(&c, &run, &id, version, None));
+        assert!(finish_delivery(&c, &run, &id, false, Settled::Maybe).unwrap());
+        assert!(runs(&ctx).unwrap()[0].unconfirmed);
+        assert_eq!(begin_delivery(&c, &run, None, false).unwrap_err(), Refusal::Unconfirmed, "not known stays unsettled");
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        assert!(!runs(&ctx).unwrap()[0].unconfirmed, "a new turn settles it");
+        let (id, version) = begin_delivery(&c, &run, None, false).unwrap();
+        // a hook moving the run while a reply's text waits for its Enter
+        handle(&c, &run, &json!({"hook_event_name": "Stop"}), Duration::ZERO).unwrap();
+        assert!(!delivery_holds(&c, &run, &id, version, None));
+    }
+
+    /// (5): a hook that cannot record its event within its budget (the database held by another writer) leaves the run's
+    /// state unknown, and remote input is refused until a later event records.
+    #[test]
+    fn a_hook_that_cannot_record_leaves_the_state_unknown_until_one_can() {
+        let (_d, ctx, run) = live_run();
+        let c = Connection::open(ctx.data.join("hm.db")).unwrap();
+        c.busy_timeout(Duration::from_millis(50)).unwrap();
+        let other = conn(&ctx);
+        other.execute_batch("begin immediate").unwrap();
+        RECORD_BUDGET_MS.with(|b| b.set(Some(300)));
+        assert!(handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).is_err());
+        RECORD_BUDGET_MS.with(|b| b.set(None));
+        other.execute_batch("commit").unwrap();
+        assert!(state_unknown(&c, &run));
+        assert_eq!(begin_delivery(&c, &run, None, false).unwrap_err(), Refusal::Unconfirmed);
+        handle(&c, &run, &json!({"hook_event_name": "UserPromptSubmit"}), Duration::ZERO).unwrap();
+        assert!(!state_unknown(&c, &run), "a later event recorded");
+        assert!(begin_delivery(&c, &run, None, false).is_ok());
     }
 
     #[test]

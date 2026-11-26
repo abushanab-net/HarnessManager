@@ -144,12 +144,17 @@ POST /c1/actions
   recording the outcome, or the terminal took the input and its acknowledgement was lost; the action may have arrived
   and is never sent again. Where the effect is committed (the hook's write of an answer, the terminal relay before the
   first byte and again before a reply's Enter) the claimed run version, the action's deadline and the phone's Control
-  are checked once more, with the run's row held from that check until the bytes are out (hooks wait), and an
-  answer is judged when its write gets the database. A reply typed but stopped before its Enter is `unavailable`, its
-  detail saying so, and no remote reply goes to that session until the text is settled at the terminal. An open
-  request blocks a reply, and a session that does not report its turns takes no reply from a phone. Every Stop
-  (desktop or phone) claims its turn with a token the relay checks, and the relay ends that turn in the write that
-  sends the Ctrl+C; a claim whose outcome is not known holds the turn for 5 s, after which it surely never arrived.
+  are checked once more, and an answer is judged when its write gets the database. Terminal input is recorded as
+  begun in a short write before its first byte, written outside any transaction within a deadline, and its outcome
+  recorded in a second short write; a run with input begun or not known takes no other remote input until a new
+  prompt or the person at the computer settles it. A reply typed but stopped before its Enter, or written part way,
+  keeps remote replies out the same way, and a keystroke at the terminal settles nothing. Every Stop (desktop or
+  phone) claims its turn with a token the relay requires; a Stop with no claim is unavailable, and the turn a Stop
+  ended stays ended for late hooks until a new prompt. A relay older than this protocol is sent nothing. A hook
+  that cannot record its event leaves the run's state unknown, which refuses remote input until an event records.
+- **Phone Reply and Stop are off unless the owner turns them on** (`phones:terminal_input`): bytes typed into a
+  terminal cannot be checked against the tool's own turn at the instant they are written, so a reply or a Ctrl+C
+  could still land a few milliseconds late. Answers are not affected.
 - A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
   automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
   fails too.
