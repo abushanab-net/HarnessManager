@@ -196,11 +196,17 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
 
     let full = pair(&rt, &d, json!({"control": true}));
     let c = &full.c;
+    let reset = now_ms() - 60_000;
+    d.ctx.db.quota_point("claude-main", "week", 100.0, Some(reset), reset - 30_000).unwrap();
     let o = rt.block_on(c.overview()).unwrap();
     assert_eq!((o.needs_you, o.computer.id.as_str()), (0, d.ctx.settings.device_id.as_str()));
+    assert_eq!(o.request_days.as_ref().unwrap().len(), 60);
     assert!(o.today["tokens"].is_i64() && o.observed_at > 0, "{o:?}");
     let a = rt.block_on(c.accounts()).unwrap();
     assert_eq!(a.computer.name, "A");
+    let fixture = a.accounts.iter().find(|a| a.profile == "claude-main").unwrap();
+    assert_eq!(fixture.past_resets.as_ref().unwrap()[0].left, Some(0.0));
+    assert_eq!(fixture.run_outs.as_ref().unwrap()[0].at, reset - 30_000);
     for acct in &a.accounts { assert_eq!(rt.block_on(c.account(&acct.profile)).unwrap().account, *acct); }
     assert_eq!(refused(rt.block_on(c.account("nobody"))), 404);
     let page = rt.block_on(c.sessions(None)).unwrap();
@@ -240,6 +246,15 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     // summaries only: no transcripts, no actions, no computer routes
     let small = pair(&rt, &d, json!({"summaries": true, "transcripts": false, "control": false}));
     assert!(rt.block_on(small.c.overview()).is_ok());
+    let key = one.session.project_key.as_deref().unwrap();
+    let project = rt.block_on(small.c.project(key)).unwrap();
+    assert_eq!((project.key.as_str(), project.computer.name.as_str(), project.daily_tokens.len()), (key, "A", 30));
+    assert_eq!(refused(rt.block_on(small.c.project("missing"))), 404);
+    // A new reader can still distinguish a desktop predating these histories from one reporting no events.
+    let mut old = serde_json::to_value(fixture).unwrap();
+    for field in ["past_resets", "run_outs"] { old.as_object_mut().unwrap().remove(field); }
+    let old: companion_proto::api::Account = serde_json::from_value(old).unwrap();
+    assert_eq!((old.past_resets, old.run_outs), (None, None));
     assert!(!rt.block_on(small.c.requests()).unwrap().actions.answer.ok);
     assert_eq!(refused(rt.block_on(small.c.transcript("claude", "claude-main", "s1", None))), 403);
     let act = Action { action_id: "x".into(), kind: ActionKind::Stop, target: Target { run: "1:2".into(), ask_id: None }, state_version: 0, expires_at: now_ms() + 30_000, payload: json!({}) };
@@ -252,6 +267,7 @@ fn every_route_answers_a_phone_with_its_grants_and_nothing_outside_them() {
     rt.block_on(none.c.push_register(&"cd".repeat(24))).unwrap();
     assert_eq!(refused(rt.block_on(none.c.overview())), 403);
     assert_eq!(refused(rt.block_on(none.c.accounts())), 403);
+    assert_eq!(refused(rt.block_on(none.c.project(key))), 403);
     assert_eq!(refused(rt.block_on(none.c.sessions(None))), 403);
     assert_eq!(refused(rt.block_on(none.c.requests())), 403);
     assert!(rt.block_on(none.c.events()).is_err(), "no events without Summaries");
@@ -1291,6 +1307,104 @@ fn the_overview_counts_waiting_sessions_and_accounts_carry_length_and_forecast()
     let (_run2, _) = working(&ctx);
     assert_eq!(super::overview_of(&ctx).unwrap().running, 2, "waiting and working sessions run");
     assert_eq!((super::window_hours("session"), super::window_hours("week:opus"), super::window_hours("window:1440"), super::window_hours("monthly")), (Some(5.0), Some(168.0), Some(24.0), None));
+}
+
+#[test]
+fn quota_history_uses_the_last_pre_reset_reading_and_counts_observed_run_outs_once() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let now = now_ms();
+    let hour = 3_600_000;
+    let first = now - 56 * 24 * hour;
+    let end = now - hour;
+    ctx.db.with(|c| {
+        let point = |tier, at, used, reset: Option<i64>, device, login: Option<&str>| c.execute(
+            "insert into quota_hist(profile,tier,ts,used,resets_at,device,account) values('p',?,?,?,?,?,?)",
+            params![tier, at, used, reset, device, login]);
+        let here = ctx.db.device.as_str();
+        point("week", first-8*hour, 100., Some(first-1), here, None)?;
+        point("week", first-6*hour, 87.5, Some(first), here, None)?;
+        point("week", end-7*hour, 92., Some(end), here, None)?;
+        point("week", end-hour, 100., Some(end), "peer", Some("someone-else"))?;
+        point("week", end, 0., Some(end), here, None)?;
+        point("session", end-2*hour, 85., Some(end), here, Some("me"))?;
+        point("session", end-hour, 100., Some(end), "peer", Some("ME"))?;
+        point("session", end-1, 100., Some(end), here, None)?;
+        point("model", end+1, 25., Some(end), here, None)?;
+        point("week", now-1, 100., Some(now+hour), here, None)?;
+        point("week", now+1, 100., Some(now+hour), here, None)?;
+        point("no-reset", first-1, 100., None, here, None)?;
+        point("no-reset", first+1, 100., None, here, None)?;
+        Ok(())
+    }).unwrap();
+    let (resets, outs) = super::history::quota(&ctx, "p", Some("me"), now).unwrap();
+    let got: Vec<_> = resets.iter().map(|r| (r.window.as_str(), r.resets_at, r.read_at, r.left)).collect();
+    assert_eq!(got, [("week", first, Some(first-6*hour), Some(12.5)), ("model", end, None, None),
+        ("session", end, Some(end-1), Some(0.)), ("week", end, Some(end-7*hour), None)]);
+    assert_eq!(outs.iter().map(|r| (r.window.as_str(), r.at)).collect::<Vec<_>>(), [("session", end-hour), ("week", now-1)]);
+}
+
+#[test]
+fn a_merged_request_establishes_activity_even_with_a_sync_gap() {
+    use crate::model::UsageRow;
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let days = || super::history::request_days(&ctx).unwrap();
+    let first = days();
+    assert_eq!(first.len(), 60);
+    assert!(first.iter().all(|d| d.known && d.requests == 0));
+    let now = now_ms();
+    ctx.db.with(|c| {
+        c.execute("insert into peers(device_id, last_seen, last_pull, last_seq, applied_seq) values('peer',?1,?1,1,1)", [now])?;
+        let row = UsageRow { request_id: "remote".into(), ts: now, profile: "p".into(), harness: "claude".into(), model: "m".into(),
+            session_id: "s".into(), project: "".into(), input: 0, output: 0, cache_read: 0, cache_write: 0, ttft_ms: None, gen_ms: None };
+        crate::db::upsert_usage(c, &row, "peer", None, None)?;
+        Ok(())
+    }).unwrap();
+    assert!(days()[58].known);
+    for change in ["last_seq=2", "last_seq=1,gap='{}'", "gap=null,last_pull=null"] {
+        ctx.db.with(|c| Ok(c.execute(&format!("update peers set {change}"), [])?)).unwrap();
+        let days = days();
+        assert!(days[..59].iter().all(|d| !d.known && d.requests == 0));
+        assert!(days[59].known);
+        assert_eq!(days[59].requests, 1);
+    }
+}
+
+#[test]
+fn project_usage_follows_local_folders_and_the_remote_sessions_project() {
+    use crate::model::{SessionMeta, UsageRow};
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let dir = ctx.home.join("one").display().to_string();
+    let key = crate::projects::Resolver::new(&[]).resolve(&dir).key;
+    let now = now_ms();
+    ctx.db.with(|c| {
+        let session = SessionMeta { harness: "claude".into(), profile: "p".into(), id: "remote".into(), project_key: key.clone(), ..Default::default() };
+        crate::db::upsert_session(c, &crate::db::session_key(&session), &session, "peer")?;
+        let mut row = UsageRow { request_id: "local".into(), ts: now, profile: "p".into(), harness: "claude".into(), model: "priced".into(),
+            session_id: "local".into(), project: dir.clone(), input: 1, output: 2, cache_read: 3, cache_write: 4, ttft_ms: None, gen_ms: None };
+        crate::db::upsert_usage(c, &row, &ctx.db.device, Some(0.25), None)?;
+        row.request_id = "different-project".into();
+        row.project = ctx.home.join("two").display().to_string();
+        crate::db::upsert_usage(c, &row, &ctx.db.device, Some(0.5), None)?;
+        row.request_id = "remote".into();
+        row.session_id = "remote".into();
+        row.model = "unpriced".into();
+        crate::db::upsert_usage(c, &row, "peer", None, None)?;
+        row.request_id = "outside".into();
+        row.ts -= 31 * 86_400_000;
+        crate::db::upsert_usage(c, &row, "peer", Some(1.), None)?;
+        Ok(())
+    }).unwrap();
+    let project = super::history::project(&ctx, &super::history::project_key(&key)).unwrap();
+    assert_eq!(super::history::project(&ctx, &key).unwrap().key, project.key);
+    assert_eq!((project.tokens, project.requests, project.cost_usd), (20, 2, Some(0.25)));
+    assert_eq!(project.by_model["unpriced"].cost_usd, None);
+    assert_eq!((project.by_model["priced"].requests, project.by_model["unpriced"].tokens), (1, 10));
+    assert_eq!(project.daily_tokens.len(), 30);
+    assert!(project.daily_tokens[..29].iter().all(|d| d.tokens == 0));
+    assert_eq!(project.daily_tokens[29].tokens, 20);
 }
 
 /// Gap 7: hello names the other computers this one knows, for a phone with Summaries.

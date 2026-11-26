@@ -455,11 +455,11 @@ fn merge(ctx: &Ctx, root: &Path) -> Result<()> {
         let pulled = pull(ctx, &src, &id).unwrap_or_else(|e| { crate::log::warn(&format!("journal: merging {id}: {e:#}")); None });
         let (man, applied) = (pulled.as_ref().map(|p| &p.0), pulled.as_ref().map(|p| p.1));
         ctx.db.with(|c| {
-            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder')
+            c.execute("insert into peers(device_id, name, os, app_version, incarnation, last_seen, last_seq, applied_seq, roots, transport, last_pull) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,'folder',?10)
                 on conflict(device_id) do update set name=coalesce(?2, name), os=coalesce(?3, os), app_version=coalesce(?4, app_version), incarnation=coalesce(?5, incarnation),
-                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder'",
+                last_seen=max(coalesce(?6, 0), coalesce(last_seen, 0)), last_seq=max(coalesce(?7, 0), coalesce(last_seq, 0)), applied_seq=max(coalesce(?8, 0), coalesce(applied_seq, 0)), roots=coalesce(?9, roots), transport='folder', last_pull=coalesce(?10,last_pull)",
                 params![id, dev["name"].as_str(), dev["os"].as_str(), dev["app_version"].as_str(), dev["incarnation"].as_str().or(man.and_then(|m| m["incarnation"].as_str())),
-                    dev["updated_at"].as_i64(), man.and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string())])?;
+                    dev["updated_at"].as_i64(), man.and_then(|m| m["last_seq"].as_i64()), applied, dev["roots"].is_object().then(|| dev["roots"].to_string()), applied.map(|_| now_ms())])?;
             Ok(())
         })?;
     }
@@ -666,6 +666,7 @@ mod tests {
         assert_eq!(st["error"], Value::Null, "{st}");
         assert_eq!(st["peers"][0]["name"], "A");
         assert_eq!(st["peers"][0]["applied_seq"], 4);
+        assert!(st["peers"][0]["last_pull"].is_i64());
         assert_eq!(count(&b, "select count(*) from usage"), 2);
         let (dev, cost, rev): (String, f64, String) = b.db.with(|c| Ok(c.query_row("select device, cost_usd, price_rev from usage where request_id='claude:1'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?)).unwrap();
         assert_eq!(dev, a.settings.device_id);
