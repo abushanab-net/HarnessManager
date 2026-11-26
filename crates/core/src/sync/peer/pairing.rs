@@ -360,7 +360,7 @@ impl PhoneHost {
             let me = format!("{}:{port}", crate::util::hostname());
             if !hints.contains(&me) { hints.push(me); }
             let p = DesktopPayload { id: ctx.settings.device_id.clone(), name: ctx.settings.device_name.clone(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(),
-                address_hints: hints, hub_url: None, hub_token: None, grants, x25519: Some(crate::companion::mailbox::keys(ctx)?.x_public) };
+                address_hints: hints, hub_url: None, hub_token: None, grants, x25519: Some(crate::companion::mailbox::keys(ctx)?.x_public), enrollment: None };
             let sealed = key.seal(&p)?;
             crate::phones::add(ctx, &phone, grants)?;
             st.state = "paired";

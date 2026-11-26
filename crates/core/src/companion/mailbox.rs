@@ -80,7 +80,7 @@ thread_local! {
 
 /// Tests: a slot of `mailbox` was looked at and did not open.
 #[cfg(test)]
-pub(crate) fn was_skipped(mailbox: &str, seq: i64) -> bool { skipped(mailbox, seq) }
+pub(crate) fn was_skipped(mailbox: &str, seq: i64) -> bool { hole_state(mailbox, seq).is_some() }
 
 #[cfg(test)]
 fn seam(s: &'static std::thread::LocalKey<Seam>) { if let Some(f) = s.with(|b| b.borrow_mut().take()) { f(); } }
@@ -185,19 +185,38 @@ fn reload(ctx: &Ctx, p: &Paired) -> Result<Option<Paired>> {
 
 /// What each mailbox was last sent: the change stamp and when.
 static SENT: LazyLock<Mutex<HashMap<String, (String, i64)>>> = LazyLock::new(Default::default);
-/// The slots up of each mailbox looked at that did not open (or were gone): passed over from then on. Only a slot
-/// that opened moves the cursor kept in the database, so one the hub made up never hides the phone's real ones.
-/// shortcut: kept in memory (1000 a mailbox), so looked at again after a restart; persist it if hubs ever do this often
-static SKIP: LazyLock<Mutex<HashMap<String, std::collections::BTreeSet<i64>>>> = LazyLock::new(Default::default);
-
-fn skipped(mailbox: &str, seq: i64) -> bool { SKIP.lock().unwrap_or_else(|e| e.into_inner()).get(mailbox).is_some_and(|s| s.contains(&seq)) }
-
-fn skip(mailbox: &str, seq: i64) {
-    let mut all = SKIP.lock().unwrap_or_else(|e| e.into_inner());
-    let s = all.entry(mailbox.to_string()).or_default();
-    s.insert(seq);
-    while s.len() > 1000 { s.pop_first(); }
+/// A slot up that did not open, or was not there: tried again after 1, 2, 4 ... 60 s, and given up once it stayed so
+/// for ten minutes (longer than a phone's request window, so an action the hub held back for a while is still read).
+/// The cursor kept in the database never passes one still being tried, so after a restart it is looked at again.
+/// shortcut: the tries are kept in memory (1000 a mailbox); persist them if hubs ever do this often
+struct Hole {
+    first: std::time::Instant,
+    tries: u32,
+    next: std::time::Instant,
 }
+
+const HOLE_GIVE_UP: Duration = Duration::from_secs(600);
+
+static HOLES: LazyLock<Mutex<HashMap<String, std::collections::BTreeMap<i64, Hole>>>> = LazyLock::new(Default::default);
+
+/// `(due, given up)` for a slot being tried; None for one never tried.
+fn hole_state(mailbox: &str, seq: i64) -> Option<(bool, bool)> {
+    HOLES.lock().unwrap_or_else(|e| e.into_inner()).get(mailbox).and_then(|m| m.get(&seq)).map(|h| (std::time::Instant::now() >= h.next, h.first.elapsed() >= HOLE_GIVE_UP))
+}
+
+fn hole(mailbox: &str, seq: i64) {
+    let now = std::time::Instant::now();
+    let mut all = HOLES.lock().unwrap_or_else(|e| e.into_inner());
+    let m = all.entry(mailbox.to_string()).or_default();
+    let h = m.entry(seq).or_insert(Hole { first: now, tries: 0, next: now });
+    h.tries += 1;
+    h.next = now + Duration::from_secs(1u64 << h.tries.saturating_sub(1).min(6)).min(Duration::from_secs(60));
+    while m.len() > 1000 { m.pop_first(); }
+}
+
+fn clear_hole(mailbox: &str, seq: i64) { if let Some(m) = HOLES.lock().unwrap_or_else(|e| e.into_inner()).get_mut(mailbox) { m.remove(&seq); } }
+
+fn forget_holes(mailbox: &str, upto: i64) { if let Some(m) = HOLES.lock().unwrap_or_else(|e| e.into_inner()).get_mut(mailbox) { m.retain(|s, _| *s > upto); } }
 
 /// The listings of one mailbox one pass reads at most.
 const PAGES: usize = 5;
@@ -209,8 +228,8 @@ fn reconcile(ctx: &Ctx) -> Result<()> {
     let now = now_ms();
     ctx.db.with(|c| {
         let tx = c.transaction()?;
-        tx.execute("update phones set hub_url = ?1 where hub_mailbox is not null and hub_url is null", [&ctx.settings.hub_url])?;
-        tx.execute("insert or ignore into phone_hub_deletes(hub_url, mailbox, phone_id, generation, at) select hub_url, hub_mailbox, phone_id, generation, ?1 from phones
+        // an enrollment whose hub is not known is owed to no hub (''): no hub this computer is on settles it
+        tx.execute("insert or ignore into phone_hub_deletes(hub_url, mailbox, phone_id, generation, at) select coalesce(hub_url, ''), hub_mailbox, phone_id, generation, ?1 from phones
             where revoked_at is not null and hub_mailbox is not null and hub_gone is null", [now])?;
         tx.execute("insert or ignore into phone_hub_deletes(hub_url, mailbox, phone_id, generation, at) select hub_url, mailbox, '', '', ?1 from phone_hub_invites where expires_at + ?2 < ?1", params![now, RESULT_KEPT_MS])?;
         tx.execute("delete from phone_hub_invites where expires_at + ?2 < ?1", params![now, RESULT_KEPT_MS])?;
@@ -265,46 +284,56 @@ pub(crate) fn cursor_key(mailbox: &str) -> String { format!("mail:{mailbox}:up")
 fn consume(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
     answer_kept(ctx, hub, me, p)?;
     let k = cursor_key(&p.mailbox);
-    let mut after: i64 = ctx.db.kv_get(&k)?.and_then(|v| v.parse().ok()).unwrap_or(0);
-    // the limit is this computer's own, whatever the hub lists: claims, and listings
-    let mut room = PER_PASS;
-    'pages: for _ in 0..PAGES {
+    let cursor: i64 = ctx.db.kv_get(&k)?.and_then(|v| v.parse().ok()).unwrap_or(0);
+    let claimed = |seq: i64| -> Result<bool> { ctx.db.read(|c| Ok(c.query_row("select exists(select 1 from phone_mail_in where mailbox = ? and seq = ?)", params![p.mailbox, seq], |r| r.get(0))?)) };
+    let (mut after, mut listed, mut fresh, mut retry) = (cursor, vec![], vec![], vec![]);
+    for _ in 0..PAGES {
         let list = hub.get_json(&format!("/v1/mail/{}/up?after={after}&limit={PER_PASS}", p.mailbox))?.unwrap_or(Value::Null);
         let seqs = ahead(&list, after);
         if seqs.is_empty() { break; }
         for seq in seqs {
-            if room == 0 { break 'pages; }
             after = seq;
-            if skipped(&p.mailbox, seq) { continue; }
-            let bytes = hub.get_opt_bytes(&format!("/v1/mail/{}/up/{seq}", p.mailbox), MAIL_MAX)?;
-            let opened = bytes.as_deref().map(|b| open_mail(&me.x_secret, &p.pubkey, &p.mailbox, "up", seq, b));
-            let Some(Ok(body)) = opened else {
-                if let Some(Err(e)) = &opened { crate::log::warn(&format!("phones: a message for {} that does not open was dropped ({e:#})", p.phone.name)); }
-                skip(&p.mailbox, seq);
-                continue;
-            };
-            room -= 1;
-            // the cursor only moves up, and what the slot held is kept in the same transaction: claimed once, never lost
-            ctx.db.with(|c| {
-                let tx = c.transaction()?;
-                let claimed = tx.execute("insert into kv(k, v) values(?1, ?2) on conflict(k) do update set v = excluded.v where cast(kv.v as integer) < cast(excluded.v as integer)", params![k, seq.to_string()])? > 0;
-                if claimed { tx.execute("insert or ignore into phone_mail_in(mailbox, seq, generation, body) values(?, ?, ?, ?)", params![p.mailbox, seq, p.phone.generation, body.to_string()])?; }
-                tx.commit()?;
-                Ok(())
-            })?;
-            #[cfg(test)]
-            if STOP_AFTER_CLAIM.with(|c| c.replace(false)) { bail!("the computer stopped after claiming a message"); }
+            listed.push(seq);
+            if claimed(seq)? { continue; }
+            match hole_state(&p.mailbox, seq) { None => fresh.push(seq), Some((true, _)) => retry.push(seq), Some((false, _)) => {} }
         }
-        if list["more"] != true { break; }
+        if list["more"] != true || fresh.len() as i64 >= PER_PASS { break; }
     }
-    answer_kept(ctx, hub, me, p)
+    // what is new first, then the holes whose wait is over: at most PER_PASS fetches, whatever they bring
+    for seq in fresh.into_iter().chain(retry).take(PER_PASS as usize) {
+        let bytes = hub.get_opt_bytes(&format!("/v1/mail/{}/up/{seq}", p.mailbox), MAIL_MAX)?;
+        let opened = bytes.as_deref().map(|b| open_mail(&me.x_secret, &p.pubkey, &p.mailbox, &p.phone.generation, "up", seq, b));
+        let Some(Ok(body)) = opened else {
+            if let Some(Err(e)) = &opened { crate::log::warn(&format!("phones: a message for {} that does not open was put aside to try again ({e:#})", p.phone.name)); }
+            hole(&p.mailbox, seq);
+            continue;
+        };
+        clear_hole(&p.mailbox, seq);
+        // claimed once: the slot's row is the claim, kept until the answer is out
+        ctx.db.with(|c| Ok(c.execute("insert or ignore into phone_mail_in(mailbox, seq, generation, body) values(?, ?, ?, ?)", params![p.mailbox, seq, p.phone.generation, body.to_string()])?))?;
+        #[cfg(test)]
+        if STOP_AFTER_CLAIM.with(|c| c.replace(false)) { bail!("the computer stopped after claiming a message"); }
+    }
+    // the cursor kept moves over what is claimed or given up, and waits at the first slot still being tried
+    let mut to = cursor;
+    for seq in listed {
+        if seq <= to { continue; }
+        if claimed(seq)? || hole_state(&p.mailbox, seq).is_some_and(|(_, given_up)| given_up) { to = seq; } else { break; }
+    }
+    if to > cursor {
+        ctx.db.with(|c| Ok(c.execute("insert into kv(k, v) values(?1, ?2) on conflict(k) do update set v = excluded.v where cast(kv.v as integer) < cast(excluded.v as integer)", params![k, to.to_string()])?))?;
+        forget_holes(&p.mailbox, to);
+    }
+    answer_kept(ctx, hub, me, p)?;
+    // a claim answered and under the cursor is done with; one above it stays, so its slot is not read again
+    ctx.db.with(|c| Ok(c.execute("delete from phone_mail_in where mailbox = ? and seq <= ? and sent = 1", params![p.mailbox, to])?)).map(|_| ())
 }
 
 /// The claimed messages of this enrollment, oldest first, at most `PER_PASS`: each decided once, the decision kept
 /// before it goes out, and a decision that did not go out sent again as it was, never decided again. A failure
 /// (the database, the hub) stops here and keeps the claim.
 fn answer_kept(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
-    let kept: Vec<(i64, String, Option<String>)> = ctx.db.read(|c| Ok(c.prepare("select seq, body, reply from phone_mail_in where mailbox = ? and generation = ? order by seq limit ?")?
+    let kept: Vec<(i64, String, Option<String>)> = ctx.db.read(|c| Ok(c.prepare("select seq, body, reply from phone_mail_in where mailbox = ? and generation = ? and sent = 0 order by seq limit ?")?
         .query_map(params![p.mailbox, p.phone.generation, PER_PASS], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?))?;
     for (seq, body, reply) in kept {
         let reply = match reply {
@@ -313,14 +342,14 @@ fn answer_kept(ctx: &Ctx, hub: &Hub, me: &Keys, p: &Paired) -> Result<()> {
                 let decided = handle(ctx, p, &serde_json::from_str(&body).unwrap_or(Value::Null))?;
                 ctx.db.with(|c| Ok(match &decided {
                     Some(r) => c.execute("update phone_mail_in set reply = ? where mailbox = ? and seq = ?", params![r.to_string(), p.mailbox, seq])?,
-                    None => c.execute("delete from phone_mail_in where mailbox = ? and seq = ?", params![p.mailbox, seq])?,
+                    None => c.execute("update phone_mail_in set sent = 1 where mailbox = ? and seq = ?", params![p.mailbox, seq])?,
                 }))?;
                 decided
             }
         };
         let Some(r) = reply else { continue };
         send(hub, me, p, &r, None)?;
-        ctx.db.with(|c| Ok(c.execute("delete from phone_mail_in where mailbox = ? and seq = ?", params![p.mailbox, seq])?))?;
+        ctx.db.with(|c| Ok(c.execute("update phone_mail_in set sent = 1 where mailbox = ? and seq = ?", params![p.mailbox, seq])?))?;
     }
     Ok(())
 }
@@ -367,7 +396,7 @@ fn send(hub: &Hub, me: &Keys, p: &Paired, body: &Value, still: Option<&dyn Fn() 
     for _ in 0..3 {
         let max = hub.get_json(&format!("/v1/mail/{}/down?after={}&limit=1", p.mailbox, i64::MAX))?.and_then(|v| v["max"].as_i64()).unwrap_or(0);
         let seq = next_seq(max)?.max(3);
-        let m = seal_mail(&me.key, &p.phone.x25519, &p.mailbox, "down", seq, body)?;
+        let m = seal_mail(&me.key, &p.phone.x25519, &p.mailbox, &p.phone.generation, "down", seq, body)?;
         #[cfg(test)]
         seam(&BEFORE_PUT);
         if let Some(still) = still { if !still()? { return Ok(false); } }
@@ -424,6 +453,8 @@ struct PairSt {
     phone: Option<PhonePayload>,
     /// The exchange as this computer saw it: the phone's first message, the answer, the phone's sealed payload.
     transcript: [Vec<u8>; 3],
+    /// The enrollment an approval made.
+    generation: Option<String>,
     error: Option<String>,
     /// The decision for the phone, and whether it is on the hub yet; whether the phone said it read it.
     result: Option<String>,
@@ -516,7 +547,7 @@ impl Shared {
     /// The decision put on the hub once, then the phone's word that it read it: sealed by the approved phone for slot
     /// 3, or signed by the refused one. Anything else in slot 3 is not that word.
     fn deliver(&self, hub: &Hub) -> Result<()> {
-        let (result, delivered, fetched, state, phone) = { let st = self.lock(); (st.result.clone(), st.delivered, st.fetched, st.state, st.phone.clone()) };
+        let (result, delivered, fetched, state, phone, generation) = { let st = self.lock(); (st.result.clone(), st.delivered, st.fetched, st.state, st.phone.clone(), st.generation.clone()) };
         #[cfg(test)]
         let delivered = delivered || self.hold.load(Ordering::SeqCst);
         if let (Some(r), false) = (&result, delivered) {
@@ -527,7 +558,7 @@ impl Shared {
         let (Some(_), false, Some(phone)) = (&result, fetched, phone) else { return Ok(()) };
         let Some(b) = hub.get_opt_bytes(&self.mail("up", 3), MAIL_MAX)? else { return Ok(()) };
         let said = match state {
-            "paired" => open_mail(&keys(&self.ctx)?.x_secret, &phone.pubkey, &self.mailbox, "up", 3, &b).is_ok_and(|v| v["kind"] == "fetched"),
+            "paired" => open_mail(&keys(&self.ctx)?.x_secret, &phone.pubkey, &self.mailbox, &generation.unwrap_or_default(), "up", 3, &b).is_ok_and(|v| v["kind"] == "fetched"),
             _ => serde_json::from_slice::<Value>(&b).ok().and_then(|v| v["sig"].as_str().map(String::from))
                 .is_some_and(|sig| identity::verify(&phone.pubkey, &fetched_refusal(&self.mailbox), &sig)),
         };
@@ -636,11 +667,14 @@ impl HubPairing {
             let port = Ctx::open_at(&ctx.data, &ctx.home).map(|c| if c.settings.direct_connection { c.settings.listen_port } else { 0 }).unwrap_or(0);
             let address_hints = if port == 0 { vec![] } else { vec![format!("{}:{port}", crate::util::hostname())] };
             let p = DesktopPayload { id: ctx.settings.device_id.clone(), name: ctx.settings.device_name.clone(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(), address_hints,
-                hub_url: Some(ctx.settings.hub_url.clone()), hub_token: None, grants, x25519: Some(keys(ctx)?.x_public) };
+                hub_url: Some(ctx.settings.hub_url.clone()), hub_token: None, grants, x25519: Some(keys(ctx)?.x_public), enrollment: Some(crate::util::uuid4()) };
             let [a, b, c] = &st.transcript;
             let sig = id.sign(&approval_binding(&s.mailbox, &phone.id, &phone.pubkey, &phone.x25519, &p, [a, b, c]));
             let decision = json!({"kind": "pair-result", "state": "approved", "payload": key.seal(&p)?, "sig": sig}).to_string();
-            phones::add_with(ctx, &phone, grants, Some(&s.mailbox), Some(&decision))?;
+            // the enrollment is the pairing the payload names: every message of it is sealed for that value
+            let generation = p.enrollment.clone().unwrap_or_default();
+            phones::add_as(ctx, &phone, grants, Some(&s.mailbox), Some(&decision), &generation)?;
+            st.generation = Some(generation);
             st.state = "paired";
             st.result = Some(decision);
             s.status_of(&st)

@@ -290,6 +290,7 @@ impl Db {
             // the hub a phone was paired through, and a claimed message's decided reply (companion/mailbox.rs)
             ("phones", "hub_url", "text"),
             ("phone_mail_in", "reply", "text"),
+            ("phone_mail_in", "sent", "integer not null default 0"),
             ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {

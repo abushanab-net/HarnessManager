@@ -136,6 +136,9 @@ pub fn normalize_url(u: &str) -> Result<String> {
 
 pub fn token(ctx: &Ctx) -> Option<String> { read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token") }
 
+/// The hub the stored token was given by.
+const TOKEN_OF: &str = "hub:token_of";
+
 pub struct Hub {
     http: reqwest::blocking::Client,
     pub base: String,
@@ -143,10 +146,15 @@ pub struct Hub {
 }
 
 impl Hub {
-    /// This computer's hub, with its token.
+    /// This computer's hub, with its token. The token is sent only to the hub that gave it: a context still naming
+    /// another hub (a pairing begun before this computer joined a new one) gets none, and what it owed stays owed.
     pub fn open(ctx: &Ctx) -> Result<Hub> {
         let base = normalize_url(&ctx.settings.hub_url).context("no hub address")?;
         let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… on the Computers page")?;
+        // a token from before its hub was written down belongs to the hub the settings name, as it always did
+        if let Some(of) = ctx.db.kv_get(TOKEN_OF)?.filter(|s| !s.is_empty()) {
+            if of != base { bail!("this computer's hub token is {of}'s, not {base}'s"); }
+        }
         Hub::at(&base, &token)
     }
 
@@ -228,6 +236,7 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
     })?;
     let tok = r["token"].as_str().filter(|t| !t.is_empty()).context("the hub answered without a token")?;
     write_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token", tok)?;
+    ctx.db.kv_set(TOKEN_OF, &base)?;
     // the first computer makes the ring; any other gets it by pairing or the recovery key, whichever way it joined:
     // with a ring of its own it could read nothing of theirs, nor they of it
     let others = r["devices"].as_array().into_iter().flatten().any(|d| split_device(d).0["id"].as_str().is_some_and(|i| i != ctx.settings.device_id));
@@ -249,6 +258,7 @@ pub fn delete_phone(ctx: &Ctx, mailbox: &str) -> Result<()> { Hub::open(ctx)?.de
 pub fn leave(ctx: &Ctx) -> Result<Ctx> {
     if let Ok(h) = Hub::open(ctx) { if let Err(e) = h.delete(&format!("/v1/devices/{}", ctx.settings.device_id)) { crate::log::warn(&format!("hub: leaving: {e:#}")); } }
     let _ = secrets::delete(&token_target(&ctx.settings.device_id));
+    let _ = ctx.db.kv_set(TOKEN_OF, "");
     let _ = std::fs::remove_file(ctx.data.join("hub.token"));
     journal::configure(&ctx.data, &ctx.home, &json!({"sync_mode": "off"}))
 }

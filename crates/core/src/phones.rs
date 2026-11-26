@@ -109,8 +109,9 @@ pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     // the deletion owed on the hub is written with the revocation: it is tried until the hub confirms it
     let (at, mailbox) = ctx.db.with(|c| {
         let tx = c.transaction()?;
-        let (mailbox, generation, gone, hub): (Option<String>, String, Option<i64>, String) = tx.query_row("select hub_mailbox, generation, hub_gone, coalesce(hub_url, ?2) from phones where phone_id = ?1",
-            params![id, ctx.settings.hub_url], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        // an enrollment whose hub is not known (this branch before it kept one) stays owed to no hub: never settled
+        let (mailbox, generation, gone, hub): (Option<String>, String, Option<i64>, String) = tx.query_row("select hub_mailbox, generation, hub_gone, coalesce(hub_url, '') from phones where phone_id = ?1",
+            [&id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
         tx.execute("update phones set revoked_at = ?2, relay_handle = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
         // owed to the hub the phone was paired through: only that hub's answer settles it
         if let (Some(mb), None) = (&mailbox, gone) { crate::companion::mailbox::delete_later(&tx, &hub, mb, &id, &generation)?; }
@@ -211,6 +212,11 @@ pub(crate) fn add(ctx: &Ctx, p: &PhonePayload, grants: Grants) -> Result<()> { a
 /// to be delivered there (kept with the enrollment, so a restart delivers it). The mailbox of an earlier enrollment
 /// of the same phone is owed a deletion on the hub, written in the same transaction and tried until it is confirmed.
 pub(crate) fn add_with(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Option<&str>, decision: Option<&str>) -> Result<()> {
+    add_as(ctx, p, grants, mailbox, decision, &crate::util::uuid4())
+}
+
+/// The same as enrollment `generation`, the value an approval through the hub gives the phone to seal for.
+pub(crate) fn add_as(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Option<&str>, decision: Option<&str>, generation: &str) -> Result<()> {
     let ok_id = !p.id.is_empty() && p.id.len() <= 80 && p.id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     if !ok_id { bail!("the phone sent no usable id"); }
     let der = check_cert(p)?;
@@ -218,13 +224,13 @@ pub(crate) fn add_with(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Opt
     let earlier: Option<String> = ctx.db.with(|c| {
         let tx = c.transaction()?;
         if cert_taken(&tx, &der, Some(&p.id))? { bail!("that certificate already belongs to another phone or computer"); }
-        let earlier: Option<(String, String, String)> = tx.query_row("select hub_mailbox, generation, coalesce(hub_url, ?2) from phones where phone_id = ?1 and hub_mailbox is not null and hub_gone is null",
-            params![p.id, ctx.settings.hub_url], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+        let earlier: Option<(String, String, String)> = tx.query_row("select hub_mailbox, generation, coalesce(hub_url, '') from phones where phone_id = ?1 and hub_mailbox is not null and hub_gone is null",
+            [&p.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
         let earlier = earlier.filter(|(mb, _, _)| Some(mb.as_str()) != mailbox);
         if let Some((mb, generation, hub)) = &earlier { crate::companion::mailbox::delete_later(&tx, hub, mb, &p.id, generation)?; }
         tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at, hub_mailbox, hub_gone, hub_pairing, hub_url) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null,?10,null,?11,?12)
             on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null, hub_mailbox=?10, hub_gone=null, hub_pairing=?11, hub_url=?12",
-            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4(), mailbox, decision, mailbox.map(|_| ctx.settings.hub_url.as_str())])?;
+            params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), generation, mailbox, decision, mailbox.map(|_| ctx.settings.hub_url.as_str())])?;
         if let Some(mb) = mailbox {
             // the invite is now this enrollment, and the pairing's own messages are not the mailbox pass's: one step
             tx.execute("delete from phone_hub_invites where mailbox = ?", [mb])?;

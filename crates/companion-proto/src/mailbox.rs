@@ -35,18 +35,21 @@ fn now_ms() -> i64 { std::time::SystemTime::now().duration_since(std::time::UNIX
 
 // ---------- the sealed envelope, the same on both sides ----------
 
-/// `body` sealed by `sender` to X25519 key `to`, for slot `seq` of `mailbox`'s `dir`: what is put on the hub.
-pub fn seal_mail(sender: &SigningKey, to: &str, mailbox: &str, dir: &str, seq: i64, body: &Value) -> Result<Vec<u8>> {
-    let env = json!({"mailbox": mailbox, "dir": dir, "seq": seq, "at": now_ms(), "body": body});
+/// `body` sealed by `sender` to X25519 key `to`, for slot `seq` of `mailbox`'s `dir` under pairing `enrollment` (the
+/// value the signed approval gave both ends): what is put on the hub.
+pub fn seal_mail(sender: &SigningKey, to: &str, mailbox: &str, enrollment: &str, dir: &str, seq: i64, body: &Value) -> Result<Vec<u8>> {
+    let env = json!({"mailbox": mailbox, "enrollment": enrollment, "dir": dir, "seq": seq, "at": now_ms(), "body": body});
     Ok(serde_json::to_vec(&seal_to(sender, to, &serde_json::to_vec(&env)?)?)?)
 }
 
 /// A message read from slot `seq` of `mailbox`'s `dir`, opened with our X25519 secret: its body, when `from` sealed it
-/// for that very slot. Changed on the way, sealed by anyone else, or copied from another slot (a replay): an error.
-pub fn open_mail(secret: &[u8; 32], from: &str, mailbox: &str, dir: &str, seq: i64, bytes: &[u8]) -> Result<Value> {
+/// for that very slot of this very pairing. Changed on the way, sealed by anyone else, copied from another slot (a
+/// replay), or written in an earlier pairing on the same mailbox: an error.
+pub fn open_mail(secret: &[u8; 32], from: &str, mailbox: &str, enrollment: &str, dir: &str, seq: i64, bytes: &[u8]) -> Result<Value> {
     let s: Sealed = serde_json::from_slice(bytes).context("not a sealed message")?;
     let env: Value = serde_json::from_slice(&open_from(secret, from, &s)?)?;
     if env["mailbox"] != mailbox || env["dir"] != dir || env["seq"] != seq { bail!("a message not written for this place: replayed or moved"); }
+    if enrollment.is_empty() || env["enrollment"] != enrollment { bail!("a message of another pairing on this mailbox"); }
     Ok(env["body"].clone())
 }
 
@@ -73,8 +76,8 @@ const ED25519_SPKI: [u8; 12] = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 
 pub fn approval_binding(mailbox: &str, phone_id: &str, phone_pubkey: &str, phone_x25519: &str, desk: &DesktopPayload, transcript: [&[u8]; 3]) -> Vec<u8> {
     let mut h = Sha256::new();
     for t in transcript { h.update((t.len() as u64).to_be_bytes()); h.update(t); }
-    format!("hm hub approval v1\n{mailbox}\n{phone_id}\n{phone_pubkey}\n{phone_x25519}\n{}\n{}\n{}\n{}\n{}", desk.id, desk.pubkey, desk.x25519.as_deref().unwrap_or(""),
-        serde_json::to_string(&desk.grants).unwrap_or_default(), hex::encode(h.finalize())).into_bytes()
+    format!("hm hub approval v2\n{mailbox}\n{}\n{phone_id}\n{phone_pubkey}\n{phone_x25519}\n{}\n{}\n{}\n{}\n{}", desk.enrollment.as_deref().unwrap_or(""), desk.id, desk.pubkey,
+        desk.x25519.as_deref().unwrap_or(""), serde_json::to_string(&desk.grants).unwrap_or_default(), hex::encode(h.finalize())).into_bytes()
 }
 
 /// The signature checks out under the computer's key, and that key is the one its certificate is made for.
@@ -294,11 +297,12 @@ impl HubJoining {
                 if self.fingerprint.as_deref().is_some_and(|f| f != pairing::fingerprint(&der)) { bail!("that is not the computer the invite named"); }
                 if p.id != self.desktop_id { bail!("the computer changed during the pairing"); }
                 let x = p.x25519.as_deref().context("the computer sent no key to seal to")?;
+                let enrollment = p.enrollment.as_deref().filter(|e| !e.is_empty()).context("the computer named no pairing")?;
                 let [a, b2, c] = &self.transcript;
                 let binding = approval_binding(&self.mailbox, &self.me.id, &self.me.pubkey(), &self.me.x25519_public(), &p, [a, b2, c]);
                 if !approval_ok(&p, &der, &binding, r["sig"].as_str().unwrap_or("")) { bail!("the approval is not signed by the computer for this exchange"); }
                 // told once; a second look finds the slot taken, which is the same news
-                if let Ok(m) = seal_mail(self.me.signing_key(), x, &self.mailbox, "up", 3, &json!({"kind": "fetched"})) { let _ = self.hub.put_mail(&self.mailbox, "up", 3, m).await; }
+                if let Ok(m) = seal_mail(self.me.signing_key(), x, &self.mailbox, enrollment, "up", 3, &json!({"kind": "fetched"})) { let _ = self.hub.put_mail(&self.mailbox, "up", 3, m).await; }
                 Outcome::Approved(p)
             }
             Some("refused") => {
@@ -324,7 +328,7 @@ impl HubJoining {
 
     /// The mailbox client once approved, past the pairing's own messages.
     pub fn mailbox(&self, desk: &DesktopPayload) -> Result<Mailbox> {
-        let m = Mailbox::new(&self.me, &self.hub_url, &self.token, &self.mailbox, &desk.pubkey, desk.x25519.as_deref().unwrap_or(""))?;
+        let m = Mailbox::new(&self.me, &self.hub_url, &self.token, &self.mailbox, desk.enrollment.as_deref().unwrap_or(""), &desk.pubkey, desk.x25519.as_deref().unwrap_or(""))?;
         m.st.try_lock().expect("new").down_seen = 2;
         Ok(m)
     }
@@ -358,14 +362,27 @@ pub struct Freshness {
     pub stale: bool,
 }
 
+/// A slot that did not open, or was not there: tried again after 1, 2, 4 ... 60 s, and given up once it stayed so for
+/// ten minutes (longer than a phone's request window, so a real message the hub held back for a while is still read).
+struct Hole {
+    first: Instant,
+    tries: u32,
+    next: Instant,
+}
+
+pub(crate) const HOLE_GIVE_UP: Duration = Duration::from_secs(600);
+
+fn backoff(tries: u32) -> Duration { Duration::from_secs(1u64 << tries.saturating_sub(1).min(6)).min(Duration::from_secs(60)) }
+
 #[derive(Default)]
 struct MailSt {
-    /// The last message read that opened: the cursor the app keeps.
+    /// The cursor the app keeps: every slot up to it is read, or given up. It never passes a slot still being tried.
     down_seen: i64,
-    /// Slots looked at that did not open, or were gone: passed over from then on (the newest 1000). They never move the
-    /// cursor, so one the hub made up never hides the computer's real messages below it.
-    skip: std::collections::BTreeSet<i64>,
+    /// Slots above the cursor that opened, and slots still being tried (the newest 1000 of these).
+    opened: std::collections::BTreeSet<i64>,
+    holes: std::collections::BTreeMap<i64, Hole>,
     snapshot: Option<Value>,
+    snapshot_seq: i64,
     /// When the newest snapshot arrived, and when the hub last answered, by this phone's monotonic clock.
     snapshot_got: Option<Instant>,
     heard: Option<Instant>,
@@ -375,23 +392,44 @@ struct MailSt {
 }
 
 impl MailSt {
-    /// One message read from slot `seq`: when it opened, the cursor moves up to it (the slots it jumped counted as
-    /// missed) and its body is kept or handed back as an answer; one that did not open moves nothing the app keeps.
+    /// One message read from slot `seq`: when it opened, its body is kept (a snapshot newer than the one held) or
+    /// handed back as an answer; one that did not open becomes a hole, tried again later.
     fn take(&mut self, seq: i64, opened: Result<Value>) -> Option<Value> {
-        if seq <= self.down_seen { return None; }
-        let Ok(body) = opened else { self.dropped += 1; self.pass_over(seq); return None };
-        self.missed += (seq - self.down_seen - 1) as u64;
-        self.down_seen = seq;
+        if seq <= self.down_seen || self.opened.contains(&seq) { return None; }
+        let Ok(body) = opened else { self.dropped += 1; self.hole(seq); return None };
+        self.holes.remove(&seq);
+        self.opened.insert(seq);
         match body["kind"].as_str() {
-            Some("snapshot") => { self.snapshot = Some(body); self.snapshot_got = Some(Instant::now()); None }
+            Some("snapshot") if seq > self.snapshot_seq => { (self.snapshot, self.snapshot_seq, self.snapshot_got) = (Some(body), seq, Some(Instant::now())); None }
             Some("receipt" | "refused") => Some(body),
             _ => None,
         }
     }
 
-    fn pass_over(&mut self, seq: i64) {
-        self.skip.insert(seq);
-        while self.skip.len() > 1000 { self.skip.pop_first(); }
+    fn hole(&mut self, seq: i64) {
+        let now = Instant::now();
+        let h = self.holes.entry(seq).or_insert(Hole { first: now, tries: 0, next: now });
+        h.tries += 1;
+        h.next = now + backoff(h.tries);
+        while self.holes.len() > 1000 { self.holes.pop_first(); }
+    }
+
+    /// A slot to look at now: never tried, or a hole whose wait is over.
+    fn due(&self, seq: i64) -> bool { self.holes.get(&seq).is_none_or(|h| Instant::now() >= h.next) }
+
+    /// The cursor moved over the slots listed in order, as long as each opened or was given up; slots never listed
+    /// between are counted as missed, and so is one given up.
+    fn advance(&mut self, listed: &[i64]) {
+        for &s in listed {
+            if s <= self.down_seen { continue; }
+            let given_up = self.holes.get(&s).is_some_and(|h| h.first.elapsed() >= HOLE_GIVE_UP);
+            if !self.opened.contains(&s) && !given_up { break; }
+            self.missed += (s - self.down_seen - 1) as u64 + u64::from(given_up);
+            self.down_seen = s;
+        }
+        let at = self.down_seen;
+        self.opened.retain(|s| *s > at);
+        self.holes.retain(|s, _| *s > at);
     }
 
     fn freshness(&self, now_ms: i64, now: Instant) -> Freshness {
@@ -429,6 +467,8 @@ pub struct Mailbox {
     hub: HubHttp,
     me: PhoneIdentity,
     mailbox: String,
+    /// The pairing every message is sealed for, from the computer's signed approval.
+    enrollment: String,
     desk_pubkey: String,
     desk_x25519: String,
     st: Mutex<MailSt>,
@@ -437,11 +477,11 @@ pub struct Mailbox {
 }
 
 impl Mailbox {
-    /// The mailbox `mailbox` on the hub at `hub_url` with the phone's `token`, to the computer whose Ed25519 and
-    /// X25519 keys the pairing gave (`DesktopPayload::pubkey`, `x25519`).
-    pub fn new(me: &PhoneIdentity, hub_url: &str, token: &str, mailbox: &str, desk_pubkey: &str, desk_x25519: &str) -> Result<Mailbox> {
-        if desk_x25519.is_empty() { bail!("the computer gave no key to seal to; pair through the hub again"); }
-        Ok(Mailbox { hub: HubHttp::new(hub_url, token)?, me: me.clone(), mailbox: mailbox.into(), desk_pubkey: desk_pubkey.into(), desk_x25519: desk_x25519.into(),
+    /// The mailbox `mailbox` on the hub at `hub_url` with the phone's `token`, for pairing `enrollment`, to the computer
+    /// whose Ed25519 and X25519 keys the pairing gave (`DesktopPayload::enrollment`, `pubkey`, `x25519`).
+    pub fn new(me: &PhoneIdentity, hub_url: &str, token: &str, mailbox: &str, enrollment: &str, desk_pubkey: &str, desk_x25519: &str) -> Result<Mailbox> {
+        if desk_x25519.is_empty() || enrollment.is_empty() { bail!("the computer gave no key to seal to or no pairing; pair through the hub again"); }
+        Ok(Mailbox { hub: HubHttp::new(hub_url, token)?, me: me.clone(), mailbox: mailbox.into(), enrollment: enrollment.into(), desk_pubkey: desk_pubkey.into(), desk_x25519: desk_x25519.into(),
             st: Mutex::new(MailSt::default()), waiters: std::sync::Mutex::new(vec![]), next_waiter: Default::default() })
     }
 
@@ -456,8 +496,9 @@ impl Mailbox {
 
     pub async fn freshness(&self) -> Freshness { self.st.lock().await.freshness(now_ms(), Instant::now()) }
 
-    /// Read what the computer left since the last look, oldest first: at most `READ_AT_MOST` messages, `LOOK_PAGES`
-    /// listings and `LOOK_TIME`. A listing that brings nothing new ends the look, whatever it says of more.
+    /// Read what the computer left since the last look, oldest first: at most `READ_AT_MOST` fetches, `LOOK_PAGES`
+    /// listings and `LOOK_TIME`. A listing that brings nothing new ends the look, whatever it says of more. Slots that
+    /// did not open are tried again later; the cursor then moves over what is read.
     pub async fn sync(&self) -> Result<()> {
         let until = Instant::now() + LOOK_TIME;
         let mut st = self.st.lock().await;
@@ -465,22 +506,24 @@ impl Mailbox {
         let mut after = st.down_seen;
         let mut list = self.hub.list(&self.mailbox, "down", after).await?;
         (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
-        let mut read = 0;
-        for _ in 0..LOOK_PAGES {
+        let (mut read, mut listed) = (0, vec![]);
+        'pages: for _ in 0..LOOK_PAGES {
             let seqs = ahead(&list, after);
-            if seqs.is_empty() { return Ok(()); }
+            if seqs.is_empty() { break; }
             for seq in seqs {
-                if read >= READ_AT_MOST || Instant::now() >= until { return Ok(()); }
                 after = seq;
-                if st.skip.contains(&seq) { continue; }
+                listed.push(seq);
+                if st.opened.contains(&seq) || !st.due(seq) { continue; }
+                if read >= READ_AT_MOST || Instant::now() >= until { break 'pages; }
                 read += 1;
-                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.pass_over(seq); continue };
-                let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, "down", seq, &bytes);
+                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.hole(seq); continue };
+                let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, &self.enrollment, "down", seq, &bytes);
                 if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
             }
-            if list["more"] != true || Instant::now() >= until { return Ok(()); }
+            if list["more"] != true || Instant::now() >= until { break; }
             list = self.hub.list(&self.mailbox, "down", after).await?;
         }
+        st.advance(&listed);
         Ok(())
     }
 
@@ -489,8 +532,17 @@ impl Mailbox {
     /// the next one is tried.
     async fn send(&self, body: &Value) -> Result<()> {
         for _ in 0..3 {
-            let seq = next_seq(self.hub.list(&self.mailbox, "up", i64::MAX).await?["max"].as_i64().unwrap_or(0))?.max(4);
-            let m = seal_mail(self.me.signing_key(), &self.desk_x25519, &self.mailbox, "up", seq, body)?;
+            let max = self.hub.list(&self.mailbox, "up", i64::MAX).await?["max"].as_i64().unwrap_or(0);
+            // the word that the decision was read goes in slot 3 before anything else: once 4 is taken, 3 never can be
+            if max < 3 {
+                let ack = seal_mail(self.me.signing_key(), &self.desk_x25519, &self.mailbox, &self.enrollment, "up", 3, &json!({"kind": "fetched"}))?;
+                match self.hub.put_mail(&self.mailbox, "up", 3, ack).await {
+                    Err(e) if !e.downcast_ref::<Refused>().is_some_and(|r| r.status == 409) => return Err(e),
+                    _ => {}
+                }
+            }
+            let seq = next_seq(max)?.max(4);
+            let m = seal_mail(self.me.signing_key(), &self.desk_x25519, &self.mailbox, &self.enrollment, "up", seq, body)?;
             match self.hub.put_mail(&self.mailbox, "up", seq, m).await {
                 Err(e) if e.downcast_ref::<Refused>().is_some_and(|r| r.status == 409) => continue,
                 r => return r,
@@ -576,10 +628,10 @@ mod tests {
     #[test]
     fn an_envelope_opens_only_where_it_was_written() {
         let (phone, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
-        let m = seal_mail(phone.signing_key(), &desk.x25519_public(), "ph-1", "up", 4, &json!({"kind": "act"})).unwrap();
-        assert_eq!(open_mail(&desk.x25519_secret(), &phone.pubkey(), "ph-1", "up", 4, &m).unwrap()["kind"], "act");
-        for (mb, dir, seq) in [("ph-1", "up", 5), ("ph-1", "down", 4), ("ph-2", "up", 4)] {
-            assert!(open_mail(&desk.x25519_secret(), &phone.pubkey(), mb, dir, seq, &m).is_err(), "{mb} {dir} {seq}");
+        let m = seal_mail(phone.signing_key(), &desk.x25519_public(), "ph-1", "e1", "up", 4, &json!({"kind": "act"})).unwrap();
+        assert_eq!(open_mail(&desk.x25519_secret(), &phone.pubkey(), "ph-1", "e1", "up", 4, &m).unwrap()["kind"], "act");
+        for (mb, en, dir, seq) in [("ph-1", "e1", "up", 5), ("ph-1", "e1", "down", 4), ("ph-2", "e1", "up", 4), ("ph-1", "e2", "up", 4)] {
+            assert!(open_mail(&desk.x25519_secret(), &phone.pubkey(), mb, en, dir, seq, &m).is_err(), "{mb} {en} {dir} {seq}");
         }
     }
 
@@ -616,10 +668,18 @@ mod tests {
         let mut st = MailSt { down_seen: 4, ..Default::default() };
         st.take(6, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 10}})));
         st.take(5, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 1}})));
-        assert_eq!((st.down_seen, st.missed, st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64()), (6, 1, Some(10)), "an older snapshot is not taken back");
-        // one that does not open moves nothing the app keeps
+        st.advance(&[5, 6]);
+        assert_eq!((st.down_seen, st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64()), (6, Some(10)), "an older snapshot is not taken back");
+        // one that does not open moves nothing the app keeps, nor do the ones after it
         st.take(7, Err(anyhow!("changed")));
-        assert_eq!((st.down_seen, st.skip.contains(&7), st.dropped), (6, true, 1));
+        st.take(8, Ok(json!({"kind": "x"})));
+        st.advance(&[7, 8]);
+        assert_eq!((st.down_seen, st.holes.contains_key(&7), st.dropped), (6, true, 1));
+        // a slot never listed between two read ones is missed
+        st.take(7, Ok(json!({"kind": "x"})));
+        st.take(10, Ok(json!({"kind": "x"})));
+        st.advance(&[7, 8, 10]);
+        assert_eq!((st.down_seen, st.missed), (10, 1));
     }
 
     /// #8: a snapshot that is not renewed, or a hub that stops answering, reads as stale.
@@ -711,7 +771,7 @@ mod hostile_hub {
     async fn mailbox(f: Answer) -> (Mailbox, PhoneIdentity, PhoneIdentity, Arc<StdMutex<Vec<String>>>) {
         let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
         let (url, asked) = hub(f).await;
-        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
         m.resume_from(2).await;
         (m, me, desk, asked)
     }
@@ -743,7 +803,7 @@ mod hostile_hub {
         let (m, _, _, asked) = mailbox(Arc::new(|meth, p, _| if meth == "PUT" { (204, vec![]) } else if p.contains("/up?") { ok(json!({"max": 2, "mail": [], "more": false})) } else { ok(json!({})) })).await;
         m.send(&json!({"kind": "receipt", "action_id": "a"})).await.unwrap();
         let puts: Vec<String> = asked.lock().unwrap().iter().filter(|a| a.starts_with("PUT")).cloned().collect();
-        assert_eq!(puts, ["PUT /v1/mail/ph-1/up/4"]);
+        assert_eq!(puts, ["PUT /v1/mail/ph-1/up/3", "PUT /v1/mail/ph-1/up/4"], "slot 3 written first: once 4 is, 3 never can be");
     }
 
     /// P2: an `act` given up (the app moved on) leaves no waiter behind.
@@ -760,7 +820,7 @@ mod hostile_hub {
     async fn two_calls_for_one_action_both_get_the_answer() {
         let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
         let receipt = json!({"kind": "receipt", "action_id": "a", "receipt": {"action_id": "a", "status": "accepted", "detail": "", "at": 1}});
-        let sealed = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "down", 3, &receipt).unwrap();
+        let sealed = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 3, &receipt).unwrap();
         let put = Arc::new(StdMutex::new(false));
         let (url, _) = hub(Arc::new(move |meth, p, _| {
             if meth == "PUT" { *put.lock().unwrap() = true; return (204, vec![]); }
@@ -768,7 +828,7 @@ mod hostile_hub {
             if p.contains("/down?") { return ok(if *put.lock().unwrap() { json!({"max": 3, "mail": [{"seq": 3}], "more": false}) } else { json!({"max": 2, "mail": [], "more": false}) }); }
             (200, sealed.clone())
         })).await;
-        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
         m.resume_from(2).await;
         let a: Action = serde_json::from_value(json!({"action_id": "a", "kind": "answer", "target": {"run": "r", "ask_id": "q"}, "state_version": 1, "expires_at": 9, "payload": {}})).unwrap();
         let (r1, r2) = tokio::time::timeout(Duration::from_secs(30), async { tokio::join!(m.act(&a), m.act(&a)) }).await.unwrap();
@@ -784,7 +844,7 @@ mod hostile_hub {
         let kp = unb64(&k.pubkey()).unwrap();
         params.custom_extensions.push(rcgen::CustomExtension::from_oid_content(&[1, 3, 6, 1, 4, 1, 55555, 1], [ED25519_SPKI.as_slice(), &kp].concat()));
         let cert = params.self_signed(&crate::identity::Ed(x.signing_key().clone())).unwrap();
-        let desk = |pubkey: String, cert_pem: String| DesktopPayload { id: "d".into(), name: "D".into(), cert_pem, pubkey, address_hints: vec![], hub_url: None, hub_token: None, grants: crate::api::Grants::default(), x25519: None };
+        let desk = |pubkey: String, cert_pem: String| DesktopPayload { id: "d".into(), name: "D".into(), cert_pem, pubkey, address_hints: vec![], hub_url: None, hub_token: None, grants: crate::api::Grants::default(), x25519: None, enrollment: None };
         let sig = b64(&k.signing_key().sign(b"binding").to_bytes());
         assert!(!approval_ok(&desk(k.pubkey(), cert.pem()), cert.der(), b"binding", &sig), "K is only in an extension of X's certificate");
         let (pem, der) = k.cert().unwrap();
@@ -816,7 +876,7 @@ mod hostile_hub {
     #[tokio::test]
     async fn a_made_up_high_slot_does_not_hide_a_real_one_below_it() {
         let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
-        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
+        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
         let looks = Arc::new(StdMutex::new(0));
         let (url, _) = hub(Arc::new(move |_, p, _| {
             if p.contains("?after=") {
@@ -826,10 +886,35 @@ mod hostile_hub {
             }
             if p.ends_with("/down/3") { (200, snap.clone()) } else { (200, b"{}".to_vec()) }
         })).await;
-        let m = Mailbox::new(&me, &url, "tok", "ph-1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
         m.resume_from(2).await;
         m.sync().await.unwrap();
         m.sync().await.unwrap();
         assert_eq!(m.down_seen().await, 3, "the real message under the made-up one was read");
+    }
+
+    /// P1: a slot the hub served wrong is tried again once it serves it right, though a later one opened meanwhile;
+    /// the cursor the app keeps waits below it.
+    #[tokio::test]
+    async fn a_slot_served_wrong_for_a_while_is_read_once_it_is_right() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
+        let later = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 4, &json!({"kind": "receipt", "action_id": "z", "receipt": {}})).unwrap();
+        let served = Arc::new(StdMutex::new(0));
+        let (url, _) = hub(Arc::new(move |_, p, _| {
+            if p.contains("?after=") { return ok(json!({"max": 4, "mail": [{"seq": 3}, {"seq": 4}], "more": false})); }
+            if p.ends_with("/down/4") { return (200, later.clone()); }
+            let mut n = served.lock().unwrap();
+            *n += 1;
+            if *n == 1 { (200, b"{}".to_vec()) } else { (200, snap.clone()) }
+        })).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_from(2).await;
+        m.sync().await.unwrap();
+        assert_eq!(m.down_seen().await, 2, "slot 3 is not read yet: the cursor waits");
+        tokio::time::sleep(Duration::from_millis(2200)).await;
+        m.sync().await.unwrap();
+        assert_eq!(m.freshness().await.snapshot_at, Some(1), "the snapshot in slot 3 was read on a later look");
+        assert_eq!(m.down_seen().await, 4);
     }
 }

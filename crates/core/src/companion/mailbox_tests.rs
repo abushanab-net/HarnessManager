@@ -161,12 +161,12 @@ fn a_phone_answers_a_request_through_the_hub_within_its_grants_and_is_cut_off_wh
     let body = json!({"kind": "act", "action": answer(&run2, &ask2, v2, "t-1")});
     let x = desk.x25519.as_deref().unwrap();
     let next = up_max(&w, &j) + 1;
-    let mut sealed: Value = serde_json::from_slice(&mailbox::seal_mail(me.signing_key(), x, &j.mailbox, "up", next, &body).unwrap()).unwrap();
+    let mut sealed: Value = serde_json::from_slice(&mailbox::seal_mail(me.signing_key(), x, &j.mailbox, desk.enrollment.as_deref().unwrap(), "up", next, &body).unwrap()).unwrap();
     let mut ct = base64::engine::general_purpose::STANDARD.decode(sealed["ct"].as_str().unwrap()).unwrap();
     ct[0] ^= 1;
     sealed["ct"] = json!(base64::engine::general_purpose::STANDARD.encode(&ct));
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{next}", j.mailbox), Some(sealed.to_string().into_bytes())), 204);
-    let moved = mailbox::seal_mail(me.signing_key(), x, &j.mailbox, "up", next + 1, &body).unwrap();
+    let moved = mailbox::seal_mail(me.signing_key(), x, &j.mailbox, desk.enrollment.as_deref().unwrap(), "up", next + 1, &body).unwrap();
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{}", j.mailbox, next + 2), Some(moved)), 204);
     // both looked at, neither moving the cursor the computer keeps
     eventually("both are read", || (super::mailbox::was_skipped(&j.mailbox, next) && super::mailbox::was_skipped(&j.mailbox, next + 2)).then_some(()));
@@ -239,7 +239,7 @@ fn a_phone_paired_again_directly_loses_its_hub_mailbox() {
 /// answer; these tests run the computer's pass by hand).
 fn put_act(w: &World, j: &HubJoining, me: &PhoneIdentity, desk: &DesktopPayload, a: companion_proto::api::Action) {
     let seq = up_max(w, j) + 1;
-    let m = mailbox::seal_mail(me.signing_key(), desk.x25519.as_deref().unwrap(), &j.mailbox, "up", seq, &json!({"kind": "act", "action": a})).unwrap();
+    let m = mailbox::seal_mail(me.signing_key(), desk.x25519.as_deref().unwrap(), &j.mailbox, desk.enrollment.as_deref().unwrap(), "up", seq, &json!({"kind": "act", "action": a})).unwrap();
     assert_eq!(raw(w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(m)), 204);
 }
 
@@ -319,7 +319,7 @@ fn an_approval_not_signed_by_the_computer_is_refused() {
     let j = w.rt.block_on(joining).unwrap().unwrap();
     let forger = PhoneIdentity::generate().unwrap();
     let p = DesktopPayload { id: w.ctx.settings.device_id.clone(), name: "Desk".into(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(), address_hints: vec![], hub_url: Some(w.url.clone()),
-        hub_token: None, grants: Grants { summaries: true, transcripts: true, control: true }, x25519: Some(forger.x25519_public()) };
+        hub_token: None, grants: Grants { summaries: true, transcripts: true, control: true }, x25519: Some(forger.x25519_public()), enrollment: Some("e".into()) };
     let sig = base64::engine::general_purpose::STANDARD.encode(ed25519_dalek::Signer::sign(forger.signing_key(), b"anything").to_bytes());
     let decision = json!({"kind": "pair-result", "state": "approved", "payload": key.seal(&p).unwrap(), "sig": sig});
     assert_eq!(raw(&w, &tok, reqwest::Method::PUT, &format!("/v1/mail/{mb}/down/2"), Some(decision.to_string().into_bytes())), 204);
@@ -380,7 +380,8 @@ fn a_message_claimed_when_the_computer_stopped_is_answered_by_the_next_pass() {
     let before = w.ctx.db.kv_get(&k).unwrap();
     super::mailbox::STOP_AFTER_CLAIM.with(|c| c.set(true));
     assert!(pass(&w.ctx).is_err());
-    assert_ne!(w.ctx.db.kv_get(&k).unwrap(), before, "stopped after the action's slot was claimed");
+    let _ = before;
+    assert_eq!(kept_count(&w.ctx), 1, "stopped after the action's slot was claimed");
     assert_eq!((ask_state(&w.ctx, &ask).0.as_str(), actions_named(&w.ctx, "s-1")), ("open", 0), "and before its reservation");
     pass(&w.ctx).unwrap();
     assert_eq!(ask_state(&w.ctx, &ask), ("answered".into(), "allow".into()));
@@ -409,7 +410,7 @@ fn only_the_phone_can_say_it_read_the_approval() {
 /// A message sealed by the phone's key for its next slot up (4 at the least: 1 to 3 are the pairing's).
 fn put_sealed(w: &World, j: &HubJoining, me: &PhoneIdentity, desk: &DesktopPayload, body: Value) {
     let seq = (up_max(w, j) + 1).max(4);
-    let m = mailbox::seal_mail(me.signing_key(), desk.x25519.as_deref().unwrap(), &j.mailbox, "up", seq, &body).unwrap();
+    let m = mailbox::seal_mail(me.signing_key(), desk.x25519.as_deref().unwrap(), &j.mailbox, desk.enrollment.as_deref().unwrap(), "up", seq, &body).unwrap();
     assert_eq!(raw(w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(m)), 204);
 }
 
@@ -571,11 +572,144 @@ fn a_correctly_signed_approval_of_another_exchange_is_refused() {
     let j = w.rt.block_on(joining).unwrap().unwrap();
     let up2 = get(2).bytes().unwrap().to_vec();
     let p = DesktopPayload { id: w.ctx.settings.device_id.clone(), name: "Desk".into(), cert_pem: id.cert_pem.clone(), pubkey: id.pubkey(), address_hints: vec![], hub_url: Some(w.url.clone()),
-        hub_token: None, grants: Grants { summaries: true, transcripts: true, control: true }, x25519: Some(super::mailbox::keys(&w.ctx).unwrap().x_public) };
+        hub_token: None, grants: Grants { summaries: true, transcripts: true, control: true }, x25519: Some(super::mailbox::keys(&w.ctx).unwrap().x_public), enrollment: Some("e".into()) };
     // the computer's real key, over an exchange whose first message is not the phone's
     let other = br#"{"kind":"pair-start","id":"someone-else","msg":"x"}"#.to_vec();
     let sig = id.sign(&mailbox::approval_binding(&mb, &me.id, &me.pubkey(), &me.x25519_public(), &p, [&other, &down1, &up2]));
     let decision = json!({"kind": "pair-result", "state": "approved", "payload": key.seal(&p).unwrap(), "sig": sig});
     assert_eq!(raw(&w, &tok, reqwest::Method::PUT, &format!("/v1/mail/{mb}/down/2"), Some(decision.to_string().into_bytes())), 204);
     assert!(w.rt.block_on(j.result()).is_err());
+}
+
+// ---------- the third review's findings ----------
+
+/// A proxy on loopback in front of `to`, keeping every byte computers send through it.
+fn proxy(w: &World, to: &str) -> (String, Arc<std::sync::Mutex<Vec<u8>>>) {
+    let to = to.trim_start_matches("http://").to_string();
+    let seen = Arc::new(std::sync::Mutex::new(vec![]));
+    let s2 = seen.clone();
+    let addr = w.rt.block_on(async move {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut client, _)) = l.accept().await else { return };
+                let (to, seen) = (to.clone(), s2.clone());
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let Ok(up) = tokio::net::TcpStream::connect(&to).await else { return };
+                    let (mut cr, mut cw) = client.split();
+                    let (mut ur, mut uw) = tokio::io::split(up);
+                    let read_client = async {
+                        let mut buf = [0u8; 8192];
+                        loop {
+                            let n = cr.read(&mut buf).await.unwrap_or(0);
+                            if n == 0 { let _ = uw.shutdown().await; return; }
+                            seen.lock().unwrap().extend_from_slice(&buf[..n]);
+                            if uw.write_all(&buf[..n]).await.is_err() { return; }
+                        }
+                    };
+                    let back = async { let _ = tokio::io::copy(&mut ur, &mut cw).await; };
+                    tokio::join!(read_client, back);
+                });
+            }
+        });
+        addr
+    });
+    (format!("http://{addr}"), seen)
+}
+
+/// P1: a pairing on hub A still open when this computer joins hub B: its cleanup never shows A the token B gave,
+/// and the deletion stays owed to A.
+#[test]
+fn a_hub_never_receives_another_hubs_token() {
+    let w = world();
+    let (url_a, seen) = proxy(&w, &w.url);
+    let ctx_a = Arc::new(crate::sync::hub::join(&w.ctx, &url_a, None, Some(ADMIN)).unwrap());
+    let p = pair_start(ctx_a.clone(), Arc::new(|_: &str, _| {})).unwrap();
+    let (url_b, _hb, _db) = second_hub(&w);
+    let ctx_b = crate::sync::hub::join(&ctx_a, &url_b, None, Some(ADMIN)).unwrap();
+    let tok_b = crate::sync::hub::token(&ctx_b).unwrap();
+    p.cancel();
+    eventually("the pairing ends", || p.ended().then_some(()));
+    let sent = String::from_utf8_lossy(&seen.lock().unwrap()).to_string();
+    assert!(!sent.contains(&tok_b), "hub A was sent hub B's token");
+    let owed: Vec<String> = ctx_b.db.read(|c| Ok(c.prepare("select hub_url from phone_hub_deletes")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).unwrap();
+    assert_eq!(owed, std::slice::from_ref(&url_a), "still owed to A");
+}
+
+/// P1: an enrollment whose hub is not known (paired by this branch before it kept the hub) is never settled by the
+/// hub this computer happens to be on.
+#[test]
+fn an_enrollment_of_unknown_hub_is_never_settled_by_another() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    w.ctx.db.with(|c| Ok(c.execute("update phones set hub_url = null where phone_id = ?", [&me.id])?)).unwrap();
+    let (url_b, _hb, _db) = second_hub(&w);
+    let ctx_b = Arc::new(crate::sync::hub::join(&w.ctx, &url_b, None, Some(ADMIN)).unwrap());
+    assert_eq!(crate::phones::revoke(&ctx_b, &me.id).unwrap()["acks"]["hub"], false);
+    pass(&ctx_b).unwrap();
+    assert_eq!(crate::phones::list(&ctx_b).unwrap()[0]["acks"]["hub"], false, "hub B's 'no such phone' settles nothing");
+    assert_eq!(raw(&w, &j.token, reqwest::Method::GET, &format!("/v1/mail/{}/down", j.mailbox), None), 200);
+}
+
+/// P1: the same phone paired again on the same mailbox with the same keys: what it sent under the earlier
+/// enrollment is not this one's.
+#[test]
+fn a_message_of_an_earlier_enrollment_on_the_same_mailbox_is_refused() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "old-1")}));
+    let again = companion_proto::pairing::PhonePayload::of(&me, "Pixel 9", "android").unwrap();
+    crate::phones::add_with(&w.ctx, &again, Grants { summaries: true, transcripts: true, control: true }, Some(&j.mailbox), None).unwrap();
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "open", "an answer of the earlier pairing acted under the new one");
+    assert_eq!(actions_named(&w.ctx, "old-1"), 0);
+}
+
+/// P1: an action whose own slot the hub served wrong for a while is read once it serves it right, though a later
+/// message was read meanwhile; the cursor kept waits below it.
+#[test]
+fn an_action_survives_its_slot_being_unavailable_for_a_while() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "late-1")}));
+    let slot = up_max(&w, &j);
+    let hub_db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    let real: Vec<u8> = hub_db.query_row("select body from mail where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, slot], |r| r.get(0)).unwrap();
+    hub_db.execute("update mail set body = x'7b7d' where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, slot]).unwrap();
+    pass(&w.ctx).unwrap();
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": "x", "query": "q1"}));
+    pass(&w.ctx).unwrap();
+    let k = format!("mail:{}:up", j.mailbox);
+    assert!(w.ctx.db.kv_get(&k).unwrap().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0) < slot, "the kept cursor stays below the unread slot");
+    hub_db.execute("update mail set body = ? where phone = ? and dir = 'up' and seq = ?", rusqlite::params![real, j.mailbox, slot]).unwrap();
+    std::thread::sleep(Duration::from_millis(2200));
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
+}
+
+/// Partly (#6): a pass fetches at most 20 slots of one phone, those that do not open included; a real message behind
+/// them is read by the next pass.
+#[test]
+fn a_pass_fetches_at_most_twenty_slots_bad_ones_included() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    let start = up_max(&w, &j).max(3);
+    for seq in start + 1..=start + 20 { assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(b"{}".to_vec())), 204); }
+    let (run, ask, v) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "behind-1")}));
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "open", "twenty fetches were spent on the bad slots");
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "answered", "the next pass reads what is new before trying the bad slots again");
 }

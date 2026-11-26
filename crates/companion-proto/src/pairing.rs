@@ -125,6 +125,10 @@ pub struct DesktopPayload {
     /// The computer's X25519 key, base64: what the phone seals its mailbox messages to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x25519: Option<String>,
+    /// This pairing, fresh at each approval through the hub: every mailbox message names it, so one written in an earlier
+    /// pairing on the same mailbox is not this one's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrollment: Option<String>,
 }
 
 /// `GET /pair/phone/result`: `pending`, `approved` with the sealed `DesktopPayload`, or `refused`.
