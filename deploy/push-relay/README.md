@@ -18,12 +18,36 @@ docker compose -f deploy/push-relay/docker-compose.yml up -d --build
 
 The compose file joins the existing `hub_default` network. If the hub uses a custom project name, set `HUB_NETWORK` to the name shown by `docker network ls`. Set `PUSH_CONFIG_DIR` to override the host configuration directory. Inside the image, `PUSH_CONFIG` defaults to `/etc/hrm-push/config.json`.
 
-Append a site to the hub's mounted Caddyfile, substituting the real hostname. Keep request and debug logging disabled here and at upstream proxies. The error handler returns a generic response if Caddy cannot reach the relay, so a failed deletion's URL stays out of Caddy's normal error logs.
+The hub's stock Caddy image needs the rate-limit module for this site. Build a local replacement with this Dockerfile, tag it (for example `caddy-push:local`), and set the hub Compose service's `caddy.image` to that tag. Recreate the Caddy container with its existing volumes. Verify that `caddy list-modules` inside it includes `http.handlers.rate_limit` before reloading. [Rate-limit module](https://github.com/mholt/caddy-ratelimit)
+
+```dockerfile
+FROM caddy:2-builder AS build
+RUN xcaddy build --with github.com/mholt/caddy-ratelimit
+FROM caddy:2
+COPY --from=build /usr/bin/caddy /usr/bin/caddy
+```
+
+Append this site to the hub's mounted Caddyfile, substituting the real hostname. Caddy faces the internet directly and allows five registrations per remote IP per minute. Keep request and debug logging disabled here and at upstream proxies.
 
 ```caddyfile
 push.example.com {
-    reverse_proxy hrm-push-relay:8788
+    route {
+        rate_limit {
+            zone push_registration {
+                match {
+                    method POST
+                    path /v1/register
+                }
+                key {remote_host}
+                events 5
+                window 1m
+            }
+        }
+        reverse_proxy hrm-push-relay:8788
+    }
     handle_errors {
+        @limited expression {err.status_code} == 429
+        respond @limited "Too many registrations" 429
         respond "Push relay unavailable" 503
     }
 }
@@ -54,3 +78,5 @@ Keep keys outside the repository and readable by the container's UID/GID 65532. 
 5. HTTP 204 means the provider accepted the wake or the registration was removed. A permanent token rejection removes that handle and returns 410. Unavailable providers return 503. The desktop sends best effort with a two-second timeout and no application retries. To turn off an enrollment, remove it from the computer with `DELETE /c1/push`. To retire a relay handle entirely, send the signed relay DELETE.
 
 SQLite persists only the random handle, platform and device token. The relay derives each handle's secret with HMAC-SHA256 under the signing key. Run one instance per database so one replay and rate-limit window covers every wake.
+
+Registering the same device token rotates its handle and secret. The device's wake limit survives rotation. At 10,000 registrations the relay returns 429 for a new token and still allows rotation and removal. An upgrade retains the newest handle for each token. An older database already over capacity can shrink or rotate its existing registrations. Failed signatures are limited to 30 per minute per in-memory bucket, shared by signed wakes and deletions.

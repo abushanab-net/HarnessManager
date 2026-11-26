@@ -4,6 +4,9 @@ services:
       context: ../..
       dockerfile: deploy/push-relay/Dockerfile
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     volumes:
       - push-data:/data
       - ${PUSH_CONFIG_DIR:-/etc/hrm-push}:/etc/hrm-push:ro

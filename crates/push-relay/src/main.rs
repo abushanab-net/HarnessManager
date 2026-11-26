@@ -22,11 +22,13 @@ use hmac::{Hmac, Mac};
 use providers::{ApnsConfig, Delivery, Provider, Providers};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 const WINDOW_MS: u64 = 60_000;
 const CLOCK_SKEW_MS: u64 = 5_000;
 const WAKES_PER_MINUTE: i64 = 10;
+const MAX_REGISTRATIONS: i64 = 10_000;
+const AUTH_FAILURES_PER_MINUTE: u32 = 30;
 type HttpResult<T> = Result<T, StatusCode>;
 
 #[derive(Deserialize)]
@@ -57,6 +59,8 @@ struct Relay<P> {
     db: Mutex<Connection>,
     key: [u8; 32],
     replay_floor: u64,
+    // Fixed buckets prevent guessed handles from allocating unbounded failure counters.
+    failures: Mutex<[(u64, u32); 256]>,
     provider: P,
 }
 
@@ -65,15 +69,25 @@ fn now_ms() -> u64 {
 }
 
 impl<P: Provider> Relay<P> {
-    fn new(db: Connection, key: [u8; 32], provider: P) -> Result<Arc<Self>> {
+    fn new(mut db: Connection, key: [u8; 32], provider: P) -> Result<Arc<Self>> {
         db.execute_batch("create table if not exists registrations(handle text primary key, platform text not null, token text not null);
             pragma temp_store=memory;
-            create temp table accepted(handle text not null, signature blob not null, received integer not null, primary key(handle,signature));
+            create temp table accepted(device_hash blob not null, signature blob not null, received integer not null, primary key(device_hash,signature));
             create index accepted_time on accepted(received);")?;
+        let tx = db.transaction()?;
+        if !tx.prepare("select 1 from pragma_index_list('registrations') where name='registration_token'")?.exists([])?
+        {
+            tx.execute_batch(
+                "update registrations set token=lower(token) where platform='ios';
+                delete from registrations where rowid not in (select max(rowid) from registrations group by token);
+                create unique index registration_token on registrations(token);",
+            )?;
+        }
+        tx.commit()?;
         let has_handles: bool = db.query_row("select exists(select 1 from registrations)", [], |r| r.get(0))?;
         // Cover even future-dated signatures the previous instance could have accepted.
         let replay_floor = if has_handles { now_ms() + CLOCK_SKEW_MS } else { 0 };
-        Ok(Arc::new(Self { db: Mutex::new(db), key, provider, replay_floor }))
+        Ok(Arc::new(Self { db: Mutex::new(db), key, provider, replay_floor, failures: Mutex::new([(0, 0); 256]) }))
     }
 
     fn secret(&self, handle: &str) -> [u8; 32] {
@@ -103,18 +117,41 @@ impl<P: Provider> Relay<P> {
         handle: &str,
         body: &[u8],
     ) -> HttpResult<(u64, [u8; 32])> {
+        let key = self.secret(handle);
+        let now = now_ms();
+        let mut failures = self.failures.lock().map_err(internal)?;
+        let bucket = &mut failures[key[0] as usize];
+        if now.saturating_sub(bucket.0) >= WINDOW_MS {
+            *bucket = (now, 0);
+        }
+        if bucket.1 >= AUTH_FAILURES_PER_MINUTE {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        let result = self.check_signature(headers, method, path, &key, body, now);
+        if result.is_err() {
+            bucket.1 += 1;
+        }
+        result
+    }
+
+    fn check_signature(
+        &self,
+        headers: &HeaderMap,
+        method: &str,
+        path: &str,
+        key: &[u8; 32],
+        body: &[u8],
+        now: u64,
+    ) -> HttpResult<(u64, [u8; 32])> {
         let refused = StatusCode::UNAUTHORIZED;
         let header = |name| headers.get(name).and_then(|v| v.to_str().ok()).ok_or(refused);
         let timestamp: u64 = header(push::TIMESTAMP)?.parse().map_err(|_| refused)?;
         let mut signature = [0; 32];
         hex::decode_to_slice(header(push::SIGNATURE)?, &mut signature).map_err(|_| refused)?;
-        let now = now_ms();
         if timestamp <= self.replay_floor || !fresh(timestamp, now) {
             return Err(refused);
         }
-        push::request_mac(&self.secret(handle), method, path, timestamp, body)
-            .verify_slice(&signature)
-            .map_err(|_| refused)?;
+        push::request_mac(key, method, path, timestamp, body).verify_slice(&signature).map_err(|_| refused)?;
         Ok((timestamp, signature))
     }
 }
@@ -129,7 +166,7 @@ fn fresh(timestamp: u64, now: u64) -> bool {
 
 async fn register<P: Provider>(
     State(relay): State<Arc<Relay<P>>>,
-    Json(r): Json<Register>,
+    Json(mut r): Json<Register>,
 ) -> HttpResult<(StatusCode, Json<Registration>)> {
     if r.token.is_empty()
         || r.token.len() > 4096
@@ -145,12 +182,24 @@ async fn register<P: Provider>(
     let result = Registration { secret: hex::encode(relay.secret(&handle)), relay_handle: handle.clone() };
     let platform = match r.platform {
         Platform::Android => "android",
-        Platform::Ios => "ios",
+        Platform::Ios => {
+            r.token.make_ascii_lowercase();
+            "ios"
+        }
     };
     relay
         .access(move |db| {
-            db.execute("insert into registrations values (?,?,?)", params![handle, platform, r.token])
+            let n = db
+                .execute(
+                    "insert into registrations(handle,platform,token) select ?1,?2,?3
+                where exists(select 1 from registrations where token=?3) or (select count(*) from registrations) < ?4
+                on conflict(token) do update set handle=excluded.handle, platform=excluded.platform",
+                    params![handle, platform, r.token, MAX_REGISTRATIONS],
+                )
                 .map_err(internal)?;
+            if n == 0 {
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
             Ok(())
         })
         .await?;
@@ -181,6 +230,7 @@ async fn wake<P: Provider>(
                 .optional()
                 .map_err(internal)?
                 .ok_or(StatusCode::NOT_FOUND)?;
+            let device_hash: [u8; 32] = Sha256::digest(registration.1.as_bytes()).into();
             let now = now_ms();
             if !fresh(ts, now) {
                 return Err(StatusCode::UNAUTHORIZED);
@@ -192,8 +242,8 @@ async fn wake<P: Provider>(
             .map_err(internal)?;
             if db
                 .query_row(
-                    "select exists(select 1 from accepted where handle=? and signature=?)",
-                    params![handle, sig],
+                    "select exists(select 1 from accepted where device_hash=? and signature=?)",
+                    params![device_hash, sig],
                     |r| r.get(0),
                 )
                 .map_err(internal)?
@@ -202,15 +252,16 @@ async fn wake<P: Provider>(
             }
             let count: i64 = db
                 .query_row(
-                    "select count(*) from accepted where handle=? and received>?",
-                    params![handle, now.saturating_sub(WINDOW_MS) as i64],
+                    "select count(*) from accepted where device_hash=? and received>?",
+                    params![device_hash, now.saturating_sub(WINDOW_MS) as i64],
                     |r| r.get(0),
                 )
                 .map_err(internal)?;
             if count >= WAKES_PER_MINUTE {
                 return Err(StatusCode::TOO_MANY_REQUESTS);
             }
-            db.execute("insert into accepted values (?,?,?)", params![handle, sig, now as i64]).map_err(internal)?;
+            db.execute("insert into accepted values (?,?,?)", params![device_hash, sig, now as i64])
+                .map_err(internal)?;
             Ok(registration)
         })
         .await?;
