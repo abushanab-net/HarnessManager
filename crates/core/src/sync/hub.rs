@@ -155,30 +155,6 @@ pub fn token(ctx: &Ctx) -> Option<String> {
 
 /// The hub the stored token was given by.
 const TOKEN_OF: &str = "hub:token_of";
-/// The one look at a 1.13 token is done.
-const LEGACY_LOOKED: &str = "hub:legacy_looked";
-
-/// At the first start of this version, before anything can change the settings or ask a hub: a token 1.13 kept under
-/// the computer alone is moved under the hub its settings name (1.13 had one hub at a time, and saved its address
-/// with its token). That one write keeps the token and its hub together. With no hub address saved, it is left as it
-/// was: no token, and a join gets one. Looked at once, whatever it finds: a settings change after this never moves
-/// an old token to another hub.
-pub(crate) fn adopt_legacy_token(ctx: &Ctx) {
-    if ctx.db.kv_get(LEGACY_LOOKED).ok().flatten().is_some_and(|v| !v.is_empty()) { return; }
-    let legacy = token_target(&ctx.settings.device_id);
-    let unrecorded = ctx.db.kv_get(TOKEN_OF).ok().flatten().is_none_or(|of| of.is_empty());
-    if let (Some(tok), true, Ok(base)) = (read_secret(ctx, &legacy, "hub.token"), unrecorded, normalize_url(&ctx.settings.hub_url)) {
-        if write_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE, &tok).is_ok() {
-            let _ = secrets::delete(&legacy);
-            crate::log::info(&format!("hub: the token kept by an earlier version is now {base}'s"));
-        }
-    }
-    let _ = ctx.db.kv_set(LEGACY_LOOKED, "1");
-}
-
-/// Tests: as a 1.13 computer would come to its first start of this version.
-#[cfg(test)]
-pub(crate) fn forget_legacy_look(ctx: &Ctx) { let _ = ctx.db.kv_set(LEGACY_LOOKED, ""); }
 
 #[cfg(test)]
 thread_local! {
