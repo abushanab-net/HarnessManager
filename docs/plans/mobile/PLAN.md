@@ -149,16 +149,20 @@ POST /c1/actions
   checked once more, judged when that write gets the database.
 - **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
   its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
-  to a request from another turn is refused. A hook that cannot record its event fails as it always did and marks the
-  run's state unknown; a phone's answer is refused (before it is claimed, and again where it is written) until an
-  event that closes every open request is recorded. The person at the computer answers throughout, and a hook for a
-  session with no phone paired behaves as in 1.13.2.
+  to a request from another turn is refused. Before it touches the database each hook makes its own in-flight marker
+  (`run-unknown/<run>/<begun>-<id>`, holding its pid and start) and removes only that one once its event commits; a
+  hook that fails anywhere, from reading its input to the commit, fails as it always did and leaves its marker. A
+  phone's answer is admitted (when it is claimed, and again where it is written) only if the run's marker folder lists
+  and lists nothing, and no hook since the last settling event found the markers unavailable (`run_state.unsure`, set
+  in the event's own transaction); any error refuses. An event that closes every open request removes, after its
+  commit, the markers of hooks that began before it and have exited; a hook still running or begun later keeps its
+  own. The end of the run removes its markers. The person at the computer answers throughout.
 - A repeated `action_id` returns the stored receipt and does nothing again. An answer is never resent automatically.
   When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that fails too.
 - `answer` goes through `hooks::answer()` with the phone's guard.
 - **Question window:** the wait variable carries 60 when a phone with Control is paired, else 15
-  (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is 70 s, 10 s beyond the window
-  for the hook's start and for printing an answer taken at the window's end. A permission request waits at most 300 s
+  (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is then 70 s, 10 s beyond the
+  window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before. A permission request waits at most 300 s
   whatever `request_seconds` says.
 
 ## Contract: the hub, for phones

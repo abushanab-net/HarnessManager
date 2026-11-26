@@ -24,7 +24,7 @@ use crate::{hooks, Ctx};
 
 const KEPT_MS: i64 = 24 * 3_600_000;
 pub(crate) const NOT_YET: &str = "Reply and Stop from a phone are not available yet";
-const STATE_UNKNOWN: &str = "An event of this session could not be recorded, so this request may already be settled; answer in its terminal";
+const STATE_UNKNOWN: &str = "An event of this session may not have been recorded, so this request may already be settled; answer in its terminal";
 
 /// shortcut: one action at a time on this computer, which serialises each run's actions too; per-run locks if
 /// phones ever act on many runs at once and one slow terminal holds the others up
@@ -108,7 +108,7 @@ fn claim(c: &Connection, p: &Phone, a: &Action) -> Result<Option<(Status, String
     if let Some(gone) = ask_gone(c, run, ask)? { return Ok(Some(gone)); }
     let row: Option<RunNow> = c.query_row("select version, pid, started from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let Some((version, _, _)) = row.filter(|r| crate::procs::start_ms(r.1).is_some_and(|s| r.2 == 0 || s == r.2)) else { return Ok(un("that session is no longer running here")) };
-    if hooks::state_unknown(c, run) { return Ok(un(STATE_UNKNOWN)); }
+    if !hooks::events_all_recorded(c, run) { return Ok(un(STATE_UNKNOWN)); }
     if version != a.state_version { return Ok(Some((Status::Expired, "the session changed since this was shown; look again".into()))); }
     c.execute("update run_state set version = version + 1 where run = ?1 and version = ?2", params![run, version])?;
     Ok(None)

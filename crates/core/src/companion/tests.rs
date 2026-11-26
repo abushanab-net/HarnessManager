@@ -308,6 +308,7 @@ fn waiting(ctx: &Ctx, expires_in: i64) -> (String, String, i64) {
             params![ask, run, now_ms(), now_ms() + expires_in, pid, started])?;
         Ok(())
     }).unwrap();
+    std::fs::create_dir_all(crate::hooks::markers_dir(&ctx.data, &run)).unwrap();
     (run, ask, 3)
 }
 
@@ -399,6 +400,7 @@ fn working(ctx: &Ctx) -> (String, i64) {
     let run = format!("{pid}:{}", crate::util::uuid4());
     ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness, session_id, state, version, terminal_port, terminal_token) values(?, ?, ?, 'work', 'claude', 's-2', 'working', 5, 9, x'00')",
         params![run, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
+    std::fs::create_dir_all(crate::hooks::markers_dir(&ctx.data, &run)).unwrap();
     (run, 5)
 }
 
@@ -963,7 +965,7 @@ fn a_phones_reply_and_stop_are_refused_and_answers_still_work() {
 
 // ---------- the fifth review (Codex, at da23831) ----------
 
-/// #1: while a run's state is unknown (a hook could not record its event) a phone's answer is refused before it is
+/// #1: while a run's state is unknown (a hook's event may not be recorded) a phone's answer is refused before it is
 /// claimed: nothing is dispatched and the version is not consumed. Once a settling event is recorded, it is accepted.
 #[test]
 fn a_phones_answer_is_refused_while_its_runs_state_is_unknown() {
@@ -971,15 +973,15 @@ fn a_phones_answer_is_refused_while_its_runs_state_is_unknown() {
     let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
     let p = enrolled(&ctx, true);
     let (run, ask, v) = waiting(&ctx, 60_000);
-    let c = rusqlite::Connection::open(ctx.data.join("hm.db")).unwrap();
-    crate::hooks::set_state_unknown(&c, &run, true);
+    let marker = crate::hooks::markers_dir(&ctx.data, &run).join("0-a-hook-in-flight");
+    std::fs::write(&marker, b"0 0").unwrap();
     let before = dispatched();
     let r = super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-1")).unwrap();
     assert_eq!((r.status, dispatched()), (Status::Unavailable, before), "{r:?}");
-    assert!(r.detail.contains("could not be recorded"), "{r:?}");
+    assert!(r.detail.contains("may not have been recorded"), "{r:?}");
     assert_eq!(crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap().version, v, "nothing consumed");
     assert_eq!(ask_state(&ctx, &ask).0, "open");
-    crate::hooks::set_state_unknown(&c, &run, false);
+    std::fs::remove_file(&marker).unwrap();
     assert_eq!(super::actions::act(&ctx, &p, &answer(&run, &ask, v, "u-2")).unwrap().status, Status::Accepted);
 }
 
