@@ -15,9 +15,12 @@ use windows_sys::Win32::Security::Cryptography::{
     CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
 
+use super::{Guard, MaybeDelivered, Withheld};
 use crate::Ctx;
 
 const MAX_TEXT: usize = 16 * 1024;
+/// The most a command's guard takes on the wire.
+const MAX_GUARD: usize = 1024;
 const TAG_LEN: usize = 16;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_CLIENTS: usize = 8;
@@ -62,11 +65,48 @@ impl<'a> Action<'a> {
     }
 }
 
+/// An action, with the guard a phone's action carries: `g<guard json>\0` before the action's own bytes.
+#[derive(Debug, PartialEq)]
+pub(super) struct Command<'a> {
+    pub action: Action<'a>,
+    pub guard: Option<Guard>,
+}
+
+impl<'a> Command<'a> {
+    fn parse(bytes: &'a [u8]) -> Result<Self> {
+        let (guard, rest) = match bytes.split_first() {
+            Some((b'g', tail)) => {
+                let end = tail.iter().position(|&b| b == 0).filter(|&n| n <= MAX_GUARD).context("invalid terminal guard")?;
+                (Some(serde_json::from_slice(&tail[..end]).context("invalid terminal guard")?), &tail[end + 1..])
+            }
+            _ => (None, bytes),
+        };
+        Ok(Command { action: Action::parse(rest)?, guard })
+    }
+
+    fn encode(&self) -> Result<Vec<u8>> {
+        let mut bytes = vec![];
+        if let Some(g) = &self.guard {
+            bytes.push(b'g');
+            bytes.extend(serde_json::to_vec(g)?);
+            bytes.push(0);
+        }
+        bytes.extend(self.action.encode()?);
+        Command::parse(&bytes)?;
+        Ok(bytes)
+    }
+}
+
+/// What the relay did: written whole; nothing written (busy, closed, or the guard no longer held); a reply typed but
+/// its Enter withheld; or a write that failed part way, so the input may have arrived.
 #[repr(u8)]
 pub(super) enum Outcome {
     Sent = 0,
     Busy = 1,
     Closed = 2,
+    Refused = 3,
+    Withheld = 4,
+    Broken = 5,
 }
 
 pub(super) struct Control {
@@ -99,7 +139,7 @@ impl Control {
 
     pub(super) fn accept(
         &mut self,
-        input: impl FnOnce(Action<'_>) -> Outcome + Send + 'static,
+        input: impl FnOnce(Command<'_>) -> Outcome + Send + 'static,
     ) -> io::Result<()> {
         self.clients.retain(|client| !client.is_finished());
         match self.listener.accept() {
@@ -216,7 +256,7 @@ fn serve(
     stream: TcpStream,
     deadline: Instant,
     cipher: &XChaCha20Poly1305,
-    input: impl FnOnce(Action<'_>) -> Outcome,
+    input: impl FnOnce(Command<'_>) -> Outcome,
 ) -> Result<()> {
     stream.set_nonblocking(false)?;
     let mut stream = ConnectionIo { stream, deadline };
@@ -227,7 +267,7 @@ fn serve(
     let mut nonce = [0; 24];
     stream.read_exact(&mut nonce)?;
     ensure!(nonce[0] & 0x80 == 0, "invalid terminal nonce");
-    const MAX_FRAME: usize = 1 + MAX_TEXT + TAG_LEN;
+    const MAX_FRAME: usize = 2 + MAX_GUARD + 1 + MAX_TEXT + TAG_LEN;
     let mut bytes = Vec::new();
     (&mut stream)
         .take((MAX_FRAME + 1) as u64)
@@ -235,7 +275,7 @@ fn serve(
     ensure!(bytes.len() <= MAX_FRAME, "terminal command is too large");
     let request = open(cipher, nonce, &challenge, &bytes)?;
     stream.remaining()?;
-    let outcome = input(Action::parse(&request)?);
+    let outcome = input(Command::parse(&request)?);
     nonce[0] |= 0x80;
     stream.write_all(&seal(cipher, nonce, &challenge, &[outcome as u8])?)?;
     Ok(())
@@ -286,8 +326,10 @@ fn endpoint(data: &Path, run: &str) -> Result<(u16, XChaCha20Poly1305)> {
     Ok((port, cipher))
 }
 
-pub(super) fn send(data: &Path, run: &str, action: Action<'_>) -> Result<()> {
-    let request = action.encode()?;
+/// Send a command to the run's relay. Every error before the command is written whole means it was not delivered; one
+/// after (no answer, a garbled one, or a write that broke) is `MaybeDelivered`.
+pub(super) fn send(data: &Path, run: &str, action: Action<'_>, guard: Option<&Guard>) -> Result<()> {
+    let request = Command { action, guard: guard.cloned() }.encode()?;
     let (port, cipher) = endpoint(data, run)?;
     let address = (Ipv4Addr::LOCALHOST, port).into();
     let deadline = Instant::now() + IO_TIMEOUT;
@@ -302,20 +344,25 @@ pub(super) fn send(data: &Path, run: &str, action: Action<'_>) -> Result<()> {
     nonce[0] &= 0x7f;
     stream.write_all(&nonce)?;
     stream.write_all(&seal(&cipher, nonce, &challenge, &request)?)?;
-    stream.stream.shutdown(Shutdown::Write)?;
+    // from here on the relay holds the command: what it did can only be told by its answer
+    let maybe = |why: &str| anyhow::Error::new(MaybeDelivered(why.to_string()));
+    let _ = stream.stream.shutdown(Shutdown::Write);
 
     let mut response = [0; 1 + TAG_LEN];
     stream
         .read_exact(&mut response)
-        .context("owned terminal did not confirm delivery")?;
+        .map_err(|_| maybe("owned terminal did not confirm delivery"))?;
     nonce[0] |= 0x80;
-    match open(&cipher, nonce, &challenge, &response)?.as_slice() {
+    match open(&cipher, nonce, &challenge, &response).map_err(|_| maybe("invalid terminal response"))?.as_slice() {
         [code] if *code == Outcome::Sent as u8 => Ok(()),
         [code] if *code == Outcome::Busy as u8 => {
             bail!("the terminal is busy writing input; try again")
         }
         [code] if *code == Outcome::Closed as u8 => bail!("the terminal input has closed"),
-        _ => bail!("invalid terminal response"),
+        [code] if *code == Outcome::Refused as u8 => bail!("the session changed before the input could reach it; look again"),
+        [code] if *code == Outcome::Withheld as u8 => Err(Withheld("the reply was typed into the session but not sent: it changed before Enter; the text waits in its input".into()).into()),
+        [code] if *code == Outcome::Broken as u8 => Err(maybe("the terminal failed while writing the input")),
+        _ => Err(maybe("invalid terminal response")),
     }
 }
 
@@ -368,5 +415,36 @@ mod tests {
         assert!(open(&key, nonce, b"another challenge", &request).is_err());
         let protected = dpapi(&[7; 32], true).unwrap();
         assert_eq!(dpapi(&protected, false).unwrap(), [7; 32]);
+    }
+
+    #[test]
+    fn a_guard_rides_before_the_action_and_reads_back() {
+        let g = Guard { version: 7, deadline: 99, phone: Some(("p".into(), "g".into())) };
+        let bytes = Command { action: Action::Reply("hi"), guard: Some(g.clone()) }.encode().unwrap();
+        assert_eq!(Command::parse(&bytes).unwrap(), Command { action: Action::Reply("hi"), guard: Some(g) });
+        assert_eq!(Command::parse(b"s").unwrap(), Command { action: Action::Stop, guard: None });
+        assert!(Command::parse(b"g{\"version\":1}").is_err(), "a guard without its end");
+    }
+
+    /// N2: the command reached the relay and its answer was lost: what became of it is not known, never "failed".
+    #[test]
+    fn an_acknowledgement_lost_after_the_command_left_reads_as_maybe_delivered() {
+        let t = tempfile::tempdir().unwrap();
+        let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+        let pid = std::process::id();
+        ctx.db.with(|c| Ok(c.execute("insert into run_state(run, pid, started, profile, harness) values('r', ?1, ?2, 'p', 'claude')", params![pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
+        let control = Control::listen(&ctx, "r").unwrap();
+        control.listener.set_nonblocking(false).unwrap();
+        let relay = thread::spawn(move || {
+            let (mut s, _) = control.listener.accept().unwrap();
+            s.write_all(&[0; 16]).unwrap();
+            // the whole command arrives; the relay then goes away without a word
+            let mut command = Vec::new();
+            let _ = s.read_to_end(&mut command);
+            command.len()
+        });
+        let e = send(&ctx.data, "r", Action::Reply("hello"), None).unwrap_err();
+        assert!(relay.join().unwrap() > 24, "the command was sent");
+        assert!(e.downcast_ref::<MaybeDelivered>().is_some(), "{e:#}");
     }
 }

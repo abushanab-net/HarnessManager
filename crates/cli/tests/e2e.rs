@@ -1357,6 +1357,23 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
         let sent = if mode == "paste" { "\x1b[200~-réply\x1b[201~" } else { "-réply" };
         let received = format!("fixture line={}", json!(sent));
         until(|| out().contains(&received).then_some(()), trace);
+        // a phone's input carries a guard that the relay checks where the input is written
+        let version = || db.query_row("select version from run_state where run = ?", [&id], |r| r.get::<_, i64>(0)).unwrap();
+        let guard = |version: i64, deadline: i64| hrm_core::terminal::Guard { version, deadline, phone: None };
+        let far = hrm_core::util::now_ms() + 60_000;
+        let line = |text: &str| format!("fixture line={}", json!(if mode == "paste" { format!("\x1b[200~{text}\x1b[201~") } else { text.to_string() }));
+        let stale = hrm_core::terminal::reply_guarded(&e.data, &id, "stale", Some(&guard(version() - 1, far))).unwrap_err();
+        assert!(format!("{stale:#}").contains("changed before the input could reach it"), "{stale:#}");
+        hrm_core::terminal::reply_guarded(&e.data, &id, "held", Some(&guard(version(), far))).unwrap();
+        until(|| out().contains(&line("held")).then_some(()), trace);
+        assert!(!out().contains("stale"), "a refused input wrote nothing: {}", trace());
+        if mode == "win32" {
+            // the deadline passes while the text waits for its Enter: the text is typed, the Enter withheld
+            let late = hrm_core::terminal::reply_guarded(&e.data, &id, "typed", Some(&guard(version(), hrm_core::util::now_ms() + 150))).unwrap_err();
+            assert!(late.downcast_ref::<hrm_core::terminal::Withheld>().is_some(), "{late:#}");
+            e.ok(&["reply", &id, "-next"]);
+            until(|| out().contains(&line("typed-next")).then_some(()), trace);
+        }
         e.ok(&["stop", &id]);
         assert_eq!(until(|| owned.0.try_wait().unwrap(), trace).code(), Some(37), "{}", trace());
         assert!(out().contains("fixture interrupt"), "{}", trace());
@@ -1368,7 +1385,9 @@ fn owned_terminal_replies_and_interrupts_from_another_process() {
                 "(13, 28, 13, 1, 0, 1)", "(13, 28, 13, 0, 0, 1)",
                 "(67, 46, 3, 1, 8, 1)", "(67, 46, 3, 0, 8, 1)",
             ];
-            assert_eq!(keys, [local, local].concat(), "{}", trace());
+            // the local input, then three remote replies (the withheld one sent no Enter) and the Stop
+            let (enter, ctrl) = (&local[..2], &local[2..]);
+            assert_eq!(keys, [&local[..], enter, enter, enter, ctrl].concat(), "{}", trace());
         }
         assert!(run_id(owned.0.id()).is_none());
         assert!(e.fail(&["stop", &id]).contains("has no owned terminal"));

@@ -4,13 +4,16 @@
 //! from the background the kept connection is usually dead: `resume` opens a fresh one at once.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_rustls::client::TlsStream;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
@@ -110,28 +113,62 @@ impl Client {
     pub async fn events(&self) -> Result<Events> {
         let tls = net::tls(&self.tls, &self.host, self.port).await?;
         let host = if self.host.contains(':') { format!("[{}]", self.host) } else { self.host.clone() };
-        let (ws, _) = tokio::time::timeout(net::CONNECT, tokio_tungstenite::client_async(format!("wss://{host}:{}/c1/events", self.port), tls)).await
+        let url = format!("wss://{host}:{}/c1/events", self.port);
+        let (ws, _) = tokio::time::timeout(net::CONNECT, tokio_tungstenite::client_async_with_config(url, tls, Some(events_config()))).await
             .map_err(|_| anyhow!("the computer did not open the events"))??;
-        Ok(Events { ws })
+        Ok(Events::over(ws, PING_EVERY, ANSWER_WITHIN))
     }
 }
 
+/// An event is a few hundred bytes, a `needs` list a few kilobytes: nothing bigger is read.
+pub const MAX_EVENT: usize = 256 * 1024;
+/// A quiet socket is pinged this often, and must answer within `ANSWER_WITHIN`, or it is taken as gone (a phone that
+/// moved networks keeps a half-open socket that would otherwise wait for ever).
+pub const PING_EVERY: Duration = Duration::from_secs(20);
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(10);
+
+fn events_config() -> WebSocketConfig { WebSocketConfig::default().max_message_size(Some(MAX_EVENT)).max_frame_size(Some(MAX_EVENT)) }
+
 /// The open events socket.
-pub struct Events {
-    ws: WebSocketStream<TlsStream<TcpStream>>,
+pub struct Events<S = TlsStream<TcpStream>> {
+    ws: WebSocketStream<S>,
+    ping_every: Duration,
+    answer_within: Duration,
+    /// When a frame last came, and when the ping still unanswered went out.
+    heard: Instant,
+    pinged: Option<Instant>,
 }
 
-impl Events {
-    /// The next event, typed; None once the computer closed the socket (or cut it, when this phone was revoked).
+impl<S: AsyncRead + AsyncWrite + Unpin> Events<S> {
+    /// Events over an open socket, with its heartbeat.
+    pub fn over(ws: WebSocketStream<S>, ping_every: Duration, answer_within: Duration) -> Events<S> {
+        Events { ws, ping_every, answer_within, heard: Instant::now(), pinged: None }
+    }
+
+    /// The next event, typed; None once the computer closed the socket (or cut it, when this phone was revoked); an
+    /// error when it stopped answering, or sent more than an event can be.
     pub async fn next(&mut self) -> Option<Result<(Event, Update)>> {
         loop {
-            match self.ws.next().await? {
-                Ok(Message::Text(t)) => {
-                    return Some(serde_json::from_str::<Event>(&t).map_err(Into::into).and_then(|e| { let u = e.update()?; Ok((e, u)) }));
+            let wait = match self.pinged {
+                Some(at) => self.answer_within.saturating_sub(at.elapsed()),
+                None => self.ping_every.saturating_sub(self.heard.elapsed()),
+            };
+            match tokio::time::timeout(wait, self.ws.next()).await {
+                Ok(None) => return None,
+                Ok(Some(Err(e))) => return Some(Err(e.into())),
+                Ok(Some(Ok(m))) => {
+                    (self.heard, self.pinged) = (Instant::now(), None);
+                    match m {
+                        Message::Text(t) => return Some(serde_json::from_str::<Event>(&t).map_err(Into::into).and_then(|e| { let u = e.update()?; Ok((e, u)) })),
+                        Message::Close(_) => return None,
+                        _ => continue,
+                    }
                 }
-                Ok(Message::Close(_)) => return None,
-                Ok(_) => continue,
-                Err(e) => return Some(Err(e.into())),
+                Err(_) if self.pinged.is_some() => return Some(Err(anyhow!("the computer stopped answering"))),
+                Err(_) => {
+                    if let Err(e) = self.ws.send(Message::Ping(Vec::new().into())).await { return Some(Err(e.into())); }
+                    self.pinged = Some(Instant::now());
+                }
             }
         }
     }
@@ -145,5 +182,63 @@ mod tests {
     fn a_path_segment_is_encoded() {
         assert_eq!(super::seg("claude-main_1.x~"), "claude-main_1.x~");
         assert_eq!(super::seg("a/b c?"), "a%2Fb%20c%3F");
+    }
+
+    use super::*;
+    use tokio::net::TcpListener;
+
+    /// A WebSocket server on loopback that does `serve` with each socket it takes.
+    async fn server<F, Fut>(serve: F) -> String
+    where F: FnOnce(WebSocketStream<TcpStream>) -> Fut + Send + 'static, Fut: std::future::Future<Output = ()> + Send {
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (s, _) = l.accept().await.unwrap();
+            serve(tokio_tungstenite::accept_async(s).await.unwrap()).await;
+        });
+        format!("ws://{addr}/c1/events")
+    }
+
+    async fn events_at(url: &str) -> Events<TcpStream> {
+        let s = TcpStream::connect(url.trim_start_matches("ws://").trim_end_matches("/c1/events")).await.unwrap();
+        let (ws, _) = tokio_tungstenite::client_async_with_config(url, s, Some(events_config())).await.unwrap();
+        Events::over(ws, Duration::from_millis(100), Duration::from_millis(100))
+    }
+
+    /// N5: a computer that stops answering (a half-open socket) ends the events within a ping and its answer time.
+    #[tokio::test]
+    async fn a_silent_computer_ends_the_events_within_the_heartbeat() {
+        let url = server(|ws| async move { let _held = ws; tokio::time::sleep(Duration::from_secs(10)).await; }).await;
+        let mut ev = events_at(&url).await;
+        let r = tokio::time::timeout(Duration::from_secs(2), ev.next()).await.expect("the heartbeat ends it");
+        assert!(format!("{:#}", r.unwrap().unwrap_err()).contains("stopped answering"));
+    }
+
+    /// N5: a quiet computer that answers its pings keeps the events open.
+    #[tokio::test]
+    async fn a_quiet_computer_that_answers_stays_connected() {
+        let url = server(|mut ws| async move {
+            // reading answers the pings; an event after a while
+            let read = async { while let Some(Ok(_)) = ws.next().await {} };
+            let _ = tokio::time::timeout(Duration::from_millis(500), read).await;
+            ws.send(Message::Text(serde_json::json!({"kind": "changed", "at": 1, "data": {}}).to_string().into())).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }).await;
+        let mut ev = events_at(&url).await;
+        let (_, u) = tokio::time::timeout(Duration::from_secs(2), ev.next()).await.unwrap().unwrap().unwrap();
+        assert_eq!(u, Update::Changed);
+    }
+
+    /// N5: a message bigger than an event can be is refused, not read.
+    #[tokio::test]
+    async fn an_oversized_event_is_refused() {
+        let url = server(|mut ws| async move {
+            let big = serde_json::json!({"kind": "changed", "at": 1, "data": {"x": "y".repeat(2 * MAX_EVENT)}}).to_string();
+            let _ = ws.send(Message::Text(big.into())).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }).await;
+        let mut ev = events_at(&url).await;
+        let r = tokio::time::timeout(Duration::from_secs(2), ev.next()).await.unwrap();
+        assert!(matches!(r, Some(Err(_))), "{:?}", r.map(|x| x.map(|(_, u)| u)));
     }
 }

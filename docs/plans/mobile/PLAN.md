@@ -141,7 +141,11 @@ POST /c1/actions
   and keeps each receipt 24 h in `phone_actions(action_id primary key, phone_id, kind, target, status, detail, at)`.
   One transaction claims the action: it consumes the state version (a second action on the same screen is `expired`)
   and reserves the receipt before anything reaches the session. `unknown`: the computer stopped between reserving and
-  recording the outcome; the action may have arrived and is never sent again.
+  recording the outcome, or the terminal took the input and its acknowledgement was lost; the action may have arrived
+  and is never sent again. Where the effect is committed (the hook's write of an answer, the terminal relay before the
+  first byte and again before a reply's Enter) the claimed run version, the action's deadline and the phone's Control
+  are checked once more; a reply typed but stopped before its Enter is `unavailable`, its detail saying so. An open
+  request blocks a reply, and a Stop holds its turn apart from the run's state until it lands or surely failed.
 - A repeated `action_id` returns the stored receipt and does nothing again. A Stop or reply is never resent
   automatically. When the phone gets no answer, it asks `GET /c1/actions/{id}`, and shows **delivery unknown** if that
   fails too.

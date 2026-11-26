@@ -131,7 +131,11 @@ pub fn get(ctx: &Ctx, id: &str) -> Result<Option<Phone>> {
 pub fn by_cert(ctx: &Ctx, der: &[u8]) -> Option<(String, String)> {
     let rows: Vec<(String, String, String)> = ctx.db.read(|c| Ok(c.prepare("select phone_id, generation, cert_pem from phones where revoked_at is null")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)).ok()?;
-    rows.into_iter().find(|(_, _, pem)| crate::sync::peer::identity::pem_to_der(pem).ok().as_deref() == Some(der)).map(|(id, g, _)| (id, g))
+    let mut hits = rows.into_iter().filter(|(_, _, pem)| crate::sync::peer::identity::pem_to_der(pem).ok().as_deref() == Some(der));
+    let first = hits.next().map(|(id, g, _)| (id, g));
+    // two enrollments with one certificate (rows from before enrollment checked it): neither, rather than a guess
+    if hits.next().is_some() { return None; }
+    first
 }
 
 /// Ed25519's SubjectPublicKeyInfo (RFC 8410) for a public key: what the phone's certificate must carry.
@@ -184,8 +188,11 @@ pub(crate) fn seen(ctx: &Ctx, id: &str) {
 }
 
 /// The phone's relay handle, or none (`PUT` / `DELETE /c1/push`).
-pub(crate) fn set_push(ctx: &Ctx, id: &str, handle: Option<&str>) -> Result<()> {
-    ctx.db.with(|c| { c.execute("update phones set relay_handle = ?2 where phone_id = ?1 and revoked_at is null", params![id, handle])?; Ok(()) })
+/// The enrollment `p` checked at the request's start, not one paired again since under the same id.
+pub(crate) fn set_push(ctx: &Ctx, p: &Phone, handle: Option<&str>) -> Result<()> {
+    let n = ctx.db.with(|c| Ok(c.execute("update phones set relay_handle = ?3 where phone_id = ?1 and generation = ?2 and revoked_at is null", params![p.id, p.generation, handle])?))?;
+    if n == 0 { bail!("this phone was revoked or paired again"); }
+    Ok(())
 }
 
 /// A phone that is not revoked may answer requests.

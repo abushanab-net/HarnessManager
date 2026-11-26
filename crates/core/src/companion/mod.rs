@@ -162,7 +162,9 @@ pub(crate) fn run_actions(p: &Phone, r: &hooks::Run) -> Value {
     let no = |why: &str| json!({"ok": false, "reason": why});
     if !p.grants.control { let n = no("Control is not granted to this phone; grant it on the computer"); return json!({"reply": n, "stop": n}); }
     if !r.terminal { let n = no("Needs Harness Manager's own terminal"); return json!({"reply": n, "stop": n}); }
-    json!({"reply": if r.state == "waiting" { no("Answer the request first") } else { json!({"ok": true}) },
+    if r.stopping { let n = no("a Stop is already on its way to this session"); return json!({"reply": n, "stop": n}); }
+    // an open request blocks a reply whatever the state says: the reply's Enter would answer its prompt
+    json!({"reply": if r.state == "waiting" || r.ask.is_some() { no("Answer the request first") } else { json!({"ok": true}) },
         "stop": if r.state == "working" || r.state == "waiting" { json!({"ok": true}) } else { no("Nothing to stop: the session is at its prompt") }})
 }
 
@@ -192,28 +194,50 @@ struct After {
     after: Option<usize>,
 }
 
-/// The transcript last read, by its file's path, size and time: a phone pages through one session, and each page
-/// would otherwise read and parse the whole file again.
+/// The transcript last read, by its file's path and signature: a phone pages through one session, and each page
+/// would otherwise read and parse the whole file again. The signature takes the write-ahead log beside the file too:
+/// OpenCode writes there while its database file stays as it was.
 /// shortcut: one transcript kept; a small cache per phone if several phones page different sessions at once
-type Parsed = (String, u64, Option<std::time::SystemTime>, Arc<crate::model::Transcript>);
-static LAST: std::sync::Mutex<Option<Parsed>> = std::sync::Mutex::new(None);
+type Sig = [Option<(i64, u64)>; 2];
+static LAST: std::sync::Mutex<Option<(String, Sig, Arc<crate::model::Transcript>)>> = std::sync::Mutex::new(None);
 
-fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::Result<Arc<crate::model::Transcript>> {
-    // this computer's own copy, found before anything is opened: another computer's session of the same id is that
-    // computer's to serve
-    let f = SessionFilter { profile: Some(profile.into()), id: Some(id.into()), scope: Some("here".into()), ..Default::default() };
-    let s = service::sessions(ctx, &f)?.into_iter().find(|s| s.harness == harness && (s.device.is_empty() || s.device == ctx.db.device)).ok_or_else(|| anyhow::anyhow!("no such session"))?;
-    let m = std::fs::metadata(&s.source_path).ok();
-    let key = (s.source_path.clone(), m.as_ref().map(|m| m.len()).unwrap_or(0), m.and_then(|m| m.modified().ok()));
-    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((p, n, t, tr)) = last.as_ref() { if (p, n, t) == (&key.0, &key.1, &key.2) && tr.meta.profile == profile && tr.meta.id == id { return Ok(tr.clone()); } }
-    let tr = Arc::new(service::transcript(ctx, profile, id)?);
-    *last = Some((key.0, key.1, key.2, tr.clone()));
-    Ok(tr)
+#[cfg(test)]
+thread_local! {
+    /// Test seams: run between choosing this computer's row and reading it; count the reads.
+    pub(crate) static BEFORE_READ: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+    pub(crate) static READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// This computer's own copy of a session, read from the very row chosen (another computer's session of the same id
+/// is that computer's to serve), and kept only once it is seen to be that row's.
+fn transcript_of(ctx: &Ctx, harness: &str, profile: &str, id: &str) -> anyhow::Result<Arc<crate::model::Transcript>> {
+    let f = SessionFilter { profile: Some(profile.into()), id: Some(id.into()), scope: Some("here".into()), ..Default::default() };
+    let here = |s: &crate::model::SessionMeta| s.harness == harness && s.id == id && s.profile == profile && (s.device.is_empty() || s.device == ctx.db.device);
+    let s = service::sessions(ctx, &f)?.into_iter().find(here).ok_or_else(|| anyhow::anyhow!("no such session"))?;
+    let path = std::path::Path::new(&s.source_path);
+    let sig: Sig = [crate::util::file_sig(path), crate::util::file_sig(&std::path::PathBuf::from(format!("{}-wal", s.source_path)))];
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((p, g, tr)) = last.as_ref() { if p == &s.source_path && g == &sig && here(&tr.meta) { return Ok(tr.clone()); } }
+    #[cfg(test)]
+    if let Some(f) = BEFORE_READ.with(|b| b.borrow_mut().take()) { f(); }
+    let reg = ctx.registry()?;
+    let p = reg.get(profile)?;
+    let mut t = if s.archived { crate::archive::transcript(&s)? } else { crate::harness::of(p).transcript(ctx, p, &s)? };
+    t.meta = s;
+    if !here(&t.meta) { anyhow::bail!("no such session"); }
+    #[cfg(test)]
+    READS.with(|r| r.set(r.get() + 1));
+    let t = Arc::new(t);
+    *last = Some((t.meta.source_path.clone(), sig, t.clone()));
+    Ok(t)
+}
+
+/// What a page holds besides its turns (names, title cut to 200 characters, the counts): kept out of the turns' budget,
+/// so a whole page stays within `PAGE_BYTES`.
+const ENVELOPE: usize = 4 * 1024;
+
 /// A turn that fits a page: its long texts cut to 2,000 characters, then its steps left out, then its answers after
-/// the first 20; `truncated` says it was cut.
+/// the first 20 (with their places), and at last only the prompt; `truncated` says it was cut.
 fn bounded(mut v: Value) -> Value {
     fn cut(v: &mut Value) {
         match v {
@@ -223,29 +247,42 @@ fn bounded(mut v: Value) -> Value {
             _ => {}
         }
     }
-    let fits = |v: &Value| v.to_string().len() <= PAGE_BYTES;
+    let fits = |v: &Value| v.to_string().len() <= PAGE_BYTES - ENVELOPE;
     if fits(&v) { return v; }
     v["truncated"] = json!(true);
     cut(&mut v);
     if !fits(&v) { let n = v["steps"].as_array().map(Vec::len).unwrap_or(0); v["steps"] = json!([]); v["steps_left_out"] = json!(n); }
-    if !fits(&v) { if let Some(a) = v["answer"].as_array_mut() { a.truncate(20); } }
+    if !fits(&v) {
+        let n = v["answer"].as_array().map(Vec::len).unwrap_or(0);
+        for k in ["answer", "answer_pos"] { if let Some(a) = v[k].as_array_mut() { a.truncate(20); } }
+        v["answers_left_out"] = json!(n.saturating_sub(20));
+    }
+    if !fits(&v) {
+        v = json!({"prompt": v["prompt"], "prompt_at": v["prompt_at"], "answer_at": v["answer_at"], "model": v["model"], "steps": [], "answer": [], "answer_pos": [], "truncated": true});
+    }
     v
+}
+
+/// One page of a transcript from turn `from`: at most `TURNS_PER_PAGE` turns, all of it within `PAGE_BYTES`.
+fn page(ctx: &Ctx, harness: &str, profile: &str, id: &str, t: &crate::model::Transcript, from: usize) -> anyhow::Result<Value> {
+    let from = from.min(t.turns.len());
+    let (mut turns, mut bytes) = (vec![], 0);
+    for turn in &t.turns[from..] {
+        let v = bounded(serde_json::to_value(turn)?);
+        let n = v.to_string().len() + 1;
+        if turns.len() >= TURNS_PER_PAGE || (!turns.is_empty() && bytes + n > PAGE_BYTES - ENVELOPE) { break; }
+        bytes += n;
+        turns.push(v);
+    }
+    let end = from + turns.len();
+    let title: String = t.meta.title.chars().take(200).collect();
+    Ok(stamped(ctx, json!({"harness": harness, "profile": profile, "id": id, "title": title, "after": from, "turns": turns, "next": (end < t.turns.len()).then_some(end), "total": t.turns.len()})))
 }
 
 async fn transcript(State(ctx): State<Arc<Ctx>>, Path((harness, profile, id)): Path<(String, String, String)>, Query(q): Query<After>) -> Response {
     answer(blocking(move || {
         let t = transcript_of(&ctx, &harness, &profile, &id)?;
-        let from = q.after.unwrap_or(0).min(t.turns.len());
-        let (mut turns, mut bytes) = (vec![], 0);
-        for turn in &t.turns[from..] {
-            let v = bounded(serde_json::to_value(turn)?);
-            let n = v.to_string().len();
-            if turns.len() >= TURNS_PER_PAGE || (!turns.is_empty() && bytes + n > PAGE_BYTES) { break; }
-            bytes += n;
-            turns.push(v);
-        }
-        let end = from + turns.len();
-        Ok(stamped(&ctx, json!({"harness": harness, "profile": profile, "id": id, "title": t.meta.title, "after": from, "turns": turns, "next": (end < t.turns.len()).then_some(end), "total": t.turns.len()})))
+        page(&ctx, &harness, &profile, &id, &t, q.after.unwrap_or(0))
     }).await)
 }
 
@@ -274,9 +311,9 @@ async fn requests(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -
 async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<api::PushHandle>) -> Response {
     let h = h.relay_handle.trim().to_string();
     if h.is_empty() || h.len() > 200 { return (StatusCode::BAD_REQUEST, Json(json!({"error": "give the relay handle"}))).into_response(); }
-    answer(blocking(move || { phones::set_push(&ctx, &p.id, Some(&h))?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+    answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h))?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }
 
 async fn push_delete(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    answer(blocking(move || { phones::set_push(&ctx, &p.id, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
+    answer(blocking(move || { phones::set_push(&ctx, &p, None)?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }

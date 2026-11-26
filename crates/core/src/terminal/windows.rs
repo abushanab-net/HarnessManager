@@ -19,7 +19,8 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::System::IO::CancelSynchronousIo;
 
-use super::control::{Action, Control, Outcome};
+use super::control::{Action, Command, Control, Outcome};
+use super::Guard;
 use crate::{launch::LaunchSpec, Ctx};
 
 const TICK: Duration = Duration::from_millis(40);
@@ -82,6 +83,7 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
     let result = (|| {
         let child = pty.spawn(spec, &job)?;
         let mut control = Control::listen(ctx, id)?;
+        let (db, run_id) = (ctx.data.join("hm.db"), id.to_string());
         keyboard = Some({
             let relay = relay.clone();
             let console = input.is_some();
@@ -101,8 +103,8 @@ pub(crate) fn run(ctx: &Ctx, id: &str, spec: &LaunchSpec) -> Result<i32> {
                 !display.is_finished(),
                 "terminal output closed before the tool exited"
             );
-            let input = relay.clone();
-            control.accept(move |action| input.remote(action))?;
+            let (input, db, run_id) = (relay.clone(), db.clone(), run_id.clone());
+            control.accept(move |command| input.remote(command, |g, reply| holds(&db, &run_id, g, reply)))?;
             if let Some(output) = &output {
                 let next = output.size()?;
                 if (size.X, size.Y) != (next.X, next.Y) {
@@ -135,8 +137,16 @@ struct Relay {
     closed: AtomicBool,
 }
 
+/// A phone's guard, read from the run's own database row in this process, right before the input is written.
+fn holds(db: &std::path::Path, run: &str, g: &Guard, reply: bool) -> bool {
+    rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .and_then(|c| { c.busy_timeout(Duration::from_secs(2))?; Ok(c) })
+        .is_ok_and(|c| crate::hooks::guard_holds(&c, run, g, reply).is_ok())
+}
+
 impl Relay {
-    fn remote(&self, action: Action<'_>) -> Outcome {
+    /// `check` is the guard's test: before the first byte, and before the Enter of a reply typed in two steps.
+    fn remote(&self, command: Command<'_>, check: impl Fn(&Guard, bool) -> bool) -> Outcome {
         let mut writer = match self.writer.try_lock() {
             Ok(writer) => writer,
             Err(TryLockError::WouldBlock) => return Outcome::Busy,
@@ -145,17 +155,24 @@ impl Relay {
         if self.closed.load(Relaxed) {
             return Outcome::Closed;
         }
-        match write_remote_input(&mut *writer, action, self.modes.load(Relaxed)) {
-            Ok(()) => Outcome::Sent,
-            Err(_) => Outcome::Closed,
+        let reply = matches!(command.action, Action::Reply(_));
+        let still = || command.guard.as_ref().is_none_or(|g| check(g, reply));
+        if !still() {
+            return Outcome::Refused;
+        }
+        match write_remote_input(&mut *writer, command.action, self.modes.load(Relaxed), &still) {
+            Ok(true) => Outcome::Sent,
+            Ok(false) => Outcome::Withheld,
+            Err(_) => Outcome::Broken,
         }
     }
 }
 
-fn write_remote_input(mut writer: impl Write, action: Action<'_>, modes: u8) -> io::Result<()> {
+/// The input's bytes, written; false when `before_enter` said no between a reply's text and its Enter.
+fn write_remote_input(mut writer: impl Write, action: Action<'_>, modes: u8, before_enter: &dyn Fn() -> bool) -> io::Result<bool> {
     let win32 = modes & WIN32_INPUT != 0;
     match action {
-        Action::Stop => writer.write_all(if win32 { WIN32_CTRL_C } else { b"\x03" }),
+        Action::Stop => writer.write_all(if win32 { WIN32_CTRL_C } else { b"\x03" }).map(|_| true),
         Action::Reply(text) => {
             let enter = if win32 { WIN32_ENTER } else { b"\r" };
             let mut bytes = if modes & BRACKETED_PASTE != 0 {
@@ -167,10 +184,14 @@ fn write_remote_input(mut writer: impl Write, action: Action<'_>, modes: u8) -> 
                 writer.write_all(&bytes)?;
                 // shortcut: let Codex's 120 ms paste window expire, revisit if the tool exposes paste completion
                 thread::sleep(Duration::from_millis(180));
-                writer.write_all(enter)
+                // the session may have changed while the text waited: the Enter is what submits it
+                if !before_enter() {
+                    return Ok(false);
+                }
+                writer.write_all(enter).map(|_| true)
             } else {
                 bytes.extend_from_slice(enter);
-                writer.write_all(&bytes)
+                writer.write_all(&bytes).map(|_| true)
             }
         }
     }
@@ -600,7 +621,7 @@ mod tests {
     fn encodes_paste_and_enter_independently() {
         let input = |action, modes| {
             let mut bytes = Vec::new();
-            write_remote_input(&mut bytes, action, modes).unwrap();
+            assert!(write_remote_input(&mut bytes, action, modes, &|| true).unwrap());
             bytes
         };
         assert_eq!(input(Action::Reply("abc"), 0), b"abc\r");
@@ -625,14 +646,32 @@ mod tests {
         };
         let first = relay.writer.lock().unwrap();
         assert!(matches!(
-            relay.remote(Action::Reply("second")),
+            relay.remote(Command { action: Action::Reply("second"), guard: None }, |_, _| true),
             Outcome::Busy
         ));
         drop(first);
-        assert!(matches!(relay.remote(Action::Stop), Outcome::Sent));
+        assert!(matches!(relay.remote(Command { action: Action::Stop, guard: None }, |_, _| true), Outcome::Sent));
         drop(relay);
         let mut received = Vec::new();
         reader.read_to_end(&mut received).unwrap();
         assert_eq!(received, [3]);
+    }
+
+    /// #3: a guard that no longer holds stops the input before its first byte, and between a reply's text and its
+    /// Enter in Win32 input mode.
+    #[test]
+    fn a_guard_is_checked_before_the_first_byte_and_before_the_enter() {
+        let g = Guard { version: 1, deadline: i64::MAX, phone: None };
+        let (mut reader, writer) = pipe().unwrap();
+        let relay = Relay { writer: Mutex::new(writer), modes: AtomicU8::new(WIN32_INPUT), closed: AtomicBool::new(false) };
+        assert!(matches!(relay.remote(Command { action: Action::Reply("before"), guard: Some(g.clone()) }, |_, _| false), Outcome::Refused));
+        let checks = std::cell::Cell::new(0);
+        let out = relay.remote(Command { action: Action::Reply("typed"), guard: Some(g) }, |_, _| { checks.set(checks.get() + 1); checks.get() == 1 });
+        assert!(matches!(out, Outcome::Withheld));
+        assert_eq!(checks.get(), 2, "once before the text, once before the Enter");
+        drop(relay);
+        let mut received = Vec::new();
+        reader.read_to_end(&mut received).unwrap();
+        assert_eq!(received, b"typed", "the text, no Enter, and nothing of the refused one");
     }
 }

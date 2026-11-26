@@ -258,6 +258,8 @@ impl Db {
             ("run_ask", "hook_started", "integer not null default 0"),
             // what a phone's action names, so it cannot act on a state it did not see (companion/actions.rs)
             ("run_state", "version", "integer not null default 0"),
+            // a Stop on its way (hooks::claim_stop)
+            ("run_state", "stopping", "integer"),
             // a phone's enrollment, and the listener's acknowledgement of a revocation (phones.rs)
             ("phones", "generation", "text not null default ''"),
             ("phones", "cut_at", "integer"),
@@ -267,6 +269,9 @@ impl Db {
                 add_column(&conn, table, col, ty)?;
             }
         }
+        // a phone paired before enrollments had generations gets one of its own; receipts kept from then name none,
+        // so no enrollment can read them (the id may have been paired again before this version)
+        conn.execute("update phones set generation = lower(hex(randomblob(16))) where generation = ''", [])?;
         // reply timings came later: add the columns, and read every log once more so older requests get them
         let has: bool = conn.prepare("select 1 from pragma_table_info('usage') where name = 'gen_ms'")?.exists([])?;
         if !has {

@@ -3,7 +3,7 @@
 //! matters is sealed under the SPAKE2 key, and the computer's certificate is checked against the fingerprint the QR
 //! code carries, so the plain HTTP carries nothing to trust.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -94,13 +94,64 @@ impl Joining {
         })
     }
 
-    /// Asked every `every` until the owner decides or the code expires.
+    /// Asked every `every` until the owner decides or the code expires. The phone keeps its own deadline, from the
+    /// time left the computer first gave (at most `LONGEST_WAIT`): a computer that answers "pending" for ever, or one
+    /// gone once the code expired, ends as `Expired`.
     pub async fn wait(&self, every: Duration) -> Result<Outcome> {
+        let mut deadline: Option<Instant> = None;
         loop {
-            match self.result().await? {
-                Outcome::Pending(_) => tokio::time::sleep(every).await,
-                o => return Ok(o),
+            let past = |d: &Option<Instant>| d.is_some_and(|d| Instant::now() >= d);
+            match self.result().await {
+                Ok(Outcome::Pending(left)) => {
+                    let d = *deadline.get_or_insert_with(|| Instant::now() + Duration::from_millis(left.max(0) as u64).min(LONGEST_WAIT) + GRACE);
+                    let now = Instant::now();
+                    if now >= d { return Ok(Outcome::Expired); }
+                    tokio::time::sleep(every.min(d - now)).await;
+                }
+                Ok(o) => return Ok(o),
+                Err(_) if past(&deadline) => return Ok(Outcome::Expired),
+                Err(e) => return Err(e),
             }
         }
+    }
+}
+
+/// The longest a code is shown (two minutes), and the moment more an answer may take to arrive.
+const LONGEST_WAIT: Duration = Duration::from_secs(120);
+const GRACE: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// N4: a computer that answers "pending" for ever does not keep the phone waiting past the time it gave.
+    #[tokio::test]
+    async fn waiting_ends_at_the_phones_own_deadline() {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = l.accept().await else { return };
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 4096];
+                    let _ = s.read(&mut buf).await;
+                    let body = r#"{"state":"pending","expires_in":0}"#;
+                    let _ = s.write_all(format!("HTTP/1.1 200 OK
+content-type: application/json
+content-length: {}
+connection: close
+
+{body}", body.len()).as_bytes()).await;
+                });
+            }
+        });
+        let (p, msg) = Pairing::start("123456", "phone-1", "desk-1").unwrap();
+        let (_, back) = pairing::answer("123456", "phone-1", "desk-1", &msg).unwrap();
+        let j = Joining { host: "127.0.0.1".into(), port, phone_id: "phone-1".into(), fingerprint: None, key: p.finish(&back).unwrap(), desktop_id: "desk-1".into(), desktop_name: "D".into() };
+        let started = Instant::now();
+        let r = tokio::time::timeout(Duration::from_secs(20), j.wait(Duration::from_millis(200))).await.expect("the wait ended");
+        assert_eq!(r.unwrap(), Outcome::Expired);
+        assert!(started.elapsed() < GRACE + Duration::from_secs(2));
     }
 }

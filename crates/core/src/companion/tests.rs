@@ -499,8 +499,8 @@ fn one_stop_per_turn_whoever_presses_it() {
     let p = enrolled(&ctx, true);
     let (run, v) = working(&ctx);
     let c = rusqlite::Connection::open(ctx.data.join("hm.db")).unwrap();
-    crate::hooks::claim_stop(&c, &run).unwrap();
-    assert_eq!(format!("{:#}", crate::hooks::claim_stop(&c, &run).unwrap_err()), "Nothing to stop: the session is at its prompt", "a second Stop would press Ctrl+C again");
+    assert!(crate::hooks::claim_stop(&c, &run, None).unwrap().is_some());
+    assert_eq!(format!("{:#}", crate::hooks::claim_stop(&c, &run, None).unwrap_err()), "a Stop is already on its way to this session", "a second Stop would press Ctrl+C again");
     let before = dispatched();
     let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Stop, &run, v, "s-1", json!({}))).unwrap();
     assert_eq!((r.status, dispatched()), (Status::Expired, before), "the phone's screen showed the turn the desktop stopped");
@@ -738,4 +738,201 @@ fn a_request_that_timed_out_reads_expired_and_an_old_receipt_is_gone() {
     let r = rt.block_on(ph.c.act(&act_now(ActionKind::Stop, "1:2", 0, "aged-1", json!({})))).unwrap();
     d.ctx.db.with(|c| Ok(c.execute("update phone_actions set at = ?1 where action_id = 'aged-1'", [now_ms() - 25 * 3_600_000])?)).unwrap();
     assert_eq!(rt.block_on(ph.c.receipt("aged-1")).unwrap(), None, "kept 24 h: {r:?}");
+}
+
+// ---------- the re-review (Codex, at 758b24e) ----------
+
+/// #1: a phone row and receipts from before enrollments had generations: after the upgrade the phone has its own
+/// generation, and the old receipts belong to no enrollment.
+#[test]
+fn receipts_from_before_enrollments_had_generations_belong_to_none() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    ctx.db.with(|c| {
+        c.execute("update phones set generation = '' where phone_id = ?", [&p.id])?;
+        c.execute("insert into phone_actions(action_id, phone_id, generation, kind, target, status, detail, at) values('legacy-1', ?1, '', 'stop', '{}', 'accepted', 'stopped', ?2)", params![p.id, now_ms()])?;
+        Ok(())
+    }).unwrap();
+    let ctx = Ctx::open_at(&ctx.data, &ctx.home).unwrap();
+    let now = crate::phones::get(&ctx, &p.id).unwrap().unwrap();
+    assert!(!now.generation.is_empty());
+    let r = super::actions::act(&ctx, &now, &act_now(ActionKind::Stop, "1:2", 0, "legacy-1", json!({}))).unwrap();
+    assert_eq!((r.status, r.detail.as_str()), (Status::Unavailable, "that action id was used by another phone"), "the old receipt was handed out: {r:?}");
+}
+
+/// #5: a cancel compares and takes the attempt under one lock: an attempt started where the cancel has looked is
+/// never the one it stops.
+#[test]
+fn a_cancel_for_a_replaced_attempt_never_stops_the_new_one() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    let first = attempt_of(&d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap());
+    let started = Arc::new(Mutex::new(None::<String>));
+    let (s2, ctx) = (started.clone(), d.ctx.clone());
+    crate::sync::peer::PHONE_SEAM.with(|s| *s.borrow_mut() = Some(Box::new(move |rt: &Runtime| { *s2.lock().unwrap() = rt.try_phone_pair_start(&ctx).map(|v| attempt_of(&v)); })));
+    d.rt.phone_pair_cancel(&first).unwrap();
+    let started = started.lock().unwrap().clone();
+    if let Some(second) = started {
+        assert_eq!(d.rt.phone_pair_status().map(|v| attempt_of(&v)), Some(second), "the cancel for the first attempt stopped the second");
+    }
+}
+
+fn attempt_of(v: &Value) -> String { v["attempt"].as_str().unwrap().to_string() }
+
+/// #6: two phone rows with one certificate (from before enrollment checked it) admit neither; and a phone and a
+/// computer enrolled at once from two connections never both get one certificate.
+#[test]
+fn one_certificate_is_never_two_identities() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let x = PhoneIdentity::generate().unwrap();
+    let xp = pairing::PhonePayload::of(&x, "X", "ios").unwrap();
+    crate::phones::add(&ctx, &xp, Grants::default()).unwrap();
+    ctx.db.with(|c| Ok(c.execute("insert into phones(phone_id, name, cert_pem, grants, generation) values('twin', 'T', ?1, '{\"control\":true}', 'g')", [&xp.cert_pem])?)).unwrap();
+    let der = identity::pem_to_der(&xp.cert_pem).unwrap();
+    assert_eq!(crate::phones::by_cert(&ctx, &der), None, "an ambiguous certificate admits neither row");
+    for round in 0..30 {
+        let me = PhoneIdentity::generate().unwrap();
+        let p = pairing::PhonePayload::of(&me, "P", "ios").unwrap();
+        let peer = json!({"id": format!("dev-{round}"), "name": "C", "cert_pem": p.cert_pem, "pubkey": p.pubkey, "address_hint": "c:1"});
+        let (c1, c2) = (Ctx::open_at(&ctx.data, &ctx.home).unwrap(), Ctx::open_at(&ctx.data, &ctx.home).unwrap());
+        let (a, b) = std::thread::scope(|s| {
+            let a = s.spawn(|| crate::phones::add(&c1, &p, Grants::default()).is_ok());
+            let b = s.spawn(|| crate::sync::peer::pairing::store_peer(&c2, &peer, "").is_ok());
+            (a.join().unwrap(), b.join().unwrap())
+        });
+        assert!(!(a && b), "round {round}: one certificate became a phone and a computer");
+    }
+}
+
+/// #11: a turn of many small answer fragments, and one just under the old limit, both fit the page whole: the
+/// page itself is at most 512 KiB.
+#[test]
+fn every_page_fits_512_kib_whatever_its_turns_hold() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let mut tr = crate::model::Transcript::default();
+    tr.meta.title = "t".repeat(5000);
+    let mut many = crate::model::Turn { prompt: "p".into(), ..Default::default() };
+    for _ in 0..100_000 { many.answer.push("a".into()); many.answer_pos.push(123_456); }
+    let mut near = crate::model::Turn { prompt: "q".into(), ..Default::default() };
+    for _ in 0..261 { near.answer.push("b".repeat(1999)); near.answer_pos.push(0); }
+    tr.turns = vec![many, near];
+    for from in 0..2 {
+        let v = super::page(&ctx, "claude", "p", "s", &tr, from).unwrap();
+        let n = v.to_string().len();
+        assert!(n <= super::PAGE_BYTES, "page from turn {from}: {n} bytes");
+        assert_eq!(v["turns"][0]["truncated"], true, "page from turn {from}");
+    }
+}
+
+/// #14: the tick decides and clears under the lock that starts an attempt: an attempt started where the tick found the
+/// last one ended keeps its announcement.
+#[test]
+fn the_announcement_follows_the_attempt_shown() {
+    let t = tempfile::tempdir().unwrap();
+    let d = desk(t.path(), "A");
+    d.rt.phone_pair_start(&d.ctx, Some("127.0.0.1")).unwrap();
+    d.rt.phone_pair_refuse(&attempt(&d)).unwrap();
+    let started = Arc::new(Mutex::new(None::<u16>));
+    let (s2, ctx) = (started.clone(), d.ctx.clone());
+    crate::sync::peer::PHONE_SEAM.with(|s| *s.borrow_mut() = Some(Box::new(move |rt: &Runtime| { *s2.lock().unwrap() = rt.try_phone_pair_start(&ctx).map(|v| v["port"].as_u64().unwrap() as u16); })));
+    d.rt.tick_phone();
+    let started = *started.lock().unwrap();
+    match started {
+        Some(port) => assert_eq!(d.rt.phone_announced(), Some(port), "the tick cleared the new attempt's port"),
+        None => assert_eq!(d.rt.phone_announced(), None, "the ended attempt is no longer announced"),
+    }
+}
+
+/// N1: an open request blocks a reply even when the run's state does not say waiting.
+#[test]
+fn an_open_request_blocks_a_reply_whatever_the_state_says() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let p = enrolled(&ctx, true);
+    let (run, v) = working(&ctx);
+    let pid = std::process::id();
+    ctx.db.with(|c| Ok(c.execute("insert into run_ask(id, run, kind, tool, created, expires, hook_pid, hook_started) values('open-1', ?1, 'permission', 'Bash', ?2, ?3, ?4, ?5)",
+        params![run, now_ms(), now_ms() + 60_000, pid, crate::procs::start_ms(pid).unwrap()])?)).unwrap();
+    let before = dispatched();
+    let r = super::actions::act(&ctx, &p, &act_now(ActionKind::Reply, &run, v, "n1-1", json!({"text": "yes"}))).unwrap();
+    assert_eq!((r.status, r.detail.as_str(), dispatched()), (Status::Unavailable, "Answer the request first", before));
+    let shown = crate::hooks::runs(&ctx).unwrap().into_iter().find(|x| x.run == run).unwrap();
+    assert_eq!(super::run_actions(&p, &shown)["reply"]["ok"], false);
+}
+
+/// A claude session file with one turn, as Claude Code writes it.
+fn session_file(ctx: &Ctx, cwd: &std::path::Path, id: &str, prompt: &str) -> std::path::PathBuf {
+    let f = ctx.home.join(".claude").join("projects").join(crate::harness::claude::project_dir_name(cwd)).join(format!("{id}.jsonl"));
+    let stamp = chrono::Utc::now().to_rfc3339();
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, [json!({"type": "user", "sessionId": id, "cwd": cwd, "timestamp": stamp, "message": {"role": "user", "content": prompt}}),
+        json!({"type": "assistant", "sessionId": id, "cwd": cwd, "timestamp": stamp, "message": {"id": "m", "model": "claude-opus-5-5", "usage": {"input_tokens": 1, "output_tokens": 1}, "content": [{"type": "text", "text": "ok"}]}})]
+        .iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+    f
+}
+
+fn claude_account(ctx: &Ctx) {
+    let mut reg = ctx.registry().unwrap();
+    reg.add_profile(crate::registry::Profile { name: "claude-main".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true,
+        base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 }).unwrap();
+    ctx.save_registry(&reg).unwrap();
+}
+
+/// N3: the transcript is read from the row chosen as this computer's, even when the index changes between the two
+/// (a row of another computer's in its place would otherwise be read and kept as this one's).
+#[test]
+fn the_transcript_read_is_the_one_chosen() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    claude_account(&ctx);
+    let cwd = t.path().join("p");
+    std::fs::create_dir_all(&cwd).unwrap();
+    session_file(&ctx, &cwd, "n3", "mine");
+    let other = session_file(&ctx, &t.path().join("q"), "n3-other", "theirs");
+    crate::index::refresh(&ctx, crate::index::Scope::All).unwrap();
+    let (data, home, other) = (ctx.data.clone(), ctx.home.clone(), other.display().to_string());
+    super::BEFORE_READ.with(|b| *b.borrow_mut() = Some(Box::new(move || {
+        // between the choice and the read, the index now says this session is another computer's, from another file
+        let c = Ctx::open_at(&data, &home).unwrap();
+        c.db.with(|c| Ok(c.execute("update sessions set device = 'other', json = json_set(json, '$.source_path', ?1, '$.device', 'other') where id = 'n3'", [&other])?)).unwrap();
+    })));
+    let tr = super::transcript_of(&ctx, "claude", "claude-main", "n3").unwrap();
+    assert_eq!(tr.turns[0].prompt, "mine");
+}
+
+/// N6: the kept transcript is read again when the write-ahead log beside its file changes (OpenCode writes there).
+#[test]
+fn a_change_to_the_write_ahead_log_is_a_change_to_the_transcript() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    claude_account(&ctx);
+    let cwd = t.path().join("w");
+    std::fs::create_dir_all(&cwd).unwrap();
+    let f = session_file(&ctx, &cwd, "n6", "hi");
+    crate::index::refresh(&ctx, crate::index::Scope::All).unwrap();
+    let reads = || super::READS.with(|r| r.get());
+    let before = reads();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
+    assert_eq!(reads(), before + 1, "the second page is the kept copy");
+    std::fs::write(format!("{}-wal", f.display()), b"new pages").unwrap();
+    super::transcript_of(&ctx, "claude", "claude-main", "n6").unwrap();
+    assert_eq!(reads(), before + 2, "the log changed: read again");
+}
+
+/// N7: a push handle change from an earlier enrollment does not touch the phone paired again under the same id.
+#[test]
+fn a_push_handle_change_belongs_to_its_enrollment() {
+    let t = tempfile::tempdir().unwrap();
+    let ctx = Ctx::open_at(&t.path().join("data"), &t.path().join("home")).unwrap();
+    let old = enrolled(&ctx, false);
+    let again = PhoneIdentity::from_secrets(&old.id, &[5; 32], &[6; 32]).unwrap();
+    crate::phones::add(&ctx, &pairing::PhonePayload::of(&again, "P", "ios").unwrap(), Grants::default()).unwrap();
+    assert!(crate::phones::set_push(&ctx, &old, Some("stale")).is_err());
+    let handle: Option<String> = ctx.db.read(|c| Ok(c.query_row("select relay_handle from phones where phone_id = ?", [&old.id], |r| r.get(0))?)).unwrap();
+    assert_eq!(handle, None);
+    crate::phones::set_push(&ctx, &crate::phones::get(&ctx, &old.id).unwrap().unwrap(), Some("h")).unwrap();
 }

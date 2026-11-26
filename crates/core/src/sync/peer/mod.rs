@@ -24,6 +24,19 @@ pub use client::pull_all;
 use crate::util::now_ms;
 use crate::{journal, Ctx};
 
+#[cfg(test)]
+type Seam = Option<Box<dyn FnOnce(&Runtime)>>;
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs where a phone pairing decision has looked and not yet acted (with `phone` held, so nothing else
+    /// can change the attempt there).
+    pub(crate) static PHONE_SEAM: std::cell::RefCell<Seam> = std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+fn phone_seam(rt: &Runtime) { if let Some(f) = PHONE_SEAM.with(|s| s.borrow_mut().take()) { f(rt); } }
+
 /// Told of what happens (`computers-pairing` with `{ok, peer?, error?}`, `phones-pairing` with the phone pairing's
 /// status); the app forwards it to the window.
 pub type OnEvent = Arc<dyn Fn(&str, Value) + Send + Sync>;
@@ -35,6 +48,8 @@ pub struct Runtime {
     mdns: Mutex<Option<mdns::Mdns>>,
     host: Mutex<Option<pairing::Host>>,
     phone: Mutex<Option<pairing::PhoneHost>>,
+    /// The phone pairing port mDNS announces now; only changed while `phone` is held, so it follows the attempt shown.
+    phone_announced: Mutex<Option<u16>>,
     on_event: OnEvent,
 }
 
@@ -42,7 +57,7 @@ impl Runtime {
     /// `bind`: every interface for the app and the CLI, loopback in tests.
     pub fn new(bind: IpAddr, on_event: OnEvent) -> Result<Runtime> {
         let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build()?;
-        Ok(Runtime { rt, bind, listener: Mutex::new(None), mdns: Mutex::new(None), host: Mutex::new(None), phone: Mutex::new(None), on_event })
+        Ok(Runtime { rt, bind, listener: Mutex::new(None), mdns: Mutex::new(None), host: Mutex::new(None), phone: Mutex::new(None), phone_announced: Mutex::new(None), on_event })
     }
 
     /// The listener and mDNS follow the setting. Returns the context to go on with: a fresh one when the port
@@ -80,8 +95,7 @@ impl Runtime {
         let done = self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result().is_some() || h.expires_at < now_ms()).unwrap_or(false);
         if done { self.pair_cancel_inner(); }
         // a phone pairing that ended keeps its status for the window, but is no longer announced
-        let phone_done = self.phone_pair_status().is_some_and(|v| !matches!(v["state"].as_str(), Some("waiting" | "confirm")));
-        if phone_done { self.advertise_phone(None); }
+        self.phone_tick();
         match self.ensure(ctx) {
             Ok(ctx) if ctx.settings.direct_connection => {
                 if let Err(e) = journal::publish(&ctx) { crate::log::warn(&format!("journal: {e:#}")); }
@@ -139,8 +153,20 @@ impl Runtime {
     /// The pairing shown now: `{ok, peer?, error?}` once it ended, `null` while it waits; `None` without one.
     pub fn pair_result(&self) -> Option<Option<Value>> { self.host.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|h| h.result()) }
 
-    fn advertise_phone(&self, port: Option<u16>) {
+    /// Announce the port of the phone pairing shown, or none; the caller holds `phone`, so the port is the attempt's.
+    fn advertise_phone(&self, _shown: &Option<pairing::PhoneHost>, port: Option<u16>) {
+        *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()) = port;
         if let Some(m) = self.mdns.lock().unwrap_or_else(|e| e.into_inner()).as_mut() { let _ = m.advertise_phone(port); }
+    }
+
+    /// A phone pairing that ended keeps its status for the window, but is no longer announced: decided under the same
+    /// lock as a new attempt's announcement, so it never clears the next attempt's port.
+    fn phone_tick(&self) {
+        let shown = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        let done = shown.as_ref().is_some_and(|h| !matches!(h.status()["state"].as_str(), Some("waiting" | "confirm")));
+        #[cfg(test)]
+        phone_seam(self);
+        if done && self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()).is_some() { self.advertise_phone(&shown, None); }
     }
 
     /// Show a code to a phone for two minutes: `{attempt, code, expires_at, host_hint, port, qr, state}`; the QR code
@@ -148,12 +174,27 @@ impl Runtime {
     /// port for a phone given the six digits. `host_name` as for computers.
     pub fn phone_pair_start(&self, ctx: &Arc<Ctx>, host_name: Option<&str>) -> Result<Value> {
         let ctx = self.ready(ctx)?;
-        self.phone_cancel_inner();
-        let h = pairing::start_phone(ctx, self.rt.handle(), self.bind, host_name, self.on_event.clone())?;
-        self.advertise_phone(Some(h.port));
-        let v = h.status();
-        *self.phone.lock().unwrap_or_else(|e| e.into_inner()) = Some(h);
+        let mut shown = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        self.phone_start_in(&mut shown, ctx, host_name)
+    }
+
+    fn phone_start_in(&self, shown: &mut std::sync::MutexGuard<'_, Option<pairing::PhoneHost>>, ctx: Arc<Ctx>, host_name: Option<&str>) -> Result<Value> {
+        if let Some(old) = shown.take() { old.cancel(); }
+        let h = match pairing::start_phone(ctx, self.rt.handle(), self.bind, host_name, self.on_event.clone()) {
+            Ok(h) => h,
+            Err(e) => { self.advertise_phone(shown, None); return Err(e); }
+        };
+        let (v, port) = (h.status(), h.port);
+        **shown = Some(h);
+        self.advertise_phone(shown, Some(port));
         Ok(v)
+    }
+
+    /// Tests: start a phone pairing now if nothing holds the pairing shown; its status, or None when it was held.
+    #[cfg(test)]
+    pub(crate) fn try_phone_pair_start(&self, ctx: &Arc<Ctx>) -> Option<Value> {
+        let mut shown = self.phone.try_lock().ok()?;
+        self.phone_start_in(&mut shown, ctx.clone(), Some("127.0.0.1")).ok()
     }
 
     /// The phone pairing shown: `{attempt, state: waiting|confirm|paired|refused|expired|failed, phone?: {name,
@@ -188,17 +229,28 @@ impl Runtime {
     pub(crate) fn with_phone_host<T>(&self, f: impl FnOnce(&pairing::PhoneHost) -> T) -> Option<T> { self.phone.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(f) }
 
     fn phone_cancel_inner(&self) {
-        if let Some(h) = self.phone.lock().unwrap_or_else(|e| e.into_inner()).take() { h.cancel(); }
-        self.advertise_phone(None);
+        let mut shown = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(h) = shown.take() { h.cancel(); }
+        self.advertise_phone(&shown, None);
     }
+
+    /// Tests: the phone pairing port announced now.
+    #[cfg(test)]
+    pub(crate) fn phone_announced(&self) -> Option<u16> { *self.phone_announced.lock().unwrap_or_else(|e| e.into_inner()) }
+
+    /// Tests: what the periodic tick does for the phone pairing.
+    #[cfg(test)]
+    pub(crate) fn tick_phone(&self) { self.phone_tick(); }
 
     /// Stop showing the code of pairing `attempt`: answers null, as `phone_pair_status` has nothing to show after.
     pub fn phone_pair_cancel(&self, attempt: &str) -> Result<Value> {
-        {
-            let h = self.phone.lock().unwrap_or_else(|e| e.into_inner());
-            Self::shown(&h, attempt)?;
-        }
-        self.phone_cancel_inner();
+        // compared and taken under one lock: a cancel for an attempt never stops the one that replaced it
+        let mut shown = self.phone.lock().unwrap_or_else(|e| e.into_inner());
+        Self::shown(&shown, attempt)?;
+        #[cfg(test)]
+        phone_seam(self);
+        if let Some(h) = shown.take() { h.cancel(); }
+        self.advertise_phone(&shown, None);
         Ok(Value::Null)
     }
 }

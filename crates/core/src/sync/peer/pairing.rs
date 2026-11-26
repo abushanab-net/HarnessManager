@@ -74,13 +74,16 @@ pub fn store_peer(ctx: &Ctx, p: &Value, address: &str) -> Result<Value> {
     let port: u16 = p["address_hint"].as_str().and_then(|a| a.rsplit_once(':')).and_then(|(_, p)| p.parse().ok()).unwrap_or(0);
     let Some(der) = p["cert_pem"].as_str().and_then(|c| identity::pem_to_der(c).ok()) else { bail!("the payload has no certificate") };
     ctx.db.with(|c| {
-        // the listener tells a computer from a phone by the certificate alone
+        // the listener tells a computer from a phone by the certificate alone: checked and stored in one transaction,
+        // so a phone enrolled from another connection cannot come between
+        let c = c.transaction()?;
         let phones: Vec<String> = c.prepare("select cert_pem from phones where revoked_at is null")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         if phones.iter().any(|pem| identity::pem_to_der(pem).ok().as_deref() == Some(der.as_slice())) { bail!("that certificate already belongs to a paired phone"); }
         c.execute("insert into peers(device_id, name, os, app_version, incarnation, cert_pem, pubkey, paired_at, address, port, transport) values(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'direct')
             on conflict(device_id) do update set name=?2, os=?3, app_version=?4, incarnation=?5, cert_pem=?6, pubkey=?7, paired_at=?8, address=?9, port=?10, transport='direct'",
             params![id, p["name"].as_str().unwrap_or(""), p["os"].as_str().unwrap_or(""), p["app_version"].as_str().unwrap_or(""), p["incarnation"].as_str().unwrap_or(""),
                 p["cert_pem"].as_str().unwrap_or(""), p["pubkey"].as_str().unwrap_or(""), now_ms(), address, port])?;
+        c.commit()?;
         Ok(())
     })?;
     crate::log::info(&format!("computers: paired with {} ({id})", p["name"].as_str().unwrap_or("")));

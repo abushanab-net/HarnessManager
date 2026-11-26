@@ -18,7 +18,8 @@ use crate::util::now_ms;
 use crate::{hooks, Ctx};
 
 pub(super) async fn events(ws: WebSocketUpgrade, State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> Response {
-    ws.on_upgrade(move |socket| run(socket, ctx, p))
+    // the phone only answers pings and closes: nothing it sends needs more than a small frame
+    ws.max_message_size(16 * 1024).max_frame_size(16 * 1024).on_upgrade(move |socket| run(socket, ctx, p))
 }
 
 /// What the phone is told about: the open requests, each run's state, a stamp of usage and limits; None once the

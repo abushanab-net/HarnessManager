@@ -129,7 +129,7 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
     };
     if let Some((state, reason)) = state_of(v) {
         c.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
-            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
+            version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6, stopping = null where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
     } else if closed > 0 {
         c.execute("update run_state set version = version + 1 where run = ?", [run])?;
     }
@@ -145,9 +145,12 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
     let (id, created) = (crate::util::uuid4(), now_ms());
     let expires = created + wait.as_millis() as i64;
     let deadline = Instant::now() + wait;
-    c.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started) values(?,?,?,?,?,?,?,?,?,?,?)",
+    // the request and the version it moves come together: nobody sees the request beside the version before it
+    let tx = c.unchecked_transaction()?;
+    tx.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started) values(?,?,?,?,?,?,?,?,?,?,?)",
         params![id, run, s("session_id"), kind, s("tool_name"), what, input, created, expires, pid, started])?;
-    c.execute("update run_state set version = version + 1 where run = ?", [run])?;
+    tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
+    tx.commit()?;
     loop {
         // a busy database is waited out: leaving would strand an answer the app then reports as given
         let row: rusqlite::Result<Option<(String, String)>> = c.query_row("select state, answer from run_ask where id = ?", [&id], |r| Ok((r.get(0)?, r.get(1)?))).optional();
@@ -192,7 +195,11 @@ fn hook_is_live(pid: u32, started: i64) -> bool {
 /// The app's answer to request `id`: `{"behavior": "allow" | "deny"}` for a permission, `{"answers": {question:
 /// [label, ...]}}` for a question, with one of each question's own options (several where it allows several).
 /// False when the request is no longer open (the terminal answered, or it expired): the answer is dropped.
-pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
+pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> { answer_guarded(ctx, id, a, None) }
+
+/// `answer`, for a phone: the run must still be at the version its action claimed, and the action's deadline not
+/// passed, when the answer is written.
+pub fn answer_guarded(ctx: &Ctx, id: &str, a: &Value, guard: Option<&Guard>) -> Result<bool> {
     let row: Option<(String, String, u32, i64)> = ctx.db.read(|c| Ok(c.query_row(
         "select kind, input, hook_pid, hook_started from run_ask where id = ?1 and state = 'open' and expires > ?2",
         params![id, now_ms()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).optional()?))?;
@@ -216,19 +223,84 @@ pub fn answer(ctx: &Ctx, id: &str, a: &Value) -> Result<bool> {
     };
     ctx.db.with(|c| {
         if !hook_is_live(pid, started) { return Ok(false); }
-        Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3", params![id, answer, now_ms()])? == 1)
+        // a phone's answer also names the run version it claimed and its own deadline: both hold in the same write
+        let (version, deadline) = guard.map(|g| (Some(g.version), g.deadline)).unwrap_or((None, i64::MAX));
+        Ok(c.execute("update run_ask set state = 'answered', answer = ?2 where id = ?1 and state = 'open' and expires > ?3 and ?3 < ?5
+            and (?4 is null or ?4 = (select version from run_state where run_state.run = run_ask.run))", params![id, answer, now_ms(), version, deadline])? == 1)
     })
 }
 
-/// Stop claims the turn it interrupts, from the desktop and from a phone alike: the run goes to `done` in the same
-/// write that finds it working or waiting (or not yet reported), so a second Stop is refused instead of pressing
-/// Ctrl+C again, which would exit the tool.
-pub fn claim_stop(c: &Connection, run: &str) -> Result<()> {
-    let n = c.execute("update run_state set state = 'done', reason = '', ts = ?2, version = version + 1 where (run = ?1 or session_id = ?1) and state in ('working', 'waiting', '')",
-        params![run, now_ms()])?;
-    // no such run: nothing to claim, and the terminal says it has none
-    let known = c.query_row("select count(*) from run_state where run = ?1 or session_id = ?1", [run], |r| r.get::<_, i64>(0))? > 0;
-    if n == 0 && known { bail!("Nothing to stop: the session is at its prompt"); }
+/// What a phone's action carries to where its effect is committed (the hook's write, the terminal's relay): the run
+/// version its claim left, its deadline (ms), and the enrollment it came from (`phone_id`, `generation`).
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
+pub struct Guard {
+    pub version: i64,
+    pub deadline: i64,
+    pub phone: Option<(String, String)>,
+}
+
+/// The guard still holds for `run`, just before input reaches it: the deadline is ahead, the run is at the claimed
+/// version, the phone still has Control, and for a reply no request waits. Err: why not.
+pub fn guard_holds(c: &Connection, run: &str, g: &Guard, reply: bool) -> std::result::Result<(), String> {
+    let now = now_ms();
+    if now >= g.deadline { return Err("the action's deadline passed".into()); }
+    let row: Option<(i64, String)> = c.query_row("select version, state from run_state where run = ?", [run], |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(|e| e.to_string())?;
+    let Some((version, state)) = row else { return Err("the session is gone".into()) };
+    if version != g.version { return Err("the session changed".into()); }
+    if reply {
+        let ask = c.query_row("select count(*) from run_ask where run = ?1 and state = 'open' and expires > ?2", params![run, now], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())?;
+        if state == "waiting" || ask > 0 { return Err("a request waits for an answer".into()); }
+    }
+    if let Some((phone, generation)) = &g.phone {
+        let row: Option<(String, String, Option<i64>)> = c.query_row("select coalesce(grants, ''), generation, revoked_at from phones where phone_id = ?", [phone], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional().map_err(|e| e.to_string())?;
+        let control = row.is_some_and(|(g, gen, revoked)| revoked.is_none() && &gen == generation && serde_json::from_str::<Value>(&g).is_ok_and(|g| g["control"] == true));
+        if !control { return Err("Control is no longer granted to this phone".into()); }
+    }
+    Ok(())
+}
+
+/// The one live run `run` names: a run id, or a session id that exactly one live run reports. None when no row names
+/// it at all (the terminal then says it has no owned terminal).
+pub fn live_run(c: &Connection, run: &str) -> Result<Option<String>> {
+    let rows: Vec<(String, u32, i64)> = c.prepare("select run, pid, started from run_state where run = ?1 or (?1 <> '' and session_id = ?1 and not exists (select 1 from run_state where run = ?1))")?
+        .query_map([run], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
+    if rows.is_empty() { return Ok(None); }
+    let live: Vec<String> = rows.into_iter().filter(|(_, pid, started)| crate::procs::start_ms(*pid).is_some_and(|s| *started == 0 || s == *started)).map(|(r, _, _)| r).collect();
+    match live.as_slice() {
+        [one] => Ok(Some(one.clone())),
+        [] => bail!("run '{run}' is not running"),
+        _ => bail!("session '{run}' has several live runs. Use the run ID"),
+    }
+}
+
+/// How long a Stop holds its turn when its delivery is not known: the next hook event releases it sooner.
+const STOP_HELD_MS: i64 = 60_000;
+
+/// Stop reserves the turn it interrupts, from the desktop and from a phone alike: one live run is resolved, and in the
+/// same write that finds it working or waiting (or not yet reported) and not already being stopped, the run is marked
+/// as being stopped. Its state is left alone until the Ctrl+C is delivered (`stopped`); a Stop that surely did not
+/// reach the terminal releases it (`release_stop`). A second Stop is refused instead of pressing Ctrl+C again, which
+/// would exit the tool. With `expected` (a phone's), the run must also still be at that version. Answers the run and
+/// its version after; None when no row names `run`.
+pub fn claim_stop(c: &Connection, run: &str, expected: Option<i64>) -> Result<Option<(String, i64)>> {
+    let Some(run) = live_run(c, run)? else { return Ok(None) };
+    let now = now_ms();
+    let n = c.execute("update run_state set stopping = ?2, version = version + 1 where run = ?1 and state in ('working', 'waiting', '')
+        and (stopping is null or stopping < ?3) and (?4 is null or version = ?4)", params![run, now, now - STOP_HELD_MS, expected])?;
+    if n == 0 {
+        let (stopping, version): (Option<i64>, i64) = c.query_row("select stopping, version from run_state where run = ?", [&run], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        if expected.is_some_and(|v| v != version) { bail!("the session changed since this was shown; look again"); }
+        if stopping.is_some_and(|t| t >= now - STOP_HELD_MS) { bail!("a Stop is already on its way to this session"); }
+        bail!("Nothing to stop: the session is at its prompt");
+    }
+    let version = c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?;
+    Ok(Some((run, version)))
+}
+
+/// A Stop that surely did not reach the terminal gives its turn back.
+pub fn release_stop(c: &Connection, run: &str) -> Result<()> {
+    c.execute("update run_state set stopping = null where run = ?", [run])?;
     Ok(())
 }
 
@@ -272,6 +344,8 @@ pub struct Run {
     pub ts: i64,
     /// Moves with every change of its state or its requests: what a phone's action must name (`companion::actions`).
     pub version: i64,
+    /// A Stop is on its way (`claim_stop`): no other Stop, and no reply, until it lands or is released.
+    pub stopping: bool,
     /// It owns its terminal (`own_terminal`), so `terminal::reply` and `terminal::stop` reach it.
     pub terminal: bool,
     /// The request its hook holds open for an answer, if any.
@@ -297,9 +371,9 @@ pub struct Ask {
 /// that is gone (its window was closed, so it could not remove its row) are deleted here.
 pub fn runs(ctx: &Ctx) -> Result<Vec<Run>> {
     let rows: Vec<(Run, i64)> = ctx.db.read(|c| {
-        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version from run_state order by ts")?;
+        let mut st = c.prepare("select run, pid, hwnd, profile, harness, session_id, cwd, state, reason, ts, started, terminal_port is not null, version, stopping is not null from run_state order by ts")?;
         let mut v: Vec<(Run, i64)> = st.query_map([], |r| Ok((Run { run: r.get(0)?, pid: r.get(1)?, hwnd: r.get(2)?, profile: r.get(3)?, harness: r.get(4)?, session_id: r.get(5)?,
-            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
+            cwd: r.get(6)?, state: r.get(7)?, reason: r.get(8)?, ts: r.get(9)?, version: r.get(12)?, stopping: r.get(13)?, terminal: r.get(11)?, ask: None }, r.get(10)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut st = c.prepare("select run, id, kind, tool, what, input, created, expires, hook_pid, hook_started from run_ask where state = 'open' and expires > ? order by created")?;
         let asks = st.query_map([now_ms()], |r| Ok((r.get::<_, String>(0)?, Ask { id: r.get(1)?, kind: r.get(2)?, tool: r.get(3)?, what: r.get(4)?,
             input: serde_json::from_str(&r.get::<_, String>(5)?).unwrap_or_default(), created: r.get(6)?, expires: r.get(7)? }, r.get::<_, u32>(8)?, r.get::<_, i64>(9)?)))?;
@@ -587,6 +661,23 @@ mod tests {
         let p = Profile { name: "work".into(), label: None, harness: "claude".into(), kind: crate::registry::Kind::Subscription, email: None, main: true, base_url: None, model: None, route: None, daily_cap_usd: None, intro: None, remote_control: false, created_at: 0 };
         start_run(&ctx, &p, &mut env);
         assert!(env.contains(&(QUESTION_VAR.to_string(), crate::phones::QUESTION_WITHOUT.to_string())), "{env:?}");
+    }
+
+    /// #3: a phone's answer is written only while the run is at the version its action claimed and before the
+    /// action's deadline, in the same write that takes the open request.
+    #[test]
+    fn a_guarded_answer_holds_only_at_the_claimed_version_and_before_the_deadline() {
+        let (_d, ctx, run) = live_run();
+        let (h, a) = hold(&ctx, &run, BASH, 20_000);
+        let v: i64 = ctx.db.read(|c| Ok(c.query_row("select version from run_state where run = ?", [&run], |r| r.get(0))?)).unwrap();
+        let allow = json!({"behavior": "allow"});
+        let g = |version: i64, deadline: i64| Guard { version, deadline, phone: None };
+        // the hook lets a request go once the app's heartbeat is 3 s old: a loaded test run must not get there first
+        heartbeat(&ctx).unwrap();
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v - 1, now_ms() + 60_000))).unwrap(), "another version");
+        assert!(!answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() - 1))).unwrap(), "past the deadline");
+        assert!(answer_guarded(&ctx, &a.id, &allow, Some(&g(v, now_ms() + 60_000))).unwrap());
+        assert!(h.join().unwrap().is_some());
     }
 
     #[test]
