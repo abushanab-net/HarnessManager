@@ -150,10 +150,8 @@ POST /c1/actions
   checked once more, judged when that write gets the database.
 - **A request belongs to the turn that opened it.** The hook writes the request in the same transaction that records
   its permission or question event, bound to the run's turn (a submitted prompt starts a new one); a phone's answer
-  to a request from another turn is refused. An event that ends what came before (a prompt, a finished tool, the
-  turn's end, the session's end, the idle prompt) records when it settled (`run_state.settled_at`), and a hook whose
-  process started before that does not open its request: a delayed hook cannot recreate a settled one. Where the
-  answer is written, the request must still be open and its hook live, the run at the claimed version and turn, both
+  to a request from another turn is refused. A hook opening its request keeps 1.13.2's order: in its event's
+  transaction it closes the run's open requests and inserts its own. Where the answer is written, the request must still be open and its hook live, the run at the claimed version and turn, both
   deadlines unpassed, the request less than 300 s old, and the enrollment current with Control. A
   hook that cannot record its event fails as it always did; the hook path does no file work beyond 1.13.2's (see the
   release criteria for what a lost event leaves open). The person at the computer answers throughout.
@@ -165,8 +163,10 @@ POST /c1/actions
   (`QUESTION_SECONDS` becomes a function of the phones table); the hook entry's timeout is then 70 s, 10 s beyond the
   window for the hook's start and for printing an answer taken at the window's end, and 15 s without one, as before.
   The desktop's permission wait is `request_seconds` (up to 15 min) and its hook entry 30 s more, as in 1.13.2; a
-  phone may answer only within 300 s of the request's opening (refused at the claim and at the write, and the expiry
-  the phone is shown is the earlier of the two).
+  phone may answer only within 300 s of the request's opening (refused at the claim and at the write). Every phone
+  view shows that window: the request list, the `needs` event and the overview give `expires` as the earlier of the
+  request's own expiry and 300 s after it opened; past it, a request is listed with `at_computer` ("Answer it at the
+  computer: ...") and counted in the overview's `at_computer`, not in `needs_you` or the event's `count`.
 
 ## Contract: the hub, for phones
 
@@ -238,14 +238,22 @@ answer path and taught these inputs:
 - **Zero stale approvals** across: the terminal answering first, two phones at once, expiry during unlock, Wi-Fi to
   cellular, a receipt lost after an answer. (WP-M8 adds zero repeated terminal inputs: a receipt lost after a reply,
   two Stop taps.)
-- **Known residual, accepted for wave 1:** if the terminal answers first and that hook event cannot be saved (SQLite
-  busy past the hook's 2 s timeout), the request stays open in hm.db and a phone's answer to it may be accepted.
-  Claude Code acts only on the first decision for a tool call, so the late one changes nothing (a spike is verifying
-  this now); the desktop app behaves the same way in 1.13.2. Besides a failed save, a terminal approval reaches
-  hm.db only when the tool finishes (its `PostToolUse`): while an approved tool is still running, the request still
-  looks open and a phone's answer to it may be accepted. Claude Code acts only on the first decision, so that answer
-  changes nothing either. The receipt says so in both cases: "Sent to the session. If the terminal answered first,
-  nothing changed."
+- **Known residual, accepted for wave 1: a phone's answer to a request the terminal already settled.** Claude Code
+  2.1.332 acts only on the first decision for a tool call, in both directions; a later one is read and ignored (the
+  real-Claude spike, `spikes/mobile-late-decision/README.md` on `mobile/spikes`, WP-M0). hrm learns of a terminal
+  answer only from a later hook event, so in these windows the request still looks open and a phone's answer to it
+  may be accepted:
+  - after a terminal **Yes**, until the tool's `PostToolUse`: as long as the command runs;
+  - after a terminal **No**, about 10–14 s, until Claude Code ends the waiting hook; no event comes at all, and then
+    the hook is no longer live and answers are refused;
+  - when the hook event that would close it cannot be saved (SQLite busy past the hook's 2 s timeout);
+  - when a hook delayed before it records reopens a request a later event already superseded.
+
+  In every case the late answer changes nothing in the session; only its receipt is wrong. The receipt says so: "Sent
+  to the session. If the terminal answered first, nothing changed." The desktop app behaves the same way in 1.13.2.
+  **Later work:** hrm owns the terminal of a session it launched, so it could read the prompt's state from the screen
+  (the prompt gone means the terminal answered) and close the request at once as already handled; the spike suggests
+  it and did not build it.
 - A summaries-only phone gets 403 on transcripts, actions and every `/v1` route; two computers with the same account
   and session names stay apart.
 - A revoked phone loses its connection, its hub token and its push handle within one minute while the computer is on.
