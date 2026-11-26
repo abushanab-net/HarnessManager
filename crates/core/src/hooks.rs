@@ -105,9 +105,7 @@ pub fn hook(input: &str) -> Result<Option<String>> {
     let c = hook_connection(&crate::ctx::data_dir().join("hm.db"))?;
     let secs = std::env::var(WAIT_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(0u32);
     let question = std::env::var(QUESTION_VAR).ok().and_then(|s| s.parse().ok()).unwrap_or(crate::phones::QUESTION_WITHOUT).min(crate::phones::QUESTION_WITH_PHONE);
-    // the hook began when its process did: a pause before it records cannot make it look newer than it is
-    let began = crate::procs::start_ms(std::process::id()).unwrap_or_else(now_ms);
-    Ok(handle_asking(&c, &run, &v, Duration::from_secs(secs.into()), Duration::from_secs(question.into()), began)?.map(|d| d.to_string()))
+    Ok(handle_asking(&c, &run, &v, Duration::from_secs(secs.into()), Duration::from_secs(question.into()))?.map(|d| d.to_string()))
 }
 
 /// The database as `hrm hook` writes it. An `hrm run` started before an update may still run, and its hooks run the
@@ -128,20 +126,11 @@ struct Opening<'a> {
     expires: i64,
     pid: u32,
     started: i64,
-    /// When the hook began (its process start): an opening from before the run's latest settlement is stale.
-    began: i64,
 }
 
-/// What a process start can be compared at: Windows gives milliseconds, the other systems whole seconds.
-/// shortcut: on those an opening begun in the same second as a settlement is let in; read finer start times there if
-/// they ever matter.
-const START_GRAIN_MS: i64 = if cfg!(windows) { 1 } else { 1000 };
-
 /// What an event says about its session, written in one transaction with the request it opens (bound to the run's
-/// current turn), so no later event can come between the two. An event that ends what came before (a prompt, a
-/// finished tool, the turn's end, the session's end, the idle prompt) records when it settled; a request whose hook
-/// began before that is not opened: its prompt was already answered, or its turn is over. Answers whether it opened.
-fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>) -> rusqlite::Result<bool> {
+/// current turn), so no later event can come between the two.
+fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>) -> rusqlite::Result<()> {
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let input = v["tool_input"].to_string();
     let event = v["hook_event_name"].as_str().unwrap_or("");
@@ -155,32 +144,25 @@ fn record(c: &Connection, run: &str, v: &Value, opening: Option<&Opening>) -> ru
         "PostToolUse" => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open' and tool = ?2 and input = ?3", params![run, s("tool_name"), input])?,
         _ => tx.execute("update run_ask set state = 'closed' where run = ?1 and state = 'open'", [run])?,
     };
-    let quiet = event == "Notification" && v["notification_type"] != "idle_prompt";
-    if kind_of(v).is_none() && !quiet {
-        tx.execute("update run_state set settled_at = ?2 where run = ?1", params![run, now_ms()])?;
-    }
     if let Some((state, reason)) = state_of(v) {
         tx.execute("update run_state set session_id = case when ?2 = '' then session_id else ?2 end, cwd = case when ?3 = '' then cwd else ?3 end,
             version = version + (state <> ?4 or ?7 > 0), state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms(), closed as i64])?;
     } else if closed > 0 {
         tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
     }
-    let mut opened = false;
     if let Some(o) = opening {
         // the request and the version it moves come together: nobody sees the request beside the version before it
-        opened = tx.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started, turn)
-            select ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, turn from run_state where run = ?2 and settled_at / ?13 <= ?12 / ?13",
-            params![o.id, run, s("session_id"), o.kind, s("tool_name"), o.what, input, o.created, o.expires, o.pid, o.started, o.began, START_GRAIN_MS])? == 1;
-        if opened { tx.execute("update run_state set version = version + 1 where run = ?", [run])?; }
+        tx.execute("insert into run_ask(id, run, session_id, kind, tool, what, input, created, expires, hook_pid, hook_started, turn)
+            values(?,?,?,?,?,?,?,?,?,?,?, (select turn from run_state where run = ?2))",
+            params![o.id, run, s("session_id"), o.kind, s("tool_name"), o.what, input, o.created, o.expires, o.pid, o.started])?;
+        tx.execute("update run_state set version = version + 1 where run = ?", [run])?;
     }
-    tx.commit()?;
-    Ok(opened)
+    tx.commit()
 }
 
 /// `handle_asking` with the question window of a computer without a phone.
-/// The hook begins now.
 pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Option<Value>> {
-    handle_asking(c, run, v, wait, Duration::from_secs(crate::phones::QUESTION_WITHOUT.into()), now_ms())
+    handle_asking(c, run, v, wait, Duration::from_secs(crate::phones::QUESTION_WITHOUT.into()))
 }
 
 /// The event for run `run`: later events close what the terminal answered, the state is recorded, and a request
@@ -188,7 +170,7 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
 /// no decision, the terminal prompt stands. The run's `version` moves with every change of its state or of its
 /// requests, so a phone's action names the state it was shown. An event that cannot be written fails as it always
 /// did (see the release criteria in docs/plans/mobile/PLAN.md for what that leaves open).
-pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration, began: i64) -> Result<Option<Value>> {
+pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, question: Duration) -> Result<Option<Value>> {
     let kind = kind_of(v);
     let wait = if kind == Some("question") { wait.min(question) } else { wait };
     // whether the event holds a request is decided first, so the request is written with the event: only for a
@@ -201,13 +183,13 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
                     v["tool_input"]["command"].as_str().or(v["tool_input"]["file_path"].as_str()).unwrap_or("").to_string()
                 };
                 let created = now_ms();
-                Opening { id: crate::util::uuid4(), kind, what, created, expires: created + wait.as_millis() as i64, pid, started, began }
+                Opening { id: crate::util::uuid4(), kind, what, created, expires: created + wait.as_millis() as i64, pid, started }
             })
         }
         _ => None,
     };
-    let opened = record(c, run, v, opening.as_ref())?;
-    let Some(Opening { id, kind, expires, .. }) = opening.filter(|_| opened) else { return Ok(None) };
+    record(c, run, v, opening.as_ref())?;
+    let Some(Opening { id, kind, expires, .. }) = opening else { return Ok(None) };
     let deadline = Instant::now() + wait;
     loop {
         // a busy database is waited out: leaving would strand an answer the app then reports as given
@@ -646,7 +628,7 @@ mod tests {
         let ev: Value = json!({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Go?", "options": [{"label": "Yes"}]}]}});
         heartbeat(&ctx).unwrap();
         let (c, run2, ev2) = (conn(&ctx), run.clone(), ev.clone());
-        let h = std::thread::spawn(move || handle_asking(&c, &run2, &ev2, Duration::from_secs(300), Duration::from_secs(crate::phones::QUESTION_WITH_PHONE.into()), now_ms()).unwrap());
+        let h = std::thread::spawn(move || handle_asking(&c, &run2, &ev2, Duration::from_secs(300), Duration::from_secs(crate::phones::QUESTION_WITH_PHONE.into())).unwrap());
         let end = std::time::Instant::now() + Duration::from_secs(5);
         let a = loop {
             if let Some(a) = runs(&ctx).unwrap().into_iter().find_map(|r| r.ask) { break a; }
@@ -762,38 +744,6 @@ mod tests {
         let g = Guard { version: version_of(&ctx, &run), deadline: now_ms() + 60_000, phone: Some(phone) };
         assert!(!answer_guarded(&ctx, &a.id, &json!({"behavior": "allow"}), Some(&g)).unwrap(), "another turn's request");
         assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap(), "the person at the computer still can");
-        assert!(h.join().unwrap().is_some());
-    }
-
-    /// Final check, finding 2: a hook that began before a settlement does not open its request after it. The order:
-    /// the permission hook starts, the turn's Stop (or the finished tool) commits, then the hook records.
-    #[test]
-    fn a_hook_that_began_before_a_settlement_does_not_reopen_its_request() {
-        let (_d, ctx, run) = live_run();
-        heartbeat(&ctx).unwrap();
-        let c = conn(&ctx);
-        let bash: Value = serde_json::from_str(BASH).unwrap();
-        for settling in [json!({"hook_event_name": "Stop"}), json!({"hook_event_name": "UserPromptSubmit"}), json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "npm test"}})] {
-            let began = now_ms() - 5000; // the hook started, then paused
-            handle(&c, &run, &settling, Duration::ZERO).unwrap();
-            let t = Instant::now();
-            assert_eq!(handle_asking(&c, &run, &bash, Duration::from_secs(20), Duration::from_secs(15), began).unwrap(), None, "{settling}");
-            assert!(t.elapsed() < Duration::from_secs(2), "nothing to wait for");
-            assert!(runs(&ctx).unwrap()[0].ask.is_none(), "no request after {settling}");
-            let opened: i64 = c.query_row("select count(*) from run_ask", [], |r| r.get(0)).unwrap();
-            assert_eq!(opened, 0);
-        }
-        // a notification that the prompt shows settles nothing; a hook begun after the settlement opens as usual
-        handle(&c, &run, &json!({"hook_event_name": "Notification", "notification_type": "permission_prompt"}), Duration::ZERO).unwrap();
-        let (data, run2) = (ctx.data.clone(), run.clone());
-        let h = std::thread::spawn(move || handle_asking(&hook_connection(&data.join("hm.db")).unwrap(), &run2, &serde_json::from_str(BASH).unwrap(), Duration::from_secs(20), Duration::from_secs(15), now_ms()).unwrap());
-        let end = Instant::now() + Duration::from_secs(5);
-        let a = loop {
-            if let Some(a) = runs(&ctx).unwrap()[0].ask.clone() { break a; }
-            assert!(Instant::now() < end, "the request never showed");
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).unwrap());
         assert!(h.join().unwrap().is_some());
     }
 

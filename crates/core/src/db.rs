@@ -242,7 +242,7 @@ pub(crate) fn add_column(conn: &Connection, table: &str, col: &str, ty: &str) ->
 /// `hrm run` started before an update keeps running, and its hooks run the updated `hrm` before anything migrates.
 pub(crate) fn hook_columns(conn: &Connection) -> rusqlite::Result<()> {
     // the newest column is added last: when it is there, so are the others (one probe per hook, not eight)
-    if conn.prepare("select 1 from pragma_table_info('run_state') where name = 'settled_at'")?.exists([])? { return Ok(()); }
+    if conn.prepare("select 1 from pragma_table_info('run_ask') where name = 'turn'")?.exists([])? { return Ok(()); }
     for (table, col, ty) in [
         ("run_state", "terminal_port", "integer"),
         ("run_state", "terminal_token", "blob"),
@@ -253,8 +253,6 @@ pub(crate) fn hook_columns(conn: &Connection) -> rusqlite::Result<()> {
         // the turn a session is in (a submitted prompt starts one), and the turn a request was opened in
         ("run_state", "turn", "integer not null default 0"),
         ("run_ask", "turn", "integer not null default 0"),
-        // when the run's latest settling event committed: an opening whose hook began before it is stale
-        ("run_state", "settled_at", "integer not null default 0"),
     ] {
         if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
             add_column(conn, table, col, ty)?;
