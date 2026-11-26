@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype · Calibre · Harness Manager mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header data-topbar></header>
+<main class="page">
+  <section class="sect proto">
+    <div class="proto-l">
+      <h2>Prototype</h2>
+      <p class="sub">Pick a journey, then tap through it in the phone. Every tab, back button, row and card that leads somewhere works, so you can also wander off the path. Countdowns run for real: the question goes back to the terminal after 41 s, as it would.</p>
+      <div class="seg" role="group" aria-label="Phone theme"><button data-proto-theme="light" aria-pressed="true">Light phone</button><button data-proto-theme="dark" aria-pressed="false">Dark phone</button></div>
+      <div class="journeys" data-journeys></div>
+    </div>
+    <div class="proto-r"><div class="device"><div class="phone" data-proto data-theme="light" data-screen="welcome"></div></div>
+      <p class="cap" style="text-align:center;margin-top:12px">Back: the ‹ in the bar. Tabs: the bar at the bottom.</p></div>
+  </section>
+
+</main>
+<script src="calibre.js"></script>
+<script src="screens-onboarding.js"></script>
+<script src="screens-requests.js"></script>
+<script src="screens-sessions.js"></script>
+<script src="screens-accounts.js"></script>
+<script src="screens-you.js"></script>
+<script src="screens-states.js"></script>
+<script src="screens-extra.js"></script>
+<script src="screens-platforms.js"></script>
+<script src="widgets.js"></script>
+<script src="prototype.js"></script>
+</body>
+</html>

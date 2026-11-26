@@ -1,0 +1,43 @@
+  <section class="sect">
+    <h2>Sessions and control</h2>
+    <p class="sub">Find the session, read what it did, answer it in place, reply one line or stop the turn. The computer that runs the session stays in charge: every action is checked again there, and each outcome has its own words.</p>
+    <div class="screens">
+      <section data-pair="sessions" id="s11"><div class="about"><span class="id">S11</span><h3>Sessions</h3>
+        <p>All computers, running first.</p>
+        <ul><li>A state on every row in words and a mark: Needs you (the vermilion pulse), Working (filled), Idle (ring), Ended.</li>
+          <li>Rows needing you sort first inside Running; the computer and the age sit on the right.</li>
+          <li>Filters are chips that open sheets: project, account, computer, tool. Running is on by default.</li></ul></div></section>
+
+      <section data-pair="session" id="s12"><div class="about"><span class="id">S12</span><h3>Session detail</h3>
+        <p>The conversation, what changed, and the controls the computer allows.</p>
+        <ul><li>Your prompts are ink bubbles; Claude's replies set in the serif, so who said what reads at a glance.</li>
+          <li>Changed files, tests and warnings fold into one step list with diff counts.</li>
+          <li>The waiting request answers in place: Face ID, then the card closes into a one-line receipt with the tick landing. Try it.</li>
+          <li>Follow starts a Live Activity for this session (see Widgets).</li>
+          <li>Stop is a ringed square, apart from Send, so it is never hit by mistake.</li></ul></div></section>
+
+      <section data-pair="session-nc" id="s12b"><div class="about"><span class="id">S12 · state</span><h3>No control here</h3>
+        <p>Disabled with the reason, never hidden.</p>
+        <ul><li>Reply and Stop need a session started in Harness Manager's own terminal. This Codex session runs in Windows Terminal on LAPTOP, so the composer says so.</li>
+          <li>The running step has no spinner: it says “now”, the only honest thing to show without a loop.</li></ul></div></section>
+
+      <section data-pair="stop" id="s13" data-fixed><div class="about"><span class="id">S13</span><h3>Stop confirmation</h3>
+        <p>A deliberate step for the one control that can't be undone.</p>
+        <ul><li>Says exactly what is sent (Ctrl+C, once), to which session and computer, and that the session stays open.</li>
+          <li>Ink, not red: red is never used, and vermilion is kept for what needs you. The stop glyph and the words carry the weight.</li></ul></div></section>
+
+      <section data-pair="stopped" id="s13b"><div class="about"><span class="id">S13 · outcome</span><h3>Interrupt delivered</h3>
+        <p>The computer's receipt, with the route and the time.</p>
+        <ul><li>The tick lands in the toast; the transcript records the stop as a line of its own.</li>
+          <li>Following stays on, so the Live Activity shows the session went idle.</li></ul></div></section>
+
+      <section data-pair="session" data-v="unknown" data-cap="delivery unknown" id="s13c"><div class="about"><span class="id">S13 · outcome</span><h3>Delivery unknown</h3>
+        <p>When the network drops before a receipt.</p>
+        <ul><li>Amber, with the plain fact: no receipt yet. The phone reads the session again; it never sends Stop twice on its own.</li></ul></div></section>
+
+      <section data-pair="filter" data-fixed id="s11f"><div class="about"><span class="id">S11 · sheet</span><h3>Filter sessions</h3>
+        <p>Every filter chip opens this one sheet, at the medium detent.</p>
+        <ul><li>Show (Running, Today, All) as a segmented control; Project, Tool and Account as chips; Computer as a checked list, with MINI marked asleep and read-only.</li>
+          <li>The button says the result before you leave: “Show 2 sessions”. Reset clears everything; Cancel keeps what was there.</li></ul></div></section>
+    </div>
+  </section>

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Full Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f6f4;--surface:#fff;--ink:#16201f;--muted:#5d6b6a;--line:#dfe4e2;--soft:#eef2f0;--ac:#0f6b5f;--ac-soft:#e2f1ed;--warn:#a35d00;--warn-soft:#fbf0de;--neg:#b42318;--neg-soft:#fde8e6;--a:#1f2a4d;--b:#c2532f;--shadow:0 1px 2px rgba(16,24,23,.06),0 4px 16px rgba(16,24,23,.06)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975;--shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
+:root[data-theme="dark"]{--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--ac)}
+h1,h2,h3{margin:0;line-height:1.25}
+.wrap{max-width:1320px;margin:0 auto;padding:0 24px}
+header.top{padding:40px 0 16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:34px;letter-spacing:-.02em;margin:6px 0 8px}
+.lede{font-size:17px;color:var(--muted);max-width:880px;margin:0}
+.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:14px;min-height:56px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+nav.toc{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+nav.toc a{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;white-space:nowrap}
+nav.toc a:hover,nav.toc a.on{background:var(--surface);color:var(--ink)}
+.fbstat{font-size:13px;color:var(--muted)}
+.fbstat b{color:var(--ink)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-block;transition:border-color .15s,transform .12s}
+.btn:hover{border-color:var(--muted)}.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+section.s{padding:44px 0 8px}
+section.s>h2{font-size:24px;letter-spacing:-.01em;display:flex;gap:12px;align-items:baseline}
+.num{font-size:13px;color:var(--muted);font-weight:600;font-family:"JetBrains Mono",monospace}
+.intro{color:var(--muted);max-width:900px;margin:8px 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:960px){.duo{grid-template-columns:1fr}}
+.duo>*,.card{min-width:0}
+.shots img{max-width:none}
+@media (max-width:640px){.shots a img[width="560"],.shots a img[width="580"],.shots a img[width="520"]{width:min(560px,82vw)}}
+.side h3{font-size:17px;display:flex;align-items:center;gap:8px}
+.badge{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff}
+.badge.a{background:var(--a)}.badge.b{background:var(--b)}
+:root[data-theme="dark"] .badge{color:#111}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge{color:#111}}
+.who{font-size:13px;color:var(--muted);margin:2px 0 12px}
+.shots{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.shots a{flex:none;display:block;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#111;transition:transform .2s ease,box-shadow .2s ease}
+.shots a:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.shots img{display:block;height:auto}
+.tall{max-height:760px;overflow-y:auto;border-radius:12px}
+.cap{font-size:12px;color:var(--muted);margin-top:4px}
+.verdict{border-left:3px solid var(--ac);background:var(--ac-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0 0;font-size:14px}
+.verdict b{display:block;margin-bottom:2px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+.t th,.t td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.t th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.fb{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.fb .chips{display:flex;gap:4px;flex-wrap:wrap}
+.fb .chip{font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s ease}
+.fb .chip:hover{color:var(--ink);border-color:var(--muted)}
+.fb .chip.on.keep,.fb .chip.on.opt{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.on.change{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.fb .chip.on.drop{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.fb textarea{font:inherit;font-size:13px;width:100%;min-height:34px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:9px;padding:7px 10px;transition:border-color .15s,min-height .2s}
+.fb textarea:focus{outline:none;border-color:var(--ac);min-height:70px}
+.pick{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.pick .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+footer{padding:50px 0 80px;color:var(--muted);font-size:13px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:640px){.wrap{padding:0 16px}h1{font-size:27px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="eyebrow">Harness Manager · Mobile companion · Review 3 of 3 · Full design</div>
+  <h1>Calibre, the whole app</h1>
+  <p class="lede">You picked Calibre on every screen. Designer A (Claude Opus 5.5) has now drawn all 24 screens, the extra states, three Android adaptations, the desktop pairing frames, five clickable journeys and two variations of every widget. Designer B (Codex Astra 6.2) drew a second set of widgets inside Calibre, since you asked for widget options from both designers. I judged both, sent one revision round to A and two to B, and checked every fix on the screenshots. Mark what to keep or change, and pick one widget per family.</p>
+  <p style="margin:14px 0 0;display:flex;gap:8px;flex-wrap:wrap"><a class="btn pri" href="design-a/prototype.html" target="_blank" rel="noopener">Try the prototype ↗</a><a class="btn" href="design-a/index.html" target="_blank" rel="noopener">A · design system and all pages ↗</a><a class="btn" href="design-a/widgets.html" target="_blank" rel="noopener">A · widgets, live ↗</a><a class="btn" href="design-b/widgets/widgets.html" target="_blank" rel="noopener">B · widgets, live ↗</a></p>
+</div></header>
+
+<div class="bar"><div class="wrap">
+  <nav class="toc" id="toc"><a href="#overview">Overview</a><a href="#onboarding">Onboarding</a><a href="#requests">Requests</a><a href="#sessions">Sessions</a><a href="#accounts">Accounts</a><a href="#you">You</a><a href="#states">States</a><a href="#access">Accessibility</a><a href="#android">Android</a><a href="#desktop">Desktop</a><a href="#proto">Prototype</a><a href="#widgets">Widgets</a><a href="#judge">My review</a><a href="#next">Next</a></nav>
+  <span class="fbstat" id="fbstat"></span>
+  <button class="btn" id="copy">Copy as text</button>
+  <button class="btn pri" id="export">Export feedback</button>
+</div></div>
+
+<main class="wrap">
+
+<section class="s reveal" id="overview">
+  <h2><span class="num">01</span>What is in it</h2>
+  <p class="intro">Every phone on A's pages is live, in light and dark: dials fill, countdowns tick, the Home board reorders, Approve goes through Face ID to a receipt, and the harvest and level-up moments play. Each page's top bar has <b>Full scroll</b> to unroll every phone. Click any image here to open it full size.</p>
+  <div class="card">
+    <table class="t">
+      <tr><th>Page</th><th>Contains</th></tr>
+      <tr><td><a href="design-a/onboarding.html" target="_blank">Onboarding</a></td><td>S1 Welcome · S2 Scan QR · S3 Enter code · S4 Approve on your computer · S5 Connected · S6 Notification prompt</td></tr>
+      <tr><td><a href="design-a/requests.html" target="_blank">Requests</a></td><td>S7 Home · the Needs-you pill on all five tabs · S8 Requests · S9 Permission · S10 Question and its expired state</td></tr>
+      <tr><td><a href="design-a/sessions.html" target="_blank">Sessions</a></td><td>S11 Sessions · S12 Session detail (with and without Control) · S13 Stop sheet · delivered / delivery unknown · filter sheet</td></tr>
+      <tr><td><a href="design-a/accounts.html" target="_blank">Accounts</a></td><td>S14 Accounts · S15 Account detail · S16 Project detail · S17 Computers · Limit-low threshold sheet</td></tr>
+      <tr><td><a href="design-a/you.html" target="_blank">You</a></td><td>You tab · S18 Progress · S19 Customize Home · S20 Settings and privacy · S21 Notifications · moments · the 1080×1350 recap</td></tr>
+      <tr><td><a href="design-a/states.html" target="_blank">States</a></td><td>Empty / first-sync Home · S22 asleep / hub unreachable / offline · S23 access removed / update needed · largest text size</td></tr>
+      <tr><td><a href="design-a/platforms.html" target="_blank">Platforms</a></td><td>Android Home, Permission, Stop sheet and predictive back beside iOS · S24 desktop Pair a phone and Phones list</td></tr>
+      <tr><td><a href="design-a/widgets.html" target="_blank">Widgets A</a> · <a href="design-b/widgets/widgets.html" target="_blank">Widgets B</a></td><td>Two variations of every family from each designer</td></tr>
+      <tr><td><a href="design-a/notes.md" target="_blank">notes.md</a></td><td>Per-screen decisions, the Flutter mapping (theme extensions, CustomPainter dials, packages), widget constraints, what to test with users</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="onboarding">
+  <h2><span class="num">02</span>Registration and activation</h2>
+  <p class="intro">Pair with a computer (QR or a six-digit code), check the three words match on both screens, the computer grants Summaries, Transcripts and Control, then the private notification prompt. No account to sign up for.</p>
+  <div class="card" data-fid="s-onboarding" data-title="Onboarding S1–S6">
+    <div class="shots"><a href="design-a/shots/sheet-ob.png" target="_blank"><img src="design-a/shots/sheet-ob.png" width="1180" alt="Onboarding screens S1 to S6, light and dark"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="requests">
+  <h2><span class="num">03</span>Home and requests</h2>
+  <p class="intro">Home, Requests, Permission, Question and "back in the terminal". The Needs-you pill (count and soonest timer) sits in every tab's title bar. Permission now shows the session title on one line, then Claude's last words before asking.</p>
+  <div class="card" data-fid="s-requests" data-title="Home, Requests, Permission, Question (S7–S10)">
+    <div class="shots"><a href="design-a/shots/sheet-rq.png" target="_blank"><img src="design-a/shots/sheet-rq.png" width="1180" alt="Home, Requests, Permission, Question, expired"></a></div>
+    <div class="cap">Permission context after the fix: <a href="design-a/shots/perm-ctx.png" target="_blank">iOS</a> · <a href="design-a/shots/perm-ctx-android.png" target="_blank">Android</a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="sessions">
+  <h2><span class="num">04</span>Sessions and Stop</h2>
+  <p class="intro">Sessions grouped by state, the transcript with the reply bar, a session without Control, the Stop sheet and its two honest outcomes: "Interrupt delivered" with the computer's confirmation, or "Delivery unknown" (never sent twice).</p>
+  <div class="card" data-fid="s-sessions" data-title="Sessions, Session detail, Stop (S11–S13)">
+    <div class="shots"><a href="design-a/shots/sheet-ss.png" target="_blank"><img src="design-a/shots/sheet-ss.png" width="1180" alt="Sessions screens"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="accounts">
+  <h2><span class="num">05</span>Accounts, projects, computers</h2>
+  <p class="intro">Accounts sorted into Use next, Low and Room to spare. Account detail now answers on the first screen (about 1.2 screens, was 2.4): the reset clock, the decision card with the harvest window, then the three windows; forecast, 7 days and sessions are tabs below.</p>
+  <div class="duo">
+    <div class="card" data-fid="s-accounts" data-title="Accounts, Project, Computers (S14, S16, S17)">
+      <div class="shots"><a href="design-a/shots/sheet-ac.png" target="_blank"><img src="design-a/shots/sheet-ac.png" width="600" alt="Accounts, Account detail, Project, Computers"></a></div>
+    </div>
+    <div class="card" data-fid="s-account-detail" data-title="Account detail, revised (S15)">
+      <div class="shots"><a href="design-a/shots/sheet-acc15.png" target="_blank"><img src="design-a/shots/sheet-acc15.png" width="300" alt="Account detail light and dark"></a></div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="you">
+  <h2><span class="num">06</span>You, progress and the game layer</h2>
+  <p class="intro">Progress has level and next step above the fold, the streak as one row, and Badges / XP log / Recap as tabs. Small earned moments: a tick lands when a request is answered, the streak date wheel turns, the harvest power reserve winds up, one restrained level-up. Never for approvals or spend.</p>
+  <div class="card" data-fid="s-you" data-title="You, Progress, Customize Home, Settings, Notifications (S18–S21)">
+    <div class="shots"><a href="design-a/shots/sheet-you.png" target="_blank"><img src="design-a/shots/sheet-you.png" width="1180" alt="You tab screens"></a></div>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="s-moments" data-title="Moments: harvest, level-up, badge, recap">
+    <div class="shots"><a href="design-a/shots/rm-harvest.png" target="_blank"><img src="design-a/shots/rm-harvest.png" width="230" alt="Harvest moment"></a><a href="design-a/shots/rm-levelup.png" target="_blank"><img src="design-a/shots/rm-levelup.png" width="230" alt="Level-up"></a><a href="design-a/shots/rm-badge-fortnight.png" target="_blank"><img src="design-a/shots/rm-badge-fortnight.png" width="230" alt="Badge detail"></a><a href="design-a/shots/recap-1080x1350-light.png" target="_blank"><img src="design-a/shots/recap-1080x1350-light.png" width="400" alt="Weekly recap share image"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="states">
+  <h2><span class="num">07</span>Empty, asleep, offline, removed, update</h2>
+  <p class="intro">First sync, computer asleep (snapshot, actions off), hub unreachable, phone offline (cached, every reading aged and marked ≈), access removed, update needed. Unknown is a dash, never a zero.</p>
+  <div class="card" data-fid="s-states" data-title="States (empty Home, S22, S23)">
+    <div class="shots"><a href="design-a/shots/sheet-st.png" target="_blank"><img src="design-a/shots/sheet-st.png" width="1180" alt="State screens"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="access">
+  <h2><span class="num">08</span>Largest text size and the two sheets</h2>
+  <p class="intro">Home and Permission at AX5 (body 53 pt): the board becomes one column of plain rows and the buttons stack. Plus the Sessions filter sheet and the Limit-low threshold sheet.</p>
+  <div class="duo">
+    <div class="card" data-fid="s-ax5" data-title="Largest text size (AX5)">
+      <div class="shots tall"><a href="design-a/shots/sheet-ax.png" target="_blank"><img src="design-a/shots/sheet-ax.png" width="420" alt="Home and Permission at AX5"></a></div>
+    </div>
+    <div class="card" data-fid="s-sheets" data-title="Filter and threshold sheets">
+      <div class="shots tall"><a href="design-a/shots/sheet-fl.png" target="_blank"><img src="design-a/shots/sheet-fl.png" width="262" alt="Sessions filter sheet"></a><a href="design-a/shots/sheet-th.png" target="_blank"><img src="design-a/shots/sheet-th.png" width="300" alt="Limit-low threshold sheet"></a></div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="android">
+  <h2><span class="num">09</span>Android adaptations</h2>
+  <p class="intro">The same screen bodies in a Material 3 scaffold: top app bar, NavigationBar with the active pill, an extended button for Needs you, a Material bottom sheet for Stop, fingerprint instead of Face ID, and a predictive-back preview. One open nit: on Android Home the floating Needs-you button covers part of the Next reset card, so the content needs bottom padding.</p>
+  <div class="card" data-fid="s-android" data-title="Android adaptations">
+    <div class="shots"><a href="design-a/shots/sheet-pf.png" target="_blank"><img src="design-a/shots/sheet-pf.png" width="1180" alt="Android and iOS side by side"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="desktop">
+  <h2><span class="num">10</span>Desktop: pair a phone, phones list</h2>
+  <div class="card" data-fid="s-desktop" data-title="Desktop S24">
+    <div class="shots"><a href="design-a/shots/desk-el0.png" target="_blank"><img src="design-a/shots/desk-el0.png" width="1000" alt="Desktop pairing dialog and phones list"></a></div>
+  </div>
+</section>
+
+<section class="s reveal" id="proto">
+  <h2><span class="num">11</span>Clickable prototype</h2>
+  <p class="intro">Five journeys in one phone: Welcome → Scan → Approve → Connected → Home; Home → Needs you → Permission → Approve once → receipt; Home → Use next → Account detail; Sessions → Session → Stop; You → Progress → badge.</p>
+  <div class="card" data-fid="s-proto" data-title="Clickable prototype">
+    <div class="shots"><a href="design-a/prototype.html" target="_blank"><img src="design-a/shots/proto-montage.png" width="1100" alt="Prototype steps"></a></div>
+    <p style="margin:10px 0 0"><a class="btn pri" href="design-a/prototype.html" target="_blank">Open the prototype ↗</a></p>
+  </div>
+</section>
+
+<section class="s reveal" id="widgets">
+  <h2><span class="num">12</span>Widgets: A and B, both in Calibre</h2>
+  <p class="intro">Each designer drew at least two variations of every family. Pick one per family (say in the comment if you want two to ship). Lock-screen widgets render in the system's tint over your wallpaper, and home-screen widgets cannot animate beyond system transitions. Privacy: the lock screen says only "A session needs you" unless you turn detail on.</p>
+
+  <h3 style="margin:22px 0 10px;font-size:18px">Home screen: small, medium, large</h3>
+  <div class="duo">
+    <div class="card side"><h3><span class="badge a">A</span>Designer A</h3><div class="who">A1 / A2 per size</div><div class="shots tall"><a href="design-a/shots/wg-0.png" target="_blank"><img src="design-a/shots/wg-0.png" width="560" alt=""></a></div><div class="cap">Week ruler after the fix: <a href="design-a/shots/wg-ruler.png" target="_blank">open</a></div></div>
+    <div class="card side"><h3><span class="badge b">B</span>Designer B</h3><div class="who">B1 / B2 per size</div><div class="shots tall"><a href="design-b/widgets/shots/home.png" target="_blank"><img src="design-b/widgets/shots/home.png" width="560" alt=""></a></div></div>
+  </div>
+  <div class="card pick" data-fid="w-small" data-title="Widget: iOS small" data-opts="A1 Use next dial|A2 Needs you count|B1 Use next|B2 Harvest receipt"><span class="lbl">iOS small</span></div>
+  <div class="card pick" data-fid="w-medium" data-title="Widget: iOS medium" data-opts="A1 Three dials + requests|A2 Week ruler|B1 Paired reserves|B2 Reset order"><span class="lbl">iOS medium</span></div>
+  <div class="card pick" data-fid="w-large" data-title="Widget: iOS large" data-opts="A1 Whole board|A2 Accounts ledger|B1 Capacity register|B2 Harvest ledger"><span class="lbl">iOS large</span></div>
+
+  <h3 style="margin:26px 0 10px;font-size:18px">Lock screen: circular, rectangular, inline</h3>
+  <div class="duo">
+    <div class="card side"><h3><span class="badge a">A</span>Designer A</h3><div class="shots"><a href="design-a/shots/wg-1.png" target="_blank"><img src="design-a/shots/wg-1.png" width="560" alt=""></a></div></div>
+    <div class="card side"><h3><span class="badge b">B</span>Designer B</h3><div class="shots"><a href="design-b/widgets/shots/accessories.png" target="_blank"><img src="design-b/widgets/shots/accessories.png" width="560" alt=""></a></div></div>
+  </div>
+  <div class="card pick" data-fid="w-circ" data-title="Widget: lock circular" data-opts="A1 Use next gauge|A2 Waiting + timer|B1 Reserve ring|B2 Harvest notches"><span class="lbl">Lock screen circular</span></div>
+  <div class="card pick" data-fid="w-rect" data-title="Widget: lock rectangular" data-opts="A1 Next reset + bar|A2 Three gauges|B1 Reset appointment|B2 Waiting for you"><span class="lbl">Lock screen rectangular</span></div>
+  <div class="card pick" data-fid="w-inline" data-title="Widget: lock inline" data-opts="A1 Pick and reset|A2 Waiting + timer|B1 Reserve line|B2 Earned line"><span class="lbl">Lock screen inline</span></div>
+
+  <h3 style="margin:26px 0 10px;font-size:18px">Live Activity and Dynamic Island</h3>
+  <div class="duo">
+    <div class="card side"><h3><span class="badge a">A</span>Designer A</h3><div class="shots tall"><a href="design-a/shots/wg-2.png" target="_blank"><img src="design-a/shots/wg-2.png" width="560" alt=""></a></div><div class="cap">Private default and detail-on versions: <a href="design-a/shots/wg-la1.png" target="_blank">Live Activity A1</a> · expanded island at the top of <a href="design-a/shots/wg-3.png" target="_blank">this sheet</a></div></div>
+    <div class="card side"><h3><span class="badge b">B</span>Designer B</h3><div class="shots tall"><a href="design-b/widgets/shots/activities.png" target="_blank"><img src="design-b/widgets/shots/activities.png" width="560" alt=""></a></div></div>
+  </div>
+  <div class="card pick" data-fid="w-la" data-title="Live Activity, lock screen" data-opts="A1 Followed session|A2 Draining dial|B1 Decision window|B2 Waiting for you"><span class="lbl">Live Activity on the lock screen</span></div>
+  <div class="card pick" data-fid="w-island" data-title="Dynamic Island (compact, minimal, expanded)" data-opts="A1 set|A2 set|B1 set|B2 set|Mix (say which in the comment)"><span class="lbl">Dynamic Island</span></div>
+
+  <h3 style="margin:26px 0 10px;font-size:18px">Android: resizable widget and ongoing notification</h3>
+  <div class="duo">
+    <div class="card side"><h3><span class="badge a">A</span>Designer A</h3><div class="shots tall"><a href="design-a/shots/wg-3.png" target="_blank"><img src="design-a/shots/wg-3.png" width="560" alt=""></a></div><div class="cap">Notification, private and full: <a href="design-a/shots/wg-n1.png" target="_blank">open</a></div></div>
+    <div class="card side"><h3><span class="badge b">B</span>Designer B</h3><div class="shots tall"><a href="design-b/widgets/shots/android.png" target="_blank"><img src="design-b/widgets/shots/android.png" width="560" alt=""></a></div><div class="cap">Calibre colours instead of Material You: <a href="design-b/widgets/shots/android-calibre.png" target="_blank">open</a> · expanded notification: <a href="design-b/widgets/shots/notification-expanded.png" target="_blank">open</a></div></div>
+  </div>
+  <div class="card pick" data-fid="w-android" data-title="Android home widget" data-opts="A1 Use next dial|A2 Needs you → board|B1 Next account|B2 Earned ledger"><span class="lbl">Android resizable widget</span></div>
+  <div class="card pick" data-fid="w-notif" data-title="Android ongoing notification" data-opts="A1 Chronometer + actions|A2 Live Update progress|B1 Deadline notice|B2 Session update"><span class="lbl">Android ongoing notification</span></div>
+</section>
+
+<section class="s reveal" id="judge">
+  <h2><span class="num">13</span>My review as judge</h2>
+  <p class="intro">What I asked for after each designer's first full pass, and what came back. I checked every point on the new screenshots.</p>
+  <div class="duo">
+    <div class="card side"><h3><span class="badge a">A</span>Calibre, full app · one revision round</h3>
+      <table class="t"><tr><th>Asked</th><th>Now</th></tr>
+      <tr><td>Android looked like iOS with another status bar</td><td>Material 3 scaffold: top app bar, NavigationBar pill, extended button, Material sheet, predictive back</td></tr>
+      <tr><td>Permission: session title squeezed into six lines</td><td>One full-width title line, Claude's last words under it</td></tr>
+      <tr><td>Live Activity and Android notification showed the project on the lock screen</td><td>Private by default; the detailed version is a labelled setting</td></tr>
+      <tr><td>Week ruler labels collided</td><td>Leader lines, labels at 11.5 pt</td></tr>
+      <tr><td>Largest text size and two sheets missing</td><td>Added in light and dark</td></tr>
+      <tr><td>Small text in dense lists</td><td>11 pt minimum, 12 pt for data lines, measured</td></tr></table>
+      <div class="verdict"><b>Verdict</b>Complete, consistent and honest. The dial language carries from Home to every widget, and the earned moments make it fun without noise. One nit left: the Android Home floating button covers the Next reset card.</div>
+    </div>
+    <div class="card side"><h3><span class="badge b">B</span>Widgets in Calibre · two revision rounds</h3>
+      <table class="t"><tr><th>Asked</th><th>Now</th></tr>
+      <tr><td>Use next disagreed with the app</td><td>claude-Resal-Dev01, "64% erased Sat", same as the app</td></tr>
+      <tr><td>Jargon ("Contact seal", "Request record", "5h left")</td><td>The app's words: "A session needs you", "5-hour room"</td></tr>
+      <tr><td>Mixed reading ages; the Island showed the clock and a Wi-Fi glyph</td><td>"8m ago" everywhere; the Island shows the waiting count</td></tr>
+      <tr><td>Closed ring, no bars, iOS widgets reused on Android</td><td>accessoryCircular gauge, a bar per account, a real 2×2 / 4×2 / 4×3 reflow and Android notification chrome</td></tr>
+      <tr><td>Two clipped labels</td><td>Fixed; a clipping check now runs over 112 renderings</td></tr></table>
+      <div class="verdict"><b>Verdict</b>Calmer and more text-led than A's set, with a strong Android reflow and a harvest-first take (receipt, ledger). A's set is the more glanceable; B's harvest widgets are the better pick if you want the game layer on your home screen.</div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="next">
+  <h2><span class="num">14</span>What happens next</h2>
+  <div class="card" data-fid="next-step" data-title="Next step" data-opts="Design approved: plan the build|One more design round first|Hand-off spec first, then build">
+    <h3 style="font-size:17px">Is the design ready to build?</h3>
+    <p class="intro" style="margin:6px 0 0;font-size:14px">If you approve, the next step is the build plan: the companion API and pairing in the desktop app and the hub, the push relay, then the Flutter app with its native widgets. A hand-off spec first would turn these pages into tokens, component specs and acceptance checks for the build.</p>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="general" data-title="Anything else for the designers" data-nochips="1"><h3 style="font-size:17px">Anything else</h3></div>
+</section>
+</main>
+<footer><div class="wrap">Harness Manager mobile · Review 3 · brief: <code>brief/design-brief.md</code> · data: <code>brief/data.json</code> · notes: <code>design-a/notes.md</code>, <code>design-b/widgets/notes.md</code></div></footer>
+<div class="toast" id="toast"></div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KEY = 'hm-mobile-review-3';
+let fb = {}; try { fb = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { fb = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {} stat(); };
+const items = [...document.querySelectorAll('[data-fid]')];
+items.forEach((el) => {
+  const id = el.dataset.fid, cur = fb[id] || {}, opts = el.dataset.opts ? el.dataset.opts.split('|') : null;
+  const w = document.createElement('div'); w.className = 'fb';
+  const chips = el.dataset.nochips ? '' : opts
+    ? `<div class="chips">${opts.map((o) => `<button type="button" class="chip opt ${cur.v === o ? 'on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<div class="chips">${[['keep','Keep'],['change','Change'],['drop','Drop']].map(([v,l]) => `<button type="button" class="chip ${v} ${cur.v === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  w.innerHTML = chips + `<textarea rows="1" placeholder="${el.dataset.nochips ? 'Your notes for the designers…' : 'Comment (optional)…'}" aria-label="Comment on ${esc(el.dataset.title)}">${esc(cur.c || '')}</textarea>`;
+  if (el.dataset.nochips) w.querySelector('textarea').style.minHeight = '120px';
+  el.appendChild(w);
+  w.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => {
+    const on = (fb[id] || {}).v === b.dataset.v; fb[id] = { ...(fb[id] || {}), v: on ? undefined : b.dataset.v };
+    w.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', !on && x === b)); save();
+  }));
+  const ta = w.querySelector('textarea'); ta.addEventListener('input', () => { fb[id] = { ...(fb[id] || {}), c: ta.value }; save(); });
+});
+function stat() { const n = items.filter((e) => !e.dataset.nochips).length, d = items.filter((e) => { const f = fb[e.dataset.fid]; return f && (f.v || (f.c || '').trim()); }).length; document.getElementById('fbstat').innerHTML = `<b>${d}</b> of ${n} reviewed`; }
+stat();
+const collect = () => items.map((e) => ({ id: e.dataset.fid, item: e.dataset.title, verdict: (fb[e.dataset.fid] || {}).v || null, comment: ((fb[e.dataset.fid] || {}).c || '').trim() || null })).filter((x) => x.verdict || x.comment);
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2400); }
+document.getElementById('export').addEventListener('click', () => {
+  const data = { review: 'mobile-review-3', exported_at: new Date().toISOString(), items: collect() };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); a.download = 'mobile-review-3-feedback.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${data.items.length} items to mobile-review-3-feedback.json`);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  const rows = collect(), text = '# Mobile review 3: feedback\n\n' + rows.map((r) => `- **${r.item}** (${r.id})${r.verdict ? ` — ${r.verdict}` : ''}${r.comment ? `\n  ${r.comment.replace(/\n/g, '\n  ')}` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${rows.length} items: paste them into the chat`); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('Copied'); }
+});
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .05 });
+document.querySelectorAll('.reveal').forEach((e) => io.observe(e));
+const links = [...document.querySelectorAll('#toc a')];
+const so = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-40% 0px -55% 0px' });
+document.querySelectorAll('section.s').forEach((s) => so.observe(s));
+</script>
+</body>
+</html>

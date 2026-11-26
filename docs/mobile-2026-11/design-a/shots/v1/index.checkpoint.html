@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calibre · Harness Manager mobile · Designer A · Checkpoint 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="mark">Calibre <span>· Designer A · Checkpoint 1, revision 1</span></span>
+  <nav aria-label="Sections"><a href="#system">Design system</a><a href="#s7">Home</a><a href="#s9">Permission</a><a href="#s15">Account</a><a href="#s18">Progress</a><a href="#moments">Moments</a><a href="#recap">Recap image</a></nav>
+  <span class="spacer"></span>
+  <div class="seg" role="group" aria-label="Page theme">
+    <button data-page-theme="light" aria-pressed="true">Light page</button><button data-page-theme="dark" aria-pressed="false">Dark page</button>
+  </div>
+  <button class="quiet-btn" data-rm aria-pressed="false">Reduce motion</button>
+  <button class="quiet-btn" data-replay>Replay motion</button>
+</header>
+
+<main class="page">
+  <section class="cover">
+    <div>
+      <h1>Calibre</h1>
+      <p class="lede">Every number in this app is about time: how much room an account has before its reset, and how long a session will wait for you.
+        A good watch has shown time and reserve at a glance for two centuries, with ticks, hands and subdials. Calibre borrows that geometry and
+        typography, and none of the fake metal. Enamel and paper in daylight, a night dial after dark, ink for readings, and one vermilion hand kept for the thing that needs you.</p>
+      <div class="ideas">
+        <div><i class="ph ph-clock" aria-hidden="true"></i><span><b>One dial for every limit</b><p>Room left and time to reset share one shape, from the Home widget to the reset clock to the lock-screen gauge later. Learn it once.</p></span></div>
+        <div><i class="ph ph-hourglass-medium" aria-hidden="true"></i><span><b>Calm, honest time</b><p>Countdowns tick in ink and never turn red. Each one says what happens at zero. Every reading carries its age, estimates carry ≈, unknown is a dash.</p></span></div>
+        <div><i class="ph ph-plant" aria-hidden="true"></i><span><b>An instrument, not a toy</b><p>XP is a power reserve, the streak is a date wheel, badges are engraved. Points only for room or time saved, shown in lume green so they never compete with work.</p></span></div>
+      </div>
+    </div>
+    <div class="cover-art" id="cover-dial"></div>
+  </section>
+
+  <section class="sect" id="system">
+    <h2>Design system</h2>
+    <p class="sub">A compact strip for this checkpoint. The full system (spacing, elevation, iconography, sheets, list rows, tab bar variants) follows after review.</p>
+    <div class="ds">
+      <div class="ds-block span-7">
+        <h3>Colour, by role</h3>
+        <div class="swatches">
+          <div class="swatch-col" data-theme="light" style="background:var(--bg)">
+            <h4>Light · enamel</h4>
+            <div class="sw"><span class="chip-c" style="background:#eef0ec"></span><span class="nm">Enamel<small>background</small></span><code>#EEF0EC</code></div>
+            <div class="sw"><span class="chip-c" style="background:#fafbf8"></span><span class="nm">Paper<small>cards, sheets</small></span><code>#FAFBF8</code></div>
+            <div class="sw"><span class="chip-c" style="background:#15203a"></span><span class="nm">Ink<small>readings, primary</small></span><code>#15203A</code></div>
+            <div class="sw"><span class="chip-c" style="background:#4a5368"></span><span class="nm">Ink 2 · Ink 3<small>secondary, captions</small></span><code>#4A5368 · #646B7D</code></div>
+            <div class="sw"><span class="chip-c" style="background:#bb3417"></span><span class="nm">Vermilion<small>needs you, only</small></span><code>#BB3417</code></div>
+            <div class="sw"><span class="chip-c" style="background:#136f52"></span><span class="nm">Lume<small>harvest, XP</small></span><code>#136F52</code></div>
+            <div class="sw"><span class="chip-c" style="background:#9a5a00"></span><span class="nm">Amber<small>low, stale, forecast</small></span><code>#9A5A00</code></div>
+          </div>
+          <div class="swatch-col" data-theme="dark" style="background:var(--bg)">
+            <h4>Dark · night dial</h4>
+            <div class="sw"><span class="chip-c" style="background:#0b1120"></span><span class="nm">Night<small>background</small></span><code>#0B1120</code></div>
+            <div class="sw"><span class="chip-c" style="background:#131b2c"></span><span class="nm">Paper<small>cards, hairline edge</small></span><code>#131B2C</code></div>
+            <div class="sw"><span class="chip-c" style="background:#e9ece6"></span><span class="nm">Ink<small>readings, primary</small></span><code>#E9ECE6</code></div>
+            <div class="sw"><span class="chip-c" style="background:#aeb5c3"></span><span class="nm">Ink 2 · Ink 3<small>secondary, captions</small></span><code>#AEB5C3 · #8A92A3</code></div>
+            <div class="sw"><span class="chip-c" style="background:#ff7552"></span><span class="nm">Vermilion<small>needs you, only</small></span><code>#FF7552</code></div>
+            <div class="sw"><span class="chip-c" style="background:#6fddb0"></span><span class="nm">Lume<small>harvest, XP</small></span><code>#6FDDB0</code></div>
+            <div class="sw"><span class="chip-c" style="background:#f2b04e"></span><span class="nm">Amber<small>low, stale, forecast</small></span><code>#F2B04E</code></div>
+          </div>
+        </div>
+        <p class="cap" style="margin:12px 0 0">Every pair passes WCAG AA for text on paper and background. A semantic colour always comes with an icon or words.</p>
+      </div>
+
+      <div class="ds-block span-5">
+        <h3>Type</h3>
+        <div class="typescale">
+          <div class="ts"><small>Reading<br>Newsreader 58/1</small><span class="serif-num" style="font-size:58px;line-height:1">64%</span></div>
+          <div class="ts"><small>Large title<br>Newsreader 36/40</small><span style="font:400 36px/1.1 var(--serif);letter-spacing:-.02em">Progress</span></div>
+          <div class="ts"><small>Title<br>Newsreader 22/26</small><span style="font:400 22px/1.2 var(--serif)">Harvest window</span></div>
+          <div class="ts"><small>Headline<br>Hanken 600 17/22</small><span style="font:600 17px/1.3 var(--sans)">claude-Resal-Dev01</span></div>
+          <div class="ts"><small>Body<br>Hanken 400 16/22</small><span style="font:400 16px/1.4 var(--sans)">Its week resets Sat 18:58 with 64% unused.</span></div>
+          <div class="ts"><small>Caption<br>Hanken 500 12/16</small><span class="cap">Limits read 8 m ago</span></div>
+          <div class="ts"><small>Code<br>JetBrains Mono 15/22</small><code class="mono" style="font-size:15px">npm run test -- --watch=false</code></div>
+        </div>
+      </div>
+
+      <div class="ds-block span-8" data-ds>
+        <h3>Components</h3>
+        <div class="comp-row" style="gap:28px;align-items:flex-end">
+          <div><div id="ds-dial"></div><p class="cap">Dial · room left</p></div>
+          <div><div id="ds-dial-s"></div><p class="cap">Dial · low</p></div>
+          <div><div id="ds-cd"></div><p class="cap">Countdown</p></div>
+          <div><div id="ds-res"></div><p class="cap">Power reserve · XP</p></div>
+          <div style="flex:1;min-width:180px;display:grid;gap:14px">
+            <div><div class="bar"><span style="--v:.64"></span></div><p class="cap">Bar · 64%</p></div>
+            <div><div class="bar low"><span style="--v:.11"></span></div><p class="cap">Bar · low, 11%</p></div>
+          </div>
+        </div>
+        <div class="comp-row" style="margin-top:20px">
+          <span class="chip">DEVELOPMENTPC</span><span class="chip chip-lume"><i class="ph ph-plant"></i>+40 XP</span>
+          <span class="chip chip-signal"><span class="pulse"></span>Needs you</span><span class="chip chip-amber"><i class="ph ph-clock-counter-clockwise"></i>3 h old</span>
+        </div>
+        <div class="comp-row" style="margin-top:16px">
+          <button class="btn btn-primary"><i class="ph ph-scan"></i>Approve once</button>
+          <button class="btn btn-secondary">Deny</button>
+          <button class="btn btn-quiet btn-sm"><i class="ph ph-arrows-down-up"></i>Arrange widgets</button>
+        </div>
+        <div class="card" style="margin-top:18px;padding:4px 16px;max-width:400px">
+          <button class="req-row" style="cursor:default"><span class="ico"><i class="ph ph-chat-circle-text"></i></span>
+            <span style="min-width:0"><div class="what">Question · request card</div><div class="main">Which branch should I base this on?</div><div class="meta">Bunyan · LAPTOP</div></span>
+            <span class="clock"><b>0:41</b></span></button>
+        </div>
+        <p class="cap" style="margin:12px 0 0">Radii: cards 16, controls 14, chips and badges pill, sheets 28. Light uses one soft tinted shadow; dark uses a hairline edge instead.</p>
+      </div>
+
+      <div class="ds-block span-4">
+        <h3>Motion</h3>
+        <div class="motion-list">
+          <div><code>press</code><code>150 ms</code><span class="demo" style="--w:100%"><span style="transition:transform 150ms var(--ease-out)"></span></span></div>
+          <div><code>state</code><code>250 ms</code><span class="demo"><span style="transition:transform 250ms var(--ease-out)"></span></span></div>
+          <div><code>settle</code><code>420 ms spring</code><span class="demo"><span style="transition:transform 420ms var(--ease-spring)"></span></span></div>
+          <div><code>fill</code><code>600 ms</code><span class="demo"><span style="transition:transform 600ms var(--ease-out)"></span></span></div>
+          <div><code>pulse</code><code>2.4 s loop</code><span style="display:flex;align-items:center;gap:8px" class="cap"><span class="pulse"></span>needs you, the only loop</span></div>
+        </div>
+        <button class="quiet-btn" data-motion-demo style="margin-top:14px">Play the curves</button>
+        <p class="cap" style="margin:14px 0 0">Ease-out <code class="mono">cubic-bezier(.22, 1, .36, 1)</code>. Settle uses a light spring with one small overshoot. Dials fill on open, the countdown drains once a second, the receipt rises. With Reduce Motion everything lands at once and the pulse becomes a still ring.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect">
+    <h2>Four screens</h2>
+    <p class="sub">iPhone 390 × 844. Each screen has a live phone in light and dark (countdowns run, dials fill, Approve goes through Face ID to a receipt, Home cards can be dragged) and, under it, a static artboard of the whole scroll so nothing below the fold is hidden.</p>
+    <div class="screens">
+      <div class="screen-set" id="s7">
+        <div class="about"><span class="id">S7</span><h3>Home</h3>
+          <p>The three jobs, top to bottom, on a board of movable widgets.</p>
+          <ul>
+            <li>The game header is now a slim strip: a small power-reserve gauge, the level, and the streak as a numeral in a date-wheel window that rolls from 11 to 12 on open. Needs you moved up by about 60 pt.</li>
+            <li>Use next says it in one line, “64% erased Sat 18:58”, with one muted line under it.</li>
+            <li>Play the harvest: the gauge winds up, a lume tick lands at the new mark, +40 rises and settles beside the XP while it counts to 1,280.</li>
+          </ul>
+          <button class="quiet-btn" data-play="harvest" data-for="#s7 .phone:not([data-static])">Play the harvest moment</button></div>
+        <div><p class="frame-cap">Light, live</p><div class="device"><div class="phone" data-theme="light" data-screen="home"></div></div></div>
+        <div><p class="frame-cap">Dark, live</p><div class="device"><div class="phone" data-theme="dark" data-screen="home"></div></div></div>
+        <div class="about board-cap"><p class="frame-cap">Full scroll, static</p><p class="cap">Running, Next reset, Today and Arrange widgets, below the fold in the live frame.</p></div>
+        <div class="phone artboard" data-theme="light" data-screen="home" data-static></div>
+        <div class="phone artboard" data-theme="dark" data-screen="home" data-static></div>
+      </div>
+
+      <div class="screen-set" id="s9">
+        <div class="about"><span class="id">S9</span><h3>Permission request</h3>
+          <p>Exactly what will run, where, why, and how long you have.</p>
+          <ul>
+            <li>The gap above the buttons now holds the decision context: the session, Claude's last line before it asked, and what it changed this turn.</li>
+            <li>The countdown moved next to the buttons, where the decision happens: a draining dial, the time left, and what happens at zero.</li>
+            <li>Approve once shows Face ID, then a receipt with who answered and how it was delivered.</li>
+          </ul></div>
+        <div><p class="frame-cap">Light, live</p><div class="device"><div class="phone" data-theme="light" data-screen="permission"></div></div></div>
+        <div><p class="frame-cap">Dark, live</p><div class="device"><div class="phone" data-theme="dark" data-screen="permission"></div></div></div>
+        <div class="about board-cap"><p class="frame-cap">Full scroll, static</p><p class="cap">The whole request fits one screen; the artboard confirms nothing hides behind the action bar.</p></div>
+        <div class="phone artboard" data-theme="light" data-screen="permission" data-static></div>
+        <div class="phone artboard" data-theme="dark" data-screen="permission" data-static></div>
+      </div>
+
+      <div class="screen-set" id="s15">
+        <div class="about"><span class="id">S15</span><h3>Account detail</h3>
+          <p>claude-Resal-Dev01, the account Home recommends.</p>
+          <ul>
+            <li>The reset clock lost its weekday letters and its legend. Each marker is labelled on the dial: Reset Sat 18:58 (lume), ≈ could run out Sat 15:00 (amber), Now.</li>
+            <li>Time against room is still the point: the grey bezel says “98 h gone” and “70 h to go”, the ink ring in the middle is the 64% of room left.</li>
+            <li>The forecast stays a range, because this account's use is all from two days.</li>
+          </ul></div>
+        <div><p class="frame-cap">Light, live</p><div class="device"><div class="phone" data-theme="light" data-screen="account"></div></div></div>
+        <div><p class="frame-cap">Dark, live</p><div class="device"><div class="phone" data-theme="dark" data-screen="account"></div></div></div>
+        <div class="about board-cap"><p class="frame-cap">Full scroll, static</p><p class="cap">Windows, forecast, harvest window, the real 7-day bars and the sessions on this account.</p></div>
+        <div class="phone artboard" data-theme="light" data-screen="account" data-static></div>
+        <div class="phone artboard" data-theme="dark" data-screen="account" data-static></div>
+      </div>
+
+      <div class="screen-set" id="s18">
+        <div class="about"><span class="id">S18</span><h3>Progress</h3>
+          <p>The game layer in one place, private and traceable.</p>
+          <ul>
+            <li>Badges are engraved medallions: a knurled rim, a bead ring, an enamel field and an embossed icon, with a lume jewel when earned. Locked ones are dashed with a lume progress arc around the rim.</li>
+            <li>Tap a badge for its detail sheet: the rule, when it was earned or what is left, and the real event behind it.</li>
+            <li>Tap the level card to preview the level-up.</li>
+          </ul>
+          <button class="quiet-btn" data-play="levelup" data-for="#s18 .phone:not([data-static])">Play the level-up</button></div>
+        <div><p class="frame-cap">Light, live</p><div class="device"><div class="phone" data-theme="light" data-screen="progress"></div></div></div>
+        <div><p class="frame-cap">Dark, live</p><div class="device"><div class="phone" data-theme="dark" data-screen="progress"></div></div></div>
+        <div class="about board-cap"><p class="frame-cap">Full scroll, static</p><p class="cap">Streak, this week, where the XP came from, all six badges and the weekly recap card.</p></div>
+        <div class="phone artboard" data-theme="light" data-screen="progress" data-static></div>
+        <div class="phone artboard" data-theme="dark" data-screen="progress" data-static></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="moments">
+    <h2>Earned moments</h2>
+    <p class="sub">The delight is kept for things that were earned, and each moment runs once, in about 600 ms. With Reduce Motion they land in their end state with no movement. Each frame opens in its end state; the button replays it.</p>
+    <div class="moments">
+      <div class="moment"><h3>Harvest</h3><p>Saturday 18:58, if Dev01 is used first: its week resets with 4% unused. The reserve winds up, a lume tick lands, +40 rises and settles.</p>
+        <div class="device"><div class="phone" data-theme="light" data-screen="home" data-state="harvest" id="m-harvest"></div></div>
+        <button class="quiet-btn" data-play="harvest" data-for="#m-harvest">Replay</button></div>
+      <div class="moment"><h3>Level-up</h3><p>Crossing 1,500 XP. The reserve winds to full, one sweep of lume ticks, the new name sets in. No confetti, no sound by default, one light haptic.</p>
+        <div class="device"><div class="phone" data-theme="dark" data-screen="progress" data-state="levelup" id="m-level"></div></div>
+        <button class="quiet-btn" data-play="levelup" data-for="#m-level">Replay</button></div>
+      <div class="moment"><h3>Badge detail, earned</h3><p>The medallion at full size with its name engraved around the rim, when it was earned, and the real event that counted.</p>
+        <div class="device"><div class="phone" data-theme="light" data-screen="progress" data-state="badge:first" id="m-badge1"></div></div>
+        <button class="quiet-btn" data-play="badge" data-arg="first" data-for="#m-badge1">Replay</button></div>
+      <div class="moment"><h3>Badge detail, locked</h3><p>Progress on the rim and in words, and what is left. Here it points back at the harvest Home recommends.</p>
+        <div class="device"><div class="phone" data-theme="dark" data-screen="progress" data-state="badge:sweep" id="m-badge2"></div></div>
+        <button class="quiet-btn" data-play="badge" data-arg="sweep" data-for="#m-badge2">Replay</button></div>
+    </div>
+  </section>
+
+  <section class="sect" id="recap">
+    <h2>Weekly recap, as a shared image</h2>
+    <p class="sub">1080 × 1350 (4:5, fits Instagram and Messages previews), shown here at 40%. Rendered from the same tokens; the full-size PNGs are in <code class="mono">shots/recap-1080x1350-light.png</code> and <code class="mono">-dark.png</code>. No account names, nothing private: only counts and the busiest project, which the owner can hide in Settings.</p>
+    <div class="recaps">
+      <div class="recap-frame"><div class="recap-img" data-theme="light" data-recap id="recap-light"></div></div>
+      <div class="recap-frame"><div class="recap-img" data-theme="dark" data-recap id="recap-dark"></div></div>
+    </div>
+  </section>
+</main>
+<script src="calibre.js"></script>
+</body>
+</html>

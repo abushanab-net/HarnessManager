@@ -1,0 +1,1134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile App Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f6f4;--surface:#ffffff;--ink:#16201f;--muted:#5d6b6a;--line:#dfe4e2;--soft:#eef2f0;
+  --ac:#0f6b5f;--ac-soft:#e2f1ed;--warn:#a35d00;--warn-soft:#fbf0de;--neg:#b42318;--neg-soft:#fde8e6;--ok:#1f7a3a;
+  --wf-bg:#fbfbfa;--wf-ink:#2a2f2e;--wf-line:#b9c0be;--wf-fill:#e3e7e5;--wf-fill2:#d3d9d7;
+  --shadow:0 1px 2px rgba(16,24,23,.06),0 4px 16px rgba(16,24,23,.06);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;
+  --ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--ok:#5fd08a;
+  --wf-bg:#1a2221;--wf-ink:#dbe3e1;--wf-line:#4a5755;--wf-fill:#2a3533;--wf-fill2:#34413f;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);
+}}
+:root[data-theme="dark"]{
+  --bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;
+  --ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--ok:#5fd08a;
+  --wf-bg:#1a2221;--wf-ink:#dbe3e1;--wf-line:#4a5755;--wf-fill:#2a3533;--wf-fill2:#34413f;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:120px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:.86em}
+a{color:var(--ac)}
+h1,h2,h3,h4{line-height:1.25;margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+header.top{padding:40px 0 18px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:34px;letter-spacing:-.02em;margin:6px 0 8px}
+.lede{font-size:17px;color:var(--muted);max-width:820px;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.tag{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--muted)}
+.tag b{color:var(--ink);font-weight:600}
+/* sticky bar */
+.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:16px;min-height:56px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+nav.toc{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+nav.toc a{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;white-space:nowrap}
+nav.toc a:hover,nav.toc a.on{background:var(--surface);color:var(--ink)}
+.fbstat{font-size:13px;color:var(--muted);white-space:nowrap}
+.fbstat b{color:var(--ink)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:7px 12px;cursor:pointer;transition:transform .12s ease,background .15s ease,border-color .15s ease}
+.btn:hover{border-color:var(--muted)}
+.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+:root[data-theme="dark"] .btn.pri{color:#06201c}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.pri{color:#06201c}}
+/* sections */
+section.s{padding:44px 0 8px}
+section.s>h2{font-size:24px;letter-spacing:-.01em;display:flex;align-items:baseline;gap:12px}
+section.s>h2 .num{font-size:13px;color:var(--muted);font-weight:600;font-family:"JetBrains Mono",monospace}
+.intro{color:var(--muted);max-width:860px;margin:8px 0 20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(340px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.p-mvp{background:var(--ac-soft);color:var(--ac);border-color:transparent}
+.p-v11{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.p-later{background:var(--soft);color:var(--muted)}
+.moved{font-size:11px;color:var(--warn);font-weight:600}
+.callout{border-left:3px solid var(--ac);background:var(--ac-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+.callout.warn{border-color:var(--warn);background:var(--warn-soft)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi b{display:block;font-size:22px;letter-spacing:-.01em}
+.kpi span{font-size:13px;color:var(--muted)}
+/* feature table */
+table.ft{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
+.ft th,.ft td{padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+.ft th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--soft);font-weight:600}
+.ft tr.grp td{background:var(--soft);font-weight:700;font-size:13px;padding:8px 14px}
+.ft td.f b{display:block;font-weight:600}
+.ft td.f span{color:var(--muted);font-size:13.5px}
+.ft td.basis{font-size:12.5px;color:var(--muted);max-width:300px}
+.ft td.you{width:300px}
+@media (max-width:900px){.ft td.basis{display:none}.ft th.basis{display:none}.ft td.you{width:auto}}
+/* feedback widget */
+.fb{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.fb .chips{display:flex;gap:4px;flex-wrap:wrap}
+.fb .chip{font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s ease}
+.fb .chip:hover{color:var(--ink);border-color:var(--muted)}
+.fb .chip.on.keep{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.on.change{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.fb .chip.on.drop{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.fb .chip.on.opt{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.rec::after{content:" · recommended";font-weight:500;opacity:.8}
+.fb textarea{font:inherit;font-size:13px;width:100%;min-height:34px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:9px;padding:7px 10px;transition:border-color .15s ease,min-height .2s ease}
+.fb textarea:focus{outline:none;border-color:var(--ac);min-height:70px}
+.fb.has textarea{border-color:color-mix(in srgb,var(--ac) 50%,var(--line))}
+/* diagrams */
+.diagram{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;overflow-x:auto;box-shadow:var(--shadow)}
+.diagram .mermaid{display:flex;justify-content:center;min-height:80px;color:#222}
+.dg-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 4px}
+.dg-title h3{font-size:17px}
+.dg-note{color:var(--muted);font-size:14px;margin:4px 0 12px;max-width:900px}
+.steps{counter-reset:st;list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.steps li{counter-increment:st;position:relative;padding:12px 14px 12px 50px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.steps li::before{content:counter(st);position:absolute;left:14px;top:12px;width:24px;height:24px;border-radius:50%;background:var(--ac-soft);color:var(--ac);font-weight:700;font-size:12.5px;display:grid;place-items:center}
+.steps li b{display:block}
+.steps li span{color:var(--muted);font-size:14px}
+/* screens */
+.screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:22px}
+figure.screen{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+figure.screen.wide{grid-column:1/-1}
+figure.screen figcaption h4{font-size:15.5px;display:flex;gap:8px;align-items:center}
+figure.screen figcaption h4 .sid{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--muted);font-weight:500}
+figure.screen figcaption p{margin:4px 0 0;color:var(--muted);font-size:13.5px}
+figure.screen figcaption ol{margin:8px 0 0;padding-left:20px;font-size:13px;color:var(--muted)}
+figure.screen figcaption ol li::marker{color:var(--ac);font-weight:700}
+.grp-h{grid-column:1/-1;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin-top:10px;border-top:1px solid var(--line);padding-top:16px}
+/* --- wireframe kit --- */
+.phone{width:270px;height:560px;margin:0 auto;border:2px solid var(--wf-ink);border-radius:38px;background:var(--wf-bg);color:var(--wf-ink);padding:10px 12px 0;display:flex;flex-direction:column;gap:7px;font:11.5px/1.35 Inter,system-ui,sans-serif;position:relative;overflow:hidden}
+.phone::before{content:"";position:absolute;top:8px;left:50%;transform:translateX(-50%);width:74px;height:20px;border-radius:12px;background:var(--wf-ink);opacity:.9}
+.sb{display:flex;justify-content:space-between;font-size:10px;font-weight:600;padding:2px 10px 4px;min-height:18px}
+.hd{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.hd .t{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.ico{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--wf-line);display:inline-grid;place-items:center;font-size:10px;flex:none}
+.box{border:1.5px solid var(--wf-line);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:5px}
+.box.fill{background:var(--wf-fill);border-color:transparent}
+.box.hl{border-color:var(--wf-ink);border-width:2px}
+.row{display:flex;align-items:center;gap:6px}
+.row.sp{justify-content:space-between}
+.col{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;opacity:.7}
+.b{font-weight:700}
+.sm{font-size:10px;opacity:.75}
+.ph{height:7px;border-radius:4px;background:var(--wf-fill2)}
+.ph.s{width:30%}.ph.m{width:55%}.ph.l{width:85%}
+.ring{width:38px;height:38px;border-radius:50%;border:3.5px solid var(--wf-fill2);border-top-color:var(--wf-ink);border-right-color:var(--wf-ink);display:grid;place-items:center;font-size:9.5px;font-weight:700;flex:none}
+.ring.lg{width:78px;height:78px;border-width:6px;font-size:16px}
+.ring.xl{width:110px;height:110px;border-width:8px;font-size:20px}
+.barw{height:6px;border-radius:3px;background:var(--wf-fill2);overflow:hidden}
+.barw i{display:block;height:100%;background:var(--wf-ink)}
+.wbtn{border:1.5px solid var(--wf-ink);border-radius:11px;padding:7px 8px;text-align:center;font-weight:700;font-size:11px}
+.wbtn.pri{background:var(--wf-ink);color:var(--wf-bg)}
+.wbtn.ghost{border-color:var(--wf-line);font-weight:600}
+.wbtn.sm{padding:3px 8px;font-size:10px;border-radius:8px}
+.wchip{border:1.2px solid var(--wf-line);border-radius:99px;padding:2px 7px;font-size:9.5px;font-weight:600;white-space:nowrap}
+.wchip.on{background:var(--wf-ink);color:var(--wf-bg);border-color:var(--wf-ink)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--wf-ink);flex:none}
+.dot.o{background:transparent;border:1.5px solid var(--wf-ink)}
+.tabs{margin-top:auto;display:flex;justify-content:space-around;border-top:1.5px solid var(--wf-line);padding:7px 0 14px;margin-left:-12px;margin-right:-12px;background:var(--wf-bg)}
+.tabs span{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;opacity:.55}
+.tabs span i{width:16px;height:16px;border-radius:5px;border:1.5px solid currentColor}
+.tabs span.on{opacity:1;font-weight:700}
+.tabs span.on i{background:currentColor}
+.code{font-family:"JetBrains Mono",monospace;font-size:10px;background:var(--wf-fill);border-radius:8px;padding:7px}
+.n{display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:#e0007a;color:#fff;font-size:9px;font-weight:700;font-style:normal;flex:none;vertical-align:middle}
+.scan{aspect-ratio:1;border-radius:18px;background:var(--wf-fill);position:relative;margin:6px 10px}
+.scan::before,.scan::after{content:"";position:absolute;inset:22px;border:3px solid var(--wf-ink);border-radius:14px;clip-path:polygon(0 0,30% 0,30% 6%,6% 6%,6% 30%,0 30%,0 70%,6% 70%,6% 94%,30% 94%,30% 100%,70% 100%,70% 94%,94% 94%,94% 70%,100% 70%,100% 30%,94% 30%,94% 6%,70% 6%,70% 0,100% 0,100% 100%,0 100%)}
+.scan::after{inset:auto 30px 50% 30px;height:2px;border:0;background:var(--wf-ink);clip-path:none;animation:scanl 2.4s ease-in-out infinite}
+@keyframes scanl{0%,100%{transform:translateY(-60px)}50%{transform:translateY(60px)}}
+@media (prefers-reduced-motion:reduce){.scan::after{animation:none}}
+.codebox{display:flex;gap:5px;justify-content:center}
+.codebox i{width:30px;height:38px;border:1.5px solid var(--wf-line);border-radius:8px;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:15px}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--wf-bg);border-top:2px solid var(--wf-ink);border-radius:22px 22px 0 0;padding:12px 14px 22px;display:flex;flex-direction:column;gap:7px;z-index:2}
+.sheet::before{content:"";width:36px;height:4px;border-radius:2px;background:var(--wf-line);margin:0 auto 4px}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.28);z-index:1}
+.bubble{border-radius:12px;padding:6px 8px;max-width:86%}
+.bubble.me{align-self:flex-end;background:var(--wf-fill2)}
+.bubble.ai{align-self:flex-start;border:1.5px solid var(--wf-line)}
+.toggle{width:26px;height:15px;border-radius:8px;border:1.5px solid var(--wf-ink);position:relative;flex:none}
+.toggle::after{content:"";position:absolute;top:1.5px;left:2px;width:9px;height:9px;border-radius:50%;background:var(--wf-ink)}
+.toggle.on{background:var(--wf-ink)}
+.toggle.on::after{left:auto;right:2px;background:var(--wf-bg)}
+.banner{border-radius:10px;padding:6px 8px;border:1.5px dashed var(--wf-ink);font-size:10.5px;font-weight:600}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal i{aspect-ratio:1;border-radius:4px;background:var(--wf-fill2)}
+.cal i.on{background:var(--wf-ink)}
+.badges{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.badges i{aspect-ratio:1;border-radius:12px;border:1.5px solid var(--wf-ink);display:grid;place-items:center;font-style:normal;font-size:9px;font-weight:700}
+.badges i.lock{border-style:dashed;border-color:var(--wf-line);opacity:.6}
+.desk{width:100%;max-width:820px;height:400px;margin:0 auto;border:2px solid var(--wf-ink);border-radius:12px;background:var(--wf-bg);color:var(--wf-ink);display:grid;grid-template-columns:150px 1fr;overflow:hidden;font:11.5px/1.35 Inter,system-ui,sans-serif;position:relative}
+.desk .side{border-right:1.5px solid var(--wf-line);padding:12px;display:flex;flex-direction:column;gap:7px}
+.desk .main{padding:14px;display:flex;flex-direction:column;gap:8px}
+.desk .dlg{position:absolute;right:40px;top:40px;width:330px;background:var(--wf-bg);border:2px solid var(--wf-ink);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.15)}
+.qr{width:96px;height:96px;flex:none;background:repeating-conic-gradient(var(--wf-ink) 0 25%,transparent 0 50%) 0 0/16px 16px;border:6px solid var(--wf-bg);outline:1.5px solid var(--wf-ink);border-radius:6px}
+/* widgets */
+.wgrid{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start}
+.homescreen{background:linear-gradient(160deg,var(--wf-fill),var(--wf-fill2));border-radius:24px;padding:16px;display:grid;grid-template-columns:repeat(4,64px);grid-auto-rows:64px;gap:12px;color:var(--wf-ink);font:11px/1.3 Inter,system-ui,sans-serif}
+.wd{background:var(--wf-bg);border:1.5px solid var(--wf-ink);border-radius:18px;padding:9px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.wd.s{grid-column:span 2;grid-row:span 2}
+.wd.m{grid-column:span 4;grid-row:span 2}
+.wd.l{grid-column:span 4;grid-row:span 4}
+.appico{border-radius:14px;background:var(--wf-bg);opacity:.55;border:1.5px dashed var(--wf-line)}
+.lock{width:270px;border-radius:28px;background:linear-gradient(170deg,var(--wf-fill2),var(--wf-fill));padding:18px 16px;color:var(--wf-ink);font:11px/1.3 Inter,system-ui,sans-serif;display:flex;flex-direction:column;gap:10px;align-items:center}
+.lock .clock{font-size:44px;font-weight:300;letter-spacing:-.02em;line-height:1}
+.acc{display:flex;gap:8px}
+.acc .c{width:52px;height:52px;border-radius:50%;border:1.5px solid var(--wf-ink);display:grid;place-items:center;font-weight:700;font-size:10px;background:var(--wf-bg)}
+.acc .r{width:130px;height:52px;border-radius:12px;border:1.5px solid var(--wf-ink);padding:6px 8px;background:var(--wf-bg);font-size:10px}
+.island{background:#111;color:#eee;border-radius:26px;padding:10px 14px;display:flex;align-items:center;gap:10px;font:11px/1.3 Inter,system-ui,sans-serif;width:270px}
+.island .pulse{width:9px;height:9px;border-radius:50%;background:#4cc3ae;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.island .pulse{animation:none}}
+.la{background:#151515;color:#eee;border-radius:22px;padding:12px 14px;width:300px;font:11px/1.35 Inter,system-ui,sans-serif;display:flex;flex-direction:column;gap:6px}
+.wcap{font-size:13px;color:var(--muted);max-width:330px;margin-top:8px}
+.wcap b{color:var(--ink)}
+/* decisions */
+.dec{display:grid;gap:14px}
+.dec .card h3{font-size:16px}
+.dec .card p{margin:6px 0 0;color:var(--muted);font-size:14px}
+footer{padding:50px 0 80px;color:var(--muted);font-size:13px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:640px){.wrap{padding:0 16px}h1{font-size:27px}.phone{transform:scale(.94)}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="eyebrow">Harness Manager · Mobile companion · Review 1 of 3</div>
+  <h1>The phone app: features, screens and how it connects</h1>
+  <p class="lede">The low-fidelity proposal for your review. Mark each item <b>Keep</b>, <b>Change</b> or <b>Drop</b>, and leave a comment where you want something different. When you are done, use <b>Export feedback</b> and give me the file, or <b>Copy as text</b> and paste it. Your marks stay in this browser until then.</p>
+  <div class="meta">
+    <span class="tag">Features consulted with <b>Codex · gpt-6.2-astra</b> (read the repository, 6 min)</span>
+    <span class="tag">Grounded in <b>develop @ 7cd0a8a</b> (1.13.2)</span>
+    <span class="tag">Next: <b>2 high-fidelity designers</b> after your feedback</span>
+    <span class="tag">25 Nov 2026</span>
+  </div>
+</div></header>
+
+<div class="bar"><div class="wrap">
+  <nav class="toc" id="toc">
+    <a href="#summary">Summary</a><a href="#features">Features</a><a href="#architecture">How it connects</a><a href="#activation">Registration</a><a href="#processes">Processes</a><a href="#screens">Screens</a><a href="#widgets">Widgets</a><a href="#game">Gamification</a><a href="#decisions">Decisions</a><a href="#next">Next phase</a>
+  </nav>
+  <span class="fbstat" id="fbstat"></span>
+  <button class="btn" id="copy">Copy as text</button>
+  <button class="btn pri" id="export">Export feedback</button>
+</div></div>
+
+<main class="wrap">
+
+<!-- ============ SUMMARY ============ -->
+<section class="s reveal" id="summary">
+  <h2><span class="num">01</span>Summary</h2>
+  <p class="intro">The phone does three jobs well: <b>see which account has room</b>, <b>find the session that needs you</b>, and <b>answer it while the request is still open</b>. Everything else supports those three. The computer that runs a session stays in charge of every action the phone asks for.</p>
+  <div class="kpis">
+    <div class="kpi"><b>34</b><span>features, 21 in the first release (MVP)</span></div>
+    <div class="kpi"><b>24</b><span>screens and sheets, plus the desktop's new “Pair a phone”</span></div>
+    <div class="kpi"><b>6</b><span>widget surfaces: in-app board, small, medium, large, lock screen, live activity</span></div>
+    <div class="kpi"><b>8</b><span>pieces of new desktop and hub work before a phone can act</span></div>
+  </div>
+  <div class="callout warn"><b>What the desktop must add first.</b> Today the direct link and the hub only carry sync data. Neither lets a phone answer a request, reply or press Stop, and computer pairing hands over the ring recovery key, which a phone must never get. The phone needs its own pairing with <b>scoped grants</b> (summaries, transcripts, control) and a <b>command channel with receipts</b>. These are listed under <a href="#backend">Desktop work</a>.</div>
+  <div class="grid g3">
+    <div class="card"><h3>Hard limits that shape the design</h3><p class="intro" style="margin:8px 0 0">A <b>question</b> waits for the phone for at most <b>15 s</b> before it goes back to the terminal; a <b>permission request</b> waits up to <b>300 s</b>. <b>Reply</b> and <b>Stop</b> need a session started with Harness Manager's own terminal (Windows, setting off by default).</p></div>
+    <div class="card"><h3>Reachability</h3><p class="intro" style="margin:8px 0 0">At home or on a VPN the phone talks to the computer directly (pinned mutual TLS). Away, it goes through <b>your hub</b>, which only ever sees encrypted data. A sleeping computer means the phone shows the last snapshot and its age.</p></div>
+    <div class="card"><h3>Your asks, carried through</h3><p class="intro" style="margin:8px 0 0">Gamified but professional, home-screen <b>widgets</b> in the first release (Codex had them in v1.1: moved up, marked <span class="moved">↑ moved</span>), subtle motion, and two distinct high-fidelity directions to choose from.</p></div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="s reveal" id="features">
+  <h2><span class="num">02</span>Feature list</h2>
+  <p class="intro">Grouped by area, with the priority Codex proposed (adjusted where your brief asked for more) and what each one stands on in the code today. <span class="pill p-mvp">MVP</span> first release · <span class="pill p-v11">v1.1</span> soon after · <span class="pill p-later">Later</span>.</p>
+  <table class="ft">
+    <thead><tr><th>Feature</th><th>Priority</th><th class="basis">Stands on</th><th>Your call</th></tr></thead>
+    <tbody id="ftbody"></tbody>
+  </table>
+
+  <h3 id="backend" style="margin:34px 0 6px;font-size:18px">Desktop and hub work the phone needs</h3>
+  <p class="intro">None of this exists yet. Each is a prerequisite for the MVP features above it relies on.</p>
+  <table class="ft"><thead><tr><th>Work</th><th>Why</th><th>Your call</th></tr></thead><tbody id="bebody"></tbody></table>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section class="s reveal" id="architecture">
+  <h2><span class="num">03</span>How it connects</h2>
+  <p class="intro">One phone identity, a grant per computer. Direct when it can, the hub when it must, and push wake-ups that carry no content: the phone fetches the details after you unlock it.</p>
+  <div class="diagram" data-fid="dg-arch" data-title="Diagram: system architecture">
+    <div class="dg-title"><h3>System architecture</h3></div>
+    <pre class="mermaid">
+flowchart LR
+  subgraph PH["Phone - iOS / Android"]
+    APP["App + widgets"]
+    KC[("Keychain / Keystore<br/>phone key - grants - encrypted cache")]
+  end
+  subgraph PCS["Your computers"]
+    D1["Desktop A<br/>Harness Manager + companion API"]
+    D2["Desktop B"]
+    CC["Claude Code / Codex sessions<br/>hooks - own terminal"]
+  end
+  HUB[("Your hub<br/>encrypted relay - presence")]
+  PR["Push relay<br/>opaque wake-ups"]
+  AP["APNs / FCM"]
+  APP <-->|"home or VPN: pinned mutual TLS"| D1
+  APP <-->|"away: sealed to the phone key"| HUB
+  D1 <-->|"outbound WebSocket"| HUB
+  D2 <-->|"outbound WebSocket"| HUB
+  D1 <-->|"peer sync"| D2
+  CC -->|"hook events"| D1
+  D1 -->|"wake-up, no content"| PR
+  HUB -->|"wake-up, no content"| PR
+  PR --> AP --> APP
+  APP --- KC
+  classDef p fill:#e2f1ed,stroke:#0f6b5f,color:#0b3d36
+  classDef d fill:#eef2f0,stroke:#5d6b6a,color:#16201f
+  classDef h fill:#fbf0de,stroke:#a35d00,color:#5a3300
+  class APP,KC p
+  class D1,D2,CC d
+  class HUB,PR,AP h
+    </pre>
+  </div>
+</section>
+
+<!-- ============ ACTIVATION ============ -->
+<section class="s reveal" id="activation">
+  <h2><span class="num">04</span>Registration and activation</h2>
+  <p class="intro">There is no account to sign up for: the phone registers with <b>your computers</b>. A computer shows a QR code, the phone proves it saw the code, and you approve the phone and what it may do <b>on the computer</b>. Through the hub the same approval happens remotely, signed by a computer you already trust.</p>
+  <ol class="steps" style="margin-bottom:22px">
+    <li><b>First install</b><span>Make a phone key in the Keychain (iOS) or Keystore (Android), excluded from backups. Ask for camera, local network and notifications only when each is first needed.</span></li>
+    <li><b>Invitation on the computer</b><span>Computers › <i>Pair a phone</i> shows a QR: protocol version, type “phone”, the six-digit code, the address hint and the computer's fingerprint. No recovery key, no admin token, nothing lasting.</span></li>
+    <li><b>Prove the code</b><span>The existing SPAKE2 exchange: two minutes, three wrong tries end it. A wrong code fails at decryption; nothing is revealed.</span></li>
+    <li><b>Approve on the computer</b><span>The computer shows the phone's name, three matching words and the grants: <b>Summaries</b> (default), <b>Transcripts</b>, <b>Control</b>. The phone is stored as a phone, never as a full peer.</span></li>
+    <li><b>First sync and notifications</b><span>The phone pins the computer's certificate, syncs, then offers push. The push token is bound to the phone, refreshed when it changes, deleted on revoke.</span></li>
+    <li><b>More computers</b><span>The first computer lists the others it knows; each grants access itself. A session on computer B always routes to B.</span></li>
+    <li><b>Revoke or replace</b><span>From any computer: revoke the grant, close connections, cancel the hub token and push binding. A new phone pairs again with a new key. Data already on a lost phone cannot be recalled, so grants expire if a phone stays offline.</span></li>
+  </ol>
+  <div class="grid g2">
+    <div class="diagram" data-fid="dg-pair-direct" data-title="Diagram: pairing at home (direct)"><div class="dg-title"><h3>Pairing at home (direct)</h3></div><p class="dg-note">On the same network or a VPN. Reuses the computer pairing's SPAKE2 code exchange with a phone-only payload.</p>
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as You
+  participant P as Phone
+  participant D as Desktop
+  U->>D: Computers - Pair a phone
+  D->>D: 6-digit code, pairing port open 2 min
+  D-->>U: QR: version, type phone, code, host, fingerprint
+  U->>P: Scan the QR (or type the code)
+  P->>P: Make the phone key (Keychain / Keystore)
+  P->>D: SPAKE2 with the code (3 tries, 2 min)
+  D-->>P: Encrypted desktop identity
+  P-->>D: Encrypted phone name + public key
+  D-->>U: "Pixel 9 wants access" + 3 matching words
+  U->>D: Approve: Summaries on, Control off
+  D->>D: Store a phone grant (no ring key)
+  D-->>P: Grant + pinned certificate
+  P->>D: First sync over mutual TLS
+  P-->>U: Connected - offer notifications
+    </pre></div>
+    <div class="diagram" data-fid="dg-pair-hub" data-title="Diagram: activation through the hub"><div class="dg-title"><h3>Activation through your hub</h3></div><p class="dg-note">When the phone is not near the computer. The hub carries the exchange but never sees the ring key, the admin token or anything in plain text.</p>
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as You
+  participant P as Phone
+  participant H as Hub
+  participant D as Trusted desktop
+  U->>D: Invite a phone
+  D->>H: Phone invite (one use, 10 min)
+  D-->>U: QR: hub URL, invite, fingerprint
+  U->>P: Scan
+  P->>H: Enroll: signed phone key + invite
+  H->>D: Phone waiting (WebSocket)
+  D-->>U: Approve this phone and its grants?
+  U->>D: Approve
+  D->>H: Grant sealed to the phone key
+  H-->>P: Phone-scoped token + sealed grant
+  P->>P: Open the grant, pin the desktop
+  P->>H: Fetch sealed snapshot
+  H-->>P: Snapshot for this phone only
+    </pre></div>
+    <div class="diagram" data-fid="dg-lifecycle" data-title="Diagram: phone lifecycle"><div class="dg-title"><h3>A phone's lifecycle</h3></div><p class="dg-note">Grants expire while a phone is out of touch, so a lost phone loses access on its own.</p>
+    <pre class="mermaid">
+stateDiagram-v2
+  [*] --> Unpaired
+  Unpaired --> Pairing: scan QR or enter code
+  Pairing --> Unpaired: 3 wrong codes or 2 min
+  Pairing --> AwaitingApproval: code proven
+  AwaitingApproval --> Active: computer approves grants
+  AwaitingApproval --> Unpaired: declined or timed out
+  Active --> Active: grants edited
+  Active --> Stale: no contact past grant refresh
+  Stale --> Active: reconnect + grant check
+  Active --> Revoked: revoked from a computer
+  Stale --> Revoked: grant expired
+  Revoked --> Unpaired: pair again with a new key
+    </pre></div>
+    <div class="diagram" data-fid="dg-revoke" data-title="Diagram: revoking a lost phone"><div class="dg-title"><h3>Revoking a lost phone</h3></div><p class="dg-note">The computer shows which places confirmed the revocation.</p>
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as You
+  participant D as Desktop A
+  participant H as Hub
+  participant R as Push relay
+  participant P as Lost phone
+  U->>D: Computers - Phones - Revoke "iPhone"
+  D->>D: Delete grant, close live connections
+  D->>H: Cancel phone token, stop sealed snapshots
+  D->>R: Delete push binding
+  H-->>D: Confirmed
+  D-->>U: Revoked on A and the hub, B once it is online
+  P->>D: Next request
+  D-->>P: 403 revoked
+  P->>P: Wipe cache, show "Access removed"
+    </pre></div>
+  </div>
+</section>
+
+<!-- ============ PROCESSES ============ -->
+<section class="s reveal" id="processes">
+  <h2><span class="num">05</span>How it operates</h2>
+  <p class="intro">The phone never acts on a stale view: every action names the request and its version, and the computer checks again right before doing it. An action whose result is unknown is never sent twice on its own.</p>
+  <div class="grid g2">
+    <div class="diagram" data-fid="dg-answer" data-title="Diagram: answering a request from the phone"><div class="dg-title"><h3>Answering a request from the phone</h3></div><p class="dg-note">The terminal still answers first if you are at the computer.</p>
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant T as Claude Code
+  participant D as Desktop (origin)
+  participant R as Push relay
+  participant P as Phone
+  actor U as You
+  T->>D: PermissionRequest hook (waits up to 300 s)
+  D->>D: Open request #42, version 1
+  D->>R: Wake-up (phone handle, no content)
+  R->>P: "A session needs you"
+  U->>P: Tap, Face ID
+  P->>D: Fetch request #42 (direct or hub)
+  D-->>P: Command, file, expiry, actions
+  U->>P: Approve once
+  P->>D: Action id, grant, request #42 v1, expiry
+  D->>D: Recheck grant, still open, same version
+  alt still open
+    D->>T: Hook answers allow
+    D-->>P: Accepted + receipt
+  else answered in the terminal first
+    D-->>P: Already handled
+  else closed or computer asleep
+    D-->>P: Expired / unavailable
+  end
+    </pre></div>
+    <div class="diagram" data-fid="dg-outcomes" data-title="Diagram: what an action can come back as"><div class="dg-title"><h3>What an action can come back as</h3></div><p class="dg-note">Each outcome has its own wording on the phone. “Delivery unknown” re-reads the session; it never resends.</p>
+    <pre class="mermaid">
+stateDiagram-v2
+  [*] --> Sent
+  Sent --> Accepted: origin did it
+  Sent --> AlreadyHandled: terminal or another phone was first
+  Sent --> Expired: request closed or grant expired
+  Sent --> OriginUnavailable: computer asleep or unreachable
+  Sent --> DeliveryUnknown: no receipt (network dropped)
+  DeliveryUnknown --> Refreshed: read the session again
+  Accepted --> [*]
+  AlreadyHandled --> [*]
+  Expired --> [*]
+  OriginUnavailable --> [*]
+  Refreshed --> [*]
+    </pre></div>
+    <div class="diagram" data-fid="dg-widgets" data-title="Diagram: how widgets stay current"><div class="dg-title"><h3>How widgets stay current</h3></div><p class="dg-note">Widgets read a redacted, encrypted cache the app keeps. A countdown runs on the phone; reaching zero only means “refresh due”, never “limit back”.</p>
+    <pre class="mermaid">
+flowchart TB
+  subgraph DK["Desktop"]
+    Q["Limit readings<br/>live + cached"] --> S["Redacted snapshot<br/>per phone grant"]
+    E["Events: request opened,<br/>run ended, limit low"] --> W["Wake-up"]
+  end
+  S -->|"direct or hub"| A["App fetch"]
+  W -->|"push"| A
+  A --> C[("Encrypted cache<br/>app group / DataStore")]
+  C --> WK["Home and lock-screen widgets"]
+  C --> LA["Live Activity /<br/>ongoing notification"]
+  WK -->|"reset reached: refresh due"| A
+    </pre></div>
+    <div class="diagram" data-fid="dg-push" data-title="Diagram: registering for notifications"><div class="dg-title"><h3>Registering for notifications</h3></div><p class="dg-note">Store builds need someone to hold the APNs/FCM credentials: a small relay you or we run. A self-built app can use your hub with your own credentials.</p>
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  actor U as You
+  participant P as Phone
+  participant OS as APNs / FCM
+  participant R as Push relay
+  participant D as Desktop
+  U->>P: Allow notifications
+  P->>OS: Register
+  OS-->>P: Device token
+  P->>R: Bind token to phone handle (signed)
+  R-->>P: Relay handle
+  P->>D: Save relay handle with my grant
+  Note over P,R: Token changes: rebind. Rejected token: pruned.
+  D->>R: Wake-up for handle (no content)
+  R->>OS: Push
+  OS->>P: Notification, details fetched after unlock
+    </pre></div>
+  </div>
+  <h3 style="margin:30px 0 10px;font-size:18px">What sends a notification</h3>
+  <table class="ft"><thead><tr><th>Event</th><th>Default</th><th>Your call</th></tr></thead><tbody id="ntbody"></tbody></table>
+</section>
+
+<!-- ============ SCREENS ============ -->
+<section class="s reveal" id="screens">
+  <h2><span class="num">06</span>Screens (low fidelity)</h2>
+  <p class="intro">Structure and content only: no visual style yet, which is what the two designers will propose. Five tabs: <b>Home</b>, <b>Sessions</b>, <b>Accounts</b>, <b>Computers</b>, <b>You</b> (progress and settings). The pink numbers match the notes under each screen.</p>
+  <div class="screens" id="screens-grid">
+
+  <div class="grp-h">Onboarding and pairing</div>
+
+  <figure class="screen" data-fid="s-welcome" data-title="Screen: Welcome">
+    <div class="phone"><div class="sb"></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:10px;align-items:center;text-align:center;padding:0 8px">
+        <div class="ring xl">HM</div>
+        <div class="b" style="font-size:19px">Harness Manager</div>
+        <div class="sm">Your AI coding accounts, sessions and limits, on your phone.</div>
+      </div>
+      <div class="wbtn pri"><i class="n">1</i> Pair with a computer</div>
+      <div class="wbtn"><i class="n">2</i> Connect through my hub</div>
+      <div class="sm" style="text-align:center">How it works · Needs Harness Manager 1.14+</div>
+      <div style="height:18px"></div>
+    </div>
+    <figcaption><h4>Welcome <span class="sid">S1</span></h4><p>One choice: where the data comes from.</p><ol><li>Scan a QR code from a computer nearby.</li><li>Away from home: scan a hub invitation.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-scan" data-title="Screen: Scan QR">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Scan the code</span><span style="width:24px"></span></div>
+      <div class="scan"></div>
+      <div class="sm" style="text-align:center">On your computer: <b>Computers › Pair a phone</b></div>
+      <div class="box fill"><div class="row"><span class="dot"></span><span><i class="n">1</i> Found <b>DEVELOPMENTPC</b> on this network</span></div></div>
+      <div class="wbtn ghost"><i class="n">2</i> Type the code instead</div>
+    </div>
+    <figcaption><h4>Scan QR <span class="sid">S2</span></h4><p>Camera permission asked here, not at install.</p><ol><li>Computers advertising a pairing nearby (mDNS) show up while you scan.</li><li>Falls back to the six-digit code.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-code" data-title="Screen: Enter code">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Enter the code</span><span style="width:24px"></span></div>
+      <div class="sm">The six digits shown on your computer.</div>
+      <div class="codebox"><i>4</i><i>8</i><i>1</i><i></i><i></i><i></i></div>
+      <div class="sm" style="text-align:center"><i class="n">1</i> 1:42 left · 3 tries</div>
+      <div class="box"><div class="lbl">Computer</div><div class="row sp"><span class="b">DEVELOPMENTPC</span><span class="sm">found nearby ▾</span></div><div class="sm"><i class="n">2</i> or type host:port</div></div>
+      <div style="flex:1"></div>
+      <div class="wbtn pri">Continue</div><div style="height:16px"></div>
+    </div>
+    <figcaption><h4>Enter code <span class="sid">S3</span></h4><p>Manual pairing when scanning isn't possible.</p><ol><li>The code's lifetime and tries left, as the computer enforces them.</li><li>An address for a computer on a VPN.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-verify" data-title="Screen: Approve on your computer">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">×</span><span class="b">Check your computer</span><span style="width:24px"></span></div>
+      <div style="text-align:center;margin-top:10px" class="sm">DEVELOPMENTPC should show the same three words</div>
+      <div class="box hl" style="align-items:center;padding:14px"><div class="b" style="font-size:18px"><i class="n">1</i> amber · otter · nine</div></div>
+      <div class="box"><div class="lbl"><i class="n">2</i> This phone asks for</div>
+        <div class="row sp"><span>Summaries: limits, sessions, usage</span><span class="toggle on"></span></div>
+        <div class="row sp"><span>Transcripts</span><span class="toggle on"></span></div>
+        <div class="row sp"><span>Control: answer, reply, Stop</span><span class="toggle on"></span></div>
+        <div class="sm">Your computer decides; you can change it there later.</div></div>
+      <div class="row" style="justify-content:center;gap:8px;margin-top:6px"><span class="ring" style="width:22px;height:22px;border-width:2.5px"></span><span class="sm">Waiting for approval…</span></div>
+    </div>
+    <figcaption><h4>Approve on your computer <span class="sid">S4</span></h4><p>The phone waits while you approve it on the desktop.</p><ol><li>Matching words guard against pairing with the wrong computer.</li><li>Requested grants; the computer's dialog has the final say.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-paired" data-title="Screen: Connected">
+    <div class="phone"><div class="sb"></div>
+      <div style="text-align:center;margin-top:20px"><div class="ring lg" style="margin:0 auto">✓</div><div class="b" style="font-size:16px;margin-top:8px">Connected to DEVELOPMENTPC</div><div class="sm">via this network · pinned</div></div>
+      <div class="box"><div class="lbl"><i class="n">1</i> Granted</div><div class="row sp"><span>Summaries</span><span class="b">On</span></div><div class="row sp"><span>Transcripts</span><span class="b">On</span></div><div class="row sp"><span>Control</span><span class="b">Off</span></div></div>
+      <div class="box fill"><div class="lbl"><i class="n">2</i> First sync</div><div>10 accounts · 9 live sessions · 3 computers known</div></div>
+      <div style="flex:1"></div>
+      <div class="wbtn ghost"><i class="n">3</i> Pair another computer</div>
+      <div class="wbtn pri">Continue</div><div style="height:16px"></div>
+    </div>
+    <figcaption><h4>Connected <span class="sid">S5</span></h4><p>What was granted and what arrived.</p><ol><li>Grants as approved; a phone without Control still sees everything else.</li><li>The other computers it knows about are listed, each to be granted on its own.</li><li>Straight into pairing the next one.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-notif-prime" data-title="Screen: Notification prompt">
+    <div class="phone"><div class="sb"></div>
+      <div class="box fill" style="height:170px;margin-top:20px;align-items:center;justify-content:center"><div class="sm">[illustration: a request card sliding in]</div></div>
+      <div class="b" style="font-size:17px;text-align:center">Know when a session needs you</div>
+      <div class="col" style="gap:6px"><div class="row"><span class="dot"></span>A question or permission is waiting</div><div class="row"><span class="dot"></span>A window resets with room left to use</div><div class="row"><span class="dot"></span>A login expired</div></div>
+      <div class="sm"><i class="n">1</i> Locked screen shows only “A session needs you”.</div>
+      <div style="flex:1"></div>
+      <div class="wbtn pri">Allow notifications</div><div class="wbtn ghost">Not now</div><div style="height:16px"></div>
+    </div>
+    <figcaption><h4>Notification prompt <span class="sid">S6</span></h4><p>Explains the value before the system prompt.</p><ol><li>Private by default: details are fetched after unlocking.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">Home and requests</div>
+
+  <figure class="screen" data-fid="s-home" data-title="Screen: Home">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><div class="col"><span class="sm">Tuesday evening</span><span class="t">Home</span></div><span class="wchip"><i class="n">1</i> ◆ 12-day streak</span></div>
+      <div class="row sp sm"><span>Level 4 · Planner</span><span>1,240 / 1,500 XP</span></div><div class="barw"><i style="width:82%"></i></div>
+      <div class="box hl"><div class="row sp"><span class="lbl"><i class="n">2</i> Needs you · 2</span><span class="sm">all</span></div>
+        <div class="row"><span class="dot"></span><div class="col"><span class="b">Bash: npm test</span><span class="sm">ses-wt-011 · DEVELOPMENTPC</span></div><span class="wchip">4:12</span></div>
+        <div class="row"><span class="dot o"></span><div class="col"><span class="b">Question: which branch?</span><span class="sm">Bunyan · laptop</span></div><span class="wchip">0:09</span></div></div>
+      <div class="box"><div class="lbl"><i class="n">3</i> Use next</div><div class="row"><span class="ring">77%</span><div class="col"><span class="b">samykabu-teksa</span><span class="sm">5-hour window resets in 18 m with 97% left · harvest it</span></div></div></div>
+      <div class="row" style="gap:6px"><div class="box" style="flex:1"><span class="lbl">Running</span><span class="b">9</span><span class="sm">3 computers</span></div><div class="box" style="flex:1"><span class="lbl">Next reset</span><span class="b">29 m</span><span class="sm">claude-main</span></div><div class="box" style="flex:1"><span class="lbl">Today</span><span class="b">1.2 M</span><span class="sm">≈ $41</span></div></div>
+      <div class="sm" style="text-align:center"><i class="n">4</i> Edit widgets</div>
+      <div class="tabs" data-on="0"></div>
+    </div>
+    <figcaption><h4>Home <span class="sid">S7</span></h4><p>The three jobs, top to bottom; every card is a movable widget.</p><ol><li>Streak and level: the light game layer.</li><li>Requests first, with the time each has left.</li><li>The account to use next and why; harvesting earns XP.</li><li>Rearrange, add or hide cards (S19).</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-inbox" data-title="Screen: Requests inbox">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">Requests</span><span class="ico">⚙</span></div>
+      <div class="row"><span class="wchip on">Open · 2</span><span class="wchip">Resolved</span></div>
+      <div class="box hl"><div class="row sp"><span class="lbl">Permission</span><span class="wchip">4:12 left</span></div><span class="b">Bash: npm test -- --watch=false</span><span class="sm">ses-wt-011 · claude-main · DEVELOPMENTPC</span></div>
+      <div class="box hl"><div class="row sp"><span class="lbl">Question</span><span class="wchip">0:09 left</span></div><span class="b">Which branch should I base this on?</span><span class="sm">Bunyan · sabushanab-resal · LAPTOP</span></div>
+      <div class="lbl" style="margin-top:6px"><i class="n">1</i> Earlier</div>
+      <div class="box"><span>Edit accounts.js</span><span class="sm">Answered in the terminal · 12 m ago</span></div>
+      <div class="box"><span>Bash: cargo build</span><span class="sm">You approved · 1 h ago</span></div>
+      <div class="tabs" data-on="0"></div>
+    </div>
+    <figcaption><h4>Requests inbox <span class="sid">S8</span></h4><p>Every open request across computers; works without push.</p><ol><li>Resolved ones say who answered: you, the terminal, or the timeout.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-permission" data-title="Screen: Permission request">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Permission</span><span class="wchip"><i class="n">1</i> 4:12</span></div>
+      <div class="barw"><i style="width:84%"></i></div>
+      <div class="sm">ses-wt-011 · claude-main · DEVELOPMENTPC</div>
+      <div class="b" style="font-size:14px">Claude Code wants to run a command</div>
+      <div class="code"><i class="n">2</i> npm run test -- --watch=false</div>
+      <div class="sm">Description: “Run the unit tests”</div>
+      <div class="box fill"><div class="sm"><i class="n">3</i> In the project folder D:\Projects\Bunyan</div></div>
+      <div style="flex:1"></div>
+      <div class="sm" style="text-align:center"><i class="n">4</i> The terminal answers first if you're at the computer</div>
+      <div class="row"><div class="wbtn" style="flex:1">Deny</div><div class="wbtn pri" style="flex:1.4">Approve once</div></div><div style="height:16px"></div>
+    </div>
+    <figcaption><h4>Permission request <span class="sid">S9</span></h4><p>Exactly what will run, where, and for how long you can answer.</p><ol><li>Countdown to the 300 s limit.</li><li>The full command or file, never shortened.</li><li>Where it runs.</li><li>Approve needs Face ID / fingerprint.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-question" data-title="Screen: Question">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Question</span><span class="ring" style="width:30px;height:30px;border-width:3px"><i class="n" style="position:absolute;margin:-24px 0 0 26px">1</i>9</span></div>
+      <div class="sm">Bunyan · sabushanab-resal · LAPTOP</div>
+      <div class="b" style="font-size:14px">Which branch should I base this on?</div>
+      <div class="box hl"><div class="row"><span class="dot"></span><span class="b">develop</span></div><span class="sm">The integration branch</span></div>
+      <div class="box"><div class="row"><span class="dot o"></span><span>main</span></div></div>
+      <div class="box"><div class="row"><span class="dot o"></span><span>release/1.13.2</span></div></div>
+      <div class="sm"><i class="n">2</i> Pick one · or write your own</div>
+      <div style="flex:1"></div>
+      <div class="wbtn pri">Send answer</div>
+      <div class="sm" style="text-align:center"><i class="n">3</i> After 0:00 it waits in the terminal</div><div style="height:14px"></div>
+    </div>
+    <figcaption><h4>Question <span class="sid">S10</span></h4><p>The tool's own options, exactly as offered (multi-select when allowed).</p><ol><li>Only 15 seconds today: the timer makes that honest.</li><li>Selection rule from the question itself.</li><li>Where it goes when time runs out.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">Sessions and control</div>
+
+  <figure class="screen" data-fid="s-sessions" data-title="Screen: Sessions">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">Sessions</span><span class="ico">⌕</span></div>
+      <div class="row" style="flex-wrap:wrap"><span class="wchip on"><i class="n">1</i> Running</span><span class="wchip">Project ▾</span><span class="wchip">Account ▾</span><span class="wchip">Computer ▾</span></div>
+      <div class="lbl">Running · 9</div>
+      <div class="box"><div class="row"><span class="dot"></span><div class="col"><span class="b">Mobile app plan</span><span class="sm">HarnessManager · claude-main · DEV PC</span></div><span class="wchip"><i class="n">2</i> Needs you</span></div></div>
+      <div class="box"><div class="row"><span class="dot"></span><div class="col"><span class="b">Fix the IPv4 read</span><span class="sm">HarnessManager · codex-main · DEV PC</span></div><span class="wchip">Working</span></div></div>
+      <div class="box"><div class="row"><span class="dot o"></span><div class="col"><span class="b">Issue 36</span><span class="sm">Bunyan · teksa · LAPTOP</span></div><span class="wchip">Idle</span></div></div>
+      <div class="lbl">Earlier today</div>
+      <div class="box"><div class="row"><div class="col"><span class="b">Admin portal export</span><span class="sm">AdminPortal · Dev01 · 3 h ago</span></div></div></div>
+      <div class="tabs" data-on="1"></div>
+    </div>
+    <figcaption><h4>Sessions <span class="sid">S11</span></h4><p>All computers' sessions, running first.</p><ol><li>Filters as sheets: project, account, tool, tag, computer, archived.</li><li>A state on every row: needs you, working, idle, ended.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-session" data-title="Screen: Session detail">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><div class="col" style="align-items:center"><span class="b">Mobile app plan</span><span class="sm">claude-main · DEVELOPMENTPC</span></div><span class="ico">⋯</span></div>
+      <div class="row" style="justify-content:center"><span class="wchip on"><i class="n">1</i> Working · 12:40</span><span class="wchip">Follow ◉</span></div>
+      <div class="bubble me">Build the review page for the mobile app</div>
+      <div class="bubble ai">Reading the pairing code first…</div>
+      <div class="box fill"><div class="sm"><i class="n">2</i> ✓ Edited review-1.html  +412 −0</div><div class="sm">✓ Ran cargo test · 36 passed</div></div>
+      <div class="box hl"><div class="lbl">Waiting for you</div><span class="b">Bash: git push</span><div class="row"><span class="wbtn sm">Deny</span><span class="wbtn sm pri">Approve</span></div></div>
+      <div style="flex:1"></div>
+      <div class="row" style="padding-bottom:16px"><div class="box" style="flex:1;padding:6px 8px"><span class="sm"><i class="n">3</i> Reply to the terminal…</span></div><span class="wbtn sm"><i class="n">4</i> Stop</span></div>
+    </div>
+    <figcaption><h4>Session detail <span class="sid">S12</span></h4><p>The conversation, what changed, and the controls the computer allows.</p><ol><li>State, time and “Follow” (starts a Live Activity).</li><li>Changed files and failed steps folded in.</li><li>One line to the terminal; disabled with the reason when it can't (not its own terminal, a prompt waiting).</li><li>Stop confirms first (S13).</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-stop" data-title="Sheet: Stop confirmation">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Mobile app plan</span><span class="ico">⋯</span></div>
+      <div class="bubble me">Build the review page…</div><div class="bubble ai">Reading the pairing code…</div>
+      <div class="scrim"></div>
+      <div class="sheet"><div class="b" style="font-size:15px">Stop this turn?</div><div class="sm">Sends Ctrl+C to <b>Mobile app plan</b> on DEVELOPMENTPC. The session stays open.</div><div class="sm"><i class="n">1</i> Pressed twice at an idle prompt, Ctrl+C can close the tool: the phone sends it once.</div><div class="wbtn pri">Stop the turn</div><div class="wbtn ghost">Cancel</div></div>
+    </div>
+    <figcaption><h4>Stop confirmation <span class="sid">S13</span></h4><p>A deliberate step for the one irreversible control.</p><ol><li>The result is shown as “interrupt delivered” or “delivery unknown”, never retried on its own.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">Accounts, projects and computers</div>
+
+  <figure class="screen" data-fid="s-accounts" data-title="Screen: Accounts">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">Accounts</span><span class="ico">⇅</span></div>
+      <div class="row" style="flex-wrap:wrap"><span class="wchip on">All 10</span><span class="wchip">Claude 6</span><span class="wchip">Codex 1</span><span class="wchip">OpenCode 1</span></div>
+      <div class="box"><div class="row"><span class="ring">77%</span><div class="col"><div class="row sp"><span class="b">samykabu-teksa</span><span class="wchip">Max 20x</span></div><div class="row sm"><span style="width:22px">5h</span><div class="barw" style="flex:1"><i style="width:97%"></i></div></div><div class="row sm"><span style="width:22px">Wk</span><div class="barw" style="flex:1"><i style="width:77%"></i></div></div></div></div></div>
+      <div class="box"><div class="row"><span class="ring">30%</span><div class="col"><div class="row sp"><span class="b">sabushanab-resal</span><span class="wchip"><i class="n">1</i> 3 h old</span></div><div class="row sm"><span style="width:22px">Wk</span><div class="barw" style="flex:1"><i style="width:30%"></i></div></div><span class="sm">resets Fri 27 Nov</span></div></div></div>
+      <div class="box"><div class="row"><span class="ring">11%</span><div class="col"><span class="b">claude-main</span><span class="sm"><i class="n">2</i> ≈ runs out Thu 14:00, 1 d before reset</span></div></div></div>
+      <div class="box"><div class="row"><span class="ring" style="border-style:dashed">—</span><div class="col"><span class="b">Dev02</span><span class="sm"><i class="n">3</i> Login expired · log in on the computer</span></div></div></div>
+      <div class="tabs" data-on="2"></div>
+    </div>
+    <figcaption><h4>Accounts <span class="sid">S14</span></h4><p>Room left on every account, by tool.</p><ol><li>The age of an old reading, as on the desktop (1.13.2).</li><li>Forecasts marked ≈.</li><li>Logins are renewed on the computer, not the phone.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-account" data-title="Screen: Account detail">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">samykabu-teksa</span><span class="ico">⋯</span></div>
+      <div class="row" style="justify-content:center;gap:16px"><span class="ring lg">77%</span><div class="col" style="flex:none"><span class="lbl">Week left</span><span class="b">resets Tue 1 Dec</span><span class="sm">read 2 m ago · live</span></div></div>
+      <div class="box"><div class="row sp"><span class="b">5-hour</span><span>97% left</span></div><div class="barw"><i style="width:97%"></i></div><div class="row sp sm"><span>resets in 18 m</span><span>Fable 88%</span></div></div>
+      <div class="box hl"><div class="lbl"><i class="n">1</i> Harvest window</div><span>97% of the 5-hour window disappears in 18 m. Use it now: <b>+40 XP</b></span><div class="wbtn sm pri" style="align-self:flex-start">Remind me in 5 m</div></div>
+      <div class="box"><div class="lbl"><i class="n">2</i> 7 days</div><div class="ph l" style="height:34px;border-radius:6px"></div><div class="row sp sm"><span>2.37 B tokens</span><span>≈ $902</span></div></div>
+      <div class="box"><div class="lbl">Sessions on it</div><span class="sm">3 running · 41 this week</span></div>
+      <div class="tabs" data-on="2"></div>
+    </div>
+    <figcaption><h4>Account detail <span class="sid">S15</span></h4><p>Every window, its reset and what is likely to happen.</p><ol><li>The game hook: room that would be lost at reset.</li><li>Usage over the chosen range.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-project" data-title="Screen: Project detail">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">HarnessManager</span><span class="ico">⋯</span></div>
+      <div class="row"><span class="wchip on">7 d</span><span class="wchip">14 d</span><span class="wchip">30 d</span></div>
+      <div class="row" style="gap:6px"><div class="box" style="flex:1"><span class="lbl">Tokens</span><span class="b">4.1 B</span></div><div class="box" style="flex:1"><span class="lbl">Cost ≈</span><span class="b">$1,530</span></div><div class="box" style="flex:1"><span class="lbl">Running</span><span class="b">3</span></div></div>
+      <div class="box"><div class="lbl"><i class="n">1</i> By model</div><div class="row sm"><span style="width:56px">Opus 5.5</span><div class="barw" style="flex:1"><i style="width:70%"></i></div></div><div class="row sm"><span style="width:56px">Fable</span><div class="barw" style="flex:1"><i style="width:22%"></i></div></div><div class="row sm"><span style="width:56px">gpt-6.2</span><div class="barw" style="flex:1"><i style="width:8%"></i></div></div></div>
+      <div class="box"><div class="lbl">By account</div><div class="ph m"></div><div class="ph l"></div><div class="ph s"></div></div>
+      <div class="lbl">Sessions</div><div class="box"><span class="b">Mobile app plan</span><span class="sm">running · DEV PC</span></div>
+      <div class="tabs" data-on="1"></div>
+    </div>
+    <figcaption><h4>Project detail <span class="sid">S16</span></h4><p>Opened from Home or a session: tokens and list-price cost across computers.</p><ol><li>Drill into the requests behind a bar (v1.1).</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-computers" data-title="Screen: Computers">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">Computers</span><span class="ico">+</span></div>
+      <div class="box hl"><div class="row sp"><span class="b">DEVELOPMENTPC</span><span class="wchip">this network</span></div><div class="sm"><i class="n">1</i> just now · 7 running · Control on</div></div>
+      <div class="box"><div class="row sp"><span class="b">LAPTOP</span><span class="wchip">via hub</span></div><div class="sm">3 m ago · 2 running · Control off</div></div>
+      <div class="box" style="border-style:dashed"><div class="row sp"><span class="b">MINI</span><span class="wchip">asleep</span></div><div class="sm"><i class="n">2</i> last seen 2 d ago · showing its snapshot</div></div>
+      <div class="box fill"><div class="lbl"><i class="n">3</i> Known, not granted</div><div class="row sp"><span>BUILD-SERVER</span><span class="wbtn sm">Ask</span></div></div>
+      <div style="flex:1"></div>
+      <div class="wbtn">Pair another computer</div>
+      <div class="tabs" data-on="3"></div>
+    </div>
+    <figcaption><h4>Computers <span class="sid">S17</span></h4><p>Which computers the phone can reach, how, and what it may do there.</p><ol><li>Route, last contact, running count, grant.</li><li>A sleeping computer: data shown with its age; actions off.</li><li>Computers known through sync that haven't granted this phone.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">You: progress, widgets and settings</div>
+
+  <figure class="screen" data-fid="s-progress" data-title="Screen: Progress">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">You</span><span class="ico">⚙</span></div>
+      <div class="row" style="gap:14px"><span class="ring lg">L4</span><div class="col"><span class="b" style="font-size:14px">Planner</span><span class="sm">1,240 / 1,500 XP to Strategist</span><div class="barw"><i style="width:82%"></i></div></div></div>
+      <div class="box"><div class="row sp"><span class="lbl"><i class="n">1</i> 12-day streak</span><span class="sm">best 21</span></div><div class="cal"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div></div>
+      <div class="box"><div class="lbl"><i class="n">2</i> This week</div><div class="row sp"><span>Resets harvested</span><span class="b">3 of 4</span></div><div class="row sp"><span>Room left unused</span><span class="b">≈ 18%</span></div></div>
+      <div class="box"><div class="lbl"><i class="n">3</i> Badges · 7 of 18</div><div class="badges"><i>2 PCs</i><i>First<br>harvest</i><i>7-day</i><i>Org.</i><i class="lock">?</i><i class="lock">?</i><i class="lock">?</i><i class="lock">?</i></div></div>
+      <div class="box fill"><span class="b"><i class="n">4</i> Weekly recap ready</span><span class="sm">Sunday · tap to see</span></div>
+      <div class="tabs" data-on="4"></div>
+    </div>
+    <figcaption><h4>Progress <span class="sid">S18</span></h4><p>The game layer in one place; optional, private, and every point traceable to real data.</p><ol><li>Days with recorded work (sync gaps marked unknown, not broken).</li><li>Room used before resets: the core loop.</li><li>Badges with the rule behind each.</li><li>A weekly summary card, shareable as an image.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-widgetboard" data-title="Screen: Customize Home widgets">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="b">Customize Home</span><span class="wbtn sm pri">Done</span></div>
+      <div class="box hl" style="border-style:dashed"><div class="row sp"><span class="b">≡ Needs you</span><span class="sm">M</span></div></div>
+      <div class="row" style="gap:6px"><div class="box" style="flex:1;border-style:dashed"><span class="b">≡ Use next</span><span class="sm">S</span></div><div class="box" style="flex:1;border-style:dashed"><span class="b">≡ Streak</span><span class="sm">S</span></div></div>
+      <div class="box" style="border-style:dashed"><div class="row sp"><span class="b">≡ Running now</span><span class="sm">M</span></div></div>
+      <div class="scrim"></div>
+      <div class="sheet"><div class="b">Add a widget</div><div class="row" style="gap:6px"><span class="wchip on">All</span><span class="wchip">Limits</span><span class="wchip">Sessions</span><span class="wchip">Progress</span></div>
+        <div class="row" style="gap:6px"><div class="box" style="flex:1;height:58px"><span class="sm"><i class="n">1</i> Reset clock</span></div><div class="box" style="flex:1;height:58px"><span class="sm">Week rings</span></div></div>
+        <div class="row" style="gap:6px"><div class="box" style="flex:1;height:58px"><span class="sm">Cost today</span></div><div class="box" style="flex:1;height:58px"><span class="sm">Computers</span></div></div>
+        <div class="sm"><i class="n">2</i> The same widgets can be placed on the phone's home screen.</div></div>
+    </div>
+    <figcaption><h4>Customize Home <span class="sid">S19</span></h4><p>The in-app widget board: drag to reorder, pick sizes, add from a gallery.</p><ol><li>Each widget comes in S / M / L.</li><li>One catalogue for in-app and home-screen widgets.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-settings" data-title="Screen: Settings and privacy">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Settings</span><span style="width:24px"></span></div>
+      <div class="lbl">Security</div>
+      <div class="box"><div class="row sp"><span>Face ID to open</span><span class="toggle on"></span></div><div class="row sp"><span>Face ID to approve</span><span class="toggle on"></span></div></div>
+      <div class="lbl"><i class="n">1</i> Privacy</div>
+      <div class="box"><div class="row sp"><span>Notification detail</span><span class="sm">Hidden ▾</span></div><div class="row sp"><span>Widget detail</span><span class="sm">Redacted ▾</span></div><div class="row sp"><span>Keep transcripts</span><span class="sm">7 days ▾</span></div></div>
+      <div class="lbl"><i class="n">2</i> Access</div>
+      <div class="box"><div class="row sp"><span>DEVELOPMENTPC</span><span class="sm">all 3 grants ›</span></div><div class="row sp"><span>LAPTOP</span><span class="sm">summaries ›</span></div></div>
+      <div class="box"><span>Notifications ›</span><span>Progress and game ›</span><span>Appearance ›</span></div>
+      <div class="wbtn" style="color:#b42318;border-color:#b42318"><i class="n">3</i> Disconnect this phone</div><div style="height:14px"></div>
+    </div>
+    <figcaption><h4>Settings and privacy <span class="sid">S20</span></h4><p>Lock, privacy and access in one list.</p><ol><li>What may show on the lock screen and in widgets.</li><li>Grants per computer (changed on the computer).</li><li>Removes the keys and the cache, and tells the computers.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-notifs" data-title="Screen: Notification settings">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="ico">←</span><span class="b">Notifications</span><span style="width:24px"></span></div>
+      <div class="box"><div class="row sp"><span class="b">A session needs you</span><span class="toggle on"></span></div><div class="row sp"><span>A session finished</span><span class="toggle"></span></div><div class="row sp"><span>Login expired</span><span class="toggle on"></span></div></div>
+      <div class="box"><div class="row sp"><span>Limit low</span><span class="sm"><i class="n">1</i> below 20% ▾</span></div><div class="row sp"><span>Harvest reminder</span><span class="sm">30 m before ▾</span></div><div class="row sp"><span>Streak at risk</span><span class="toggle"></span></div><div class="row sp"><span>Weekly recap</span><span class="toggle on"></span></div></div>
+      <div class="box"><div class="row sp"><span>Quiet hours</span><span class="sm">23:00 – 07:00</span></div><div class="sm"><i class="n">2</i> Requests still come through</div></div>
+      <div class="wbtn ghost"><i class="n">3</i> Send a test notification</div>
+      <div class="sm">Last delivered 2 m ago via relay</div>
+      <div class="tabs" data-on="4"></div>
+    </div>
+    <figcaption><h4>Notification settings <span class="sid">S21</span></h4><p>Each event on its own switch.</p><ol><li>Thresholds per account in a sheet.</li><li>Your choice whether requests break quiet hours.</li><li>Proves the whole path works.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">States and edge cases</div>
+
+  <figure class="screen" data-fid="s-offline" data-title="Screen: Computer asleep / offline">
+    <div class="phone"><div class="sb"></div>
+      <div class="hd"><span class="t">Home</span><span class="wchip">◆ 12</span></div>
+      <div class="banner"><i class="n">1</i> DEVELOPMENTPC is asleep. Showing what it last sent, 18 m ago.</div>
+      <div class="box" style="opacity:.6"><div class="lbl">Needs you</div><span class="sm">Answer when it's awake</span></div>
+      <div class="box" style="opacity:.6"><div class="lbl">Use next</div><div class="row"><span class="ring">77%</span><span class="sm">as of 18 m ago</span></div></div>
+      <div class="banner"><i class="n">2</i> Hub not reachable. Retrying… <u>Details</u></div>
+      <div class="box fill"><span class="sm"><i class="n">3</i> No connection: everything here is from your phone's cache.</span></div>
+      <div class="tabs" data-on="0"></div>
+    </div>
+    <figcaption><h4>Asleep, unreachable, offline <span class="sid">S22</span></h4><p>Shared banners for the three ways data gets old.</p><ol><li>The computer is off: snapshot with its age, actions disabled.</li><li>The hub is down: retry and diagnostics.</li><li>The phone is offline: cache only.</li></ol></figcaption>
+  </figure>
+
+  <figure class="screen" data-fid="s-revoked" data-title="Screen: Access removed / unsupported">
+    <div class="phone"><div class="sb"></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:10px;padding:0 10px">
+        <div class="ring lg" style="border-style:dashed">!</div>
+        <div class="b" style="font-size:16px"><i class="n">1</i> Access removed</div>
+        <div class="sm">DEVELOPMENTPC removed this phone on 25 Nov at 17:40. Its cached data has been erased.</div>
+        <div class="box fill" style="width:100%"><span class="sm"><i class="n">2</i> Or: “DEVELOPMENTPC runs Harness Manager 1.12. Update it to 1.14 to use the phone.”</span></div>
+      </div>
+      <div class="wbtn pri">Pair again</div><div class="wbtn ghost">Use another computer</div><div style="height:16px"></div>
+    </div>
+    <figcaption><h4>Access removed, update needed <span class="sid">S23</span></h4><p>Dead ends that explain themselves.</p><ol><li>After a revoke (or an expired grant).</li><li>A computer too old for the companion API.</li></ol></figcaption>
+  </figure>
+
+  <div class="grp-h">The desktop's side</div>
+
+  <figure class="screen wide" data-fid="s-desktop" data-title="Desktop: Pair a phone and Phones list">
+    <div class="desk">
+      <div class="side"><span class="b">Harness Manager</span><span class="sm">Overview</span><span class="sm">Sessions</span><span class="sm">Accounts</span><span class="b">Computers</span><span class="sm">Setup</span></div>
+      <div class="main">
+        <div class="row sp"><span class="b" style="font-size:16px">Computers</span><div class="row"><span class="wbtn sm">Invite a computer…</span><span class="wbtn sm pri"><i class="n">1</i> Pair a phone…</span></div></div>
+        <div class="box"><div class="lbl"><i class="n">3</i> Phones</div>
+          <div class="row sp"><span><b>Samy's iPhone</b> · Summaries, Transcripts, Control · last seen now</span><span class="wbtn sm">Revoke</span></div>
+          <div class="row sp"><span><b>Pixel 9</b> · Summaries · last seen 3 d ago · expires in 4 d</span><span class="wbtn sm">Revoke</span></div></div>
+        <div class="box"><div class="lbl">Computers</div><div class="ph l"></div><div class="ph m"></div></div>
+      </div>
+      <div class="dlg"><div class="row sp"><span class="b">Pair a phone</span><span class="sm">1:42</span></div>
+        <div class="row" style="gap:12px;align-items:flex-start"><div class="qr"></div><div class="col"><span class="sm">Scan with the Harness Manager app, or type</span><span class="b" style="font-size:20px;letter-spacing:.1em">481 920</span><span class="sm">on DEVELOPMENTPC</span></div></div>
+        <div class="box hl"><div class="lbl"><i class="n">2</i> Pixel 9 wants access</div><div class="sm">Words on the phone: <b>amber · otter · nine</b></div><div class="row sp"><span>Summaries</span><span class="toggle on"></span></div><div class="row sp"><span>Transcripts</span><span class="toggle"></span></div><div class="row sp"><span>Control</span><span class="toggle"></span></div><div class="row"><span class="wbtn sm">Decline</span><span class="wbtn sm pri">Approve</span></div></div>
+      </div>
+    </div>
+    <figcaption><h4>Desktop: Pair a phone and the Phones list <span class="sid">S24</span></h4><p>The approving half of pairing and where phones are revoked.</p><ol><li>Next to “Invite a computer…”, a separate button: a phone is never a full peer.</li><li>Approval with matching words and grants, Summaries only by default.</li><li>Every phone, its grants, last contact, expiry and Revoke.</li></ol></figcaption>
+  </figure>
+  </div>
+</section>
+
+<!-- ============ WIDGETS ============ -->
+<section class="s reveal" id="widgets">
+  <h2><span class="num">07</span>Widgets (low fidelity)</h2>
+  <p class="intro">One catalogue for the in-app board (S19) and the phone's home and lock screens. Widgets open the app; approving, replying and Stop always happen inside the unlocked app. Each designer will draw <b>at least two variations</b> of these.</p>
+  <div class="wgrid">
+    <div data-fid="w-homescreen" data-title="Widgets: home screen small / medium / large">
+      <div class="homescreen">
+        <div class="wd s"><div class="row sp"><span class="lbl">Use next</span><span class="sm">◆12</span></div><div class="row" style="flex:1"><span class="ring">77%</span><div class="col"><span class="b">teksa</span><span class="sm">5h · 18m</span></div></div><span class="sm">read 2m ago</span></div>
+        <div class="appico"></div><div class="appico"></div><div class="appico"></div><div class="appico"></div>
+        <div class="wd m"><div class="row sp"><span class="lbl">Limits</span><span class="wchip on">2 need you</span></div>
+          <div class="row sm"><span style="width:52px" class="b">teksa</span><div class="barw" style="flex:1"><i style="width:97%"></i></div><span>18m</span></div>
+          <div class="row sm"><span style="width:52px" class="b">resal</span><div class="barw" style="flex:1"><i style="width:30%"></i></div><span>2d</span></div>
+          <div class="row sm"><span style="width:52px" class="b">codex</span><div class="barw" style="flex:1"><i style="width:93%"></i></div><span>5d</span></div></div>
+        <div class="wd l"><div class="row sp"><span class="lbl">Harness Manager</span><span class="sm">L4 · 82%</span></div>
+          <div class="box hl" style="padding:5px"><span class="b">2 need you</span><span class="sm">oldest 4 m · open to answer</span></div>
+          <div class="row" style="gap:6px;justify-content:space-between"><span class="ring">77%</span><span class="ring">30%</span><span class="ring">11%</span><span class="ring">93%</span></div>
+          <div class="row sp sm"><span>teksa</span><span>resal</span><span>main</span><span>codex</span></div>
+          <div class="row sp sm" style="margin-top:auto"><span>Running: DEV 7 · LAP 2</span><span>◆ 12 days</span></div></div>
+      </div>
+      <p class="wcap"><b>Small, medium, large.</b> Small: one pinned account (or “Use next”) with its limiting window. Medium: up to three accounts and the request count. Large: requests, four rings, running sessions per computer, streak and level.</p>
+    </div>
+    <div data-fid="w-lock" data-title="Widgets: lock screen">
+      <div class="lock"><span class="sm">Tuesday 25 November</span><span class="clock">9:41</span>
+        <div class="acc"><span class="c">77%</span><span class="c">2!</span><div class="r"><b>Reset in 18 m</b><br>teksa · 97% left<br>◆ 12-day streak</div></div></div>
+      <p class="wcap"><b>Lock screen.</b> Circular gauges (best account, waiting count) and a rectangular reset line. Redacted by default: no titles or commands.</p>
+    </div>
+    <div data-fid="w-live" data-title="Widgets: Live Activity / ongoing notification">
+      <div class="island"><span class="pulse"></span><span style="flex:1">Mobile app plan</span><span>12:40</span></div>
+      <div style="height:12px"></div>
+      <div class="la"><div class="row sp"><b>Mobile app plan · DEVELOPMENTPC</b><span>12:40</span></div><div style="display:flex;gap:6px;align-items:center"><span class="pulse" style="width:8px;height:8px;border-radius:50%;background:#f0a84a"></span>Waiting for you: Bash: git push</div><div style="height:5px;border-radius:3px;background:#333;overflow:hidden"><i style="display:block;width:64%;height:100%;background:#4cc3ae"></i></div><span style="opacity:.7">Tap to answer · claude-main</span></div>
+      <p class="wcap"><b>Live Activity (iOS) / ongoing notification (Android).</b> Follows one session you chose: working, waiting for you, ended. Dismissed when the session ends; marked stale if contact is lost.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GAMIFICATION ============ -->
+<section class="s reveal" id="game">
+  <h2><span class="num">08</span>Gamification</h2>
+  <p class="intro">Your brief: fun to use and to monitor, but professional. The rule that keeps it professional: <b>points only for things that save you room or time</b>, never for spending tokens, answering fast or approving more. Every number links to the data behind it, and the whole layer can be turned off.</p>
+  <div class="grid g3" id="gamegrid"></div>
+  <div class="callout"><b>Motion.</b> Rings fill on open (≈600 ms, eased), the XP bar ticks when you harvest, a single restrained celebration for a level, and a soft pulse only on things that need you. All of it respects Reduce Motion.</div>
+</section>
+
+<!-- ============ DECISIONS ============ -->
+<section class="s reveal" id="decisions">
+  <h2><span class="num">09</span>Decisions for you</h2>
+  <p class="intro">Pick one per question (or write your own). These change what the designers and the first release build.</p>
+  <div class="card" data-fid="e-effort" data-title="Effort estimate by technology" style="margin-bottom:16px;overflow-x:auto">
+    <h3>Effort by technology: the first release (MVP) on both phones</h3>
+    <p class="intro" style="margin:6px 0 12px;font-size:14px">Person-weeks for one experienced developer, rough (±20%); the ratios between options matter more than the totals. The phone app only: the desktop and hub work is the same for every option and is counted on the last row.</p>
+    <table class="ft" style="box-shadow:none;font-size:13.5px">
+      <thead><tr><th>Option</th><th>Screens (23)</th><th>Pairing, keys, encryption</th><th>Widgets + Live Activity</th><th>Motion, game polish</th><th>Push, build, stores</th><th>MVP total</th><th>Languages</th><th>Native feel</th><th>Upkeep</th></tr></thead>
+      <tbody>
+        <tr><td class="f"><b>SwiftUI + Compose, Rust core (UniFFI)</b></td><td>14 · written twice</td><td>3 · reuses the desktop's Rust</td><td>5 · native, first-class</td><td>3</td><td>3.5 · Rust cross-builds</td><td><b>≈ 28</b><br><span class="muted">26–32</span></td><td>Swift, Kotlin, Rust</td><td>Best</td><td>Two UIs to keep in step</td></tr>
+        <tr><td class="f"><b>Kotlin Multiplatform + native UI</b></td><td>14 · written twice</td><td>4 · Rust through bindings, or rewrite</td><td>5 · native</td><td>3</td><td>3.5</td><td><b>≈ 29</b><br><span class="muted">27–33</span></td><td>Kotlin, Swift, Rust</td><td>Best</td><td>Two UIs, shared logic</td></tr>
+        <tr><td class="f"><b>.NET MAUI 11 (C#)</b></td><td>9 · once, custom visuals need per-platform handlers</td><td>4 · Rust through C bindings (P/Invoke)</td><td>6.5 · SwiftUI extension + App Group, Android widget in C#, Live Activity in Swift via a wrapper</td><td>4 · custom drawing, platform quirks</td><td>4 · MAUI + Xcode extension + native libs</td><td><b>≈ 27.5</b><br><span class="muted">24–31</span></td><td>C#, Swift, Kotlin/Java, Rust</td><td>Good</td><td>One UI; four languages in the build</td></tr>
+        <tr><td class="f"><b>Flutter</b></td><td>8 · once, strong custom animation</td><td>3 · Rust via flutter_rust_bridge</td><td>6 · SwiftUI + Android native, Live Activity native</td><td>2.5</td><td>3.5</td><td><b>≈ 23</b><br><span class="muted">21–27</span></td><td>Dart, Swift, Kotlin, Rust</td><td>Good: drawn, not native controls</td><td>One UI</td></tr>
+        <tr><td class="f"><b>React Native / Expo</b></td><td>8.5 · once</td><td>3.5 · Rust via uniffi-bindgen-react-native</td><td>6 · native</td><td>3 · Reanimated</td><td>3</td><td><b>≈ 24</b><br><span class="muted">22–28</span></td><td>TypeScript, Swift, Kotlin, Rust</td><td>Good</td><td>One UI; frequent upgrades</td></tr>
+        <tr class="grp"><td colspan="6">Desktop and hub work, every option: companion API 3 · phone pairing and approval 2.5 · action receipts 3 · hub phone enrollment and sealed relay 4 · push relay 2.5 · revocation 1.5 · followed session 1 · shared ranking 1</td><td colspan="4">≈ 18.5 <span class="muted">(16–21)</span></td></tr>
+      </tbody>
+    </table>
+    <ul style="color:var(--muted);font-size:13.5px;margin:12px 0 0;padding-left:20px">
+      <li><b>Most complex to build:</b> two native apps (KMP or SwiftUI + Compose): the most code, but the fewest surprises and the best widgets and motion.</li>
+      <li><b>Most complex to keep running:</b> MAUI, with four languages in one build. The SwiftUI widget extension and the Swift/Kotlin wrappers sit beside the C#, and every native SDK update touches the bindings.</li>
+      <li><b>Least effort:</b> Flutter. One UI built for custom, game-like visuals. Widgets and Live Activities stay native here too.</li>
+      <li><b>Calendar time:</b> two developers in parallel roughly halve the native options (one per platform); the single-codebase options parallelise less well.</li>
+    </ul>
+  </div>
+  <div class="dec" id="decs"></div>
+</section>
+
+<!-- ============ NEXT ============ -->
+<section class="s reveal" id="next">
+  <h2><span class="num">10</span>Next phase: two high-fidelity designs</h2>
+  <p class="intro">After your feedback I finalize this, then brief two designers in parallel on the same approved scope. Each designs a different visual direction: layout and exterior. You pick one (or parts of both) and comment.</p>
+  <div class="grid g2">
+    <div class="card" data-fid="n-designer-a" data-title="Designer A: Claude"><h3>Designer A · Claude Code</h3><p class="intro" style="margin:8px 0 0">Model <b>Opus 5.5</b> (<code>claude-opus-5-5</code>). Account <b>claude-main</b>: Max 20x, 11% of the week left, resets in about 42 h. That's the soonest reset with enough room left. Fallback <b>claude-Resal-Dev01</b> (65%, resets in 70 h).</p></div>
+    <div class="card" data-fid="n-designer-b" data-title="Designer B: Codex"><h3>Designer B · Codex</h3><p class="intro" style="margin:8px 0 0">Model <b>Codex Astra 6.2</b> (<code>gpt-6.2-astra</code>). Account <b>codex-main</b>: ChatGPT Pro, 93% of the week left, resets in about 5 d 21 h. It's the only Codex account.</p></div>
+  </div>
+  <ol class="steps" style="margin-top:18px">
+    <li><b>Each designer delivers</b><span>A clickable HTML prototype in a phone frame: every approved screen at high fidelity, light and dark, real data from this computer, subtle motion, plus <b>at least two variations</b> of the home-screen, lock-screen and live widgets.</span></li>
+    <li><b>Kept apart</b><span>Each designer works in its own folder and sees only the brief, not the other's work, so the two directions stay distinct.</span></li>
+    <li><b>Design skills they'll use</b><span>design-taste-frontend (app screens), impeccable, frontend-design, ui-ux-pro-max, and dataviz for rings and charts. Each is checked against Apple's and Material's guidelines: 44 pt targets, Dynamic Type, AA contrast, Reduce Motion.</span></li>
+    <li><b>You compare</b><span>One standard HTML page (not a Claude artifact) with both directions side by side, the same screen against the same screen, each widget variation, and the same Keep / Change / Drop and comments.</span></li>
+  </ol>
+  <div class="card" style="margin-top:16px" data-fid="n-brief" data-title="Design brief pillars"><h3>Design brief: the pillars I'll give both designers</h3>
+    <ul style="color:var(--muted);margin:8px 0 0;padding-left:20px">
+      <li><b>Glanceable:</b> the answer to “can I keep working, and where?” in under two seconds.</li>
+      <li><b>Gamified, not childish:</b> rings, streaks and XP rendered with the restraint of a fitness or finance app.</li>
+      <li><b>Honest numbers:</b> every reading shows its age; estimates carry ≈; unknown is a dash, never a zero.</li>
+      <li><b>Distinct exteriors:</b> each designer chooses its own type, colour, shape language and layout; neither may copy the desktop app's look one-to-one.</li>
+      <li><b>Subtle motion:</b> 150–600 ms, spring or ease-out, purposeful; nothing loops except “needs you”.</li>
+      <li><b>Native feel:</b> iOS and Android conventions (navigation, sheets, haptics) over a shared design language.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="s reveal" id="general">
+  <h2><span class="num">11</span>Anything else</h2>
+  <div class="card" data-fid="general" data-title="General comments" data-nochips="1"><p class="intro" style="margin:0">Anything this page missed, or that you want the designers to know.</p></div>
+</section>
+</main>
+
+<footer><div class="wrap">Harness Manager mobile · Review 1 · Codex's full consultation is saved next to this page as <code>codex-consultation.md</code>.</div></footer>
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- data ----------
+const F = [
+ ['Onboarding and pairing',[
+  ['f-pair','Pair with a computer by QR or code','Scan the computer\'s code, or type six digits; see the computer and the access asked for before activating.','mvp','core/sync/peer/{pairing,identity,mdns}.rs · NEW phone invitation and grant'],
+  ['f-hub','Connect through your hub when away','Same data and actions away from home, end-to-end encrypted.','mvp','core/sync/hub.rs, crates/hub · NEW phone enrollment, sealed reads, command relay'],
+  ['f-grants','Scoped grants approved on the computer','Summaries, transcripts and control granted per computer, changeable there.','mvp','NEW grant store; peers today are all-or-nothing'],
+  ['f-multi','Several computers, one phone','One phone identity, a grant per computer; a session always routes to its own computer.','mvp','core/journal.rs, ui/computers.js'],
+ ]],
+ ['Home',[
+  ['f-needs','Needs you first','Open permission requests and questions from every computer, with time left.','mvp','core/hooks.rs, ui/home.js'],
+  ['f-usenext','Use next, with the reason','The account to use for a tool and why: weekly room or a window about to reset.','mvp','ui/home.js recommendedFor · NEW one shared ranking for desktop and phone'],
+  ['f-running','Running now','Live sessions by computer and their state.','mvp','core/service.rs, journal presence'],
+  ['f-today','Next reset, today\'s tokens and cost','Each with how fresh it is.','mvp','core/dash.rs, pricing.rs'],
+ ]],
+ ['Accounts and limits',[
+  ['f-accounts','Accounts by tool and computer','Rings, 5-hour and weekly windows, resets, reading age, login attention.','mvp','core/harness/*, ui/limits.js'],
+  ['f-account','Account detail with forecast','“Runs out before reset” and harvest windows, usage over 7/14/30 days.','mvp','ui/limits.js metricsOf, core/db.rs'],
+  ['f-credits','Credits, reset offers, daily caps','Where the tool reports them; measured vs estimated vs missing labelled.','v11','ui/accounts.js, core/dash.rs'],
+ ]],
+ ['Sessions and remote control',[
+  ['f-sessions','Browse and search sessions','By computer, project, account, tool or tag; running, archived, last seen.','mvp','core/{service,index,journal}.rs'],
+  ['f-transcript','Read and follow a session','Turns, answers, failed steps and changed files; follow live while connected.','mvp','core/transcripts.rs · NEW paged, authorized transcript reads'],
+  ['f-answer','Approve, deny, answer questions','For a live request on a computer that granted Control.','mvp','core/hooks.rs askCard · NEW routed action with receipt'],
+  ['f-reply','Reply one line, Stop a turn','Only for a session in Harness Manager\'s own terminal; reasons shown when unavailable.','mvp','core/terminal/{control,windows}.rs · NEW origin checks, no blind retry'],
+  ['f-start','Start a session from the phone','Pick an account, a computer and a folder; it opens in that computer\'s terminal.','later','core/launch.rs · NEW: not in Codex\'s list; added for your decision'],
+ ]],
+ ['Notifications',[
+  ['f-push','“A session needs you” push','Private alert that opens the exact request after unlock.','mvp','NEW attention events, push registration, relay'],
+  ['f-inbox','Requests inbox','Open and resolved requests; works with push off.','mvp','core/hooks.rs'],
+  ['f-alerts','Reset reminders, low room, quiet hours','Per-account thresholds; known resets scheduled on the phone.','v11','core/db.rs · NEW threshold events'],
+ ]],
+ ['Computers, projects and usage',[
+  ['f-computers','Computers and how they are reached','Route, last contact, last good read, whether Control works now.','mvp','core/sync/peer/*, ui/computers-page.js'],
+  ['f-projects','Project detail','Sessions across computers, running work, tokens and list-price cost.','mvp','core/{projects,pricing}.rs, ui/projects.js'],
+  ['f-usage','Compare 7/14/30 days, by account or model','With the requests behind each bar.','v11','app/src-tauri/src/usage.rs'],
+ ]],
+ ['Widgets',[
+  ['f-w-board','In-app widget board','Home made of cards you reorder, resize and add.','mvp','ui/home.js cards'],
+  ['f-w-home','Home-screen widgets: small, medium, large','Use next, limits, the whole picture; redacted cache.','mvp','NEW native WidgetKit / App Widgets','moved'],
+  ['f-w-lock','Lock-screen widgets','Waiting count and a reset countdown.','v11','NEW'],
+  ['f-w-live','Live Activity / ongoing notification','Follow one session: working, waiting for you, ended.','v11','NEW followed-session updates'],
+ ]],
+ ['Security and settings',[
+  ['f-lock','App lock and privacy','Face ID / fingerprint to open and to approve; notification and widget detail; cache retention.','mvp','core/secrets.rs pattern'],
+  ['f-revoke','Revoke a lost phone','From any computer; shows which places confirmed it.','mvp','NEW revocation propagation'],
+  ['f-setupinv','Setup at a glance','Router health and the names of MCP servers, skills and prompts (never values).','later','crates/router, core/registry.rs'],
+ ]],
+ ['Gamification',[
+  ['f-g-streak','Streak','Days with recorded work; sync gaps count as unknown.','mvp','core/journal.rs','moved'],
+  ['f-g-harvest','Harvest before reset','XP for using room that a reset would otherwise erase.','mvp','ui/limits.js, NEW phone event','moved'],
+  ['f-g-levels','Levels','Connected → Organized → Planner → Strategist, earned from real milestones.','v11','phone-local'],
+  ['f-g-badges','Badges','With the rule and evidence behind each one.','v11','core/journal.rs'],
+  ['f-g-recap','Weekly recap','A Sunday card: room used, resets harvested, busiest project; shareable image.','v11','core/dash.rs · added for your brief'],
+ ]],
+];
+const BE = [
+ ['b-api','Companion API on the desktop','A versioned, read-mostly API with separate grants for summaries, transcripts and control. The desktop\'s own operations include files, settings and launches a phone must never reach.'],
+ ['b-pair','Phone invitation and approval','“Pair a phone…”: QR, SPAKE2 proof, matching words, grant dialog; a phone stored as a phone, never a full peer, never given the ring key.'],
+ ['b-cmd','Action contract with receipts','Each action names grant, computer, run, request version, expiry and an id; rechecked at the computer; outcomes accepted / already handled / expired / unavailable / unknown.'],
+ ['b-hub','Hub: phone enrollment and sealed relay','A phone invite class, a phone-scoped token, snapshots sealed to the phone key, and an online relay for actions through NAT.'],
+ ['b-push','Push wake-ups and the relay','Attention events with expiry and dedup; a relay holding APNs/FCM credentials that forwards content-free wake-ups.'],
+ ['b-revoke','Revocation everywhere','Revoke at one computer reaches the others, the hub and the push relay; grants expire while a phone is out of touch.'],
+ ['b-follow','Followed-session updates','State changes for one followed session, to drive the Live Activity / ongoing notification.'],
+ ['b-rank','One ranking for “Use next”','Move the recommendation from the desktop UI into the core so phone and desktop always agree.'],
+];
+const NT = [
+ ['n-needs','A permission request or question opens','On · breaks quiet hours'],
+ ['n-done','A session you follow ends or fails','Off'],
+ ['n-low','An account drops below your threshold','On at 20%'],
+ ['n-harvest','A window resets soon with room left (harvest)','On, 30 min before'],
+ ['n-login','A login expired and needs the computer','On'],
+ ['n-streak','Your streak is at risk today','Off (opt-in)'],
+ ['n-recap','Weekly recap is ready','On, Sunday evening'],
+];
+const G = [
+ ['g-harvest','Harvest','The core loop. A window that resets with room left loses that room. Using it before the reset earns XP in proportion to the room saved. A reminder fires 30 minutes before.'],
+ ['g-streak','Streak','Consecutive workdays (you choose which days) with at least one recorded request, counted across computers. Days missing because a computer hasn\'t synced yet count as unknown, never as broken.'],
+ ['g-levels','Levels','Connected → Organized → Planner → Strategist. Earned from pairing, tagging projects and harvesting, never from tokens or money spent.'],
+ ['g-badges','Badges','“Second computer”, “First harvest”, “7-day streak”, “Zero waste week”. Each opens the rule and the days that earned it.'],
+ ['g-recap','Weekly recap','A Sunday card: room used vs lost at resets, busiest project, best account choice. Shareable as an image with no account names unless you allow them.'],
+ ['g-guard','Guardrails','No leaderboards, no points for spend, approval speed or approvals. Off with one switch, and nothing is lost when it\'s off.'],
+];
+const D = [
+ ['d-stack','How the two apps are built','The desktop core is Rust (pairing, SPAKE2, encryption). Reusing it keeps both phones correct. Whatever is picked, iOS home-screen widgets, lock-screen widgets and Live Activities are written in SwiftUI: Apple allows nothing else. .NET MAUI 11 (released 10 Nov 2026) is one C# codebase for both phones; it calls Swift or Java/Kotlin code through native wrapper libraries (Native Library Interop), carries the SwiftUI widgets as an Xcode extension inside the app, and would reach the Rust core through C bindings.',['SwiftUI + Jetpack Compose, shared Rust core via UniFFI','Kotlin Multiplatform shared logic + native UI','.NET MAUI 11 (C#), Swift/Kotlin wrappers and SwiftUI widget extension','Flutter','React Native / Expo'],0],
+ ['d-first','Which phone first','',['iOS first','Android first','Both together'],2],
+ ['d-route','How the first release reaches computers','Hub support is the larger share of the new backend work.',['Home network and VPN only, hub in v1.1','Home network, VPN and hub from the start'],1],
+ ['d-push','Who sends push notifications','Store builds need someone to hold the APNs / FCM credentials.',['A small relay we operate for store builds','Your hub with your own credentials (self-built app)','No push in the first release, in-app only'],0],
+ ['d-grants','Default grants when pairing','The computer\'s dialog starts with these switched on.',['Summaries only','Summaries and transcripts','Everything, including Control'],1],
+ ['d-qwin','The 15-second question window','Today a question goes back to the terminal after 15 s.',['Keep 15 s, the terminal stays first','Longer (60 s) when a phone with Control is paired','Questions only on the phone while the app is open'],1],
+ ['d-game','How strong the game layer is','',['Subtle: rings and streak only','Balanced: XP, harvest, badges, levels, recap','Bold: plus celebrations and challenges'],1],
+];
+
+// ---------- render ----------
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const prio = {mvp:'<span class="pill p-mvp">MVP</span>', v11:'<span class="pill p-v11">v1.1</span>', later:'<span class="pill p-later">Later</span>'};
+document.getElementById('ftbody').innerHTML = F.map(([g, rows]) => `<tr class="grp"><td colspan="4">${esc(g)}</td></tr>` + rows.map(([id, t, d, p, basis, mv]) =>
+  `<tr><td class="f"><b>${esc(t)}</b><span>${esc(d)}</span></td><td>${prio[p]}${mv ? '<div class="moved">↑ moved up for your brief</div>' : ''}</td><td class="basis"><code>${esc(basis)}</code></td><td class="you" data-fid="${id}" data-title="Feature: ${esc(t)}"></td></tr>`).join('')).join('');
+document.getElementById('bebody').innerHTML = BE.map(([id, t, d]) => `<tr><td class="f"><b>${esc(t)}</b></td><td style="color:var(--muted);font-size:14px">${esc(d)}</td><td class="you" data-fid="${id}" data-title="Desktop work: ${esc(t)}"></td></tr>`).join('');
+document.getElementById('ntbody').innerHTML = NT.map(([id, t, d]) => `<tr><td class="f"><b>${esc(t)}</b></td><td style="color:var(--muted);font-size:14px">${esc(d)}</td><td class="you" data-fid="${id}" data-title="Notification: ${esc(t)}"></td></tr>`).join('');
+document.getElementById('gamegrid').innerHTML = G.map(([id, t, d]) => `<div class="card" data-fid="${id}" data-title="Game: ${esc(t)}"><h3 style="font-size:16px">${esc(t)}</h3><p class="intro" style="margin:6px 0 0;font-size:14px">${esc(d)}</p></div>`).join('');
+document.getElementById('decs').innerHTML = D.map(([id, t, d, opts, rec]) => `<div class="card" data-fid="${id}" data-title="Decision: ${esc(t)}" data-opts="${esc(opts.join('|'))}" data-rec="${rec}"><h3>${esc(t)}</h3>${d ? `<p>${esc(d)}</p>` : ''}</div>`).join('');
+// phone status bars and tab bars
+document.querySelectorAll('.sb').forEach((e) => e.innerHTML = '<span>9:41</span><span>●●● 5G ▭</span>');
+const TABS = ['Home', 'Sessions', 'Accounts', 'Computers', 'You'];
+document.querySelectorAll('.tabs').forEach((e) => e.innerHTML = TABS.map((t, i) => `<span class="${String(i) === e.dataset.on ? 'on' : ''}"><i></i>${t}</span>`).join(''));
+
+// ---------- feedback ----------
+const KEY = 'hm-mobile-review-1';
+let fb = {};
+try { fb = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { fb = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {} stat(); };
+const items = [...document.querySelectorAll('[data-fid]')];
+function section(el) { const s = el.closest('section'); return s ? (s.querySelector('h2')?.textContent || '').replace(/^\d+/, '').trim() : ''; }
+items.forEach((el) => {
+  const id = el.dataset.fid, cur = fb[id] || {}, target = el.matches('figure') ? el.querySelector('figcaption') : el;
+  const opts = el.dataset.opts ? el.dataset.opts.split('|') : null, rec = el.dataset.rec;
+  const w = document.createElement('div'); w.className = 'fb' + (cur.c ? ' has' : '');
+  const chips = el.dataset.nochips ? '' : opts
+    ? `<div class="chips">${opts.map((o, i) => `<button type="button" class="chip opt ${cur.v === o ? 'on' : ''} ${String(i) === rec ? 'rec' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<div class="chips">${[['keep', 'Keep'], ['change', 'Change'], ['drop', 'Drop']].map(([v, l]) => `<button type="button" class="chip ${v} ${cur.v === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  w.innerHTML = chips + `<textarea rows="1" placeholder="${el.dataset.nochips ? 'Your comments…' : 'Comment (optional)…'}" aria-label="Comment on ${esc(el.dataset.title || id)}">${esc(cur.c || '')}</textarea>`;
+  if (el.dataset.nochips) w.querySelector('textarea').style.minHeight = '120px';
+  target.appendChild(w);
+  w.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => {
+    const v = b.dataset.v, on = (fb[id] || {}).v === v;
+    fb[id] = { ...(fb[id] || {}), v: on ? undefined : v };
+    w.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', !on && x === b));
+    save();
+  }));
+  const ta = w.querySelector('textarea');
+  ta.addEventListener('input', () => { fb[id] = { ...(fb[id] || {}), c: ta.value }; w.classList.toggle('has', !!ta.value.trim()); save(); });
+});
+function stat() {
+  const n = items.filter((el) => !el.dataset.nochips).length;
+  const done = items.filter((el) => { const f = fb[el.dataset.fid]; return f && (f.v || (f.c || '').trim()); }).length;
+  document.getElementById('fbstat').innerHTML = `<b>${done}</b> of ${n} reviewed`;
+}
+stat();
+function collect() {
+  return items.map((el) => ({ id: el.dataset.fid, section: section(el), item: el.dataset.title || el.dataset.fid, verdict: (fb[el.dataset.fid] || {}).v || null, comment: ((fb[el.dataset.fid] || {}).c || '').trim() || null }))
+    .filter((x) => x.verdict || x.comment);
+}
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2400); }
+document.getElementById('export').addEventListener('click', () => {
+  const data = { review: 'mobile-review-1', exported_at: new Date().toISOString(), items: collect() };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = 'mobile-review-1-feedback.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${data.items.length} items to mobile-review-1-feedback.json`);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  const rows = collect(), text = '# Mobile review 1: feedback\n\n' + rows.map((r) => `- **${r.item}** (${r.id})${r.verdict ? ` — ${r.verdict}` : ''}${r.comment ? `\n  ${r.comment.replace(/\n/g, '\n  ')}` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${rows.length} items: paste them into the chat`); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('Copied'); }
+});
+
+// ---------- motion: reveal on scroll, active section in the bar ----------
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .06 });
+document.querySelectorAll('.reveal').forEach((e) => io.observe(e));
+const links = [...document.querySelectorAll('#toc a')];
+const so = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-40% 0px -55% 0px' });
+document.querySelectorAll('section.s').forEach((s) => so.observe(s));
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+if (window.mermaid) {
+  mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'strict',
+    themeVariables: { fontFamily: 'Inter, system-ui, sans-serif', fontSize: '14px', primaryColor: '#e2f1ed', primaryBorderColor: '#0f6b5f', primaryTextColor: '#16201f', lineColor: '#5d6b6a', secondaryColor: '#fbf0de', tertiaryColor: '#f5f6f4', actorBkg: '#e2f1ed', actorBorder: '#0f6b5f', noteBkgColor: '#fbf0de', noteBorderColor: '#a35d00', signalColor: '#16201f', labelBoxBkgColor: '#eef2f0' },
+    sequence: { mirrorActors: false, actorMargin: 40, messageMargin: 32 }, flowchart: { curve: 'basis' } });
+  mermaid.run({ querySelector: '.mermaid' }).catch((e) => console.error(e));
+} else {
+  document.querySelectorAll('.mermaid').forEach((e) => { e.style.whiteSpace = 'pre'; e.style.fontSize = '12px'; e.insertAdjacentHTML('beforebegin', '<p class="dg-note">The diagram library could not load (offline?): its source is shown.</p>'); });
+}
+</script>
+</body>
+</html>

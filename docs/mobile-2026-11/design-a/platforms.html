@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Android and desktop · Calibre · Harness Manager mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header data-topbar></header>
+<main class="page">
+  <section class="sect">
+    <h2>Android adaptations</h2>
+    <p class="sub">One Flutter codebase and one Calibre theme: the screen bodies, type, colours and dials are the same widgets. The scaffold around them is Material 3: edge-to-edge system bars with the gesture handle, a large, medium or small top app bar with a left-aligned title and a back arrow, the NavigationBar with its active-indicator pill, an extended FAB for Needs you, stadium-shaped buttons, state layers with ripples, Material modal bottom sheets, predictive back and BiometricPrompt. Each row: iOS light, then Android light and dark.</p>
+    <div class="screens">
+      <section data-pair="a-home" data-ios="home" data-os="android" id="a1"><div class="about"><span class="id">Android · S7</span><h3>Home</h3>
+        <p>Large top app bar (date and title left, search and overflow right), the board unchanged, the NavigationBar, and Needs you as an extended FAB.</p>
+        <ul><li>The FAB is the iOS pill's job in Android's idiom: the count and the soonest countdown, on every tab, above the navigation bar. It never pulses harder than the dot inside it.</li>
+          <li>NavigationBar: 80 dp on a surface-container tint, a 64 × 32 pill behind the selected icon (filled), labels always shown, the gesture handle drawn over it edge to edge.</li>
+          <li>State layer shown on the first request row: pressed is a 10% ink overlay with the ripple spreading from the touch point (Calibre ink, not Material's default tint). Hover 8%, focus 10%, drag 16%.</li>
+          <li>412 × 915 dp (Pixel class). Haptics: a light tick when a card settles and on Approve.</li></ul></div></section>
+
+      <section data-pair="a-permission" data-ios="permission" data-os="android" id="a2"><div class="about"><span class="id">Android · S9</span><h3>Permission request</h3>
+        <p>Medium top app bar: the arrow and overflow on top, the headline below, collapsing to a small bar on scroll.</p>
+        <ul><li>FilledButton (Approve once) and OutlinedButton (Deny) in the stadium shape, 56 dp; the timer row is the same Calibre widget.</li>
+          <li>BiometricPrompt (fingerprint or face, whatever the phone has) replaces Face ID; the receipt is identical.</li></ul></div></section>
+
+      <section data-pair="a-back" data-os="android" data-fixed id="a2b"><div class="about"><span class="id">Android · S9 · gesture</span><h3>Predictive back</h3>
+        <p>Mid-swipe from the left edge: the request shrinks and follows the thumb, Home shows behind under a scrim, the edge arrow appears.</p>
+        <ul><li>Letting go below the threshold springs the page back, so leaving an open request is never an accident. Flutter: PredictiveBackPageTransitionsBuilder, enableOnBackInvokedCallback on.</li></ul></div></section>
+
+      <section data-pair="a-stop" data-ios="stop" data-os="android" id="a3" data-fixed><div class="about"><span class="id">Android · S13</span><h3>Stop, as a Material sheet</h3>
+        <p>Modal bottom sheet: a 32 × 4 drag handle, 28 dp top corners, a 32% scrim that dismisses, left-aligned headline and text, a stadium FilledButton and a text button.</p>
+        <ul><li>Back gesture, a drag down or a tap on the scrim cancels; Stop is never the default focus. The session sits under a small top app bar.</li></ul></div></section>
+    </div>
+  </section>
+
+  <section class="sect" id="s24">
+    <h2>S24 · The desktop's side</h2>
+    <p class="sub">In Harness Manager's own desktop style (its teal Chrono-Runway tokens), not Calibre. Computers gets a separate <b>Pair a phone…</b> button next to Invite a computer: a phone is never a full peer. The dialog shows both halves at once: the code the phone used, and the approval with the matching words and the grants. Control is off unless ticked. Below, every phone with its grants, last contact, expiry and Revoke.</p>
+    <div class="desks">
+      <div><p class="frame-cap">Pair a phone · dark, the desktop default</p><div class="desk" data-theme="dark" data-desk="dialog"></div></div>
+      <div><p class="frame-cap">Pair a phone · light</p><div class="desk" data-theme="light" data-desk="dialog"></div></div>
+      <div><p class="frame-cap">Phones list · dark</p><div class="desk" data-theme="dark" data-desk="list"></div></div>
+      <div><p class="frame-cap">Phones list · light</p><div class="desk" data-theme="light" data-desk="list"></div></div>
+    </div>
+  </section>
+
+</main>
+<script src="calibre.js"></script>
+<script src="screens-onboarding.js"></script>
+<script src="screens-requests.js"></script>
+<script src="screens-sessions.js"></script>
+<script src="screens-accounts.js"></script>
+<script src="screens-you.js"></script>
+<script src="screens-states.js"></script>
+<script src="screens-extra.js"></script>
+<script src="screens-platforms.js"></script>
+<script src="widgets.js"></script>
+<script src="prototype.js"></script>
+</body>
+</html>

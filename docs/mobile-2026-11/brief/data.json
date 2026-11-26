@@ -1,0 +1,584 @@
+{
+ "note": "Snapshot of the owner's real Harness Manager data (25 Nov 2026), for realistic designs. Computers: DEVELOPMENTPC (this one, direct), LAPTOP (via hub), MINI (asleep). Costs are API list-price estimates (≈).",
+ "computers": [
+  "DEVELOPMENTPC",
+  "LAPTOP",
+  "MINI"
+ ],
+ "accounts": [
+  {
+   "name": "claude-main",
+   "tool": "claude",
+   "kind": "subscription",
+   "plan": "Max 20x",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 21807748,
+   "days_7d": [
+    1962292,
+    3270182,
+    9710379,
+    6341703,
+    195886,
+    280794,
+    46512
+   ],
+   "sessions_7d": 29,
+   "running": true,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "Week",
+     "left_pct": 11,
+     "resets_in_hours": 41.6
+    },
+    {
+     "label": "Week · Fable",
+     "left_pct": 30,
+     "resets_in_hours": 41.6
+    }
+   ]
+  },
+  {
+   "name": "codex-main",
+   "tool": "codex",
+   "kind": "subscription",
+   "plan": "ChatGPT Pro",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 67029059,
+   "days_7d": [
+    3159718,
+    2668859,
+    3765883,
+    1789287,
+    3541230,
+    48364542,
+    3739540
+   ],
+   "sessions_7d": 217,
+   "running": true,
+   "limits_read_minutes_ago": 0,
+   "windows": [
+    {
+     "label": "Week",
+     "left_pct": 93,
+     "resets_in_hours": 140.6
+    }
+   ]
+  },
+  {
+   "name": "opencode-main",
+   "tool": "opencode",
+   "kind": "subscription",
+   "plan": "opencode, opencode-go, anthropic, mirbadllm",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 0,
+   "days_7d": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "sessions_7d": 0,
+   "running": false,
+   "limits_read_minutes_ago": null,
+   "windows": []
+  },
+  {
+   "name": "agy-main",
+   "tool": "agy",
+   "kind": "subscription",
+   "plan": "Google · active",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 0,
+   "days_7d": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "sessions_7d": 0,
+   "running": false,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "Week",
+     "left_pct": 100,
+     "resets_in_hours": 167.9
+    },
+    {
+     "label": "5-hour session",
+     "left_pct": 100,
+     "resets_in_hours": 4.9
+    },
+    {
+     "label": "Week · Claude and GPT models",
+     "left_pct": 100,
+     "resets_in_hours": 167.9
+    },
+    {
+     "label": "5-hour session · Claude and GPT models",
+     "left_pct": 100,
+     "resets_in_hours": 4.9
+    }
+   ]
+  },
+  {
+   "name": "sabushanab-resal",
+   "tool": "claude",
+   "kind": "subscription",
+   "plan": "Max 5x",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 7717521,
+   "days_7d": [
+    0,
+    170776,
+    1405751,
+    3142088,
+    2820028,
+    14272,
+    164606
+   ],
+   "sessions_7d": 20,
+   "running": true,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "5-hour session",
+     "left_pct": 93,
+     "resets_in_hours": 1.8
+    },
+    {
+     "label": "Week",
+     "left_pct": 29,
+     "resets_in_hours": 51.6
+    },
+    {
+     "label": "Week · Fable",
+     "left_pct": 61,
+     "resets_in_hours": 51.6
+    }
+   ]
+  },
+  {
+   "name": "service-account-resal",
+   "tool": "claude",
+   "kind": "subscription",
+   "plan": "Max 5x",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 8509437,
+   "days_7d": [
+    1222883,
+    916997,
+    1420979,
+    2419567,
+    2524274,
+    4737,
+    0
+   ],
+   "sessions_7d": 12,
+   "running": false,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "Week",
+     "left_pct": 100,
+     "resets_in_hours": 154.6
+    },
+    {
+     "label": "Week · Fable",
+     "left_pct": 100,
+     "resets_in_hours": 154.6
+    }
+   ]
+  },
+  {
+   "name": "samykabu-teksa",
+   "tool": "claude",
+   "kind": "subscription",
+   "plan": "Max 20x",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 10466036,
+   "days_7d": [
+    3265833,
+    109034,
+    6,
+    26472,
+    387021,
+    2760904,
+    3916766
+   ],
+   "sessions_7d": 24,
+   "running": true,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "5-hour session",
+     "left_pct": 99,
+     "resets_in_hours": 4.6
+    },
+    {
+     "label": "Week",
+     "left_pct": 75,
+     "resets_in_hours": 132.6
+    },
+    {
+     "label": "Week · Fable",
+     "left_pct": 87,
+     "resets_in_hours": 132.6
+    }
+   ]
+  },
+  {
+   "name": "claude-Resal-Dev01",
+   "tool": "claude",
+   "kind": "subscription",
+   "plan": "Max 5x",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 4989293,
+   "days_7d": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    825051,
+    4164242
+   ],
+   "sessions_7d": 16,
+   "running": true,
+   "limits_read_minutes_ago": 8,
+   "windows": [
+    {
+     "label": "5-hour session",
+     "left_pct": 52,
+     "resets_in_hours": 2.3
+    },
+    {
+     "label": "Week",
+     "left_pct": 64,
+     "resets_in_hours": 69.6
+    },
+    {
+     "label": "Week · Fable",
+     "left_pct": 100,
+     "resets_in_hours": 69.6
+    }
+   ]
+  },
+  {
+   "name": "Claude-Resal-API",
+   "tool": "claude",
+   "kind": "api_key",
+   "plan": "API key",
+   "logged_in": true,
+   "login_expired": false,
+   "tokens_7d": 98169,
+   "days_7d": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    98169,
+    0
+   ],
+   "sessions_7d": 2,
+   "running": false,
+   "limits_read_minutes_ago": null,
+   "windows": []
+  }
+ ],
+ "projects": [
+  {
+   "name": "HarnessManager-rc-chat",
+   "tokens": 181067469,
+   "sessions": 49,
+   "last_active_minutes_ago": 0
+  },
+  {
+   "name": "subscription-entitlements",
+   "tokens": 4076422,
+   "sessions": 22,
+   "last_active_minutes_ago": 0
+  },
+  {
+   "name": "wt-mirbad-lan-models",
+   "tokens": 221070980,
+   "sessions": 7,
+   "last_active_minutes_ago": 0
+  },
+  {
+   "name": "Bunyan",
+   "tokens": 31139470377,
+   "sessions": 1193,
+   "last_active_minutes_ago": 0
+  },
+  {
+   "name": "sabus",
+   "tokens": 2933234095,
+   "sessions": 233,
+   "last_active_minutes_ago": 12
+  },
+  {
+   "name": "can",
+   "tokens": 137633178,
+   "sessions": 3,
+   "last_active_minutes_ago": 112
+  },
+  {
+   "name": "fix-the-open-mirbadllm-issue-35",
+   "tokens": 1689183,
+   "sessions": 2,
+   "last_active_minutes_ago": 1092
+  },
+  {
+   "name": "tes",
+   "tokens": 18189,
+   "sessions": 1,
+   "last_active_minutes_ago": 1241
+  },
+  {
+   "name": "MirbadLLM",
+   "tokens": 21420314,
+   "sessions": 6,
+   "last_active_minutes_ago": 1442
+  },
+  {
+   "name": "images",
+   "tokens": 335618,
+   "sessions": 1,
+   "last_active_minutes_ago": 1643
+  }
+ ],
+ "recent_sessions": [
+  {
+   "project": "HarnessManager-rc-chat",
+   "title": "Account limit re-login notifications",
+   "tool": "claude",
+   "account": "sabushanab-resal",
+   "started_minutes_ago": 191
+  },
+  {
+   "project": "HarnessManager-rc-chat",
+   "title": "Delegated task",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 38
+  },
+  {
+   "project": "HarnessManager-rc-chat",
+   "title": "app shows \"Filter accounts/Run a commandCtrl K7 live3 computersl…",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 317
+  },
+  {
+   "project": "subscription-entitlements",
+   "title": "Branch protection and default branch setup",
+   "tool": "claude",
+   "account": "claude-Resal-Dev01",
+   "started_minutes_ago": 1660
+  },
+  {
+   "project": "subscription-entitlements",
+   "title": "Delegated task",
+   "tool": "claude",
+   "account": "claude-Resal-Dev01",
+   "started_minutes_ago": 33
+  },
+  {
+   "project": "subscription-entitlements",
+   "title": "Delegated task",
+   "tool": "claude",
+   "account": "claude-Resal-Dev01",
+   "started_minutes_ago": 99
+  },
+  {
+   "project": "wt-mirbad-lan-models",
+   "title": "Delegated task",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 97
+  },
+  {
+   "project": "wt-mirbad-lan-models",
+   "title": "mirbadllm can not load the model W1124 01:49:38.936000 1 torch/_…",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 2310
+  },
+  {
+   "project": "wt-mirbad-lan-models",
+   "title": "Mirbad GGUF reader unknown types",
+   "tool": "claude",
+   "account": "samykabu-personal",
+   "started_minutes_ago": 318
+  },
+  {
+   "project": "Bunyan",
+   "title": "Use /speckit-workflow-continue 29. Read D:\\Projects\\Bunyan\\Issue…",
+   "tool": "claude",
+   "account": "samykabu-teksa",
+   "started_minutes_ago": 79
+  },
+  {
+   "project": "Bunyan",
+   "title": "Bunyan START-PROMPT resume 2026-11-22",
+   "tool": "claude",
+   "account": "samykabu-teksa",
+   "started_minutes_ago": 4338
+  },
+  {
+   "project": "Bunyan",
+   "title": "Use /speckit-workflow-continue 29. Read D:\\Projects\\Bunyan\\Issue…",
+   "tool": "claude",
+   "account": "samykabu-teksa",
+   "started_minutes_ago": 814
+  },
+  {
+   "project": "sabus",
+   "title": "mirbadllm-agent installer on developmentpc",
+   "tool": "claude",
+   "account": "claude-main",
+   "started_minutes_ago": 135
+  },
+  {
+   "project": "sabus",
+   "title": "VSCode picker omits lnkling-2-mini-mac",
+   "tool": "claude",
+   "account": "claude-main",
+   "started_minutes_ago": 328
+  },
+  {
+   "project": "sabus",
+   "title": "Honda 2004 car model in Blender",
+   "tool": "claude",
+   "account": "Surogate3_7",
+   "started_minutes_ago": 1251
+  },
+  {
+   "project": "can",
+   "title": "can  you deploy thinkingmachines/Inkling-2-Mini on my MirbadLLM …",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 5657
+  },
+  {
+   "project": "can",
+   "title": "Codex session",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 5652
+  },
+  {
+   "project": "can",
+   "title": "Codex session",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 5662
+  },
+  {
+   "project": "fix-the-open-mirbadllm-issue-35",
+   "title": "is thier any deepseek v 4.1 flash model that can be served by my…",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 1094
+  },
+  {
+   "project": "fix-the-open-mirbadllm-issue-35",
+   "title": "Codex session",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 1093
+  },
+  {
+   "project": "tes",
+   "title": "hi",
+   "tool": "claude",
+   "account": "Surogate3_7",
+   "started_minutes_ago": 1241
+  },
+  {
+   "project": "MirbadLLM",
+   "title": "Token/s update rate and 1/7 indicator",
+   "tool": "claude",
+   "account": "Claude-Resal-API",
+   "started_minutes_ago": 1687
+  },
+  {
+   "project": "MirbadLLM",
+   "title": "Meaning of 'noisy'",
+   "tool": "claude",
+   "account": "service-account-resal",
+   "started_minutes_ago": 2721
+  },
+  {
+   "project": "MirbadLLM",
+   "title": "did not we added support for Ollama API in mirbadLLM?",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 2911
+  },
+  {
+   "project": "images",
+   "title": "Delegated task",
+   "tool": "codex",
+   "account": "codex-main",
+   "started_minutes_ago": 1646
+  }
+ ],
+ "overview": {
+  "cost": 41003.20285843499,
+  "requests": 605769,
+  "tokens": 126236880417,
+  "cache_hit_rate": 0.9772088221385641,
+  "today_cost": 737.4969233149997,
+  "today_tokens": 2233836588,
+  "last_30_days_tokens": [
+   632087302,
+   2017852273,
+   1975025541,
+   2631595518,
+   3703190126,
+   2161864651,
+   2601815609,
+   1152230047,
+   1600146711,
+   2256744348,
+   2616464274,
+   2273744208,
+   1715899467,
+   2026792133,
+   2361261791,
+   1947814012,
+   1486278259,
+   664633538,
+   1255864173,
+   1755445027,
+   1262250792,
+   3182089496,
+   2569300718,
+   1690622910,
+   1207148421,
+   3436129308,
+   3503453411,
+   1411046549,
+   4529102719,
+   2233836588
+  ]
+ }
+}

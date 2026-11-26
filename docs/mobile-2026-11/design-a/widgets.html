@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Widgets · Calibre · Harness Manager mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header data-topbar></header>
+<main class="page">
+  <section class="sect">
+    <h2>Widget gallery</h2>
+    <p class="sub">Every family in at least two variations (A1, A2), light and dark, at real sizes. Home Screen widgets read a redacted, encrypted cache the app keeps: no titles or commands unless Settings › Widget detail allows them. Nothing inside a widget animates on its own: countdowns are the system's own timers (<code class="mono">Text(timerInterval:)</code>, <code class="mono">ProgressView(timerInterval:)</code>, Android <code class="mono">Chronometer</code>), and the timeline refreshes at each reset. Reaching zero means “refresh due”, never “limit back”. Approving, replying and Stop always happen inside the unlocked app; every widget opens it.</p>
+    <div data-widgets></div>
+  </section>
+  <section class="sect">
+    <h2>Constraints designed for</h2>
+    <div class="ds">
+      <div class="ds-block span-6"><h3>iOS · WidgetKit and ActivityKit</h3><ul class="cons">
+        <li>Families: systemSmall, systemMedium, systemLarge; accessoryCircular, accessoryRectangular, accessoryInline. No interactive approve: buttons in widgets may only run App Intents, and every action here needs Face ID, so they open the app.</li>
+        <li>No free animation: the only motion is the system's content transition when the timeline changes, and live timers drawn by the system.</li>
+        <li>Lock Screen accessories render in the vibrant (monochrome) style: one tint at varying opacity, so the dials use opacity, never colour, to separate track and arc. Amber and vermilion are lost there on purpose; the words carry the meaning.</li>
+        <li>Tinted and clear Home Screen modes (iOS 18+): every element is marked <code class="mono">widgetAccentable</code> or not; the dial arc is the accent.</li>
+        <li>Live Activity: up to 8 h active plus 4 h on the Lock Screen, 160 pt tall at most, updated by push (APNs, content-free until unlock unless the owner allows detail). Dynamic Island compact leading and trailing are tiny: one glyph, one timer.</li></ul></div>
+      <div class="ds-block span-6"><h3>Android · Glance and notifications</h3><ul class="cons">
+        <li>Glance (RemoteViews underneath): Compose-like layout, no custom drawing at runtime. The dials are rendered to bitmaps by the app at each update and cached; text stays real text for accessibility.</li>
+        <li>Resizable with SizeMode.Responsive: three layouts (2×1, 2×2, 4×2 or 4×4) chosen by the launcher size, not by scaling one layout.</li>
+        <li>Updates: WorkManager at each reset and on push, at most every 15 minutes otherwise; a countdown uses Chronometer, which the system ticks.</li>
+        <li>Ongoing notification: a foreground-service style notification while a session is followed; on Android 16 it uses ProgressStyle as a Live Update, which can be promoted to a status-bar chip.</li>
+        <li>Calibre colours are fixed in widgets (not Material You dynamic colour), so the semantic roles stay true; a “Match wallpaper” option can follow later.</li></ul></div>
+    </div>
+  </section>
+
+</main>
+<script src="calibre.js"></script>
+<script src="screens-onboarding.js"></script>
+<script src="screens-requests.js"></script>
+<script src="screens-sessions.js"></script>
+<script src="screens-accounts.js"></script>
+<script src="screens-you.js"></script>
+<script src="screens-states.js"></script>
+<script src="screens-extra.js"></script>
+<script src="screens-platforms.js"></script>
+<script src="widgets.js"></script>
+<script src="prototype.js"></script>
+</body>
+</html>

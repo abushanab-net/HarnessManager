@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Build Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f6f4;--surface:#fff;--ink:#16201f;--muted:#5d6b6a;--line:#dfe4e2;--soft:#eef2f0;--ac:#0f6b5f;--ac-soft:#e2f1ed;--warn:#a35d00;--warn-soft:#fbf0de;--neg:#b42318;--neg-soft:#fde8e6;--a:#1f2a4d;--b:#c2532f;--shadow:0 1px 2px rgba(16,24,23,.06),0 4px 16px rgba(16,24,23,.06)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975;--shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
+:root[data-theme="dark"]{--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--ac)}
+h1,h2,h3{margin:0;line-height:1.25}
+.wrap{max-width:1320px;margin:0 auto;padding:0 24px}
+header.top{padding:40px 0 16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:34px;letter-spacing:-.02em;margin:6px 0 8px}
+.lede{font-size:17px;color:var(--muted);max-width:880px;margin:0}
+.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:14px;min-height:56px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+nav.toc{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+nav.toc a{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;white-space:nowrap}
+nav.toc a:hover,nav.toc a.on{background:var(--surface);color:var(--ink)}
+.fbstat{font-size:13px;color:var(--muted)}
+.fbstat b{color:var(--ink)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-block;transition:border-color .15s,transform .12s}
+.btn:hover{border-color:var(--muted)}.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+section.s{padding:44px 0 8px}
+section.s>h2{font-size:24px;letter-spacing:-.01em;display:flex;gap:12px;align-items:baseline}
+.num{font-size:13px;color:var(--muted);font-weight:600;font-family:"JetBrains Mono",monospace}
+.intro{color:var(--muted);max-width:900px;margin:8px 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:960px){.duo{grid-template-columns:1fr}}
+.duo>*,.card{min-width:0}
+.shots img{max-width:none}
+@media (max-width:640px){.shots a img[width="560"],.shots a img[width="580"],.shots a img[width="520"]{width:min(560px,82vw)}}
+.side h3{font-size:17px;display:flex;align-items:center;gap:8px}
+.badge{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff}
+.badge.a{background:var(--a)}.badge.b{background:var(--b)}
+:root[data-theme="dark"] .badge{color:#111}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge{color:#111}}
+.who{font-size:13px;color:var(--muted);margin:2px 0 12px}
+.shots{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.shots a{flex:none;display:block;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#111;transition:transform .2s ease,box-shadow .2s ease}
+.shots a:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.shots img{display:block;height:auto}
+.tall{max-height:760px;overflow-y:auto;border-radius:12px}
+.cap{font-size:12px;color:var(--muted);margin-top:4px}
+.verdict{border-left:3px solid var(--ac);background:var(--ac-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0 0;font-size:14px}
+.verdict b{display:block;margin-bottom:2px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+.t th,.t td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.t th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.fb{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.fb .chips{display:flex;gap:4px;flex-wrap:wrap}
+.fb .chip{font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s ease}
+.fb .chip:hover{color:var(--ink);border-color:var(--muted)}
+.fb .chip.on.keep,.fb .chip.on.opt{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.on.change{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.fb .chip.on.drop{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.fb textarea{font:inherit;font-size:13px;width:100%;min-height:34px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:9px;padding:7px 10px;transition:border-color .15s,min-height .2s}
+.fb textarea:focus{outline:none;border-color:var(--ac);min-height:70px}
+.pick{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.pick .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+footer{padding:50px 0 80px;color:var(--muted);font-size:13px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:640px){.wrap{padding:0 16px}h1{font-size:27px}}
+.mermaid{background:#fff;border-radius:10px;padding:12px;overflow-x:auto;text-align:center}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="eyebrow">Harness Manager · Mobile companion · Build plan</div>
+  <h1>From the approved design to the stores</h1>
+  <p class="lede">The Calibre design is approved, with designer A's widget for every type. This plan says how we build it: what the desktop and the hub must learn first, how the phone talks to them safely, the order of the work, who builds what in parallel, and how we know it is ready. It builds on the pairing, hub and request code that already ships. The detailed contract is <code>docs/plans/mobile/PLAN.md</code>. Seven decisions below need your answer before work starts.</p>
+  <p style="margin:14px 0 0;display:flex;gap:8px;flex-wrap:wrap"><a class="btn" href="PLAN.md" target="_blank" rel="noopener">PLAN.md (the contract) ↗</a><a class="btn" href="../../mobile-2026-11/review-3.html" target="_blank" rel="noopener">The approved design ↗</a><a class="btn" href="../../mobile-2026-11/design-a/prototype.html" target="_blank" rel="noopener">Prototype ↗</a></p>
+</div></header>
+
+<div class="bar"><div class="wrap">
+  <nav class="toc" id="toc"><a href="#shape">How it works</a><a href="#reuse">What exists</a><a href="#safety">Safety</a><a href="#phases">Phases</a><a href="#packages">Who builds what</a><a href="#decide">Decide</a><a href="#ready">Ready when</a><a href="#go">Go</a></nav>
+  <span class="fbstat" id="fbstat"></span>
+  <button class="btn" id="copy">Copy as text</button>
+  <button class="btn pri" id="export">Export feedback</button>
+</div></div>
+
+<main class="wrap">
+
+<section class="s reveal" id="shape">
+  <h2><span class="num">01</span>How it works</h2>
+  <p class="intro">Each computer is the authority for its own sessions. At home or on the VPN, the phone talks to each paired computer directly over mutual TLS, both sides pinned. Away, the computer and the phone exchange sealed messages through a mailbox on your hub, which sees only sizes and timing. Alerts reach the phone through a small push relay we operate, carrying no content: the phone fetches the details after unlock.</p>
+  <div class="card" data-fid="p-shape" data-title="Architecture">
+    <pre class="mermaid">
+flowchart LR
+  subgraph Home["At home or on the VPN"]
+    P1["Phone app<br/>Flutter + native widgets"] -- "mutual TLS · /c1 API<br/>pinned both ways" --> D1["Desktop app<br/>DEVELOPMENTPC"]
+    P1 -- "mutual TLS" --> D2["Desktop app<br/>LAPTOP"]
+  end
+  subgraph Away["Away from home"]
+    P2["Phone app"] -- "sealed to the computer" --> H["Your hub<br/>phone mailbox"]
+    H -- "sealed to the phone" --> P2
+    D1 -- "outbound WebSocket" --> H
+  end
+  D1 -- "wake: no content" --> R["Push relay<br/>we operate"]
+  H -- "wake" --> R
+  R -- "APNs / FCM:<br/>'A session needs you'" --> P2
+  D1 --> K["Claude Code hook<br/>waits 300 s / 60 s"]
+    </pre>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="p-flow" data-title="Answering a request">
+    <h3 style="font-size:17px;margin-bottom:8px">Answering a permission request, end to end</h3>
+    <pre class="mermaid">
+sequenceDiagram
+  participant C as Claude Code
+  participant D as Desktop (origin)
+  participant R as Push relay
+  participant P as Phone
+  C->>D: PermissionRequest (hook waits up to 300 s)
+  D->>R: wake(handle, "needs")
+  R->>P: "A session needs you"
+  P->>D: GET /c1/requests (after unlock)
+  P->>D: POST /c1/actions {action_id, allow, state_version}
+  D->>D: recheck grant, run, request, version
+  D->>C: allow once
+  D-->>P: receipt: accepted
+  Note over P,D: no reply? ask for the receipt, else "delivery unknown"
+    </pre>
+  </div>
+</section>
+
+<section class="s reveal" id="reuse">
+  <h2><span class="num">02</span>What already exists, and what is new</h2>
+  <div class="duo">
+    <div class="card"><h3 style="font-size:17px">Reused</h3>
+      <table class="t">
+        <tr><td>Six-digit code pairing (SPAKE2, sealed payloads, 2 min, 3 failures)</td><td><code>core/sync/peer/pairing.rs</code></td></tr>
+        <tr><td>Ed25519 identity and certificates, mutual TLS listener</td><td><code>identity.rs</code>, <code>listener.rs</code></td></tr>
+        <tr><td>LAN discovery</td><td><code>mdns.rs</code></td></tr>
+        <tr><td>Answering a request only while it is open and its hook is alive</td><td><code>hooks::answer()</code></td></tr>
+        <tr><td>Reply and Stop for an owned terminal</td><td><code>terminal::reply/stop</code></td></tr>
+        <tr><td>Hub: device records, encrypted storage, live events</td><td><code>crates/hub</code></td></tr>
+        <tr><td>The request heartbeat runs in the background, so requests wait for the phone while the app sits in the tray</td><td><code>app/src-tauri/src/main.rs</code></td></tr>
+      </table>
+    </div>
+    <div class="card"><h3 style="font-size:17px">New</h3>
+      <table class="t">
+        <tr><td>Phone enrollment: its own table, approval on the computer with three words, grants per computer</td></tr>
+        <tr><td>The companion API (<code>/c1</code>): overview, accounts, sessions, transcripts, requests, live events, actions</td></tr>
+        <tr><td>Actions with receipts: accepted, already handled, expired, unavailable, delivery unknown</td></tr>
+        <tr><td>"Use next" moves from the desktop's JavaScript into Rust, so desktop, phone and widgets always agree</td></tr>
+        <tr><td>Hub: phone invites and a sealed mailbox</td></tr>
+        <tr><td>Push relay service (APNs and FCM)</td></tr>
+        <tr><td>Desktop: Pair a phone, the Phones list, <code>hrm phones</code></td></tr>
+        <tr><td>The Flutter app, the native widgets and the Live Activity</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="safety">
+  <h2><span class="num">03</span>The safety rules the plan is built around</h2>
+  <div class="card" data-fid="p-safety" data-title="Safety rules">
+    <table class="t">
+      <tr><th>Rule</th><th>Why</th></tr>
+      <tr><td>A phone never gets the ring key and is never stored as a paired computer</td><td>Computer pairing today sends the ring key and opens the journal and transcript routes. A phone with Summaries must not be able to read more by knowing a URL.</td></tr>
+      <tr><td>The computer approves every phone and chooses its grants; the code alone grants nothing</td><td>A leaked code or hub invite cannot add a phone.</td></tr>
+      <tr><td>Every action carries an id, the request's state version and an expiry; the computer rechecks just before acting</td><td>Zero stale approvals: if the terminal answered first, the phone gets "already handled".</td></tr>
+      <tr><td>Stop and reply are never resent automatically</td><td>A second Ctrl+C at an idle prompt can close Claude Code.</td></tr>
+      <tr><td>Push carries no content; the lock screen says only "A session needs you" unless you turn detail on</td><td>Apple, Google and the relay see nothing about your work.</td></tr>
+      <tr><td>Revoking a phone cuts its connection, hub token and push handle, and the desktop shows each one acknowledged</td><td>A lost phone is shut out within a minute while the computer is on.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="phases">
+  <h2><span class="num">04</span>Phases</h2>
+  <p class="intro">Sizes are for one agent working full time; with parallel packages the calendar is shorter. Phases 1 and 2 overlap once the API contract is fixed, because the app can build against a fake server answering from your real data snapshot.</p>
+  <div class="card" data-fid="p-phases" data-title="Phases">
+    <table class="t">
+      <tr><th>Phase</th><th>Delivers</th><th>Size</th></tr>
+      <tr><td><b>0 Spikes</b></td><td>Prove the four risky parts on real phones: the shared Rust protocol code inside Flutter; mutual TLS from Dart with a pinned Ed25519 certificate; push wake → unlock → answer inside a 60 s question; a Live Activity updated by push</td><td>3–4 days</td></tr>
+      <tr><td><b>1 Desktop</b></td><td>Phone pairing with approval and words, the <code>/c1</code> API, actions and receipts, the 60 s question window, "Use next" in Rust, Pair a phone and the Phones list, <code>hrm phones</code>, tests with a fake phone</td><td>2 weeks</td></tr>
+      <tr><td><b>2 App at home</b></td><td>The Flutter app in Calibre over LAN / VPN: onboarding, Home, requests, sessions, accounts, computers, You, settings, every state, offline cache, app lock</td><td>3–4 weeks</td></tr>
+      <tr><td><b>3 Away and alerts</b></td><td>Hub phone invite and mailbox, the push relay, private alerts, notification settings, quiet hours</td><td>1.5–2 weeks</td></tr>
+      <tr><td><b>4 Widgets and game</b></td><td>The nine chosen widgets, Live Activity and Dynamic Island, the Android widget and ongoing notification, Progress, badges, the weekly recap</td><td>2–3 weeks</td></tr>
+      <tr><td><b>5 Release</b></td><td>Signing, TestFlight and Play internal testing, store listings and privacy labels, the two real-phone journeys</td><td>1 week</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="packages">
+  <h2><span class="num">05</span>Who builds what</h2>
+  <p class="intro">As for the across-computers work: each package owns its paths and its branch, I orchestrate and review, and each runs on the account with enough room that resets soonest.</p>
+  <div class="card" data-fid="p-packages" data-title="Work packages">
+    <table class="t">
+      <tr><th>Wave</th><th>Package</th><th>Owns</th></tr>
+      <tr><td>1</td><td>WP-M0 spikes</td><td><code>spikes/mobile-*</code></td></tr>
+      <tr><td>1</td><td>WP-M1 desktop core</td><td>phones, companion API, pairing, listener, hooks, "Use next" in <code>crates/core</code></td></tr>
+      <tr><td>1</td><td>WP-M2 desktop UI and CLI</td><td>Pair a phone, Phones list, <code>hrm phones</code>, e2e tests</td></tr>
+      <tr><td>1</td><td>WP-M3 protocol crate</td><td><code>crates/companion-proto</code>: pairing client, sealing, certificates, receipt types (used by tests and the app)</td></tr>
+      <tr><td>2</td><td>WP-M4 Flutter app</td><td><code>mobile/</code></td></tr>
+      <tr><td>2</td><td>WP-M5 hub mailbox</td><td><code>crates/hub</code>, <code>core/sync/hub.rs</code></td></tr>
+      <tr><td>2</td><td>WP-M6 push relay</td><td><code>crates/push-relay</code>, <code>deploy/push-relay</code></td></tr>
+      <tr><td>2</td><td>WP-M7 native widgets</td><td>WidgetKit / ActivityKit and Glance code inside <code>mobile/</code></td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="decide">
+  <h2><span class="num">06</span>Decisions I need from you</h2>
+  <p class="intro">The first option of each is my recommendation.</p>
+  <div class="card pick" data-fid="d-repo" data-title="Where the app lives" data-opts="mobile/ in this repository|A separate repository"><span class="lbl">Where the app's code lives</span><p class="intro" style="margin:4px 0 0;font-size:14px">One repository keeps the API contract, the protocol crate and the app's contract tests changing together in one pull request. A separate repository keeps the desktop's CI lighter.</p></div>
+  <div class="card pick" data-fid="d-proto" data-title="Protocol code in the app" data-opts="Shared Rust crate via flutter_rust_bridge|Rewrite it in Dart"><span class="lbl">Pairing and encryption code in the app</span><p class="intro" style="margin:4px 0 0;font-size:14px">The desktop's pairing uses a Rust SPAKE2 implementation with no compatible Dart package. Compiling the same Rust into the app guarantees both sides agree, at the cost of a Rust toolchain in the mobile build. The spike checks it on both phones first.</p></div>
+  <div class="card pick" data-fid="d-relay" data-title="Push relay hosting" data-opts="Docker next to the hub on your server|Cloudflare Worker"><span class="lbl">Where the push relay runs</span><p class="intro" style="margin:4px 0 0;font-size:14px">Docker reuses the hub's deployment and keeps one stack. A Worker is cheaper to run and needs no server, but is a second platform to deploy and watch.</p></div>
+  <div class="card pick" data-fid="d-stores" data-title="Store accounts" data-opts="My personal Apple and Google developer accounts|An organisation's accounts|Not yet: internal builds first"><span class="lbl">Apple Developer and Google Play accounts</span><p class="intro" style="margin:4px 0 0;font-size:14px">Push, TestFlight and Play testing need them. Whoever owns them owns the listing and the APNs key the relay uses. Without them, phase 0 to 2 still run on your own phones.</p></div>
+  <div class="card pick" data-fid="d-os" data-title="Minimum OS" data-opts="iOS 17 and Android 8 (API 26)|iOS 16 and Android 7"><span class="lbl">Oldest phones supported</span><p class="intro" style="margin:4px 0 0;font-size:14px">iOS 17 brings interactive widgets and the lock-screen features the chosen widgets use; Android 8 covers almost every phone in use and has notification channels.</p></div>
+  <div class="card pick" data-fid="d-id" data-title="App name and identifier" data-opts="Harness Manager · net.abushanab.harnessmanager|Something else (say in the comment)"><span class="lbl">App name and bundle identifier</span><p class="intro" style="margin:4px 0 0;font-size:14px">The identifier cannot change after the first store upload.</p></div>
+  <div class="card pick" data-fid="d-start" data-title="How to start" data-opts="Wave 1 now: spikes, desktop core, desktop UI and protocol crate in parallel|Spikes first, then decide"><span class="lbl">How to start</span><p class="intro" style="margin:4px 0 0;font-size:14px">Parallel is faster. The desktop work doesn't depend on the spikes, except the protocol crate's packaging, which the spike settles in its first days.</p></div>
+</section>
+
+<section class="s reveal" id="ready">
+  <h2><span class="num">07</span>Ready to release when</h2>
+  <div class="card" data-fid="p-ready" data-title="Release criteria">
+    <table class="t">
+      <tr><td><b>No stale or repeated actions</b></td><td>Zero stale approvals and zero repeated terminal inputs across: the terminal answering first, two phones at once, expiry during unlock, Wi-Fi to cellular, a receipt lost after a reply, two Stop taps.</td></tr>
+      <tr><td><b>Grants hold</b></td><td>A Summaries-only phone is refused transcripts, actions and every computer-to-computer route; two computers with the same account and session names stay apart.</td></tr>
+      <tr><td><b>Revocation works</b></td><td>A revoked phone loses its connection, hub token and push handle within a minute while the computer is on.</td></tr>
+      <tr><td><b>The two journeys</b></td><td>On a real iPhone and a real Android phone: find a usable account from a stale Home; receive a permission request over cellular, unlock, approve, see the computer's receipt.</td></tr>
+      <tr><td><b>The design's own checks</b></td><td>AA contrast in light and dark, 44 pt / 48 dp targets, the largest text size, Reduce Motion.</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="s reveal" id="go">
+  <h2><span class="num">08</span>Go</h2>
+  <div class="card" data-fid="go" data-title="Approve the plan" data-opts="Approved: start wave 1|Approved with the changes in my comments|Not yet">
+    <h3 style="font-size:17px">Approve the plan?</h3>
+    <p class="intro" style="margin:6px 0 0;font-size:14px">On approval I commit the design and this plan on <code>mobile/design</code>, then start wave 1 on the accounts with enough room that reset soonest.</p>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="general" data-title="Anything else" data-nochips="1"><h3 style="font-size:17px">Anything else</h3></div>
+</section>
+</main>
+<footer><div class="wrap">Harness Manager mobile · Build plan · contract: <code>docs/plans/mobile/PLAN.md</code> · design: <code>docs/mobile-2026-11/</code> · Codex consultation: <code>docs/mobile-2026-11/codex-consultation.md</code></div></footer>
+<div class="toast" id="toast"></div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KEY = 'hm-mobile-plan-1';
+let fb = {}; try { fb = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { fb = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {} stat(); };
+const items = [...document.querySelectorAll('[data-fid]')];
+items.forEach((el) => {
+  const id = el.dataset.fid, cur = fb[id] || {}, opts = el.dataset.opts ? el.dataset.opts.split('|') : null;
+  const w = document.createElement('div'); w.className = 'fb';
+  const chips = el.dataset.nochips ? '' : opts
+    ? `<div class="chips">${opts.map((o) => `<button type="button" class="chip opt ${cur.v === o ? 'on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<div class="chips">${[['keep','Keep'],['change','Change'],['drop','Drop']].map(([v,l]) => `<button type="button" class="chip ${v} ${cur.v === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  w.innerHTML = chips + `<textarea rows="1" placeholder="${el.dataset.nochips ? 'Your notes for the designers…' : 'Comment (optional)…'}" aria-label="Comment on ${esc(el.dataset.title)}">${esc(cur.c || '')}</textarea>`;
+  if (el.dataset.nochips) w.querySelector('textarea').style.minHeight = '120px';
+  el.appendChild(w);
+  w.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => {
+    const on = (fb[id] || {}).v === b.dataset.v; fb[id] = { ...(fb[id] || {}), v: on ? undefined : b.dataset.v };
+    w.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', !on && x === b)); save();
+  }));
+  const ta = w.querySelector('textarea'); ta.addEventListener('input', () => { fb[id] = { ...(fb[id] || {}), c: ta.value }; save(); });
+});
+function stat() { const n = items.filter((e) => !e.dataset.nochips).length, d = items.filter((e) => { const f = fb[e.dataset.fid]; return f && (f.v || (f.c || '').trim()); }).length; document.getElementById('fbstat').innerHTML = `<b>${d}</b> of ${n} reviewed`; }
+stat();
+const collect = () => items.map((e) => ({ id: e.dataset.fid, item: e.dataset.title, verdict: (fb[e.dataset.fid] || {}).v || null, comment: ((fb[e.dataset.fid] || {}).c || '').trim() || null })).filter((x) => x.verdict || x.comment);
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2400); }
+document.getElementById('export').addEventListener('click', () => {
+  const data = { review: 'mobile-plan-1', exported_at: new Date().toISOString(), items: collect() };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); a.download = 'mobile-plan-1-feedback.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${data.items.length} items to mobile-plan-1-feedback.json`);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  const rows = collect(), text = '# Mobile build plan: feedback\n\n' + rows.map((r) => `- **${r.item}** (${r.id})${r.verdict ? ` — ${r.verdict}` : ''}${r.comment ? `\n  ${r.comment.replace(/\n/g, '\n  ')}` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${rows.length} items: paste them into the chat`); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('Copied'); }
+});
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .05 });
+document.querySelectorAll('.reveal').forEach((e) => io.observe(e));
+const links = [...document.querySelectorAll('#toc a')];
+const so = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-40% 0px -55% 0px' });
+document.querySelectorAll('section.s').forEach((s) => so.observe(s));
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+if (window.mermaid) {
+  mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'strict',
+    themeVariables: { fontFamily: 'Inter, system-ui, sans-serif', fontSize: '14px', primaryColor: '#e2f1ed', primaryBorderColor: '#0f6b5f', primaryTextColor: '#16201f', lineColor: '#5d6b6a', secondaryColor: '#fbf0de', tertiaryColor: '#f5f6f4', actorBkg: '#e2f1ed', actorBorder: '#0f6b5f', noteBkgColor: '#fbf0de', noteBorderColor: '#a35d00', signalColor: '#16201f', labelBoxBkgColor: '#eef2f0' },
+    sequence: { mirrorActors: false, actorMargin: 40, messageMargin: 32 }, flowchart: { curve: 'basis' } });
+  document.fonts.ready.then(() => mermaid.run({ querySelector: '.mermaid' })).catch((e) => console.error(e));
+} else {
+  document.querySelectorAll('.mermaid').forEach((e) => { e.style.whiteSpace = 'pre'; e.style.fontSize = '12px'; e.insertAdjacentHTML('beforebegin', '<p class="dg-note">The diagram library could not load (offline?): its source is shown.</p>'); });
+}
+</script>
+</body>
+</html>

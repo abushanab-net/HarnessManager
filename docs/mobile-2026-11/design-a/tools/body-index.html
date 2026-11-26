@@ -1,0 +1,153 @@
+  <section class="cover">
+    <div>
+      <h1>Calibre</h1>
+      <p class="lede">Every number in this app is about time: how much room an account has before its reset, and how long a session will wait for you.
+        A good watch has shown time and reserve at a glance for two centuries, with ticks, hands and subdials. Calibre borrows that geometry and
+        typography, and none of the fake metal. Enamel and paper in daylight, a night dial after dark, ink for readings, and one vermilion hand kept for the thing that needs you.</p>
+      <div class="ideas">
+        <div><i class="ph ph-clock" aria-hidden="true"></i><span><b>One dial for every limit</b><p>Room left and time to reset share one shape, from the Home widget to the reset clock to the Lock Screen gauge. Learn it once.</p></span></div>
+        <div><i class="ph ph-hourglass-medium" aria-hidden="true"></i><span><b>Calm, honest time</b><p>Countdowns tick in ink and never turn red. Each one says what happens at zero. Every reading carries its age, estimates carry ≈, unknown is a dash.</p></span></div>
+        <div><i class="ph ph-plant" aria-hidden="true"></i><span><b>An instrument, not a toy</b><p>XP is a power reserve, the streak is a date wheel, badges are engraved. Points only for room or time saved, shown in lume green so they never compete with work.</p></span></div>
+      </div>
+    </div>
+    <div class="cover-art" id="cover-dial"></div>
+  </section>
+
+  <section class="sect" id="system">
+    <h2>Design system</h2>
+    <p class="sub">The tokens become a Flutter ThemeExtension (see notes.md). Light is enamel, dark is the night dial; every pair passes WCAG AA.</p>
+    <div class="ds">
+      <div class="ds-block span-7">
+        <h3>Colour, by role</h3>
+        <div class="swatches">
+          <div class="swatch-col" data-theme="light" style="background:var(--bg)">
+            <h4>Light · enamel</h4>
+            <div class="sw"><span class="chip-c" style="background:#eef0ec"></span><span class="nm">Enamel<small>background</small></span><code>#EEF0EC</code></div>
+            <div class="sw"><span class="chip-c" style="background:#fafbf8"></span><span class="nm">Paper<small>cards, sheets</small></span><code>#FAFBF8</code></div>
+            <div class="sw"><span class="chip-c" style="background:#15203a"></span><span class="nm">Ink<small>readings, primary</small></span><code>#15203A</code></div>
+            <div class="sw"><span class="chip-c" style="background:#4a5368"></span><span class="nm">Ink 2 · Ink 3<small>secondary, captions</small></span><code>#4A5368 · #646B7D</code></div>
+            <div class="sw"><span class="chip-c" style="background:#bb3417"></span><span class="nm">Vermilion<small>needs you, only</small></span><code>#BB3417</code></div>
+            <div class="sw"><span class="chip-c" style="background:#136f52"></span><span class="nm">Lume<small>harvest, XP</small></span><code>#136F52</code></div>
+            <div class="sw"><span class="chip-c" style="background:#9a5a00"></span><span class="nm">Amber<small>low, stale, forecast</small></span><code>#9A5A00</code></div>
+          </div>
+          <div class="swatch-col" data-theme="dark" style="background:var(--bg)">
+            <h4>Dark · night dial</h4>
+            <div class="sw"><span class="chip-c" style="background:#0b1120"></span><span class="nm">Night<small>background</small></span><code>#0B1120</code></div>
+            <div class="sw"><span class="chip-c" style="background:#131b2c"></span><span class="nm">Paper<small>cards, hairline edge</small></span><code>#131B2C</code></div>
+            <div class="sw"><span class="chip-c" style="background:#e9ece6"></span><span class="nm">Ink<small>readings, primary</small></span><code>#E9ECE6</code></div>
+            <div class="sw"><span class="chip-c" style="background:#aeb5c3"></span><span class="nm">Ink 2 · Ink 3<small>secondary, captions</small></span><code>#AEB5C3 · #8A92A3</code></div>
+            <div class="sw"><span class="chip-c" style="background:#ff7552"></span><span class="nm">Vermilion<small>needs you, only</small></span><code>#FF7552</code></div>
+            <div class="sw"><span class="chip-c" style="background:#6fddb0"></span><span class="nm">Lume<small>harvest, XP</small></span><code>#6FDDB0</code></div>
+            <div class="sw"><span class="chip-c" style="background:#f2b04e"></span><span class="nm">Amber<small>low, stale, forecast</small></span><code>#F2B04E</code></div>
+          </div>
+        </div>
+        <p class="cap" style="margin:12px 0 0">Every pair passes WCAG AA for text on paper and background. A semantic colour always comes with an icon or words.</p>
+      </div>
+
+      <div class="ds-block span-5">
+        <h3>Type</h3>
+        <div class="typescale">
+          <div class="ts"><small>Reading<br>Newsreader 58/1</small><span class="serif-num" style="font-size:58px;line-height:1">64%</span></div>
+          <div class="ts"><small>Large title<br>Newsreader 36/40</small><span style="font:400 36px/1.1 var(--serif);letter-spacing:-.02em">Progress</span></div>
+          <div class="ts"><small>Title<br>Newsreader 22/26</small><span style="font:400 22px/1.2 var(--serif)">Harvest window</span></div>
+          <div class="ts"><small>Headline<br>Hanken 600 17/22</small><span style="font:600 17px/1.3 var(--sans)">claude-Resal-Dev01</span></div>
+          <div class="ts"><small>Body<br>Hanken 400 16/22</small><span style="font:400 16px/1.4 var(--sans)">Its week resets Sat 18:58 with 64% unused.</span></div>
+          <div class="ts"><small>Caption<br>Hanken 500 12/16</small><span class="cap">Limits read 8 m ago</span></div>
+          <div class="ts"><small>Code<br>JetBrains Mono 15/22</small><code class="mono" style="font-size:15px">npm run test -- --watch=false</code></div>
+        </div>
+      </div>
+
+      <div class="ds-block span-8" data-ds>
+        <h3>Components</h3>
+        <div class="comp-row" style="gap:28px;align-items:flex-end">
+          <div><div id="ds-dial"></div><p class="cap">Dial · room left</p></div>
+          <div><div id="ds-dial-s"></div><p class="cap">Dial · low</p></div>
+          <div><div id="ds-cd"></div><p class="cap">Countdown</p></div>
+          <div><div id="ds-res"></div><p class="cap">Power reserve · XP</p></div>
+          <div style="flex:1;min-width:180px;display:grid;gap:14px">
+            <div><div class="bar"><span style="--v:.64"></span></div><p class="cap">Bar · 64%</p></div>
+            <div><div class="bar low"><span style="--v:.11"></span></div><p class="cap">Bar · low, 11%</p></div>
+          </div>
+        </div>
+        <div class="comp-row" style="margin-top:20px">
+          <span class="chip">DEVELOPMENTPC</span><span class="chip chip-lume"><i class="ph ph-plant"></i>+40 XP</span>
+          <span class="chip chip-signal"><span class="pulse"></span>Needs you</span><span class="chip chip-amber"><i class="ph ph-clock-counter-clockwise"></i>3 h old</span>
+        </div>
+        <div class="comp-row" style="margin-top:16px">
+          <button class="btn btn-primary"><i class="ph ph-scan"></i>Approve once</button>
+          <button class="btn btn-secondary">Deny</button>
+          <button class="btn btn-quiet btn-sm"><i class="ph ph-arrows-down-up"></i>Arrange widgets</button>
+        </div>
+        <div class="card" style="margin-top:18px;padding:4px 16px;max-width:400px">
+          <button class="req-row" style="cursor:default"><span class="ico"><i class="ph ph-chat-circle-text"></i></span>
+            <span style="min-width:0"><div class="what">Question · request card</div><div class="main">Which branch should I base this on?</div><div class="meta">Bunyan · LAPTOP</div></span>
+            <span class="clock"><b>0:41</b></span></button>
+        </div>
+        <p class="cap" style="margin:12px 0 0">Radii: cards 16, controls 14, chips and badges pill, sheets 28. Light uses one soft tinted shadow; dark uses a hairline edge instead.</p>
+      </div>
+
+      <div class="ds-block span-4">
+        <h3>Motion</h3>
+        <div class="motion-list">
+          <div><code>press</code><code>150 ms</code><span class="demo" style="--w:100%"><span style="transition:transform 150ms var(--ease-out)"></span></span></div>
+          <div><code>state</code><code>250 ms</code><span class="demo"><span style="transition:transform 250ms var(--ease-out)"></span></span></div>
+          <div><code>settle</code><code>420 ms spring</code><span class="demo"><span style="transition:transform 420ms var(--ease-spring)"></span></span></div>
+          <div><code>fill</code><code>600 ms</code><span class="demo"><span style="transition:transform 600ms var(--ease-out)"></span></span></div>
+          <div><code>pulse</code><code>2.4 s loop</code><span style="display:flex;align-items:center;gap:8px" class="cap"><span class="pulse"></span>needs you, the only loop</span></div>
+        </div>
+        <button class="quiet-btn" data-motion-demo style="margin-top:14px">Play the curves</button>
+        <p class="cap" style="margin:14px 0 0">Ease-out <code class="mono">cubic-bezier(.22, 1, .36, 1)</code>. Settle uses a light spring with one small overshoot. Dials fill on open, the countdown drains once a second, the receipt rises. With Reduce Motion everything lands at once and the pulse becomes a still ring.</p>
+      </div>
+    
+
+      <div class="ds-block span-4">
+        <h3>Spacing, radii, elevation</h3>
+        <div class="space-scale"><span style="--w:4px"><i></i>4</span><span style="--w:8px"><i></i>8</span><span style="--w:12px"><i></i>12</span><span style="--w:16px"><i></i>16</span><span style="--w:20px"><i></i>20</span><span style="--w:24px"><i></i>24</span><span style="--w:32px"><i></i>32</span><span style="--w:40px"><i></i>40</span></div>
+        <p class="cap" style="margin:10px 0 14px">A 4-pt scale. Screen margins 16 (cards) and 20 (text); gaps inside cards 12; between sections 24 to 26.</p>
+        <div class="radii"><span style="border-radius:16px">Card 16</span><span style="border-radius:14px">Control 14</span><span style="border-radius:999px">Chip pill</span><span style="border-radius:28px 28px 0 0">Sheet 28</span></div>
+        <div class="elev"><div class="card" style="padding:12px">Light: one navy-tinted shadow</div><div class="card" data-theme="dark" style="padding:12px;background:var(--paper);color:var(--ink)">Dark: a hairline edge</div></div>
+      </div>
+      <div class="ds-block span-4">
+        <h3>Iconography</h3>
+        <div class="icons"><span title="house"><i class="ph ph-house" aria-hidden="true"></i></span><span title="terminal-window"><i class="ph ph-terminal-window" aria-hidden="true"></i></span><span title="gauge"><i class="ph ph-gauge" aria-hidden="true"></i></span><span title="desktop"><i class="ph ph-desktop" aria-hidden="true"></i></span><span title="user-circle"><i class="ph ph-user-circle" aria-hidden="true"></i></span><span title="tray"><i class="ph ph-tray" aria-hidden="true"></i></span><span title="terminal"><i class="ph ph-terminal" aria-hidden="true"></i></span><span title="chat-circle-text"><i class="ph ph-chat-circle-text" aria-hidden="true"></i></span><span title="plant"><i class="ph ph-plant" aria-hidden="true"></i></span><span title="bell-simple"><i class="ph ph-bell-simple" aria-hidden="true"></i></span><span title="push-pin"><i class="ph ph-push-pin" aria-hidden="true"></i></span><span title="clock-counter-clockwise"><i class="ph ph-clock-counter-clockwise" aria-hidden="true"></i></span><span title="scan"><i class="ph ph-scan" aria-hidden="true"></i></span><span title="fingerprint"><i class="ph ph-fingerprint" aria-hidden="true"></i></span><span title="stop"><i class="ph ph-stop" aria-hidden="true"></i></span><span title="moon"><i class="ph ph-moon" aria-hidden="true"></i></span><span title="cloud"><i class="ph ph-cloud" aria-hidden="true"></i></span><span title="qr-code"><i class="ph ph-qr-code" aria-hidden="true"></i></span><span title="lock-simple"><i class="ph ph-lock-simple" aria-hidden="true"></i></span><span title="broadcast"><i class="ph ph-broadcast" aria-hidden="true"></i></span></div>
+        <p class="cap" style="margin:12px 0 0">Phosphor Regular; filled only for the selected tab, a granted state and status glyphs. Tool marks (Claude, Codex, OpenCode, Antigravity) are the tools' own. Dials, ticks and medallions are drawn geometry, not icons.</p>
+      </div>
+      <div class="ds-block span-4">
+        <h3>Needs you, switches, banners</h3>
+        <div class="comp-row"><button class="needs"><span class="pulse"></span><b>2</b><span class="needs-t">0:41</span></button><button class="req-btn"><i class="ph ph-tray" aria-hidden="true"></i></button>
+          <button class="sw-t" role="switch" aria-checked="true" data-toggle-ds><i></i></button><button class="sw-t" role="switch" aria-checked="false" data-toggle-ds><i></i></button></div>
+        <div class="banner" style="margin:14px 0 0"><i class="ph ph-moon" aria-hidden="true"></i><div><b>DEVELOPMENTPC is asleep</b><p>Showing what it last sent, 18 m ago.</p></div></div>
+        <p class="cap" style="margin:12px 0 0">The pill is the one pulse in the app. Stale states share one amber banner; the phone being offline uses a neutral one.</p>
+      </div>
+      <div class="ds-block span-6">
+        <h3>List rows and the request card</h3>
+        <div class="card rows" style="padding:2px 16px">
+          <div class="ss-row" style="min-height:60px"><span class="ss-tool"><img src="icons/claude.svg" width="20" height="20" alt=""></span><span class="ss-main"><b>Account limit re-login notifications</b><small>HarnessManager-rc-chat · sabushanab-resal</small></span><span class="ss-st"><span class="st st-needs"><span class="pulse"></span>Needs you</span><small>DEV PC · 3 h 11 m</small></span></div>
+          <div class="ss-row" style="min-height:60px"><span class="ss-tool"><img src="icons/codex.svg" width="20" height="20" alt=""></span><span class="ss-main"><b>Delegated task</b><small>HarnessManager-rc-chat · codex-main</small></span><span class="ss-st"><span class="st st-work"><i></i>Working</span><small>DEV PC · 38 m</small></span></div>
+          <div class="set" style="padding-right:0"><span class="s-i"><i class="ph ph-bell-simple" aria-hidden="true"></i></span><span class="s-t"><b>Notifications</b><small>Settings row</small></span><span class="s-v">5 on ›</span></div>
+        </div>
+        <p class="cap" style="margin:12px 0 0">State is always a word plus a mark: Needs you (pulse), Working (filled), Idle (ring), Ended (text only). Rows are at least 56 pt; every target at least 44 pt.</p>
+      </div>
+      <div class="ds-block span-6">
+        <h3>Tab bar and sheet</h3>
+        <div class="ds-tab"><nav class="tabbar" style="position:relative;height:64px;border-radius:14px"><a aria-current="page"><i class="ph-fill ph-house" aria-hidden="true"></i><span>Home</span></a><a ><i class="ph ph-terminal-window" aria-hidden="true"></i><span>Sessions</span></a><a ><i class="ph ph-gauge" aria-hidden="true"></i><span>Accounts</span></a><a ><i class="ph ph-desktop" aria-hidden="true"></i><span>Computers</span></a><a ><i class="ph ph-user-circle" aria-hidden="true"></i><span>You</span></a></nav></div>
+        <div class="ds-sheet"><span class="grabber"></span><b>Stop this turn?</b><p>Sheets: 28 corners, a grabber, a scrim that dismisses, actions full width at the bottom. Android uses the Material modal bottom sheet with the same content.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sect" id="pages">
+    <h2>The pages</h2>
+    <p class="sub">Every screen is drawn as a live phone in light and dark, with its decisions beside it. Use <b>Full scroll</b> in the top bar to unroll every phone to its full length. All data is the owner's real snapshot (25 Nov 2026, now is Wednesday 21:22) except what had to be invented: request texts, XP, streak, badges and the recap.</p>
+    <div class="dir">
+      <a href="onboarding.html"><b>Onboarding</b><span>S1 Welcome · S2 Scan · S3 Code · S4 Approve on the computer · S5 Connected · S6 Notifications</span></a>
+      <a href="requests.html"><b>Home and requests</b><span>S7 Home · the Needs-you pill on every tab · S8 Requests · S9 Permission · S10 Question and its expired state</span></a>
+      <a href="sessions.html"><b>Sessions</b><span>S11 Sessions · S12 Session detail, with and without Control · S13 Stop, delivered and delivery unknown · the filter sheet</span></a>
+      <a href="accounts.html"><b>Accounts and computers</b><span>S14 Accounts · S15 Account detail, revised to one screen · S16 Project · S17 Computers</span></a>
+      <a href="you.html"><b>You</b><span>You tab · S18 Progress, revised · S19 Customize Home · S20 Settings · S21 Notifications and the Limit-low sheet · earned moments · the recap image</span></a>
+      <a href="states.html"><b>States</b><span>Empty and first-sync Home · S22 asleep, hub down, offline · S23 access removed, update needed · Home and Permission at the largest text size</span></a>
+      <a href="platforms.html"><b>Android and desktop</b><span>Home, Permission, predictive back and Stop in Material 3 next to iOS · S24 the desktop's Pair a phone and Phones list</span></a>
+      <a href="widgets.html"><b>Widgets</b><span>Two variations of every family: Home Screen S M L, Lock Screen, Live Activity, Dynamic Island, Android Glance, ongoing notification</span></a>
+      <a href="prototype.html"><b>Prototype</b><span>Five journeys, clickable: pairing, answering a request, Use next, stopping a turn, a badge</span></a>
+    </div>
+  </section>

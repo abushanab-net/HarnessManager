@@ -1,0 +1,70 @@
+  <section class="sect">
+    <h2>You: progress, widgets and settings</h2>
+    <p class="sub">The game layer, the Home board and every switch that decides what leaves the computer. Progress is revised so the level and the next step fit the first screen.</p>
+    <div class="screens">
+      <section data-pair="you" id="you"><div class="about"><span class="id">Tab</span><h3>You</h3>
+        <p>The fifth tab: the game layer on top, then the board and settings.</p>
+        <ul><li>One slim level card (reserve, Planner, XP, the streak date wheel) opens Progress.</li>
+          <li>Everything else is a short grouped list, in the platform's own pattern.</li></ul></div></section>
+
+      <section data-pair="progress" id="s18"><div class="about"><span class="id">S18</span><h3>Progress, revised</h3>
+        <p>Level and next step in the first 844 pt.</p>
+        <ul><li>The level card gained a Next row: the one harvest that would move the reserve (Dev01 before Sat 18:58, +40 XP), with Open.</li>
+          <li>The streak is one row: the date wheel turns from 11 to 12, then the 14 days. A sync gap is dashed and never breaks it.</li>
+          <li>Badges, the XP log and the recap moved into tabs. Badges open first: medallions are the reward people come back for.</li>
+          <li>Tap the reserve to preview the level-up; tap a badge for its sheet.</li></ul>
+        <button class="quiet-btn" data-play="levelup" data-for="#s18 .phone">Play the level-up</button></div></section>
+
+      <section data-pair="customize" id="s19"><div class="about"><span class="id">S19</span><h3>Customize Home</h3>
+        <p>The in-app board: reorder, size, add.</p>
+        <ul><li>Every widget has S, M and L; the size control is inline, no extra screen.</li>
+          <li>The gallery previews each widget in its real shape, with its category.</li>
+          <li>One catalogue for this board and the phone's Home and Lock Screen.</li></ul></div></section>
+
+      <section data-pair="settings" id="s20"><div class="about"><span class="id">S20</span><h3>Settings and privacy</h3>
+        <p>Lock, privacy and access in one list.</p>
+        <ul><li>Face ID to approve is on and locked while any computer grants Control, and says why.</li>
+          <li>Notification detail Hidden and widget detail Redacted by default.</li>
+          <li>Access is listed per computer and changed only there; Disconnect says exactly what it erases.</li></ul></div></section>
+
+      <section data-pair="notifs" id="s21"><div class="about"><span class="id">S21</span><h3>Notification settings</h3>
+        <p>Each event on its own switch.</p>
+        <ul><li>Thresholds are inline links that open a sheet (Limit low below 20%, harvest 30 m before).</li>
+          <li>Requests can break quiet hours; your choice, on by default.</li>
+          <li>A test notification proves the whole path and reports the last delivery.</li></ul></div></section>
+
+      <section data-pair="threshold" data-fixed id="s21t"><div class="about"><span class="id">S21 · sheet</span><h3>Limit low threshold</h3>
+        <p>Opened from “Below 20% ›” in Notifications.</p>
+        <ul><li>The threshold is a Calibre dial with an amber arc and a knob to drag, plus presets (10, 20, 30, 50%) and the window it watches.</li>
+          <li>It says what would happen right now: claude-main is already at 11%, so one alert would go out.</li>
+          <li>Per-account overrides, and the accounts it skips because they report no limit window.</li></ul></div></section>
+    </div>
+  </section>
+
+  <section class="sect" id="moments">
+    <h2>Earned moments</h2>
+    <p class="sub">The delight is kept for things that were earned, and each moment runs once, in about 600 ms. With Reduce Motion they land in their end state. New in the full phase: the tick that lands when a request is answered (S9, S10, S12), the date wheel turning on Home, You and Progress, and the first-sync count on Connected (S5). None of them is tied to approvals or spend.</p>
+    <div class="moments">
+      <div class="moment"><h3>Harvest</h3><p>Saturday 18:58, if Dev01 is used first: its week resets with 4% unused. The reserve winds up, a lume tick lands, +40 rises and settles.</p>
+        <div class="device"><div class="phone" data-theme="light" data-screen="home" data-state="harvest" id="m-harvest"></div></div>
+        <button class="quiet-btn" data-play="harvest" data-for="#m-harvest">Replay</button></div>
+      <div class="moment"><h3>Level-up</h3><p>Crossing 1,500 XP. The reserve winds to full, one sweep of lume ticks, the new name sets in. No confetti, no sound by default, one light haptic.</p>
+        <div class="device"><div class="phone" data-theme="dark" data-screen="progress" data-state="levelup" id="m-level"></div></div>
+        <button class="quiet-btn" data-play="levelup" data-for="#m-level">Replay</button></div>
+      <div class="moment"><h3>Badge detail, earned</h3><p>The medallion at full size with its name engraved around the rim, when it was earned, and the real event that counted.</p>
+        <div class="device"><div class="phone" data-theme="light" data-screen="progress" data-state="badge:first" id="m-badge1"></div></div>
+        <button class="quiet-btn" data-play="badge" data-arg="first" data-for="#m-badge1">Replay</button></div>
+      <div class="moment"><h3>Badge detail, locked</h3><p>Progress on the rim and in words, and what is left. Here it points back at the harvest Home recommends.</p>
+        <div class="device"><div class="phone" data-theme="dark" data-screen="progress" data-state="badge:sweep" id="m-badge2"></div></div>
+        <button class="quiet-btn" data-play="badge" data-arg="sweep" data-for="#m-badge2">Replay</button></div>
+    </div>
+  </section>
+
+  <section class="sect" id="recap">
+    <h2>Weekly recap, as a shared image</h2>
+    <p class="sub">1080 × 1350 (4:5), shown at 40%. Rendered from the same tokens; full-size PNGs in <code class="mono">shots/recap-1080x1350-light.png</code> and <code class="mono">-dark.png</code>. No account names: only counts and the busiest project, which Settings can hide.</p>
+    <div class="recaps">
+      <div class="recap-frame"><div class="recap-img" data-theme="light" data-recap id="recap-light"></div></div>
+      <div class="recap-frame"><div class="recap-img" data-theme="dark" data-recap id="recap-dark"></div></div>
+    </div>
+  </section>

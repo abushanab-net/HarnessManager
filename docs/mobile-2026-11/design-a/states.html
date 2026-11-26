@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>States · Calibre · Harness Manager mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header data-topbar></header>
+<main class="page">
+  <section class="sect">
+    <h2>States and edge cases</h2>
+    <p class="sub">The three ways data gets old share one banner and one look: readings turn ink-2, dials go dashed, an amber chip gives the age, and estimates gain ≈. Unknown is a dash with a sentence, never a zero. Dead ends explain themselves and offer the next step.</p>
+    <div class="screens">
+      <section data-pair="home-empty" id="empty"><div class="about"><span class="id">Home · first sync</span><h3>Empty and first sync</h3>
+        <p>Right after Connected, while limits are still being read.</p>
+        <ul><li>Sessions and requests arrive first (they are live); limits take a few seconds per account, and the card says how many are read.</li>
+          <li>Use next waits for every limit, so the pick is never made on half the data. Skeletons match the final shapes and do not shimmer: nothing loops.</li>
+          <li>Needs you has a real empty state that says what will appear there.</li>
+          <li>Level 1, Connected, 0 XP, day 1: the first harvest is named as the way up.</li></ul></div></section>
+
+      <section data-pair="home" data-v="asleep" data-cap="computer asleep" id="s22a"><div class="about"><span class="id">S22 · a</span><h3>A computer is asleep</h3>
+        <p>DEVELOPMENTPC sleeps: its snapshot shows with its age, its actions are off.</p>
+        <ul><li>Its permission request cannot be answered from here and says so (“Answer when DEVELOPMENTPC wakes”); LAPTOP's question is still live.</li>
+          <li>Use next keeps the pick but marks it: dashed dial, ≈64%, “18 m old”.</li></ul></div></section>
+
+      <section data-pair="home" data-v="hub" data-cap="hub unreachable" id="s22b"><div class="about"><span class="id">S22 · b</span><h3>The hub is unreachable</h3>
+        <p>Away from home and the hub does not answer.</p>
+        <ul><li>Needs you becomes unknown, not zero: requests still wait in each terminal.</li>
+          <li>Details opens the diagnostics: last contact, the hub address, and a retry.</li></ul></div></section>
+
+      <section data-pair="home" data-v="offline" data-cap="phone offline" id="s22c"><div class="about"><span class="id">S22 · c</span><h3>The phone is offline</h3>
+        <p>Cache only, with its age.</p>
+        <ul><li>The neutral banner (no amber) because nothing is wrong with the computers; the phone itself has no network.</li></ul></div></section>
+
+      <section data-pair="access" data-v="removed" id="s23a"><div class="about"><span class="id">S23 · a</span><h3>Access removed</h3>
+        <p>After a revoke or an expired grant.</p>
+        <ul><li>Says who removed it and when, and that the cache was erased.</li>
+          <li>LAPTOP still grants this phone, so the way forward is right there.</li></ul></div></section>
+
+      <section data-pair="access" data-v="update" id="s23b"><div class="about"><span class="id">S23 · b</span><h3>Update needed</h3>
+        <p>A computer too old for the companion API.</p>
+        <ul><li>Names the version it runs (1.13.2, today's release) and the one it needs, with the three steps on the computer.</li></ul></div></section>
+    </div>
+  </section>
+
+  <section class="sect" id="ax">
+    <h2>The largest text size</h2>
+    <p class="sub">iOS Accessibility 5 (AX5), the largest Dynamic Type setting: body text at 53 pt. Calibre switches to an accessibility layout at the AX sizes instead of shrinking type: one column, every line wraps (account and computer names may break inside a word rather than truncate), and the countdown leads each request. Navigation and tab bars keep their size and show the Large Content Viewer on long press, as iOS does. Use Full scroll to see the whole length.</p>
+    <div class="screens">
+      <section data-pair="home-ax" id="ax1"><div class="about"><span class="id">S7 · AX5</span><h3>Home, largest text</h3>
+        <p>The three jobs survive, one per card.</p>
+        <ul><li>The Needs-you pill becomes a full-width row: “2 waiting, 0:41 left”.</li>
+          <li>Each request: kind, the full command, the time left in the serif, the computer. No truncation.</li>
+          <li>Use next: the dial grows to 220 pt and its number caps at Title 1 (58 pt); the account and “64% erased Sat 18:58” follow on their own lines.</li>
+          <li>The game strip, Running, Next reset and Today move below the fold; nothing is removed.</li></ul></div></section>
+      <section data-pair="permission-ax" id="ax2"><div class="about"><span class="id">S9 · AX5</span><h3>Permission, largest text</h3>
+        <p>The decision stays reachable without scrolling.</p>
+        <ul><li>The sticky action bar keeps only what decides: the time left and the two buttons, stacked full width (Approve once on top).</li>
+          <li>Everything else scrolls: who asks, the command (wrapped, never shortened), the session, Claude's last line, the computer.</li>
+          <li>The folder path moves below the computer at these sizes; it is still there, under the fold.</li></ul></div></section>
+    </div>
+  </section>
+</main>
+<script src="calibre.js"></script>
+<script src="screens-onboarding.js"></script>
+<script src="screens-requests.js"></script>
+<script src="screens-sessions.js"></script>
+<script src="screens-accounts.js"></script>
+<script src="screens-you.js"></script>
+<script src="screens-states.js"></script>
+<script src="screens-extra.js"></script>
+<script src="screens-platforms.js"></script>
+<script src="widgets.js"></script>
+<script src="prototype.js"></script>
+</body>
+</html>

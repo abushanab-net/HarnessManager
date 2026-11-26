@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accounts and computers · Calibre · Harness Manager mobile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css">
+<link rel="stylesheet" href="calibre.css">
+</head>
+<body>
+<header data-topbar></header>
+<main class="page">
+  <section class="sect">
+    <h2>Accounts, projects and computers</h2>
+    <p class="sub">Job one in depth: which account has room, until when, and why the app recommends one. Account detail is revised so the decision fits the first screen; the rest is a tap away in tabs.</p>
+    <div class="screens">
+      <section data-pair="accounts" id="s14"><div class="about"><span class="id">S14</span><h3>Accounts</h3>
+        <p>Room left on every account, grouped by what to do with it.</p>
+        <ul><li>Groups instead of a sort menu: Use next, Low, Room to spare, No limit window. The first glance answers the question.</li>
+          <li>Each dial is the week's room; the other windows (5-hour, Fable) sit under it as small bars.</li>
+          <li>Low is amber with an icon and the word. A forecast carries ≈. Accounts with no limit window show a dash, never a zero.</li>
+          <li>One line says how old the readings are; a reading older than an hour gets its own age chip.</li></ul></div></section>
+
+      <section data-pair="account" id="s15"><div class="about"><span class="id">S15</span><h3>Account detail, revised</h3>
+        <p>The decision now fits the first 844 pt.</p>
+        <ul><li>The reset clock is smaller (300 pt) with its labels kept legible: Reset Sat 18:58, ≈ could run out Sat 15:00, Now, hours gone and to go.</li>
+          <li>Right under it, the decision card: Use next, “64% erased Sat 18:58 unless it's used”, the harvest window and Remind me.</li>
+          <li>The three windows are one compact table above the fold.</li>
+          <li>Forecast, the 7 days and the sessions on it moved into tabs below: one is open at a time, so the page is about 1.2 screens instead of 2.4.</li></ul></div></section>
+
+      <section data-pair="project" id="s16"><div class="about"><span class="id">S16</span><h3>Project detail</h3>
+        <p>Tokens and list-price cost across computers.</p>
+        <ul><li>Three numbers in one strip; cost always with ≈ and “list price”.</li>
+          <li>The 30-day bars show the project's real start: nothing before 11 Nov, so the empty days are drawn as hairlines, not hidden.</li>
+          <li>By model, and the sessions in it. Drilling into the requests behind a bar comes in v1.1, and says so.</li></ul></div></section>
+
+      <section data-pair="computers" id="s17"><div class="about"><span class="id">S17</span><h3>Computers</h3>
+        <p>Which computers the phone can reach, how, and what it may do.</p>
+        <ul><li>The route is drawn: phone to computer direct, or through the hub.</li>
+          <li>Last contact, running sessions and accounts in serif figures; grants as chips, granted ones filled.</li>
+          <li>MINI is asleep: its data shows with its age and its actions are off.</li>
+          <li>Known, not granted has an honest empty state rather than an invented computer.</li></ul></div></section>
+    </div>
+  </section>
+
+</main>
+<script src="calibre.js"></script>
+<script src="screens-onboarding.js"></script>
+<script src="screens-requests.js"></script>
+<script src="screens-sessions.js"></script>
+<script src="screens-accounts.js"></script>
+<script src="screens-you.js"></script>
+<script src="screens-states.js"></script>
+<script src="screens-extra.js"></script>
+<script src="screens-platforms.js"></script>
+<script src="widgets.js"></script>
+<script src="prototype.js"></script>
+</body>
+</html>

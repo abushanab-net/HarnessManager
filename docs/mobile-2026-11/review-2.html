@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mobile Design Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f5f6f4;--surface:#fff;--ink:#16201f;--muted:#5d6b6a;--line:#dfe4e2;--soft:#eef2f0;--ac:#0f6b5f;--ac-soft:#e2f1ed;--warn:#a35d00;--warn-soft:#fbf0de;--neg:#b42318;--neg-soft:#fde8e6;--a:#1f2a4d;--b:#c2532f;--shadow:0 1px 2px rgba(16,24,23,.06),0 4px 16px rgba(16,24,23,.06)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975;--shadow:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25)}}
+:root[data-theme="dark"]{--bg:#0e1413;--surface:#151d1c;--ink:#e6eceb;--muted:#9aa8a6;--line:#26302f;--soft:#1b2524;--ac:#4cc3ae;--ac-soft:#173430;--warn:#f0a84a;--warn-soft:#3a2a12;--neg:#ff7b6e;--neg-soft:#3d1a17;--a:#aeb9e6;--b:#ff9975}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:90px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--ac)}
+h1,h2,h3{margin:0;line-height:1.25}
+.wrap{max-width:1320px;margin:0 auto;padding:0 24px}
+header.top{padding:40px 0 16px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-size:34px;letter-spacing:-.02em;margin:6px 0 8px}
+.lede{font-size:17px;color:var(--muted);max-width:880px;margin:0}
+.bar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:14px;min-height:56px;flex-wrap:wrap;padding-top:6px;padding-bottom:6px}
+nav.toc{display:flex;gap:2px;flex-wrap:wrap;flex:1;min-width:0}
+nav.toc a{font-size:13px;color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;white-space:nowrap}
+nav.toc a:hover,nav.toc a.on{background:var(--surface);color:var(--ink)}
+.fbstat{font-size:13px;color:var(--muted)}
+.fbstat b{color:var(--ink)}
+.btn{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-block;transition:border-color .15s,transform .12s}
+.btn:hover{border-color:var(--muted)}.btn:active{transform:translateY(1px)}
+.btn.pri{background:var(--ac);border-color:var(--ac);color:#fff}
+section.s{padding:44px 0 8px}
+section.s>h2{font-size:24px;letter-spacing:-.01em;display:flex;gap:12px;align-items:baseline}
+.num{font-size:13px;color:var(--muted);font-weight:600;font-family:"JetBrains Mono",monospace}
+.intro{color:var(--muted);max-width:900px;margin:8px 0 18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;box-shadow:var(--shadow)}
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:960px){.duo{grid-template-columns:1fr}}
+.duo>*,.card{min-width:0}
+.shots img{max-width:none}
+@media (max-width:640px){.shots a img[width="560"],.shots a img[width="580"],.shots a img[width="520"]{width:min(560px,82vw)}}
+.side h3{font-size:17px;display:flex;align-items:center;gap:8px}
+.badge{font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:999px;color:#fff}
+.badge.a{background:var(--a)}.badge.b{background:var(--b)}
+:root[data-theme="dark"] .badge{color:#111}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .badge{color:#111}}
+.who{font-size:13px;color:var(--muted);margin:2px 0 12px}
+.shots{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.shots a{flex:none;display:block;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#111;transition:transform .2s ease,box-shadow .2s ease}
+.shots a:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.shots img{display:block;height:auto}
+.tall{max-height:760px;overflow-y:auto;border-radius:12px}
+.cap{font-size:12px;color:var(--muted);margin-top:4px}
+.verdict{border-left:3px solid var(--ac);background:var(--ac-soft);padding:12px 16px;border-radius:0 10px 10px 0;margin:12px 0 0;font-size:14px}
+.verdict b{display:block;margin-bottom:2px}
+table.t{width:100%;border-collapse:collapse;font-size:14px}
+.t th,.t td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.t th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.fb{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.fb .chips{display:flex;gap:4px;flex-wrap:wrap}
+.fb .chip{font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s ease}
+.fb .chip:hover{color:var(--ink);border-color:var(--muted)}
+.fb .chip.on.keep,.fb .chip.on.opt{background:var(--ac-soft);color:var(--ac);border-color:var(--ac)}
+.fb .chip.on.change{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.fb .chip.on.drop{background:var(--neg-soft);color:var(--neg);border-color:var(--neg)}
+.fb textarea{font:inherit;font-size:13px;width:100%;min-height:34px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:9px;padding:7px 10px;transition:border-color .15s,min-height .2s}
+.fb textarea:focus{outline:none;border-color:var(--ac);min-height:70px}
+.pick{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.pick .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+footer{padding:50px 0 80px;color:var(--muted);font-size:13px}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-size:13.5px;opacity:0;transition:all .25s ease;pointer-events:none;z-index:50}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+@media (max-width:640px){.wrap{padding:0 16px}h1{font-size:27px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="eyebrow">Harness Manager · Mobile companion · Review 2 of 3 · Design checkpoint</div>
+  <h1>Two directions, four screens each</h1>
+  <p class="lede">Each designer worked alone from the same brief, your decisions and your real data. I reviewed both checkpoints as art director, sent one round of changes, and both made them. Tell me what to keep, change or drop, and which direction (or mix) to take into the full design: all 24 screens and at least two variations of every widget.</p>
+  <p style="margin:14px 0 0;display:flex;gap:8px;flex-wrap:wrap"><a class="btn" href="design-a/index.html" target="_blank" rel="noopener">Open A · Calibre, live ↗</a><a class="btn" href="design-b/index.html" target="_blank" rel="noopener">Open B · Split Time, live ↗</a></p>
+</div></header>
+
+<div class="bar"><div class="wrap">
+  <nav class="toc" id="toc"><a href="#directions">Directions</a><a href="#home">Home</a><a href="#permission">Permission</a><a href="#account">Account</a><a href="#progress">Progress</a><a href="#moments">Moments</a><a href="#system">Design systems</a><a href="#judge">My review</a><a href="#pick">Your pick</a></nav>
+  <span class="fbstat" id="fbstat"></span>
+  <button class="btn" id="copy">Copy as text</button>
+  <button class="btn pri" id="export">Export feedback</button>
+</div></div>
+
+<main class="wrap">
+
+<section class="s reveal" id="directions">
+  <h2><span class="num">01</span>The two directions</h2>
+  <p class="intro">The live prototypes run: dials fill, countdowns tick, Approve goes through Face ID to a receipt, the harvest and level-up moments play, and Home cards can be dragged (in A). Click any image to open it full size.</p>
+  <div class="duo">
+    <div class="card side" data-fid="dir-a" data-title="Direction A: Calibre">
+      <h3><span class="badge a">A</span>Calibre</h3>
+      <div class="who">Claude Code · Opus 5.5 · account claude-main · 18 + 11 min</div>
+      <div class="shots"><a href="design-a/shots/page-top.png" target="_blank"><img src="design-a/shots/page-top.png" width="560" alt="Calibre cover"></a></div>
+      <p style="margin:12px 0 0;font-size:14px">A precision watch, not a gadget: dials and subdials for every limit, a serif for readings (Newsreader) and a clean grotesk for text (Hanken), enamel and paper by day, a night dial after dark. One vermilion accent is kept only for what needs you, and lume green only for XP. Calm, crafted, very legible.</p>
+    </div>
+    <div class="card side" data-fid="dir-b" data-title="Direction B: Split Time">
+      <h3><span class="badge b">B</span>Split Time</h3>
+      <div class="who">Codex · Astra 6.2 (gpt-6.2-astra) · account codex-main · 11 + 11 min</div>
+      <div class="shots"><a href="design-b/shots/cover.png" target="_blank"><img src="design-b/shots/cover.png" width="560" alt="Split Time cover"></a></div>
+      <p style="margin:12px 0 0;font-size:14px">A sports timing panel: condensed italic numerals (Barlow Condensed), a flip-board reset clock, coral for room and ice blue for requests, dark first. Badges are race bibs and timing chips, and harvesting “flips a lap split”. Energetic and game-forward, still disciplined.</p>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="home">
+  <h2><span class="num">02</span>Home</h2>
+  <p class="intro">The three jobs top to bottom: the game strip, Needs you, Use next with the harvest hook, then running, next reset and today.</p>
+  <div class="duo">
+    <div class="card side" data-fid="home-a" data-title="Home: A">
+      <h3><span class="badge a">A</span>Calibre: light and dark, full scroll</h3>
+      <div class="shots tall"><a href="design-a/shots/full-home-light.png" target="_blank"><img src="design-a/shots/full-home-light.png" width="260" alt=""></a><a href="design-a/shots/full-home-dark.png" target="_blank"><img src="design-a/shots/full-home-dark.png" width="260" alt=""></a></div>
+    </div>
+    <div class="card side" data-fid="home-b" data-title="Home: B">
+      <h3><span class="badge b">B</span>Split Time: dark and light</h3>
+      <div class="shots"><a href="design-b/shots/home-full.png" target="_blank"><img src="design-b/shots/home-full.png" width="560" alt=""></a></div>
+    </div>
+  </div>
+  <div class="card pick" data-fid="home-pick" data-title="Home: which is better" data-opts="A is better|B is better|Both good|Neither yet"><span class="lbl">Home: which works better for you?</span></div>
+</section>
+
+<section class="s reveal" id="permission">
+  <h2><span class="num">03</span>Permission request</h2>
+  <p class="intro">The full command, where it runs, the session's context, an honest countdown (5-minute window), and Approve once / Deny with Face ID.</p>
+  <div class="duo">
+    <div class="card side" data-fid="perm-a" data-title="Permission: A">
+      <h3><span class="badge a">A</span>Calibre: light and dark</h3>
+      <div class="shots"><a href="design-a/shots/full-permission-light.png" target="_blank"><img src="design-a/shots/full-permission-light.png" width="260" alt=""></a><a href="design-a/shots/full-permission-dark.png" target="_blank"><img src="design-a/shots/full-permission-dark.png" width="260" alt=""></a></div>
+      <div class="cap">The receipt after approving: <a href="design-a/shots/receipt-light.png" target="_blank">receipt</a> · a question that expired: <a href="design-a/shots/question-expired-dark.png" target="_blank">expired</a> · denied: <a href="design-a/shots/denied-dark.png" target="_blank">denied</a></div>
+    </div>
+    <div class="card side" data-fid="perm-b" data-title="Permission: B">
+      <h3><span class="badge b">B</span>Split Time: dark and light</h3>
+      <div class="shots"><a href="design-b/shots/permission-full.png" target="_blank"><img src="design-b/shots/permission-full.png" width="560" alt=""></a></div>
+    </div>
+  </div>
+  <div class="card pick" data-fid="perm-pick" data-title="Permission: which is better" data-opts="A is better|B is better|Both good|Neither yet"><span class="lbl">Permission: which works better for you?</span></div>
+</section>
+
+<section class="s reveal" id="account">
+  <h2><span class="num">04</span>Account detail</h2>
+  <p class="intro">Every window and its reset, the forecast (≈), the harvest window, and the last 7 days.</p>
+  <div class="duo">
+    <div class="card side" data-fid="acct-a" data-title="Account detail: A">
+      <h3><span class="badge a">A</span>Calibre: light and dark, full scroll</h3>
+      <div class="shots tall"><a href="design-a/shots/full-account-light.png" target="_blank"><img src="design-a/shots/full-account-light.png" width="260" alt=""></a><a href="design-a/shots/full-account-dark.png" target="_blank"><img src="design-a/shots/full-account-dark.png" width="260" alt=""></a></div>
+    </div>
+    <div class="card side" data-fid="acct-b" data-title="Account detail: B">
+      <h3><span class="badge b">B</span>Split Time: dark and light</h3>
+      <div class="shots"><a href="design-b/shots/account-full.png" target="_blank"><img src="design-b/shots/account-full.png" width="560" alt=""></a></div>
+    </div>
+  </div>
+  <div class="card pick" data-fid="acct-pick" data-title="Account detail: which is better" data-opts="A is better|B is better|Both good|Neither yet"><span class="lbl">Account detail: which works better for you?</span></div>
+</section>
+
+<section class="s reveal" id="progress">
+  <h2><span class="num">05</span>Progress</h2>
+  <p class="intro">Level, XP, streak (sync gaps are unknown, not broken), badges with their rule, where the XP came from, and the weekly recap.</p>
+  <div class="duo">
+    <div class="card side" data-fid="prog-a" data-title="Progress: A">
+      <h3><span class="badge a">A</span>Calibre: light and dark, full scroll</h3>
+      <div class="shots tall"><a href="design-a/shots/full-progress-light.png" target="_blank"><img src="design-a/shots/full-progress-light.png" width="260" alt=""></a><a href="design-a/shots/full-progress-dark.png" target="_blank"><img src="design-a/shots/full-progress-dark.png" width="260" alt=""></a></div>
+    </div>
+    <div class="card side" data-fid="prog-b" data-title="Progress: B">
+      <h3><span class="badge b">B</span>Split Time: dark and light</h3>
+      <div class="shots"><a href="design-b/shots/progress-full.png" target="_blank"><img src="design-b/shots/progress-full.png" width="560" alt=""></a></div>
+    </div>
+  </div>
+  <div class="card pick" data-fid="prog-pick" data-title="Progress: which is better" data-opts="A is better|B is better|Both good|Neither yet"><span class="lbl">Progress: which works better for you?</span></div>
+</section>
+
+<section class="s reveal" id="moments">
+  <h2><span class="num">06</span>The game moments</h2>
+  <p class="intro">Stills of the animated moments: open the live prototypes to see them move (each has a Replay button).</p>
+  <div class="duo">
+    <div class="card side" data-fid="mom-a" data-title="Moments: A">
+      <h3><span class="badge a">A</span>Calibre: harvest, level-up, badge, shareable recap</h3>
+      <div class="shots"><a href="design-a/shots/moment-harvest.png" target="_blank"><img src="design-a/shots/moment-harvest.png" width="200" alt=""></a><a href="design-a/shots/moment-level.png" target="_blank"><img src="design-a/shots/moment-level.png" width="200" alt=""></a><a href="design-a/shots/moment-badge1.png" target="_blank"><img src="design-a/shots/moment-badge1.png" width="200" alt=""></a><a href="design-a/shots/recap-1080x1350-light.png" target="_blank"><img src="design-a/shots/recap-1080x1350-light.png" width="340" alt=""></a><a href="design-a/shots/recap-1080x1350-dark.png" target="_blank"><img src="design-a/shots/recap-1080x1350-dark.png" width="340" alt=""></a></div>
+    </div>
+    <div class="card side" data-fid="mom-b" data-title="Moments: B">
+      <h3><span class="badge b">B</span>Split Time: the harvest lap split</h3>
+      <div class="shots"><a href="design-b/shots/harvest.png" target="_blank"><img src="design-b/shots/harvest.png" width="348" alt=""></a></div>
+      <div class="cap">B's level-up and the badge detail are in Progress above; the split-flip animation is in its Motion lab (live prototype).</div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="system">
+  <h2><span class="num">07</span>Design systems</h2>
+  <div class="duo">
+    <div class="card side" data-fid="sys-a" data-title="Design system: A">
+      <h3><span class="badge a">A</span>Calibre</h3>
+      <div class="shots"><a href="design-a/shots/system.png" target="_blank"><img src="design-a/shots/system.png" width="580" alt=""></a></div>
+    </div>
+    <div class="card side" data-fid="sys-b" data-title="Design system: B">
+      <h3><span class="badge b">B</span>Split Time · “Instrument kit”</h3>
+      <div class="shots"><a href="design-b/shots/system.png" target="_blank"><img src="design-b/shots/system.png" width="520" alt=""></a></div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="judge">
+  <h2><span class="num">08</span>My review as judge</h2>
+  <p class="intro">What I asked each designer to fix after the first checkpoint, and what came back. Both addressed every point; I checked each on the rendered screens.</p>
+  <div class="duo">
+    <div class="card"><h3 style="font-size:16px"><span class="badge a">A</span> Calibre</h3>
+      <table class="t"><thead><tr><th>Asked</th><th>Now</th></tr></thead><tbody>
+        <tr><td>Too muted for “fun to monitor”</td><td>Harvest moment (power reserve winds, +40 rises), level-up, engraved medallion badges with progress and a detail sheet</td></tr>
+        <tr><td>Heavy level card on Home</td><td>A slim strip: gauge, level, XP, date-wheel streak</td></tr>
+        <tr><td>4-line Use next reason</td><td>“64% erased Sat 18:58” + one muted line</td></tr>
+        <tr><td>Dense reset clock with a legend</td><td>Markers labelled on the dial (“could run out”, “Reset”, “Now”), no legend</td></tr>
+        <tr><td>Empty Permission screen</td><td>Session and Claude's last line before asking</td></tr>
+        <tr><td>Content hidden below the fold</td><td>Full-scroll artboards; the recap as a 1080×1350 share image</td></tr>
+      </tbody></table>
+      <div class="verdict"><b>Verdict</b>The most crafted and trustworthy of the two: superb hierarchy and honesty, and the dial language carries from Home to the widgets. Risk: it can still read as more calm than fun. Medium-density screens are long (Account and Progress scroll about 2.4 screens).</div>
+    </div>
+    <div class="card"><h3 style="font-size:16px"><span class="badge b">B</span> Split Time</h3>
+      <table class="t"><thead><tr><th>Asked</th><th>Now</th></tr></thead><tbody>
+        <tr><td>Light and dark side by side</td><td>Every screen paired</td></tr>
+        <tr><td>Thin design system</td><td>Full type scale, spacing, radius, elevation, a motion lab and all core components</td></tr>
+        <tr><td>Placeholder badges</td><td>Race bib, date tab, locked shield with progress, and a badge detail</td></tr>
+        <tr><td>More fun</td><td>“L04” lap counter header, a harvest split-flip with +XP</td></tr>
+        <tr><td>7-day chart and forecast wording</td><td>Day labels, peak and today marked; “≈ 93% will be unused at the reset if nothing else runs”</td></tr>
+        <tr><td>Empty Permission screen, coral contrast, cover art</td><td>Last message from Claude Code, 0:00–5:00 window bar, 7.82:1 small text on coral, a flip-board reset clock cover</td></tr>
+      </tbody></table>
+      <div class="verdict"><b>Verdict</b>The more game-forward and energetic, and everything fits on one screen. It is also the more glanceable. Risk: the solid coral card and condensed italics are loud. It needs care so it stays professional across 24 screens, and its icon set is still generic.</div>
+    </div>
+  </div>
+</section>
+
+<section class="s reveal" id="pick">
+  <h2><span class="num">09</span>Your pick for the full design</h2>
+  <div class="card" data-fid="pick-overall" data-title="Overall direction" data-opts="A: Calibre|B: Split Time|Mix: A's base with B's energy|Mix: B's base with A's craft|Both continue to the full design">
+    <h3 style="font-size:17px">Which direction goes into the full design?</h3>
+    <p class="intro" style="margin:6px 0 0;font-size:14px">The full phase is all 24 screens, the Android adaptations and at least two variations of every widget. Keeping both going costs about twice the design time but gives you a full comparison. If you mix, say below what to take from each.</p>
+  </div>
+  <div class="card" style="margin-top:14px" data-fid="general" data-title="Anything else for the designers" data-nochips="1"><h3 style="font-size:17px">Anything else for the designers</h3></div>
+</section>
+</main>
+<footer><div class="wrap">Harness Manager mobile · Review 2 · brief: <code>brief/design-brief.md</code> · data: <code>brief/data.json</code> · designers' notes: <code>design-a/notes.md</code>, <code>design-b/notes.md</code></div></footer>
+<div class="toast" id="toast"></div>
+<script>
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KEY = 'hm-mobile-review-2';
+let fb = {}; try { fb = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { fb = {}; }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(fb)); } catch (e) {} stat(); };
+const items = [...document.querySelectorAll('[data-fid]')];
+items.forEach((el) => {
+  const id = el.dataset.fid, cur = fb[id] || {}, opts = el.dataset.opts ? el.dataset.opts.split('|') : null;
+  const w = document.createElement('div'); w.className = 'fb';
+  const chips = el.dataset.nochips ? '' : opts
+    ? `<div class="chips">${opts.map((o) => `<button type="button" class="chip opt ${cur.v === o ? 'on' : ''}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+    : `<div class="chips">${[['keep','Keep'],['change','Change'],['drop','Drop']].map(([v,l]) => `<button type="button" class="chip ${v} ${cur.v === v ? 'on' : ''}" data-v="${v}">${l}</button>`).join('')}</div>`;
+  w.innerHTML = chips + `<textarea rows="1" placeholder="${el.dataset.nochips ? 'Your notes for the designers…' : 'Comment (optional)…'}" aria-label="Comment on ${esc(el.dataset.title)}">${esc(cur.c || '')}</textarea>`;
+  if (el.dataset.nochips) w.querySelector('textarea').style.minHeight = '120px';
+  el.appendChild(w);
+  w.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => {
+    const on = (fb[id] || {}).v === b.dataset.v; fb[id] = { ...(fb[id] || {}), v: on ? undefined : b.dataset.v };
+    w.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', !on && x === b)); save();
+  }));
+  const ta = w.querySelector('textarea'); ta.addEventListener('input', () => { fb[id] = { ...(fb[id] || {}), c: ta.value }; save(); });
+});
+function stat() { const n = items.filter((e) => !e.dataset.nochips).length, d = items.filter((e) => { const f = fb[e.dataset.fid]; return f && (f.v || (f.c || '').trim()); }).length; document.getElementById('fbstat').innerHTML = `<b>${d}</b> of ${n} reviewed`; }
+stat();
+const collect = () => items.map((e) => ({ id: e.dataset.fid, item: e.dataset.title, verdict: (fb[e.dataset.fid] || {}).v || null, comment: ((fb[e.dataset.fid] || {}).c || '').trim() || null })).filter((x) => x.verdict || x.comment);
+function toast(t) { const e = document.getElementById('toast'); e.textContent = t; e.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('show'), 2400); }
+document.getElementById('export').addEventListener('click', () => {
+  const data = { review: 'mobile-review-2', exported_at: new Date().toISOString(), items: collect() };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })); a.download = 'mobile-review-2-feedback.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast(`Saved ${data.items.length} items to mobile-review-2-feedback.json`);
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  const rows = collect(), text = '# Mobile review 2: feedback\n\n' + rows.map((r) => `- **${r.item}** (${r.id})${r.verdict ? ` — ${r.verdict}` : ''}${r.comment ? `\n  ${r.comment.replace(/\n/g, '\n  ')}` : ''}`).join('\n');
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${rows.length} items: paste them into the chat`); }
+  catch (e) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); toast('Copied'); }
+});
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: .05 });
+document.querySelectorAll('.reveal').forEach((e) => io.observe(e));
+const links = [...document.querySelectorAll('#toc a')];
+const so = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-40% 0px -55% 0px' });
+document.querySelectorAll('section.s').forEach((s) => so.observe(s));
+</script>
+</body>
+</html>
