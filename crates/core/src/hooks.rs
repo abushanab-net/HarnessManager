@@ -190,7 +190,6 @@ pub fn handle_asking(c: &Connection, run: &str, v: &Value, wait: Duration, quest
     };
     record(c, run, v, opening.as_ref())?;
     let Some(Opening { id, kind, expires, .. }) = opening else { return Ok(None) };
-    crate::companion::push::opened(c, &id);
     let deadline = Instant::now() + wait;
     loop {
         // a busy database is waited out: leaving would strand an answer the app then reports as given
@@ -491,38 +490,6 @@ mod tests {
             assert!(std::time::Instant::now() < end, "the request never showed");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-    }
-
-    #[test]
-    fn opening_a_request_sends_one_signed_wake_while_the_hook_takes_a_local_answer() {
-        use axum::{body::Bytes, http::{HeaderMap, StatusCode}, routing::post, Router};
-        use companion_proto::push;
-        use std::sync::mpsc;
-        let (_dir, ctx, run) = live_run();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let ctx = crate::service::settings_set(&ctx, "push_relay_url", json!(url)).unwrap();
-        let key = [7u8; 32];
-        ctx.db.with(|c| Ok(c.execute("insert into phones(phone_id,relay_handle,relay_secret,revoked_at)
-            values ('phone','active',?1,null),('old','revoked',?1,1),('legacy','unsigned',null,null)", [hex::encode(key)])?)).unwrap();
-        let (sent, seen) = mpsc::channel();
-        let server = Router::new().route(push::WAKE_PATH, post(move |headers: HeaderMap, body: Bytes| {
-            let sent = sent.clone();
-            async move {
-                sent.send((headers, body)).unwrap();
-                std::future::pending::<StatusCode>().await
-            }
-        }));
-        rt.spawn(async move { axum::serve(listener, server).await.unwrap() });
-        let (hook, ask) = hold(&ctx, &run, BASH, 20_000);
-        let (headers, body) = seen.recv_timeout(Duration::from_secs(5)).unwrap();
-        let ts = headers[push::TIMESTAMP].to_str().unwrap().parse().unwrap();
-        assert_eq!(headers[push::SIGNATURE].to_str().unwrap(), push::signature(&key, "POST", push::WAKE_PATH, ts, &body));
-        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"relay_handle":"active","kind":"needs","collapse_id":ask.id}));
-        assert!(answer(&ctx, &ask.id, &json!({"behavior":"allow"})).unwrap());
-        assert!(hook.join().unwrap().is_some());
-        assert!(seen.recv_timeout(Duration::from_millis(300)).is_err());
     }
 
     #[test]

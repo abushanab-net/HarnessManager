@@ -27,6 +27,7 @@ pub struct Phone {
     pub x25519: String,
     /// This enrollment; a pairing again under the same id makes a new one.
     pub generation: String,
+    pub push_needs_reregistering: bool,
 }
 
 fn grants_of(s: &str) -> Grants { serde_json::from_str(s).unwrap_or(Grants { summaries: false, transcripts: false, control: false }) }
@@ -103,7 +104,11 @@ pub fn set_grants(ctx: &Ctx, phone_id: &str, grants: &Value) -> Result<Value> {
 pub fn revoke(ctx: &Ctx, phone_id: &str) -> Result<Value> {
     let id = self::phone_id(ctx, phone_id)?;
     let at = ctx.db.with(|c| {
-        c.execute("update phones set revoked_at = ?2, relay_handle = null, relay_secret = null where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
+        let tx = c.transaction()?;
+        let old = push_key_id(&tx, &id)?;
+        tx.execute("update phones set revoked_at = ?2, relay_handle = null, push_key_id = null, push_needs_reregistering=0 where phone_id = ?1 and revoked_at is null", params![id, now_ms()])?;
+        tx.commit()?;
+        forget_push_key(old);
         Ok(c.query_row("select revoked_at from phones where phone_id = ?", [&id], |r| r.get::<_, i64>(0))?)
     })?;
     // after the mark: a connection that comes back is refused at its handshake
@@ -123,8 +128,9 @@ pub(crate) fn cut_done(ctx: &Ctx, ids: &[String]) {
 
 /// One phone's row by id, revoked or not.
 pub fn get(ctx: &Ctx, id: &str) -> Result<Option<Phone>> {
-    ctx.db.read(|c| Ok(c.query_row("select phone_id, coalesce(name, ''), coalesce(grants, ''), revoked_at, coalesce(x25519, ''), generation from phones where phone_id = ?", [id],
-        |r| Ok(Phone { id: r.get(0)?, name: r.get(1)?, grants: grants_of(&r.get::<_, String>(2)?), revoked_at: r.get(3)?, x25519: r.get(4)?, generation: r.get(5)? })).optional()?))
+    ctx.db.read(|c| Ok(c.query_row("select phone_id, coalesce(name, ''), coalesce(grants, ''), revoked_at, coalesce(x25519, ''), generation,
+        push_needs_reregistering or (relay_handle is not null and push_key_id is null) from phones where phone_id = ?", [id],
+        |r| Ok(Phone { id: r.get(0)?, name: r.get(1)?, grants: grants_of(&r.get::<_, String>(2)?), revoked_at: r.get(3)?, x25519: r.get(4)?, generation: r.get(5)?, push_needs_reregistering: r.get(6)? })).optional()?))
 }
 
 /// Who a certificate belongs to, read from one snapshot of the phones and the paired computers.
@@ -195,10 +201,12 @@ pub(crate) fn add(ctx: &Ctx, p: &PhonePayload, grants: Grants) -> Result<()> {
     ctx.db.with(|c| {
         let tx = c.transaction()?;
         if cert_taken(&tx, &der, Some(&p.id))? { bail!("that certificate already belongs to another phone or computer"); }
+        let old = push_key_id(&tx, &p.id)?;
         tx.execute("insert into phones(phone_id, name, platform, cert_pem, pubkey, x25519, grants, paired_at, last_seen, revoked_at, relay_handle, generation, cut_at) values(?1,?2,?3,?4,?5,?6,?7,?8,null,null,null,?9,null)
-            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, relay_secret=null, generation=?9, cut_at=null",
+            on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, push_key_id=null, push_needs_reregistering=0, generation=?9, cut_at=null",
             params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), crate::util::uuid4()])?;
         tx.commit()?;
+        forget_push_key(old);
         Ok(())
     })?;
     crate::companion::conn::cut(ctx, &p.id);
@@ -214,10 +222,68 @@ pub(crate) fn seen(ctx: &Ctx, id: &str) {
 /// The phone's relay handle, or none (`PUT` / `DELETE /c1/push`).
 /// The enrollment `p` checked at the request's start, not one paired again since under the same id.
 pub(crate) fn set_push(ctx: &Ctx, p: &Phone, handle: Option<&str>, secret: Option<&str>) -> Result<()> {
-    let n = ctx.db.with(|c| Ok(c.execute("update phones set relay_handle = ?3, relay_secret = ?4 where phone_id = ?1 and generation = ?2 and revoked_at is null", params![p.id, p.generation, handle, secret])?))?;
-    if n == 0 { bail!("this phone was revoked or paired again"); }
+    ctx.db.with(|c| {
+        let tx = c.transaction()?;
+        let old = push_key_id(&tx, &p.id)?;
+        let slot = secret.map(|_| crate::util::uuid4());
+        let n = tx.execute("update phones set relay_handle=?3, push_key_id=?4, push_needs_reregistering=?5
+            where phone_id=?1 and generation=?2 and revoked_at is null",
+            params![p.id, p.generation, handle, slot, handle.is_some() && secret.is_none()])?;
+        if n == 0 { bail!("this phone was revoked or paired again"); }
+        if let (Some(slot), Some(secret)) = (&slot, secret) { crate::secrets::set_key(&push_target(slot), secret)?; }
+        if let Err(e) = tx.commit() { forget_push_key(slot); return Err(e.into()); }
+        forget_push_key(old);
+        Ok(())
+    })
+}
+
+pub(crate) fn push_target(slot: &str) -> String { format!("{}:phone-push:{slot}", crate::secrets::prefix()) }
+
+fn push_key_id(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    Ok(c.query_row("select push_key_id from phones where phone_id=?", [id], |r| r.get(0)).optional()?.flatten())
+}
+
+fn forget_push_key(slot: Option<String>) {
+    if let Some(slot) = slot {
+        if crate::secrets::delete(&push_target(&slot)).is_err() { crate::log::warn("could not remove the retired phone push credential"); }
+    }
+}
+
+/// The slot changes on every PUT, even when the phone reinstalls the same handle during a wake.
+pub(crate) fn rejected_push(ctx: &Ctx, slot: &str) -> Result<()> {
+    let n = ctx.db.with(|c| Ok(c.execute("update phones set relay_handle=null, push_key_id=null, push_needs_reregistering=1
+        where push_key_id=? and revoked_at is null", [slot])?))?;
+    if n != 0 { forget_push_key(Some(slot.into())); }
     Ok(())
 }
+
+pub(crate) fn migrate_push_keys(c: &mut rusqlite::Connection) -> Result<()> {
+    let legacy = "select 1 from pragma_table_info('phones') where name='relay_secret'";
+    if !c.prepare(legacy)?.exists([])? { return Ok(()); }
+    let tx = c.transaction()?;
+    if !tx.prepare(legacy)?.exists([])? { return Ok(()); }
+    tx.pragma_update(None, "secure_delete", true)?;
+    {
+        let mut st = tx.prepare("select phone_id, generation, relay_handle, relay_secret from phones where revoked_at is null and relay_handle is not null")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?, r.get::<_,Option<String>>(3)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for (id, generation, handle, secret) in rows {
+            if let Some(secret) = secret.filter(|s| valid_handle(&handle) && hex::decode_to_slice(s, &mut [0;32]).is_ok()) {
+                // A retry after an interrupted migration writes the same credential.
+                crate::secrets::set_key(&push_target(&generation), &secret)?;
+                tx.execute("update phones set push_key_id=?, relay_handle=lower(relay_handle) where phone_id=?", params![generation,id])?;
+            } else {
+                tx.execute("update phones set relay_handle=null, push_needs_reregistering=1 where phone_id=?", [id])?;
+            }
+        }
+    }
+    tx.execute_batch("update phones set relay_secret=null where relay_secret is not null; alter table phones drop column relay_secret")?;
+    tx.commit()?;
+    c.execute_batch("pragma wal_checkpoint(truncate)")?;
+    Ok(())
+}
+
+pub(crate) fn valid_handle(handle: &str) -> bool { handle.len() == 48 && handle.bytes().all(|b| b.is_ascii_hexdigit()) }
 
 /// A phone that is not revoked may answer requests.
 pub fn control_paired(ctx: &Ctx) -> bool {

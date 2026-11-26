@@ -6,7 +6,7 @@
 pub mod actions;
 pub mod conn;
 mod events;
-pub(crate) mod push;
+pub mod push;
 #[cfg(test)]
 mod tests;
 
@@ -103,7 +103,7 @@ async fn hello(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>) -> J
             .map(|k| api::KnownComputer { id: k.id, name: k.name, os: k.os, last_seen: k.last_seen }).collect()
     } else { vec![] };
     let now = now_ms();
-    Json(api::Hello { computer: computer(&ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers })
+    Json(api::Hello { computer: computer(&ctx), observed_at: now, app_version: env!("CARGO_PKG_VERSION").into(), api: api::API, grants: p.grants, server_time: now, computers, push_needs_reregistering: p.push_needs_reregistering })
 }
 
 /// What this phone may do with requests now, and why not.
@@ -393,9 +393,13 @@ struct PushEnrollment { relay_handle: String, secret: Option<String> }
 
 async fn push_put(State(ctx): State<Arc<Ctx>>, Extension(p): Extension<Phone>, Json(h): Json<PushEnrollment>) -> Response {
     let secret = h.secret;
-    if secret.as_ref().is_some_and(|s| hex::decode_to_slice(s, &mut [0; 32]).is_err()) { return StatusCode::BAD_REQUEST.into_response(); }
-    let h = h.relay_handle.trim().to_string();
-    if h.is_empty() || h.len() > 200 { return (StatusCode::BAD_REQUEST, Json(json!({"error": "give the relay handle"}))).into_response(); }
+    if secret.as_ref().is_some_and(|s| hex::decode_to_slice(s, &mut [0; 32]).is_err()) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error":"the relay secret must be 64 hex digits"}))).into_response();
+    }
+    if !phones::valid_handle(&h.relay_handle) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error":"the relay handle must be 48 hex digits"}))).into_response();
+    }
+    let h = h.relay_handle.to_ascii_lowercase();
     answer(blocking(move || { phones::set_push(&ctx, &p, Some(&h), secret.as_deref())?; Ok(stamped(&ctx, json!({"ok": true}))) }).await)
 }
 

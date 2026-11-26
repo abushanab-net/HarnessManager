@@ -46,6 +46,8 @@ pub struct Hello {
     pub api: u32,
     pub grants: Grants,
     pub server_time: i64,
+    #[serde(default)]
+    pub push_needs_reregistering: bool,
     /// The other computers this one knows (paired, or seen through the hub or a shared folder), for the Computers
     /// screen; empty without Summaries.
     #[serde(default)]
