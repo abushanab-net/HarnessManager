@@ -10,6 +10,7 @@ own README with the steps and every number.
 | `mobile-frb/` | Flutter app + Rust crate through flutter_rust_bridge 2.13.0: pairing, TLS, the notification stand-in |
 | `mobile-tls/` | `dart:io` mutual-TLS tests and the Rust alternative |
 | `mobile-timing/` | Driver and results for alert → request shown → answer accepted |
+| `mobile-late-decision/` | Claude Code and a hook decision that arrives after the terminal answered |
 
 ## The answers
 
@@ -37,6 +38,13 @@ measured case; the rest belongs to push delivery and the person. 60 s is workabl
 tight once unlock and reading are counted. Still to measure: real FCM delivery (needs a Firebase project), APNs and
 Live Activity push (need the paid Apple membership and a real iPhone), real lock screens, mid-range phones, and the
 hub mailbox path.
+
+**4. A phone answer after the terminal answered (`mobile-late-decision`).** Claude Code 2.1.332 uses only the
+first answer: a late hook decision is ignored either way, and a hook answer that comes first closes the prompt. The
+gap is in hrm: after a terminal "No" no event arrives and Claude Code ends the hook only 10–14 s later, and after a
+terminal "Yes" the request closes only at `PostToolUse`, when the command has finished. In both windows a phone answer
+would be reported as accepted while Claude Code ignores it. Receipts should confirm through `PostToolUse` or the
+terminal's screen before they say "done".
 
 ## How the app should depend on `crates/companion-proto`
 
