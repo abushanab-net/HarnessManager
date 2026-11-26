@@ -245,21 +245,26 @@ POST /c1/actions
   computer's X25519 key is derived from its Ed25519 seed). A message changed, sealed by anyone else, or found in a
   slot it was not written for (replayed or moved) is dropped. There is no read cursor, no skipped slot and no retry
   timer: each side keeps the set of slots it handled (the computer: `phone_mail_seen`, keyed by the enrollment's
-  generation, the mailbox and the slot; the phone: `Mailbox::handled`, which the app keeps). Every look or pass lists
-  the whole mailbox (pages of 100, at most 12 of them and a few seconds; a page out of order, out of 1 to 2^53, or
-  bringing nothing new ends the listing), and fetches the listed slots not handled yet, at most 20 a pass on the
-  computer and 50 a look on the phone: the newest half, and a share that moves on each time, so no slot waits for
-  ever behind ones that never open. A slot that does not open, or is not there, is simply fetched again later: a slot
-  served wrong for a while, missing from a listing, or a false one made up high never hides or loses a real one. A
-  handled slot is let go once the hub cannot hold it (older than its week, or below its oldest in a whole listing).
+  generation, the mailbox and the slot; the phone: `Mailbox::state`, which the app keeps). Every look or pass lists
+  the mailbox (pages of 100, at most 12 of them and a few seconds, on the phone at most 6 of its 10 s; a page out of
+  order, out of 1 to 2^53, or bringing nothing new ends the listing) from where the last one stopped when it could
+  not list it all, so successive passes cover the whole of a mailbox slower to list than one pass, and fetches the
+  listed slots not handled yet, at most 20 a pass on the computer and 50 a look on the phone: the newest half, and a
+  share that moves on each time, so no slot waits for ever behind ones that never open. A slot that does not open, is
+  not there, or fails to come (an error reading that one slot) is simply fetched again later, and the slots after it
+  are still read: a slot served wrong for a while, missing from a listing, or a false one made up high never hides or
+  loses a real one. A handled slot is let go only by age, eight days after it was handled (past the hub's week and far
+  past any action's window), never by what a listing shows, so a delivered refusal is never decided again.
   The computer reads each enrollment from one row (mailbox, keys, grants, generation; the generation is the pairing's
-  `enrollment` value) and handles a message for that enrollment only. A message is decided first (the companion
-  API's entry point and guards), then recorded with its reply, only if no record exists yet (insert-if-absent, keyed
-  by generation, mailbox and slot): that record is the claim, so with two drainers only one decision is ever
-  published, and the slot is handled from then on. A recorded reply goes out as it was recorded, never decided again
-  (a refusal stays a refusal though Control came since). A computer stopping between a decision and its record
-  decides again on the next pass, where the action contract's rule keeps the action to one dispatch (the same action
-  id is the stored receipt; a reservation without an outcome reads `unknown`). Every change names generation, mailbox
+  `enrollment` value) and handles a message for that enrollment only. One drainer at a time serves an enrollment's
+  mail: it takes a lease (`phone_mail_lease`: owner and expiry, 30 s, renewed before each decision, given back at the
+  end of its pass); another process does nothing while it is held, and takes over only once it lapsed (a drainer that
+  stopped dead). A message is decided first (the companion API's entry point and guards), then recorded with its
+  reply (keyed by generation, mailbox and slot), and the slot is handled from then on: what the phone is told is
+  what reached the session. A recorded reply goes out as it was recorded, never decided again (a refusal stays a
+  refusal though Control came since). A drainer stopping between a decision and its record leaves it to the next
+  holder, which decides again under the action contract's rule (the same action id is the stored receipt; a
+  reservation without an outcome reads `unknown`; nothing is sent twice). Every change names generation, mailbox
   and slot, and a worker whose enrollment ended (revoked, or paired again, on the same mailbox too) does nothing more;
   what was handled for an enrollment no longer here goes. A database read that fails records nothing. The hub sees
   sizes and timing only.
@@ -276,7 +281,9 @@ POST /c1/actions
 - The phone (`companion_proto::mailbox`): `join_hub_qr` / `join_hub` → `HubJoining` (`words`, `result`, `wait`,
   `mailbox`; the invite's deadline is held to 15 minutes whatever the hub says), and `Mailbox` with the direct
   `Client`'s typed calls (`hello`, `overview`, `accounts`, `account`, `requests`, `act`, `receipt`) plus `sync`,
-  `handled` / `resume_handled` for the app to keep what it handled, and `freshness` → `{snapshot_at, snapshot_age_ms,
+  `state` / `restore` for the app to keep across restarts (the mailbox, the pairing, the slots handled, the newest
+  snapshot and its slot, together; restored only into the same mailbox and pairing, the snapshot shown at once but
+  stale until a new one arrives), and `freshness` → `{snapshot_at, snapshot_age_ms,
   heard_at, missed, stale}`: a hub can always withhold mail, so `stale` when no snapshot arrived for 12 minutes by the
   phone's own monotonic clock, when the hub was silent as long, or when the snapshot is that old by the computer's
   signed time; `missed` counts the listed slots not read yet. A newer snapshot is never replaced by an older one read
@@ -289,8 +296,10 @@ POST /c1/actions
   `phones::list` gives `route: "hub"`. Each hub's token is kept under that hub's own address, in one write (the
   address is the credential's name): a context names a hub and reads that hub's token only, so a pairing begun on hub
   A and cleaned up while this computer joins hub B sends A its own token, never B's, with no moment in between where
-  the two disagree. (A token kept by a version before, under the computer alone, is read only for the hub it was
-  written for, and a join removes it.) An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
+  the two disagree. A token kept by a version before, under the computer alone (1.13 kept no record of its hub), is
+  used only when this branch recorded the hub it was for and that hub is the one asked: otherwise there is no token,
+  and the computer joins its hub afresh (an upgraded 1.13 desktop on the hub joins once more). A join forgets that
+  record only once the old token is really gone. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
   and only that hub's answer settles its deletion. An enrollment with no hub recorded can only come from this branch
   before it kept one (nothing released has hub enrollments): it is served by no hub and its deletion is owed to none,
   so no hub's "no such phone" settles it; pair such a phone again. A deletion owed on the hub (a revocation, the earlier mailbox of a phone paired again, an invite that ended
@@ -299,10 +308,11 @@ POST /c1/actions
   one owed on a hub this computer left stays owed. A revocation from before the queue, not acknowledged, is taken up.
   `acks.hub` on a revoked phone is true once its own hub confirmed its own enrollment's mailbox, false until then,
   null for a phone never paired through it.
+- Databases of this branch from before the handled set (its `phone_mail_in` table) are disposable: nothing released
+  has hub phones, and that table is dropped at start with what it held.
 - Follow-ups (not in this package): the phone's ten-second look deadline enforced around each awaited call (one
-  request may take its own 20 s today); a test of a forged refusal acknowledgement; with two drainers, the losing one
-  may still have dispatched its action (the action contract keeps that to one dispatch, but the published receipt may
-  then read `unknown` when the loser recorded first).
+  request may take its own 20 s today); a test of a forged refusal acknowledgement; the app saving `Mailbox::state`
+  and restoring it at start (the protocol side is here).
 
 ## Contract: the push relay
 
