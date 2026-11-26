@@ -5,7 +5,8 @@
 // The direct connection: the pairing dialog (computers_pair_start | cancel | join and the computers-pairing event),
 // the transport line of a computer card, and a 10 s tick while a peer is connected. The hub: Join with a code…,
 // Invite a computer…, the recovery key dialogs (hub_join | hub_invite | ring_key_show | ring_key_enter), and the
-// first-run choice "Add this computer to your others". The dialogs are drawn as the reference draws them.
+// first-run choice "Add this computer to your others". The dialogs are drawn as the reference draws them. Phones:
+// Pair a phone… (a QR code, then the phone's three words and its grants to approve), as the S24 frames draw it.
 
 import { S, call, action, render, openDialog, closeDialog, dlgHead, toast, changed, confirmDialog, pickFolder, mutate, redrawLive, shown } from './core.js';
 import { esc, dur } from './lib.js';
@@ -151,6 +152,90 @@ if (ev) ev.listen('computers-pairing', (e) => {
     if (r.ok) setTimeout(() => { if (document.getElementById('pair-done')) closeDialog(); }, 1500);
   } else if (r.ok) toast(`Paired with ${(r.peer || {}).name || 'another computer'}`);
   if (r.ok) changed();
+});
+
+// ---------- pairing a phone: a QR code and its six digits here; the phone proves the code, then this computer checks
+// the three words and approves it with its grants (phones_pair_start | status | approve | refuse | cancel and the
+// phones-pairing event) ----------
+/** What a phone may do, in the order the dialog and the Phones list show them; Control is off unless ticked. */
+export const GRANTS = [
+  ['summaries', 'Summaries', 'Limits, sessions and usage', true],
+  ['transcripts', 'Transcripts', 'What each session said and did', true],
+  ['control', 'Control', 'Answer requests, reply and Stop. Off unless you tick it.', false],
+];
+export const PLATFORM = { ios: 'iOS', android: 'Android' };
+let phone = null; // { r: the start's answer, st: the status now, timer } while the dialog is open
+function phonePairDialog() {
+  openDialog(`${dlgHead('Pair a phone')}<div class="ph-pair" data-testid="phone-pair-body">
+      <div class="ph-step" data-testid="phone-pair-code"><h3><span class="n">1</span>Scan or type the code</h3><p class="muted">Asking for a code…</p></div>
+      <div class="ph-step" data-testid="phone-pair-ask"><h3><span class="n">2</span>Check and approve</h3><p class="muted">When the phone has used the code, its name and three words show here.</p></div></div>
+    <div class="modal-foot" id="phone-pair-foot"><span id="phone-pair-left" data-testid="phone-pair-left"></span><span class="acts"><button class="btn-secondary" data-act="dialog-close" data-testid="phone-pair-close">Cancel</button></span></div>`,
+  { onClose: () => { if (phone) { clearInterval(phone.timer); const open = ['waiting', 'confirm'].includes(phone.st.state); phone = null; if (open) call('phones_pair_cancel').catch(() => {}); } }, size: 'ph', label: 'Pair a phone' });
+  phoneStart();
+}
+async function phoneStart() {
+  const el = document.querySelector('[data-testid=phone-pair-code]');
+  let r;
+  try { r = await call('phones_pair_start'); } catch (e) { if (el && el.isConnected) phoneShow({ state: 'failed', error: errText(e) }); return; }
+  if (!el.isConnected) { call('phones_pair_cancel').catch(() => {}); return; } // the dialog went while asking
+  el.innerHTML = `<h3><span class="n">1</span>Scan or type the code</h3>
+    <div class="ph-qr" data-testid="phone-qr" role="img" aria-label="QR code for the phone">${r.qr_svg || ''}<span class="used">✓ Code used</span></div>
+    <p>On the phone: Harness Manager › Pair with a computer. Or type <b class="mono" data-testid="phone-code">${esc(fmtCode(r.code))}</b>.</p>
+    <p class="muted">Open 2 minutes, 3 tries. Same network, or through your hub.</p>`;
+  phone = { r, st: { state: 'waiting' }, timer: setInterval(phoneTick, 1000) };
+  phoneTick();
+}
+/** The time left in the foot; at zero a code nobody used, or a phone not approved yet, has expired. */
+function phoneTick() {
+  const left = document.getElementById('phone-pair-left');
+  if (!phone || !left) return;
+  const ms = phone.r.expires_at - Date.now();
+  if (ms > 0) left.textContent = `${mmss(ms)} left`;
+  else { phoneShow({ state: 'expired' }); call('phones_pair_cancel').catch(() => {}); }
+}
+/** The dialog for a status: waiting, confirm (the phone, the words, the grants), or how it ended. */
+function phoneShow(st) {
+  const ask = document.querySelector('[data-testid=phone-pair-ask]'), foot = document.querySelector('#phone-pair-foot .acts');
+  if (!ask || (phone && phone.st.state === st.state)) return; // the approve's answer and its event say the same
+  if (phone) phone.st = st;
+  const ended = !['waiting', 'confirm'].includes(st.state);
+  if (ended && phone) { clearInterval(phone.timer); document.getElementById('phone-pair-left').textContent = ''; }
+  document.querySelector('[data-testid=phone-qr]')?.classList.toggle('done', ['confirm', 'paired', 'refused'].includes(st.state)); // the phone used the code
+  const p = st.phone || {}, who = esc(p.name || 'The phone'), again = '<button class="btn-secondary" data-act="phone-pair" data-testid="phone-pair-again">Show a new code</button>';
+  const close = (t = 'Close') => `<button class="btn-secondary" data-act="dialog-close" data-testid="phone-pair-close">${t}</button>`;
+  const end = (cls, text) => `<h3><span class="n">2</span>Check and approve</h3><p class="${cls}" data-testid="phone-pair-result" ${cls === 'b-danger' ? 'role="alert"' : ''}>${text}</p>`;
+  if (st.state === 'waiting') return;
+  if (st.state === 'confirm') {
+    ask.innerHTML = `<h3><span class="n">2</span><span><span data-testid="phone-name">${who}</span> wants access${p.platform ? ` <span class="muted">· ${esc(PLATFORM[p.platform] || p.platform)}</span>` : ''}</span></h3>
+      <p>Check the phone shows the same words:</p>
+      <div class="ph-words" data-testid="phone-words">${(st.words || []).map((w) => `<span>${esc(w)}</span>`).join('')}</div>
+      ${GRANTS.map(([k, t, d, on]) => `<label class="check-row ph-grant"><input type="checkbox" data-grant="${k}" ${on ? 'checked' : ''} data-testid="phone-grant-${k}"><span><b>${t}</b>${esc(d)}</span></label>`).join('')}
+      ${errLine('phone-pair-error')}`;
+    foot.innerHTML = `<button class="btn-secondary negT" id="phone-refuse" data-testid="phone-refuse">Refuse</button><button class="btn-primary" id="phone-approve" data-testid="phone-approve">Approve</button>`;
+    const go = (run) => async () => {
+      for (const b of foot.querySelectorAll('button')) b.disabled = true;
+      try { phoneShow(await run()); }
+      catch (e) { fail('phone-pair-error', null, errText(e)); for (const b of foot.querySelectorAll('button')) b.disabled = false; }
+    };
+    document.getElementById('phone-approve').onclick = go(() => call('phones_pair_approve', { grants: Object.fromEntries([...ask.querySelectorAll('[data-grant]')].map((i) => [i.dataset.grant, i.checked])) }));
+    document.getElementById('phone-refuse').onclick = go(() => call('phones_pair_refuse'));
+    return document.getElementById('phone-approve').focus();
+  }
+  if (st.state === 'paired') {
+    ask.innerHTML = end('b-good', `Paired with ${who}. Its grants are in the Phones list, where you can change them.`);
+    foot.innerHTML = close('Done');
+    changed(); // the phone is in the Phones list
+  } else if (st.state === 'refused') { ask.innerHTML = end('muted', `${who} was refused. It gets nothing from this computer.`); foot.innerHTML = close() + again; }
+  else if (st.state === 'expired') { ask.innerHTML = end('b-danger', 'The code expired. Nothing was paired.'); foot.innerHTML = close() + again; }
+  else { ask.innerHTML = end('b-danger', esc(st.error || 'The pairing failed. Nothing was paired.')); foot.innerHTML = close() + again; }
+  foot.querySelector('button:last-child')?.focus();
+}
+action('phone-pair', phonePairDialog);
+// a phone used the code, or the pairing ended: the dialog follows; with the dialog closed, a pairing is said once
+if (ev) ev.listen('phones-pairing', (e) => {
+  const st = e.payload || {};
+  if (phone && document.querySelector('[data-testid=phone-pair-ask]')) phoneShow(st);
+  else if (st.state === 'paired') { toast(`Paired with ${(st.phone || {}).name || 'a phone'}`); changed(); }
 });
 
 // ---------- the hub: joining with a code, inviting, the recovery key ----------
