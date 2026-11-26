@@ -2790,6 +2790,194 @@ description: Bulk skill ${i}
     assert.deepEqual(r, ['all', 'here', 'here', 'all']);
   });
 
+  // ---- phones (WP-M2): Pair a phone… and the Phones list, as the S24 frames draw them ----
+  // The phone operations (phones_* and the phones-pairing event) come from WP-M1. The first two tests answer them from a
+  // fake layer, so the dialog's every state and the list are checked and photographed now; the last two need the real
+  // operations and say so in their names (they are skipped while the core answers "not built yet").
+  const phonesFakeOn = () => exec(`
+    const t = window.__TAURI__, real = window.__phReal || t.core, now = Date.now(), D = 86400e3;
+    window.__phReal = real;
+    // a QR-like picture for the shots: three finder squares and a fixed pattern of modules
+    const m = [];
+    for (let y = 0; y < 25; y++) for (let x = 0; x < 25; x++) {
+      const f = (fx, fy) => x >= fx && x < fx + 7 && y >= fy && y < fy + 7 && (x === fx || x === fx + 6 || y === fy || y === fy + 6 || (x > fx + 1 && x < fx + 5 && y > fy + 1 && y < fy + 5));
+      const inF = (fx, fy) => x >= fx - 1 && x < fx + 8 && y >= fy - 1 && y < fy + 8;
+      if (f(0, 0) || f(18, 0) || f(0, 18) || (!inF(0, 0) && !inF(18, 0) && !inF(0, 18) && ((x * 7 + y * 13 + x * y) % 5 < 2))) m.push('M' + (x + 4) + ' ' + (y + 4) + 'h1v1h-1z');
+    }
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges"><path d="M0 0h33v33H0z" fill="#fff"/><path fill="#000" d="' + m.join('') + '"/></svg>';
+    const ph = window.__ph = { calls: [], list: [
+      { phone_id: 'ph-iphone', name: 'iPhone 17', platform: 'ios', route: 'direct', grants: { summaries: true, transcripts: true, control: true }, paired_at: now - 17 * D, last_seen: now - 5000, revoked_at: null },
+      { phone_id: 'ph-pixel', name: 'Pixel 9', platform: 'android', route: 'hub', grants: { summaries: true, transcripts: false, control: false }, paired_at: now - 30 * D, last_seen: now - 3 * D, revoked_at: null },
+      { phone_id: 'ph-old', name: 'Old phone', platform: 'android', route: null, grants: { summaries: true, transcripts: true, control: false }, paired_at: now - 90 * D, last_seen: now - 60 * D, revoked_at: now - 50 * D },
+    ] };
+    const fake = {
+      phones_list: () => ph.list,
+      phones_set_grants: (a) => { const p = ph.list.find((x) => x.phone_id === a.id); p.grants = a.grants; return p; },
+      phones_revoke: (a) => { const p = ph.list.find((x) => x.phone_id === a.id); p.revoked_at = Date.now(); return { phone_id: a.id, revoked_at: p.revoked_at, acks: { connection: true, hub: false, push: null } }; },
+      phones_pair_start: () => ({ code: '481920', expires_at: Date.now() + 91000, host_hint: 'WORKSTATION:47100', port: 47100, qr: 'hm-phone:1?h=WORKSTATION:47100&c=481920&f=ab12', qr_svg: svg }),
+      phones_pair_status: () => ph.status || null,
+      phones_pair_approve: (a) => (ph.status = { state: 'paired', phone: { name: 'iPhone 17', platform: 'ios' }, grants: a.grants }),
+      phones_pair_refuse: () => (ph.status = { state: 'refused', phone: { name: 'iPhone 17', platform: 'ios' } }),
+      phones_pair_cancel: () => (ph.status = null),
+    };
+    t.core = { ...real, invoke: (cmd, a, o) => (a && fake[a.op] ? (ph.calls.push([a.op, a.args]), Promise.resolve(fake[a.op](a.args || {}))) : real.invoke(cmd, a, o)) };`);
+  const phonesFakeOff = () => exec('if (window.__phReal) { window.__TAURI__.core = window.__phReal; window.__phReal = null; } document.documentElement.dataset.theme = "light";');
+  /** The phones-pairing event, as the core sends it, through Tauri's own event bus. */
+  const phoneEvent = (st) => exec('return window.__TAURI__.event.emit("phones-pairing", arguments[0])', [st]);
+  const phCalls = (op) => exec('return window.__ph.calls.filter((c) => c[0] === arguments[0]).map((c) => c[1])', [op]);
+  const dialogGone = () => waitFor(async () => !(await exec("return document.getElementById('dialog-root').innerHTML")), 'the dialog closed');
+  const confirmState = { state: 'confirm', phone: { name: 'iPhone 17', platform: 'ios' }, words: ['amber', 'otter', 'nine'] };
+
+  await test('phones: Pair a phone… shows the QR code and the six digits, then the phone, its three words and the grants; Approve with the grants ticked; Refuse, expired and failed say how it ended', async () => {
+    await phonesFakeOn();
+    try {
+      await nav('#home');
+      await nav('#computers');
+      // the head: Pair a phone… beside the one primary Pair a computer…
+      await click('[data-testid=phone-pair-head]');
+      await $('[data-testid=phone-qr] svg');
+      const d = await exec(`const q = (s) => document.querySelector(s);
+        return { code: q('[data-testid=phone-code]').textContent, left: q('[data-testid=phone-pair-left]').textContent, used: getComputedStyle(q('.ph-qr .used')).display,
+          ask: q('[data-testid=phone-pair-ask]').innerText, label: q('.modal-card').getAttribute('aria-label'), acts: [...q('#phone-pair-foot .acts').querySelectorAll('button')].map((b) => b.textContent) }`);
+      assert.equal(d.code, '481 920', 'the six digits in two groups');
+      assert.match(d.left, /^1:(2\d|3[01]) left$/, 'the time left: ' + d.left);
+      assert.equal(d.used, 'none', 'the code is not marked used while the phone has not used it');
+      assert.match(d.ask, /When the phone has used the code/, 'step 2 waits for the phone');
+      assert.deepEqual(d.acts, ['Cancel']);
+      await shot('19p-phone-pair-waiting');
+      // the phone proved the code: its name and platform, the three words, the grants (Control off), Refuse and Approve
+      await phoneEvent(confirmState);
+      await $('[data-testid=phone-words]');
+      const c = await exec(`const q = (s) => document.querySelector(s);
+        return { name: q('[data-testid=phone-name]').textContent, head: q('[data-testid=phone-pair-ask] h3').textContent, words: [...q('[data-testid=phone-words]').children].map((w) => w.textContent),
+          grants: ['summaries', 'transcripts', 'control'].map((k) => q('[data-testid=phone-grant-' + k + ']').checked), control: q('[data-testid=phone-grant-control]').closest('label').innerText,
+          used: getComputedStyle(q('.ph-qr .used')).display, acts: [...q('#phone-pair-foot .acts').querySelectorAll('button')].map((b) => b.textContent), focus: document.activeElement.dataset.testid }`);
+      assert.equal(c.name, 'iPhone 17');
+      assert.match(c.head, /iPhone 17\s+wants access · iOS/);
+      assert.deepEqual(c.words, ['amber', 'otter', 'nine']);
+      assert.deepEqual(c.grants, [true, true, false], 'Summaries and Transcripts on, Control off by default');
+      assert.match(c.control, /Answer requests, reply and Stop\. Off unless you tick it\./, 'Control says what it allows');
+      assert.notEqual(c.used, 'none', 'the code is marked used');
+      assert.deepEqual(c.acts, ['Refuse', 'Approve']);
+      assert.equal(c.focus, 'phone-approve');
+      await shot('19q-phone-pair-confirm-light');
+      await exec("document.documentElement.dataset.theme = 'dark'");
+      await shot('19r-phone-pair-confirm-dark');
+      await exec("document.documentElement.dataset.theme = 'light'");
+      // Approve sends the grants as ticked: Control ticked here, Transcripts not
+      await click('[data-testid=phone-grant-control]');
+      await click('[data-testid=phone-grant-transcripts]');
+      await click('[data-testid=phone-approve]');
+      await hasText('[data-testid=phone-pair-result]', 'Paired with iPhone 17');
+      assert.deepEqual(await phCalls('phones_pair_approve'), [{ grants: { summaries: true, transcripts: false, control: true } }]);
+      await phoneEvent({ state: 'paired', phone: { name: 'iPhone 17', platform: 'ios' } }); // the same news by event: drawn once
+      assert.equal(await exec("return document.querySelectorAll('[data-testid=phone-pair-result]').length"), 1);
+      await shot('19s-phone-pair-paired');
+      await click('[data-testid=phone-pair-close]');
+      await dialogGone();
+      assert.equal((await phCalls('phones_pair_cancel')).length, 0, 'a finished pairing is not cancelled on close');
+      // Refuse
+      await click('[data-testid=phone-pair-head]');
+      await $('[data-testid=phone-qr] svg');
+      await phoneEvent(confirmState);
+      await click('[data-testid=phone-refuse]');
+      await hasText('[data-testid=phone-pair-result]', 'iPhone 17 was refused');
+      await $('[data-testid=phone-pair-again]');
+      // a new code from the outcome, then expired (the core's event) and failed (its error said)
+      await click('[data-testid=phone-pair-again]');
+      await $('[data-testid=phone-qr] svg');
+      await phoneEvent({ state: 'expired' });
+      await hasText('[data-testid=phone-pair-result]', 'The code expired');
+      await shot('19t-phone-pair-expired');
+      await click('[data-testid=phone-pair-again]');
+      await $('[data-testid=phone-qr] svg');
+      await phoneEvent({ state: 'failed', error: 'The phone gave the wrong code three times.' });
+      await hasText('[data-testid=phone-pair-result]', 'The phone gave the wrong code three times.');
+      assert.equal(await exec("return document.querySelector('[data-testid=phone-pair-result]').getAttribute('role')"), 'alert');
+      // closing while a code is open cancels it
+      await click('[data-testid=phone-pair-again]');
+      await $('[data-testid=phone-qr] svg');
+      const before = (await phCalls('phones_pair_cancel')).length;
+      await click('.dlg .dh [data-act=dialog-close]');
+      await dialogGone();
+      assert.equal((await phCalls('phones_pair_cancel')).length, before + 1, 'Cancel ends the pairing in the core');
+    } finally { await phonesFakeOff(); await nav('#home'); }
+  });
+
+  await test('phones: the Phones list on Computers: platform, route, last seen, the grants as switches saved at once, Revoke… with a confirmation and the acknowledgements', async () => {
+    await phonesFakeOn();
+    try {
+      await nav('#home');
+      await nav('#computers');
+      await $('[data-testid=phones] [data-testid=phone-ph-iphone]');
+      const d = await exec(`const q = (s) => document.querySelector(s), row = (id) => q('[data-testid=phone-' + id + ']');
+        return { count: q('[data-testid=phones-count]').textContent, rows: [...document.querySelectorAll('[data-testid=phones] .ph-row')].map((r) => r.querySelector('b').textContent),
+          iphone: row('ph-iphone').querySelector('[data-testid=phone-line]').textContent, pixel: row('ph-pixel').querySelector('[data-testid=phone-line]').textContent,
+          pixelGrants: ['summaries', 'transcripts', 'control'].map((k) => q('[data-testid=phone-ph-pixel-' + k + ']').checked),
+          after: !!q('[data-testid=computer-cards] + [data-testid=phones] + [data-testid=computers]'), note: q('[data-testid=phones] .pc-note').textContent,
+          primary: document.querySelectorAll('#sheet .page-head .btn.primary').length, small: [...document.querySelectorAll('[data-testid=phones] *')].filter((e) => e.childElementCount === 0 && e.textContent.trim() && parseFloat(getComputedStyle(e).fontSize) < 12).map((e) => e.textContent) }`);
+      assert.equal(d.count, '2', 'a revoked phone is not listed');
+      assert.deepEqual(d.rows, ['iPhone 17', 'Pixel 9']);
+      assert.match(d.iphone, /^iOS · direct · last seen now · paired (\d+ \w+|\w+ \d+)$/, d.iphone);
+      assert.match(d.pixel, /^Android · through your hub · last seen 3 d ago · paired/, d.pixel);
+      assert.deepEqual(d.pixelGrants, [true, false, false]);
+      assert.ok(d.after, 'between the computer cards and How your computers sync');
+      assert.match(d.note, /never a full peer/);
+      assert.equal(d.primary, 1, 'still one primary button in the head');
+      assert.deepEqual(d.small, [], 'nothing under 12 px');
+      await shot('19u-phones-list-light');
+      await exec("document.documentElement.dataset.theme = 'dark'");
+      await shot('19v-phones-list-dark');
+      await exec("document.documentElement.dataset.theme = 'light'");
+      // a switch saves the phone's three grants together
+      await click('[data-testid=phone-ph-pixel-control]');
+      await waitFor(async () => (await phCalls('phones_set_grants')).length === 1, 'the grants saved');
+      assert.deepEqual(await phCalls('phones_set_grants'), [{ id: 'ph-pixel', grants: { summaries: true, transcripts: false, control: true } }]);
+      await waitFor(() => exec("return document.querySelector('[data-testid=phone-ph-pixel-control]').checked"), 'drawn on');
+      // Revoke… asks first; Cancel keeps the phone
+      await click('[data-testid=phone-revoke-ph-pixel]');
+      await hasText('.modal-card .dlg-text', 'Revoke Pixel 9?');
+      await click('.modal-card [data-act=dialog-close].btn-secondary');
+      await dialogGone();
+      assert.equal((await phCalls('phones_revoke')).length, 0, 'nothing revoked on Cancel');
+      // confirmed: the acknowledgements, then the list without it
+      await click('[data-testid=phone-revoke-ph-pixel]');
+      await click('#confirm-ok');
+      await $('[data-testid=phone-acks]');
+      const acks = await exec("return ['connection', 'hub', 'push'].map((k) => document.querySelector('[data-testid=phone-ack-' + k + ']').innerText)");
+      assert.deepEqual(acks, ['Its open connections cut: confirmed', 'Its hub token and mailbox deleted: not confirmed', 'Its push handle removed from the relay: not used yet']);
+      await shot('19w-phone-revoked');
+      await click('.modal-card .btn-primary[data-act=dialog-close]');
+      await dialogGone();
+      await waitFor(async () => !(await exec("return !!document.querySelector('[data-testid=phone-ph-pixel]')")), 'the revoked phone left the list');
+      assert.equal(await text('[data-testid=phones-count]'), '1');
+    } finally { await phonesFakeOff(); await nav('#home'); }
+  });
+
+  /** The real phone operations are there (WP-M1 merged), not the stub's "not built yet". */
+  const phonesBuilt = () => exec("return window.__TAURI__.core.invoke('call', { op: 'phones_list', args: {} }).then(() => true, (e) => !/not built yet/.test(String(e)))");
+  await test('phones (needs the phone operations): Pair a phone… shows the core\'s own QR code and six digits, and Cancel ends the pairing', async () => {
+    if (!(await phonesBuilt())) return console.log('     skipped: the phone operations are not built yet');
+    await nav('#home');
+    await nav('#computers');
+    await click('[data-testid=phone-pair-head]');
+    await $('[data-testid=phone-qr] svg path');
+    assert.match(await text('[data-testid=phone-code]'), /^\d{3} \d{3}$/);
+    assert.match(await text('[data-testid=phone-pair-left]'), /^[12]:\d\d left$/);
+    assert.equal((await exec("return window.__TAURI__.core.invoke('call', { op: 'phones_pair_status', args: {} })")).state, 'waiting');
+    await click('.dlg .dh [data-act=dialog-close]');
+    await dialogGone();
+    await waitFor(async () => { const s = await exec("return window.__TAURI__.core.invoke('call', { op: 'phones_pair_status', args: {} })"); return !s || s.state !== 'waiting'; }, 'the pairing cancelled');
+  });
+  await test('phones (needs the phone operations): the Phones card from phones_list, empty on a computer with no phone', async () => {
+    if (!(await phonesBuilt())) return console.log('     skipped: the phone operations are not built yet');
+    await nav('#home');
+    await nav('#computers');
+    await $('[data-testid=phones] [data-testid=phones-none]');
+    assert.equal(await text('[data-testid=phones-count]'), '0');
+    assert.equal(execFileSync(path.join(appDir, 'hrm.exe'), ['phones', 'list', '--json'], { env, encoding: 'utf8' }).trim(), '[]', 'hrm phones list agrees');
+  });
+
   // Sync now is in this computer's ⋯ while sync is on (and on a paired computer's card)
   const syncNow = async () => { await click('[data-testid=computer-cards] .pc [data-act=pc-menu]'); await click('.menu [data-testid=computers-now]'); };
   if (process.env.HRM_E2E_SYNC) await test('computers: a second computer in the sync folder reaches Settings, the chip, the Overview, Sessions and Projects', async () => {
