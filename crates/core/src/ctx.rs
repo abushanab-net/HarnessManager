@@ -61,6 +61,9 @@ pub struct Settings {
     pub sync_presence: bool,
     /// Talk to paired computers straight over the network (mDNS or an address), besides the folder.
     pub direct_connection: bool,
+    /// Experimental, off: phones paired and served through the hub's mailbox. Off, this computer makes no phone call
+    /// to the hub (no invite, no mailbox pass, no snapshot); only a deletion already owed there is still sent.
+    pub phones_via_hub: bool,
     /// The direct connection's port; 0: a free one is picked once and saved here.
     pub listen_port: u16,
     /// Sessions older than this many days have their transcript moved to the archive; 0: never.
@@ -93,7 +96,7 @@ impl Default for Settings {
             backup_hours: 24, backup_keep: 10, log_enabled: true, log_level: "warn".into(),
             moving_routes: true, pinned_projects: vec![],
             device_id: String::new(), device_name: String::new(), incarnation: String::new(), sync_mode: "off".into(), sync_folder: String::new(),
-            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
+            hub_url: String::new(), sync_transcripts: true, sync_presence: true, direct_connection: false, phones_via_hub: false, listen_port: 0, archive_days: 30, archive_dir: String::new(),
             archive_in_sync_folder: true, backup_in_sync_folder: true, backup_transcripts: false, agent_hint: false, session_hooks: true, request_seconds: 300, own_terminal: false }
     }
 }

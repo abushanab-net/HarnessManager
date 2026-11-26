@@ -156,6 +156,15 @@ pub fn token(ctx: &Ctx) -> Option<String> {
 /// The hub the stored token was given by.
 const TOKEN_OF: &str = "hub:token_of";
 
+/// What the hub status and the CLI say to a computer whose only token is one an earlier version kept without its hub.
+pub const REJOIN: &str = "Join your hub again to keep syncing";
+
+/// The computer has a token from an earlier version (kept under the computer alone, its hub not known) and none it
+/// may use: it joins its hub once more.
+pub fn needs_rejoin(ctx: &Ctx) -> bool {
+    token(ctx).is_none() && (secrets::read(&token_target(&ctx.settings.device_id)).is_some() || ctx.data.join("hub.token").exists())
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test seam: runs during a join, just after its credential is written.
@@ -173,7 +182,11 @@ impl Hub {
     /// naming another hub (a pairing begun before this computer joined a new one) only ever sends that hub its own.
     pub fn open(ctx: &Ctx) -> Result<Hub> {
         let base = normalize_url(&ctx.settings.hub_url).context("no hub address")?;
-        let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… on the Computers page")?;
+        let token = match token(ctx) {
+            Some(t) => t,
+            None if needs_rejoin(ctx) => bail!("{REJOIN}: Join with a code… on the Computers page (hrm hub join)"),
+            None => bail!("this computer has not joined the hub yet: Join with a code… on the Computers page"),
+        };
         Hub::at(&base, &token)
     }
 
@@ -275,7 +288,10 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
 pub fn invite(ctx: &Ctx) -> Result<Value> { Hub::open(ctx)?.post_json("/v1/invite", &json!({})) }
 
 /// A one-use code for a phone to join through the hub, and the phone's mailbox there: `{code, phone_id, expires_at}`.
-pub fn phone_invite(ctx: &Ctx) -> Result<Value> { Hub::open(ctx)?.post_json("/v1/phones/invite", &json!({})) }
+pub fn phone_invite(ctx: &Ctx) -> Result<Value> {
+    if !ctx.settings.phones_via_hub { bail!("phones through the hub are off (experimental): pair the phone directly, or turn on phones_via_hub"); }
+    Hub::open(ctx)?.post_json("/v1/phones/invite", &json!({}))
+}
 
 /// A phone's token and mailbox gone from the hub (already gone counts).
 pub fn delete_phone(ctx: &Ctx, mailbox: &str) -> Result<()> { Hub::open(ctx)?.delete(&format!("/v1/phones/{mailbox}")) }
@@ -459,7 +475,8 @@ pub fn status(ctx: &Ctx) -> Value {
     let devices: i64 = ctx.db.read(|c| Ok(c.query_row("select count(*) from peers where transport='hub'", [], |r| r.get(0))?)).unwrap_or(0);
     let joined = token(ctx).is_some() && !ctx.settings.hub_url.is_empty();
     let last = kv("computers:last").and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(Value::Null);
-    json!({"url": ctx.settings.hub_url, "joined": joined, "devices": if joined { devices + 1 } else { 0 },
+    let rejoin = ctx.settings.sync_mode == "hub" && needs_rejoin(ctx);
+    json!({"url": ctx.settings.hub_url, "joined": joined, "rejoin": rejoin, "rejoin_text": if rejoin { json!(REJOIN) } else { Value::Null }, "devices": if joined { devices + 1 } else { 0 },
         "last_push": kv("hub:last_push").and_then(|v| v.parse::<i64>().ok()), "last_pull": kv("hub:last_pull").and_then(|v| v.parse::<i64>().ok()),
         "ws": kv("hub:ws").as_deref() == Some("1"), "error": if ctx.settings.sync_mode == "hub" { last["error"].clone() } else { Value::Null },
         "ring": has_ring(ctx), "ring_shown": kv("ring:shown").as_deref() != Some("0")})

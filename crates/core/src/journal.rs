@@ -563,7 +563,7 @@ pub fn status(ctx: &Ctx) -> Result<Value> {
 }
 
 /// Change the Computers settings from `{device_name?, sync_mode?, sync_folder?, sync_transcripts?, sync_presence?,
-/// direct_connection?, listen_port?}`, saved and reopened so the journal follows the mode; turning sync on queues
+/// direct_connection?, phones_via_hub?, listen_port?}`, saved and reopened so the journal follows the mode; turning sync on queues
 /// a backfill for the next round.
 pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
     let mut ctx = Ctx::open_at(data, home)?;
@@ -585,6 +585,7 @@ pub fn configure(data: &Path, home: &Path, a: &Value) -> Result<Ctx> {
     if let Some(b) = a["sync_transcripts"].as_bool() { s.sync_transcripts = b; }
     if let Some(b) = a["sync_presence"].as_bool() { s.sync_presence = b; }
     if let Some(b) = a["direct_connection"].as_bool() { s.direct_connection = b; }
+    if let Some(b) = a["phones_via_hub"].as_bool() { s.phones_via_hub = b; }
     if let Some(p) = a["listen_port"].as_i64() {
         if !(0..=65535).contains(&p) { bail!("the port is a number up to 65535, or 0 to pick one"); }
         s.listen_port = p as u16;

@@ -194,6 +194,13 @@ POST /c1/actions
 
 ## Contract: the hub, for phones
 
+**Experimental, and off.** The hub mailbox ships switched off: the desktop setting `phones_via_hub` (default false,
+`configure {phones_via_hub}`) gates everything phone-related on the hub on the desktop side. Off, the desktop sends
+the hub no phone invite, runs no mailbox pass and sends no snapshot; only a deletion already owed there (a phone
+paired through the hub while it was on, revoked since) is still sent. Direct pairing, the push relay and the
+computers' own sync through the hub work as before, on or off. What follows is the contract as built; its hardening
+before it is turned on by default is WP-M5b below.
+
 - `POST /v1/phones/invite` (a joined computer's token; the admin owns no phone) → `{code, phone_id, expires_at}`: a
   one-use six-digit code for ten minutes, and the phone's id on the hub (`ph-<hex>`, one per invite: a phone paired
   with two computers has two mailboxes). No live invite holds the same digits, a computer's or a phone's. The computer
@@ -298,7 +305,10 @@ POST /c1/actions
   A and cleaned up while this computer joins hub B sends A its own token, never B's, with no moment in between where
   the two disagree. A token kept by a version before, under the computer alone (1.13 kept no record of its hub), is
   used only when this branch recorded the hub it was for and that hub is the one asked: otherwise there is no token,
-  and the computer joins its hub afresh (an upgraded 1.13 desktop on the hub joins once more). A join forgets that
+  and the computer joins its hub afresh. An upgraded 1.13 desktop on a hub joins once more: nothing it kept says
+  which hub issued its token (an interrupted 1.13 join could leave one hub's token beside another's address), so it
+  is never guessed. The hub status says `rejoin` with "Join your hub again to keep syncing", shown on the Computers
+  page and by `hrm hub status`, and the sync round's error says the same. A join forgets that
   record only once the old token is really gone. An enrollment keeps the hub it was paired through (`phones.hub_url`): only that hub serves it,
   and only that hub's answer settles its deletion. An enrollment with no hub recorded can only come from this branch
   before it kept one (nothing released has hub enrollments): it is served by no hub and its deletion is owed to none,
@@ -348,7 +358,27 @@ Phases 1 and 2 can overlap once the `/c1` contract is fixed: the app builds agai
 
 Wave 2: WP-M4 the Flutter app (its own repository), WP-M5 hub mailbox (`crates/hub/**`, `crates/core/src/sync/hub.rs`),
 WP-M6 push relay (`crates/push-relay/**`, `deploy/push-relay/**`), WP-M7 native widgets (the widget targets in the app's repository),
-WP-M8 phone Reply and Stop.
+WP-M8 phone Reply and Stop, WP-M5b hub mailbox hardening.
+
+**WP-M5b hub mailbox hardening** (`crates/core/src/companion/mailbox.rs`, `crates/companion-proto/src/mailbox.rs`)
+makes the experimental mailbox fit to be turned on by default. Its inputs are the open findings of the sixth review
+of WP-M5:
+
+- **Lease takeover against a recorded outcome.** A drainer can dispatch an answer and stop before recording its
+  decision; once its lease lapses, the next holder decides again, and with Control withdrawn meanwhile it refuses
+  (403) before looking at the action's own receipt, and records that. The request was answered once, but the phone is
+  told it was refused. The next holder must reconcile the slot with the durable action record before it decides, and
+  the decision's write must check that its writer still holds the lease.
+- **Fetch rotation per page.** With a listing resumed one page per pass, the rotating share moves on by the same step
+  each pass, so on a page that comes back every few passes the same subset is picked each time: a valid answer among
+  the rest is never fetched. Track fetch progress per resumed page, or rotate over the outstanding slots gathered
+  across passes.
+- **Handset pruning of resumed listings.** The phone lets go of handled slots below the first slot of a listing that
+  reached the end; after a resumed listing that slot is only the oldest of the last part, so earlier receipts are
+  read again (harmless today, but not intended).
+- **Handset listing budget.** The phone's six-second listing share is checked only between calls, so one slow listing
+  call can take the whole look and leave nothing for fetching; the look's ten seconds are not enforced around each
+  awaited call either.
 
 **WP-M8 phone Reply and Stop** gets its own design before any code; wave 1's five reviews tried to bolt it onto the
 answer path and taught these inputs:

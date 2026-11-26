@@ -333,7 +333,7 @@ function syncChoices(c) {
       <span class="mono b-command" title="${esc(c.folder || '')}">${esc(c.folder || 'No folder chosen yet')}</span>
       <div class="page-actions"><button class="btn-secondary" data-act="firstrun-folder" data-testid="firstrun-folder">Choose folder…</button></div></div>
     <div class="b-sync-choice ${hubOn ? 'active' : ''}"><b>A hub you host ${hubOn ? inUse : ''}</b><span class="muted">${WAYS.hub}</span>
-      <span class="mono b-command" title="${esc(hub.url || '')}">${esc(hub.url || 'Not joined yet')}</span>
+      <span class="mono b-command" title="${esc(hub.url || '')}">${esc(hub.url || 'Not joined yet')}</span>${hub.rejoin ? `<span class="b-warn" data-testid="hub-rejoin">${esc(hub.rejoin_text)}</span>` : ''}
       <div class="page-actions"><button class="btn-secondary" data-act="firstrun-hub" data-testid="firstrun-hub">Join with a code…</button></div></div></div>`;
 }
 

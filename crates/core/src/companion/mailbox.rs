@@ -260,6 +260,8 @@ fn reconcile(ctx: &Ctx) -> Result<()> {
 pub fn pass(ctx: &Ctx) -> Result<()> {
     reconcile(ctx)?;
     retry_deletes(ctx);
+    // experimental, off unless chosen: nothing more of phones goes to the hub than a deletion already owed
+    if !ctx.settings.phones_via_hub { return Ok(()); }
     let rows = ctx.db.read(|c| Ok(enrolled(c, None, &ctx.settings.hub_url)?))?;
     if rows.is_empty() { return Ok(()); }
     let hub = Hub::open(ctx)?;

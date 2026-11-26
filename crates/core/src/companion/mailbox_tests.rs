@@ -52,6 +52,8 @@ fn world() -> World {
     let (data, home) = (dir.path().join("desk"), dir.path().join("home"));
     let mut ctx = Ctx::open_at(&data, &home).unwrap();
     ctx.settings.device_name = "Desk".into();
+    // these tests are the hub mailbox's: switched on, as an owner trying it would
+    ctx.settings.phones_via_hub = true;
     ctx.save_settings().unwrap();
     let ctx = crate::sync::hub::join(&Ctx::open_at(&data, &home).unwrap(), &url, None, Some(ADMIN)).unwrap();
     World { rt, _hub: handle, hub_dir, url, ctx: Arc::new(ctx), _dir: dir }
@@ -980,4 +982,58 @@ fn r5_the_published_outcome_is_what_reached_the_session() {
     let ran = ask_state(&w.ctx, &ask).0 == "answered";
     assert_eq!(told.len(), 1, "{told:?} (the second drainer decided: {second_decided})");
     assert_eq!(told[0] == "accepted", ran, "the phone was told {told:?} while the session was {}", if ran { "answered" } else { "not answered" });
+}
+
+// ---------- the hub mailbox off (the default) ----------
+
+/// Off, the default: no call of a phone's ever reaches the hub (an invite, a mailbox pass, a snapshot), while the
+/// computers' own sync through it goes on as before. On, the same enrollment is served there.
+#[test]
+fn r7_with_phones_via_hub_off_no_phone_call_reaches_the_hub_and_sync_goes_on() {
+    let w = world();
+    let (url_p, seen) = proxy(&w, &w.url);
+    let on = Arc::new(crate::sync::hub::join(&w.ctx, &url_p, None, Some(ADMIN)).unwrap());
+    let _forget = Forget(vec![crate::sync::hub::token_target_of(&on)]);
+    let me = PhoneIdentity::generate().unwrap();
+    crate::phones::add_with(&on, &companion_proto::pairing::PhonePayload::of(&me, "Pixel 9", "android").unwrap(), Grants::default(), Some("ph-experiment"), None).unwrap();
+    // no such mailbox on the hub: the pass fails there, after it asked
+    let _ = pass(&on);
+    assert!(String::from_utf8_lossy(&seen.lock().unwrap()).contains("/v1/mail/ph-experiment/"), "on: the mailbox is served");
+    let off = Arc::new(crate::journal::configure(&on.data, &on.home, &json!({"phones_via_hub": false})).unwrap());
+    assert!(!off.settings.phones_via_hub);
+    seen.lock().unwrap().clear();
+    for _ in 0..3 { pass(&off).unwrap(); }
+    assert!(crate::sync::hub::phone_invite(&off).is_err());
+    assert!(pair_start(off.clone(), Arc::new(|_: &str, _| {})).is_err());
+    crate::sync::hub::round(&off).unwrap();
+    let sent = String::from_utf8_lossy(&seen.lock().unwrap()).to_string();
+    assert!(!sent.contains("/v1/mail/") && !sent.contains("/v1/phones/"), "off, a phone call reached the hub: {sent}");
+    assert!(sent.contains("/v1/devices"), "the computers' sync through the hub goes on");
+}
+
+/// The default is off.
+#[test]
+fn r7_phones_via_hub_is_off_by_default() { assert!(!crate::ctx::Settings::default().phones_via_hub); }
+
+/// A 1.13 desktop on hub A, its token kept under the computer alone, its settings naming A: it is asked to join
+/// again, and its old token is never sent (to A or anyone).
+#[test]
+fn r7_a_legacy_token_asks_for_a_join_and_is_never_sent() {
+    let w = world();
+    let (url_a, seen) = proxy(&w, &w.url);
+    let dir = tempfile::tempdir().unwrap();
+    let (data, home) = (dir.path().join("d113"), dir.path().join("h113"));
+    let mut c = Ctx::open_at(&data, &home).unwrap();
+    let legacy = crate::sync::hub::token_target(&c.settings.device_id);
+    let _forget = Forget(vec![legacy.clone()]);
+    crate::secrets::write(&legacy, "hrm", b"legacy-token-113").unwrap();
+    (c.settings.sync_mode, c.settings.hub_url) = ("hub".into(), url_a.clone());
+    c.save_settings().unwrap();
+    let c = Ctx::open_at(&data, &home).unwrap();
+    assert!(crate::sync::hub::token(&c).is_none());
+    let st = crate::sync::hub::status(&c);
+    assert_eq!((st["joined"].as_bool(), st["rejoin"].as_bool(), st["rejoin_text"].as_str()), (Some(false), Some(true), Some(crate::sync::hub::REJOIN)));
+    let e = crate::sync::hub::round(&c).unwrap_err();
+    assert!(format!("{e:#}").contains(crate::sync::hub::REJOIN), "{e:#}");
+    assert!(!String::from_utf8_lossy(&seen.lock().unwrap()).contains("legacy-token-113"));
 }
