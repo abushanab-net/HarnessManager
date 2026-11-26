@@ -75,6 +75,11 @@ impl crate::PhoneIdentity {
 
     /// Opened by this phone: sealed to it and signed by `from`.
     pub fn open_from(&self, from: &str, s: &Sealed) -> Result<Vec<u8>> { open_from(&self.x25519_secret(), from, s) }
+
+    /// A mailbox message sealed to this phone (`mailbox::open_mail` with its own secret).
+    pub fn open_mail(&self, from: &str, mailbox: &str, enrollment: &str, dir: &str, seq: i64, bytes: &[u8]) -> Result<serde_json::Value> {
+        crate::mailbox::open_mail(&self.x25519_secret(), from, mailbox, enrollment, dir, seq, bytes)
+    }
 }
 
 #[cfg(test)]

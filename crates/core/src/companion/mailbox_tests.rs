@@ -168,10 +168,10 @@ fn a_phone_answers_a_request_through_the_hub_within_its_grants_and_is_cut_off_wh
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{next}", j.mailbox), Some(sealed.to_string().into_bytes())), 204);
     let moved = mailbox::seal_mail(me.signing_key(), x, &j.mailbox, desk.enrollment.as_deref().unwrap(), "up", next + 1, &body).unwrap();
     assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{}", j.mailbox, next + 2), Some(moved)), 204);
-    // both looked at, neither moving the cursor the computer keeps
-    eventually("both are read", || (super::mailbox::was_skipped(&j.mailbox, next) && super::mailbox::was_skipped(&j.mailbox, next + 2)).then_some(()));
-    let k = format!("mail:{}:up", j.mailbox);
-    assert!(w.ctx.db.kv_get(&k).unwrap().and_then(|s| s.parse::<i64>().ok()) < Some(next));
+    // both fetched again and again by the worker, neither ever handled
+    std::thread::sleep(Duration::from_millis(1000));
+    let seen = |seq: i64| w.ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_mail_seen where mailbox = ? and seq = ?", rusqlite::params![j.mailbox, seq], |r| r.get::<_, i64>(0))?)).unwrap();
+    assert_eq!((seen(next), seen(next + 2)), (0, 0));
     assert_eq!(ask_state(&w.ctx, &ask2).0, "open", "neither reached the session");
     assert_eq!(w.rt.block_on(m.receipt("t-1")).unwrap(), None, "the computer never took it");
 
@@ -327,23 +327,6 @@ fn an_approval_not_signed_by_the_computer_is_refused() {
     assert!(format!("{e:#}").contains("not signed by the computer"), "{e:#}");
 }
 
-/// #6: one pass reads a bounded number of one phone's messages; the rest wait for the next.
-#[test]
-fn one_pass_reads_a_bounded_number_of_a_phones_messages() {
-    let w = world();
-    let me = PhoneIdentity::generate().unwrap();
-    let (j, desk, _m) = paired(&w, &me, Grants::default());
-    pass(&w.ctx).unwrap();
-    let k = format!("mail:{}:up", j.mailbox);
-    let cursor = || w.ctx.db.kv_get(&k).unwrap().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
-    let before = cursor();
-    for i in 0..25 { put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": format!("b-{i}"), "query": format!("q{i}")})); }
-    pass(&w.ctx).unwrap();
-    assert_eq!(cursor(), before + 20);
-    pass(&w.ctx).unwrap();
-    assert_eq!(cursor(), before + 25);
-}
-
 /// #7: a deletion the hub could not do is kept and done later, after the phone was paired again too, and its
 /// acknowledgement lands on the enrollment it was owed for, not on the one after it.
 #[test]
@@ -372,17 +355,16 @@ fn a_message_claimed_when_the_computer_stopped_is_answered_by_the_next_pass() {
     let w = world();
     let me = PhoneIdentity::generate().unwrap();
     let (j, desk, m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
-    // the phone's word in slot 3 read first, so the stop lands on the action's own claim
+    // the phone's word in slot 3 read first, so the stop lands on the action's own slot
     pass(&w.ctx).unwrap();
     let (run, ask, v) = waiting(&w.ctx, 60_000);
     put_act(&w, &j, &me, &desk, answer(&run, &ask, v, "s-1"));
-    let k = format!("mail:{}:up", j.mailbox);
-    let before = w.ctx.db.kv_get(&k).unwrap();
     super::mailbox::STOP_AFTER_CLAIM.with(|c| c.set(true));
     assert!(pass(&w.ctx).is_err());
-    let _ = before;
-    assert_eq!(kept_count(&w.ctx), 1, "stopped after the action's slot was claimed");
-    assert_eq!((ask_state(&w.ctx, &ask).0.as_str(), actions_named(&w.ctx, "s-1")), ("open", 0), "and before its reservation");
+    let slot = up_max(&w, &j);
+    let handled = w.ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_mail_seen where mailbox = ? and seq = ?", rusqlite::params![j.mailbox, slot], |r| r.get::<_, i64>(0))?)).unwrap();
+    assert_eq!((handled, actions_named(&w.ctx, "s-1")), (0, 1), "stopped after the dispatch, before its record: the slot is not handled");
+    // fetched again and decided again: the action contract keeps it to its one dispatch
     pass(&w.ctx).unwrap();
     assert_eq!(ask_state(&w.ctx, &ask), ("answered".into(), "allow".into()));
     let _desk = desk_loop(&w.ctx);
@@ -414,7 +396,14 @@ fn put_sealed(w: &World, j: &HubJoining, me: &PhoneIdentity, desk: &DesktopPaylo
     assert_eq!(raw(w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(m)), 204);
 }
 
-fn kept_count(ctx: &Ctx) -> i64 { ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_mail_in", [], |r| r.get(0))?)).unwrap() }
+fn kept_count(ctx: &Ctx) -> i64 { ctx.db.read(|c| Ok(c.query_row("select count(*) from phone_mail_seen where sent = 0", [], |r| r.get(0))?)).unwrap() }
+
+/// Forgets these credentials when the test ends, however it ends.
+struct Forget(Vec<String>);
+
+impl Drop for Forget {
+    fn drop(&mut self) { for t in &self.0 { let _ = crate::secrets::delete(t); } }
+}
 
 /// Another hub on loopback.
 fn second_hub(w: &World) -> (String, axum_server::Handle<SocketAddr>, tempfile::TempDir) {
@@ -433,6 +422,7 @@ fn a_revocation_is_settled_only_by_the_hub_the_phone_was_paired_through() {
     let (j, _desk, _m) = paired(&w, &me, Grants::default());
     let (url_b, _hb, _db) = second_hub(&w);
     let ctx_b = Arc::new(crate::sync::hub::join(&w.ctx, &url_b, None, Some(ADMIN)).unwrap());
+    let _forget = Forget(vec![crate::sync::hub::token_target_of(&ctx_b)]);
     let r = crate::phones::revoke(&ctx_b, &me.id).unwrap();
     assert_eq!(r["acks"]["hub"], false, "hub B cannot settle a mailbox on hub A");
     pass(&ctx_b).unwrap();
@@ -486,23 +476,6 @@ fn a_failed_enrollment_read_keeps_the_claimed_message() {
     let _ = pass(&w.ctx);
     pass(&w.ctx).unwrap();
     assert_eq!(ask_state(&w.ctx, &ask), ("answered".into(), "allow".into()), "the claimed message was answered on the next pass");
-}
-
-/// P1: a slot the hub fills with something that does not open, numbered high, does not move the cursor past the
-/// phone's real messages below it.
-#[test]
-fn a_slot_that_does_not_open_does_not_move_the_cursor() {
-    let w = world();
-    let me = PhoneIdentity::generate().unwrap();
-    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
-    pass(&w.ctx).unwrap();
-    let hub_db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
-    hub_db.execute("insert into mail(phone, dir, seq, at, bytes, body) values(?, 'up', 500, ?, 2, x'7b7d')", rusqlite::params![j.mailbox, crate::util::now_ms()]).unwrap();
-    pass(&w.ctx).unwrap();
-    let (run, ask, v) = waiting(&w.ctx, 60_000);
-    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "c-1")}));
-    pass(&w.ctx).unwrap();
-    assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
 }
 
 /// P2: replies that keep failing do not let the claimed backlog grow past one pass's worth; a revoked phone's
@@ -634,8 +607,10 @@ fn a_hub_never_receives_another_hubs_token() {
     eventually("the pairing ends", || p.ended().then_some(()));
     let sent = String::from_utf8_lossy(&seen.lock().unwrap()).to_string();
     assert!(!sent.contains(&tok_b), "hub A was sent hub B's token");
-    let owed: Vec<String> = ctx_b.db.read(|c| Ok(c.prepare("select hub_url from phone_hub_deletes")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).unwrap();
-    assert_eq!(owed, std::slice::from_ref(&url_a), "still owed to A");
+    let _forget = Forget(vec![crate::sync::hub::token_target_of(&ctx_a), crate::sync::hub::token_target_of(&ctx_b)]);
+    // A's own token, kept under A's address, settled what was owed to A
+    let owed: i64 = ctx_b.db.read(|c| Ok(c.query_row("select count(*) from phone_hub_deletes", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(owed, 0, "A deleted its invite, asked with its own token");
 }
 
 /// P1: an enrollment whose hub is not known (paired by this branch before it kept the hub) is never settled by the
@@ -648,6 +623,7 @@ fn an_enrollment_of_unknown_hub_is_never_settled_by_another() {
     w.ctx.db.with(|c| Ok(c.execute("update phones set hub_url = null where phone_id = ?", [&me.id])?)).unwrap();
     let (url_b, _hb, _db) = second_hub(&w);
     let ctx_b = Arc::new(crate::sync::hub::join(&w.ctx, &url_b, None, Some(ADMIN)).unwrap());
+    let _forget = Forget(vec![crate::sync::hub::token_target_of(&ctx_b)]);
     assert_eq!(crate::phones::revoke(&ctx_b, &me.id).unwrap()["acks"]["hub"], false);
     pass(&ctx_b).unwrap();
     assert_eq!(crate::phones::list(&ctx_b).unwrap()[0]["acks"]["hub"], false, "hub B's 'no such phone' settles nothing");
@@ -671,45 +647,197 @@ fn a_message_of_an_earlier_enrollment_on_the_same_mailbox_is_refused() {
     assert_eq!(actions_named(&w.ctx, "old-1"), 0);
 }
 
-/// P1: an action whose own slot the hub served wrong for a while is read once it serves it right, though a later
-/// message was read meanwhile; the cursor kept waits below it.
+// ---------- the redesign: a handled set, no cursor ----------
+
+fn slot_body(w: &World, j: &HubJoining, seq: i64) -> Vec<u8> {
+    let db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    db.query_row("select body from mail where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, seq], |r| r.get(0)).unwrap()
+}
+
+fn set_slot(w: &World, j: &HubJoining, seq: i64, body: &[u8]) {
+    let db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    db.execute("insert or replace into mail(phone, dir, seq, at, bytes, body) values(?, 'up', ?, ?, ?, ?)", rusqlite::params![j.mailbox, seq, crate::util::now_ms(), body.len() as i64, body]).unwrap();
+}
+
+/// A slot the hub serves unreadable for a while, then right: the action in it is taken on the next pass.
 #[test]
-fn an_action_survives_its_slot_being_unavailable_for_a_while() {
+fn r4_a_slot_unreadable_for_a_while_then_readable_is_taken() {
     let w = world();
     let me = PhoneIdentity::generate().unwrap();
     let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
     pass(&w.ctx).unwrap();
     let (run, ask, v) = waiting(&w.ctx, 120_000);
-    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "late-1")}));
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "u-1")}));
     let slot = up_max(&w, &j);
-    let hub_db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
-    let real: Vec<u8> = hub_db.query_row("select body from mail where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, slot], |r| r.get(0)).unwrap();
-    hub_db.execute("update mail set body = x'7b7d' where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, slot]).unwrap();
+    let real = slot_body(&w, &j, slot);
+    set_slot(&w, &j, slot, b"{}");
     pass(&w.ctx).unwrap();
     put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": "x", "query": "q1"}));
     pass(&w.ctx).unwrap();
-    let k = format!("mail:{}:up", j.mailbox);
-    assert!(w.ctx.db.kv_get(&k).unwrap().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0) < slot, "the kept cursor stays below the unread slot");
-    hub_db.execute("update mail set body = ? where phone = ? and dir = 'up' and seq = ?", rusqlite::params![real, j.mailbox, slot]).unwrap();
-    std::thread::sleep(Duration::from_millis(2200));
+    set_slot(&w, &j, slot, &real);
     pass(&w.ctx).unwrap();
     assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
 }
 
-/// Partly (#6): a pass fetches at most 20 slots of one phone, those that do not open included; a real message behind
-/// them is read by the next pass.
+/// A slot missing from one listing (a later one read meanwhile), then back: the action in it is taken.
 #[test]
-fn a_pass_fetches_at_most_twenty_slots_bad_ones_included() {
+fn r4_a_slot_missing_from_one_listing_then_back_is_taken() {
     let w = world();
     let me = PhoneIdentity::generate().unwrap();
     let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
     pass(&w.ctx).unwrap();
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "m-1")}));
+    let slot = up_max(&w, &j);
+    let real = slot_body(&w, &j, slot);
+    let db = rusqlite::Connection::open(w.hub_dir.path().join("hub.db")).unwrap();
+    db.execute("delete from mail where phone = ? and dir = 'up' and seq = ?", rusqlite::params![j.mailbox, slot]).unwrap();
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": "x", "query": "q1"}));
+    pass(&w.ctx).unwrap();
+    set_slot(&w, &j, slot, &real);
+    pass(&w.ctx).unwrap();
+    assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
+}
+
+/// A slot the hub made up high never hides the phone's real messages below it, pass after pass.
+#[test]
+fn r4_a_false_high_slot_never_hides_lower_ones() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    set_slot(&w, &j, 900, b"{}");
+    for i in 0..3 {
+        let (run, ask, v) = waiting(&w.ctx, 60_000);
+        put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, &format!("h-{i}"))}));
+        pass(&w.ctx).unwrap();
+        assert_eq!(ask_state(&w.ctx, &ask).0, "answered", "message {i} under the false slot");
+    }
+}
+
+/// A backlog bigger than one pass, behind an unreadable slot: an action at its end is taken within a few passes.
+#[test]
+fn r4_an_action_at_the_end_of_a_long_backlog_is_taken_within_a_few_passes() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
+    pass(&w.ctx).unwrap();
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": "x", "query": "first"}));
+    let bad = up_max(&w, &j);
+    set_slot(&w, &j, bad, b"{}");
+    for i in 0..150 { put_sealed(&w, &j, &me, &desk, json!({"kind": "receipt", "action_id": format!("b-{i}"), "query": format!("q{i}")})); }
+    let (run, ask, v) = waiting(&w.ctx, 120_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "end-1")}));
+    for _ in 0..5 { pass(&w.ctx).unwrap(); if ask_state(&w.ctx, &ask).0 == "answered" { return; } }
+    panic!("the action at the end was not taken within five passes");
+}
+
+/// A pass fetches at most twenty slots of one phone, those that do not open included.
+#[test]
+fn r4_a_pass_fetches_at_most_twenty_slots() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, _desk, _m) = paired(&w, &me, Grants::default());
+    pass(&w.ctx).unwrap();
     let start = up_max(&w, &j).max(3);
-    for seq in start + 1..=start + 20 { assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(b"{}".to_vec())), 204); }
-    let (run, ask, v) = waiting(&w.ctx, 60_000);
-    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, "behind-1")}));
+    for seq in start + 1..=start + 30 { assert_eq!(raw(&w, &j.token, reqwest::Method::PUT, &format!("/v1/mail/{}/up/{seq}", j.mailbox), Some(b"{}".to_vec())), 204); }
+    for _ in 0..3 {
+        super::mailbox::FETCHES.with(|c| c.set(0));
+        pass(&w.ctx).unwrap();
+        assert!(super::mailbox::FETCHES.with(|c| c.get()) <= 20);
+    }
+}
+
+/// The phone paired again on the same mailbox while a worker of the earlier pairing is still under way: that worker
+/// touches nothing of the new pairing's, and the new pairing's action is taken.
+#[test]
+fn r4_a_stale_worker_does_nothing_to_the_pairing_after_it() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: false });
     pass(&w.ctx).unwrap();
-    assert_eq!(ask_state(&w.ctx, &ask).0, "open", "twenty fetches were spent on the bad slots");
+    let (run1, ask1, v1) = waiting(&w.ctx, 60_000);
+    put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run1, &ask1, v1, "s-old")}));
+    let slot = up_max(&w, &j);
+    super::mailbox::FAIL_SEND.with(|c| c.set(1));
+    assert!(pass(&w.ctx).is_err(), "the earlier pairing's refusal is kept, not sent");
+    let (ctx, mb, me2, x) = (w.ctx.clone(), j.mailbox.clone(), me.clone(), desk.x25519.clone().unwrap());
+    let ask2_cell = Arc::new(std::sync::Mutex::new(String::new()));
+    let (cell, hub_dir) = (ask2_cell.clone(), w.hub_dir.path().to_path_buf());
+    super::mailbox::AFTER_KEPT_READ.with(|s| *s.borrow_mut() = Some(Box::new(move || {
+        // meanwhile: paired again on the same mailbox, with Control; the hub serves the slot again with an action of
+        // the new pairing, which a new worker claims and stops on
+        crate::phones::add_with(&ctx, &companion_proto::pairing::PhonePayload::of(&me2, "Pixel 9", "android").unwrap(), Grants { summaries: true, transcripts: true, control: true }, Some(&mb), None).unwrap();
+        let gen2: String = ctx.db.read(|c| Ok(c.query_row("select generation from phones where phone_id = ?", [&me2.id], |r| r.get(0))?)).unwrap();
+        let (run2, ask2, v2) = waiting(&ctx, 60_000);
+        *cell.lock().unwrap() = ask2.clone();
+        let m = mailbox::seal_mail(me2.signing_key(), &x, &mb, &gen2, "up", slot, &json!({"kind": "act", "action": answer(&run2, &ask2, v2, "s-new")})).unwrap();
+        let db = rusqlite::Connection::open(hub_dir.join("hub.db")).unwrap();
+        db.execute("update mail set body = ?, bytes = ? where phone = ? and dir = 'up' and seq = ?", rusqlite::params![m, m.len() as i64, mb, slot]).unwrap();
+        super::mailbox::STOP_AFTER_CLAIM.with(|c| c.set(true));
+        let _ = pass(&ctx);
+    })));
+    let _ = pass(&w.ctx);
+    super::mailbox::STOP_AFTER_CLAIM.with(|c| c.set(false));
+    let _ = pass(&w.ctx);
+    let _ = pass(&w.ctx);
+    let ask2 = ask2_cell.lock().unwrap().clone();
+    assert_eq!(ask_state(&w.ctx, &ask2).0, "answered", "the new pairing's action was lost to the old worker");
+    assert_eq!(ask_state(&w.ctx, &ask1).0, "open");
+}
+
+/// Two processes draining one phone's mail at once: the action runs once, and only one decision is published.
+#[test]
+fn r4_two_drainers_publish_one_decision() {
+    let w = world();
+    let me = PhoneIdentity::generate().unwrap();
+    let (j, desk, _m) = paired(&w, &me, Grants { summaries: true, transcripts: true, control: true });
     pass(&w.ctx).unwrap();
-    assert_eq!(ask_state(&w.ctx, &ask).0, "answered", "the next pass reads what is new before trying the bad slots again");
+    let other = Arc::new(Ctx::open_at(&w.ctx.data, &w.ctx.home).unwrap());
+    for round in 0..5 {
+        let (run, ask, v) = waiting(&w.ctx, 60_000);
+        let id = format!("two-{round}");
+        put_sealed(&w, &j, &me, &desk, json!({"kind": "act", "action": answer(&run, &ask, v, &id)}));
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let drains: Vec<_> = [w.ctx.clone(), other.clone()].into_iter().map(|c| { let g = gate.clone(); std::thread::spawn(move || { g.wait(); let _ = pass(&c); }) }).collect();
+        for d in drains { d.join().unwrap(); }
+        let _ = pass(&w.ctx);
+        assert_eq!(ask_state(&w.ctx, &ask).0, "answered");
+        assert_eq!(actions_named(&w.ctx, &id), 1);
+        // what the phone was told about it, read as the phone reads it
+        let list: Value = reqwest::blocking::Client::new().get(format!("{}/v1/mail/{}/down?limit=100", w.url, j.mailbox)).bearer_auth(&j.token).send().unwrap().json().unwrap();
+        let mut decisions = std::collections::BTreeSet::new();
+        for m in list["mail"].as_array().unwrap() {
+            let seq = m["seq"].as_i64().unwrap();
+            let b = reqwest::blocking::Client::new().get(format!("{}/v1/mail/{}/down/{seq}", w.url, j.mailbox)).bearer_auth(&j.token).send().unwrap().bytes().unwrap();
+            if let Ok(body) = me.open_mail(&desk.pubkey, &j.mailbox, desk.enrollment.as_deref().unwrap(), "down", seq, &b) {
+                if body["action_id"] == id.as_str() { decisions.insert(body["receipt"]["status"].to_string() + &body["receipt"]["detail"].to_string()); }
+            }
+        }
+        assert_eq!(decisions.len(), 1, "round {round}: decisions published {decisions:?}");
+    }
+}
+
+/// A hub switch while a pairing on hub A is open, the pairing's cleanup running in the middle of the join to B:
+/// each hub only ever receives its own token.
+#[test]
+fn r4_each_hub_receives_only_its_own_token_through_a_switch() {
+    let w = world();
+    let (url_a, seen_a) = proxy(&w, &w.url);
+    let ctx_a = Arc::new(crate::sync::hub::join(&w.ctx, &url_a, None, Some(ADMIN)).unwrap());
+    let tok_a = crate::sync::hub::token(&ctx_a).unwrap();
+    let p = pair_start(ctx_a.clone(), Arc::new(|_: &str, _| {})).unwrap();
+    let (url_b0, _hb, _db) = second_hub(&w);
+    let (url_b, seen_b) = proxy(&w, &url_b0);
+    crate::sync::hub::JOIN_SEAM.with(|s| *s.borrow_mut() = Some(Box::new(move || {
+        p.cancel();
+        let until = Instant::now() + Duration::from_secs(15);
+        while !p.ended() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+    })));
+    let ctx_b = crate::sync::hub::join(&ctx_a, &url_b, None, Some(ADMIN)).unwrap();
+    let tok_b = crate::sync::hub::token(&ctx_b).unwrap();
+    let _forget = Forget(vec![crate::sync::hub::token_target_of(&ctx_a), crate::sync::hub::token_target_of(&ctx_b)]);
+    let (a, b) = (String::from_utf8_lossy(&seen_a.lock().unwrap()).to_string(), String::from_utf8_lossy(&seen_b.lock().unwrap()).to_string());
+    assert!(!a.contains(&tok_b), "hub A was sent hub B's token");
+    assert!(!b.contains(&tok_a), "hub B was sent hub A's token");
 }

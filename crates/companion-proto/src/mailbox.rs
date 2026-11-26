@@ -53,10 +53,11 @@ pub fn open_mail(secret: &[u8; 32], from: &str, mailbox: &str, enrollment: &str,
     Ok(env["body"].clone())
 }
 
-/// The numbers of a listing to read, in order: within the hub's range (1 to 2^53), above `cursor`, each above the
-/// one before. A hub that lists an older message after a newer one, one twice, or one out of range, is not followed.
-pub fn ahead(list: &Value, cursor: i64) -> Vec<i64> {
-    let mut last = cursor;
+/// The numbers of a listing page, in order: within the hub's range (1 to 2^53), above `after` (where the page was
+/// asked from), each above the one before. A hub that lists an older message after a newer one, one twice, or one
+/// out of range, is not followed.
+pub fn ahead(list: &Value, after: i64) -> Vec<i64> {
+    let mut last = after;
     list["mail"].as_array().into_iter().flatten().filter_map(|m| m["seq"].as_i64()).filter(|s| (1..=1i64 << 53).contains(s))
         .filter(|&s| { let up = s > last; if up { last = s; } up }).collect()
 }
@@ -329,20 +330,21 @@ impl HubJoining {
     /// The mailbox client once approved, past the pairing's own messages.
     pub fn mailbox(&self, desk: &DesktopPayload) -> Result<Mailbox> {
         let m = Mailbox::new(&self.me, &self.hub_url, &self.token, &self.mailbox, desk.enrollment.as_deref().unwrap_or(""), &desk.pubkey, desk.x25519.as_deref().unwrap_or(""))?;
-        m.st.try_lock().expect("new").down_seen = 2;
+        // the pairing's own two messages are not the mailbox's
+        m.st.try_lock().expect("new").handled.extend([1, 2]);
         Ok(m)
     }
 }
 
 // ---------- the mailbox, as the direct client ----------
 
-/// The most messages one look reads, oldest first (after a long absence the next looks read on). One look also asks
-/// for at most `LOOK_PAGES` listings and lasts at most `LOOK_TIME`, whatever the hub answers.
-const READ_AT_MOST: i64 = 50;
-const LOOK_PAGES: usize = 5;
+/// One look lists the whole mailbox (at most `LOOK_PAGES` pages of 100: the hub keeps at most 1000 a direction) and
+/// fetches at most `READ_AT_MOST` of the slots it has not handled yet, within `LOOK_TIME`, whatever the hub answers.
+const READ_AT_MOST: usize = 50;
+const LOOK_PAGES: usize = 12;
 const LOOK_TIME: Duration = Duration::from_secs(10);
-/// The hub's own range of message numbers.
-const MAX_SEQ: i64 = 1 << 53;
+/// How many handled slots are remembered at most: more than the hub keeps.
+const HANDLED_AT_MOST: usize = 4000;
 /// How long an action or a receipt question waits for the computer's answer through the hub.
 const ANSWER_WAIT: Duration = Duration::from_secs(20);
 /// The computer sends a snapshot at least every five minutes: none received here for longer than this, one older
@@ -350,9 +352,8 @@ const ANSWER_WAIT: Duration = Duration::from_secs(20);
 pub const STALE_MS: i64 = 12 * 60_000;
 
 /// How fresh what the mailbox shows is: when the newest snapshot was taken (the computer's clock) and how long ago
-/// this phone received it (its own clock), when the hub last answered, how many of the computer's messages never
-/// arrived or were passed over, and whether it is stale. A hub can always withhold mail; this is how the phone sees
-/// it did.
+/// this phone received it (its own clock), when the hub last answered, how many listed messages are not read yet,
+/// and whether it is stale. A hub can always withhold mail; this is how the phone sees it did.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Freshness {
     pub snapshot_at: Option<i64>,
@@ -362,25 +363,25 @@ pub struct Freshness {
     pub stale: bool,
 }
 
-/// A slot that did not open, or was not there: tried again after 1, 2, 4 ... 60 s, and given up once it stayed so for
-/// ten minutes (longer than a phone's request window, so a real message the hub held back for a while is still read).
-struct Hole {
-    first: Instant,
-    tries: u32,
-    next: Instant,
+/// The slots of `unread` (oldest first) one look or pass fetches, at most `budget`: the newest half, so a message
+/// with a deadline is read at once, and the rest from a place that moves on each time (`turn`), so no slot waits
+/// for ever behind ones that never open.
+pub fn pick(unread: &[i64], budget: usize, turn: &mut usize) -> Vec<i64> {
+    if unread.len() <= budget { return unread.to_vec(); }
+    let newest = budget / 2;
+    let (rest, top) = unread.split_at(unread.len() - newest);
+    let mut out = top.to_vec();
+    out.extend((0..budget - newest).map(|i| rest[(*turn + i) % rest.len()]));
+    *turn = (*turn + budget - newest) % rest.len();
+    out
 }
-
-pub(crate) const HOLE_GIVE_UP: Duration = Duration::from_secs(600);
-
-fn backoff(tries: u32) -> Duration { Duration::from_secs(1u64 << tries.saturating_sub(1).min(6)).min(Duration::from_secs(60)) }
 
 #[derive(Default)]
 struct MailSt {
-    /// The cursor the app keeps: every slot up to it is read, or given up. It never passes a slot still being tried.
-    down_seen: i64,
-    /// Slots above the cursor that opened, and slots still being tried (the newest 1000 of these).
-    opened: std::collections::BTreeSet<i64>,
-    holes: std::collections::BTreeMap<i64, Hole>,
+    /// The slots down handled (read, and acted on): never read again. Kept by the app across restarts
+    /// (`handled`, `resume_handled`); the ones below the hub's oldest are let go.
+    handled: std::collections::BTreeSet<i64>,
+    turn: usize,
     snapshot: Option<Value>,
     snapshot_seq: i64,
     /// When the newest snapshot arrived, and when the hub last answered, by this phone's monotonic clock.
@@ -392,44 +393,17 @@ struct MailSt {
 }
 
 impl MailSt {
-    /// One message read from slot `seq`: when it opened, its body is kept (a snapshot newer than the one held) or
-    /// handed back as an answer; one that did not open becomes a hole, tried again later.
+    /// One message read from slot `seq`: when it opened, it is handled, and its body kept (a snapshot newer than the
+    /// one held) or handed back as an answer; one that did not open is simply read again on a later look.
     fn take(&mut self, seq: i64, opened: Result<Value>) -> Option<Value> {
-        if seq <= self.down_seen || self.opened.contains(&seq) { return None; }
-        let Ok(body) = opened else { self.dropped += 1; self.hole(seq); return None };
-        self.holes.remove(&seq);
-        self.opened.insert(seq);
+        if self.handled.contains(&seq) { return None; }
+        let Ok(body) = opened else { self.dropped += 1; return None };
+        self.handled.insert(seq);
         match body["kind"].as_str() {
             Some("snapshot") if seq > self.snapshot_seq => { (self.snapshot, self.snapshot_seq, self.snapshot_got) = (Some(body), seq, Some(Instant::now())); None }
             Some("receipt" | "refused") => Some(body),
             _ => None,
         }
-    }
-
-    fn hole(&mut self, seq: i64) {
-        let now = Instant::now();
-        let h = self.holes.entry(seq).or_insert(Hole { first: now, tries: 0, next: now });
-        h.tries += 1;
-        h.next = now + backoff(h.tries);
-        while self.holes.len() > 1000 { self.holes.pop_first(); }
-    }
-
-    /// A slot to look at now: never tried, or a hole whose wait is over.
-    fn due(&self, seq: i64) -> bool { self.holes.get(&seq).is_none_or(|h| Instant::now() >= h.next) }
-
-    /// The cursor moved over the slots listed in order, as long as each opened or was given up; slots never listed
-    /// between are counted as missed, and so is one given up.
-    fn advance(&mut self, listed: &[i64]) {
-        for &s in listed {
-            if s <= self.down_seen { continue; }
-            let given_up = self.holes.get(&s).is_some_and(|h| h.first.elapsed() >= HOLE_GIVE_UP);
-            if !self.opened.contains(&s) && !given_up { break; }
-            self.missed += (s - self.down_seen - 1) as u64 + u64::from(given_up);
-            self.down_seen = s;
-        }
-        let at = self.down_seen;
-        self.opened.retain(|s| *s > at);
-        self.holes.retain(|s, _| *s > at);
     }
 
     fn freshness(&self, now_ms: i64, now: Instant) -> Freshness {
@@ -485,45 +459,47 @@ impl Mailbox {
             st: Mutex::new(MailSt::default()), waiters: std::sync::Mutex::new(vec![]), next_waiter: Default::default() })
     }
 
-    /// The last message read from the computer that opened, for the app to keep, and to start from again
-    /// (`resume_from`, which never moves it back).
-    pub async fn down_seen(&self) -> i64 { self.st.lock().await.down_seen }
+    /// The slots down handled, for the app to keep, and to start from again (`resume_handled`).
+    pub async fn handled(&self) -> Vec<i64> { self.st.lock().await.handled.iter().copied().collect() }
 
-    pub async fn resume_from(&self, down_seen: i64) { let mut st = self.st.lock().await; st.down_seen = st.down_seen.max(down_seen.clamp(0, MAX_SEQ)); }
+    pub async fn resume_handled(&self, handled: &[i64]) { self.st.lock().await.handled.extend(handled.iter().copied().filter(|s| (1..=1i64 << 53).contains(s))); }
 
     /// Messages read that did not open (changed on the way, sealed by someone else, replayed): never used.
     pub async fn dropped(&self) -> u32 { self.st.lock().await.dropped }
 
     pub async fn freshness(&self) -> Freshness { self.st.lock().await.freshness(now_ms(), Instant::now()) }
 
-    /// Read what the computer left since the last look, oldest first: at most `READ_AT_MOST` fetches, `LOOK_PAGES`
-    /// listings and `LOOK_TIME`. A listing that brings nothing new ends the look, whatever it says of more. Slots that
-    /// did not open are tried again later; the cursor then moves over what is read.
+    /// Read what the computer left: the whole listing, then the slots not handled yet (at most `READ_AT_MOST`,
+    /// newest first and a share that moves on). A listing that brings nothing new ends the listing, whatever it says
+    /// of more. A slot that does not open, or is not there, is simply read again on a later look.
     pub async fn sync(&self) -> Result<()> {
         let until = Instant::now() + LOOK_TIME;
         let mut st = self.st.lock().await;
-        // oldest first from the cursor: the hub's word on where the newest is cannot be checked, so it is not followed
-        let mut after = st.down_seen;
-        let mut list = self.hub.list(&self.mailbox, "down", after).await?;
-        (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
-        let (mut read, mut listed) = (0, vec![]);
-        'pages: for _ in 0..LOOK_PAGES {
+        let (mut after, mut listed, mut whole) = (0, vec![], false);
+        for _ in 0..LOOK_PAGES {
+            if Instant::now() >= until { break; }
+            let list = self.hub.list(&self.mailbox, "down", after).await?;
+            (st.heard, st.heard_at) = (Some(Instant::now()), Some(now_ms()));
             let seqs = ahead(&list, after);
-            if seqs.is_empty() { break; }
-            for seq in seqs {
-                after = seq;
-                listed.push(seq);
-                if st.opened.contains(&seq) || !st.due(seq) { continue; }
-                if read >= READ_AT_MOST || Instant::now() >= until { break 'pages; }
-                read += 1;
-                let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { st.hole(seq); continue };
-                let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, &self.enrollment, "down", seq, &bytes);
-                if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
-            }
-            if list["more"] != true || Instant::now() >= until { break; }
-            list = self.hub.list(&self.mailbox, "down", after).await?;
+            let Some(&last) = seqs.last() else { whole = true; break };
+            after = last;
+            listed.extend(seqs);
+            if list["more"] != true { whole = true; break; }
         }
-        st.advance(&listed);
+        let unread: Vec<i64> = listed.iter().copied().filter(|s| !st.handled.contains(s)).collect();
+        let mut turn = st.turn;
+        let picked = pick(&unread, READ_AT_MOST, &mut turn);
+        st.turn = turn;
+        for seq in picked {
+            if Instant::now() >= until { break; }
+            let Some(bytes) = self.hub.get_mail(&self.mailbox, "down", seq).await? else { continue };
+            let opened = open_mail(&self.me.x25519_secret(), &self.desk_pubkey, &self.mailbox, &self.enrollment, "down", seq, &bytes);
+            if let Some(answer) = st.take(seq, opened) { hand(&mut self.waiters.lock().unwrap_or_else(|e| e.into_inner()), &answer); }
+        }
+        st.missed = listed.iter().filter(|s| !st.handled.contains(s)).count() as u64;
+        // what the hub no longer keeps is let go: the whole listing says where its oldest is
+        if let (true, Some(&oldest)) = (whole, listed.first()) { st.handled.retain(|s| *s >= oldest || *s <= 2); }
+        while st.handled.len() > HANDLED_AT_MOST { st.handled.pop_first(); }
         Ok(())
     }
 
@@ -660,26 +636,34 @@ mod tests {
     fn a_public_or_mapped_public_peer_is_not_private() {
         assert!(private_ip("127.0.0.1".parse().unwrap()) && !private_ip("93.184.216.34".parse().unwrap()) && !private_ip("::ffff:8.8.8.8".parse().unwrap()));
     }
-
-    /// #8: a listing that goes back, or repeats, is not followed; the cursor only moves up and jumped slots are missed.
+    /// A listing that goes back or repeats is not followed; a slot handled once is not handled again, one that did not
+    /// open is not handled at all, and an older snapshot does not replace a newer one.
     #[test]
-    fn the_cursor_only_moves_up() {
+    fn a_slot_is_handled_once_and_only_when_it_opened() {
         assert_eq!(ahead(&json!({"mail": [{"seq": 5}, {"seq": 3}, {"seq": 5}, {"seq": 7}]}), 2), [5, 7]);
-        let mut st = MailSt { down_seen: 4, ..Default::default() };
+        let mut st = MailSt::default();
         st.take(6, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 10}})));
         st.take(5, Ok(json!({"kind": "snapshot", "hello": {"observed_at": 1}})));
-        st.advance(&[5, 6]);
-        assert_eq!((st.down_seen, st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64()), (6, Some(10)), "an older snapshot is not taken back");
-        // one that does not open moves nothing the app keeps, nor do the ones after it
+        assert_eq!(st.snapshot.as_ref().unwrap()["hello"]["observed_at"].as_i64(), Some(10), "an older snapshot is not taken back");
         st.take(7, Err(anyhow!("changed")));
-        st.take(8, Ok(json!({"kind": "x"})));
-        st.advance(&[7, 8]);
-        assert_eq!((st.down_seen, st.holes.contains_key(&7), st.dropped), (6, true, 1));
-        // a slot never listed between two read ones is missed
-        st.take(7, Ok(json!({"kind": "x"})));
-        st.take(10, Ok(json!({"kind": "x"})));
-        st.advance(&[7, 8, 10]);
-        assert_eq!((st.down_seen, st.missed), (10, 1));
+        assert_eq!((st.handled.contains(&7), st.dropped), (false, 1), "read again on a later look");
+        assert!(st.take(8, Ok(json!({"kind": "receipt", "action_id": "a"}))).is_some());
+        assert!(st.take(8, Ok(json!({"kind": "receipt", "action_id": "a"}))).is_none(), "handled once");
+    }
+
+    /// Within a few turns every unread slot is picked, the newest each time.
+    #[test]
+    fn every_unread_slot_is_picked_within_a_few_turns() {
+        let unread: Vec<i64> = (1..=100).collect();
+        let (mut turn, mut seen) = (0, std::collections::BTreeSet::new());
+        for _ in 0..9 {
+            let p = pick(&unread, 20, &mut turn);
+            assert_eq!(p.len(), 20);
+            assert!(p.contains(&100));
+            seen.extend(p);
+        }
+        assert_eq!(seen.len(), 100);
+        assert_eq!(pick(&[3, 4], 20, &mut turn), [3, 4]);
     }
 
     /// #8: a snapshot that is not renewed, or a hub that stops answering, reads as stale.
@@ -772,7 +756,7 @@ mod hostile_hub {
         let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
         let (url, asked) = hub(f).await;
         let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
-        m.resume_from(2).await;
+        m.resume_handled(&[1, 2]).await;
         (m, me, desk, asked)
     }
 
@@ -782,19 +766,6 @@ mod hostile_hub {
         let (m, _, _, _) = mailbox(Arc::new(|_, _, _| ok(json!({"max": 5, "mail": [], "more": true})))).await;
         let r = tokio::time::timeout(Duration::from_secs(10), m.sync()).await;
         assert!(r.is_ok(), "sync never returned");
-    }
-
-    /// P1: a slot that does not open, or a number out of range, never moves the cursor the app keeps.
-    #[tokio::test]
-    async fn a_slot_that_does_not_open_does_not_move_the_cursor() {
-        let (m, _, _, asked) = mailbox(Arc::new(|_, p, _| {
-            if p.contains("?after=") { return ok(json!({"max": 9, "mail": [{"seq": 1i64 << 60}, {"seq": 9}], "more": false})); }
-            (200, b"{\"v\":1}".to_vec())
-        })).await;
-        m.sync().await.unwrap();
-        assert_eq!(m.down_seen().await, 2, "the app's cursor stayed below what did not authenticate");
-        assert_eq!(m.dropped().await, 1);
-        assert!(!asked.lock().unwrap().iter().any(|a| a.contains(&(1i64 << 60).to_string())), "a number out of range is not asked for");
     }
 
     /// P2: up slot 3 is the pairing's acknowledgement: the mailbox's own messages start at 4.
@@ -829,7 +800,7 @@ mod hostile_hub {
             (200, sealed.clone())
         })).await;
         let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
-        m.resume_from(2).await;
+        m.resume_handled(&[1, 2]).await;
         let a: Action = serde_json::from_value(json!({"action_id": "a", "kind": "answer", "target": {"run": "r", "ask_id": "q"}, "state_version": 1, "expires_at": 9, "payload": {}})).unwrap();
         let (r1, r2) = tokio::time::timeout(Duration::from_secs(30), async { tokio::join!(m.act(&a), m.act(&a)) }).await.unwrap();
         assert_eq!((r1.unwrap().status, r2.unwrap().status), (crate::api::Status::Accepted, crate::api::Status::Accepted));
@@ -872,49 +843,60 @@ mod hostile_hub {
         assert!(ws.lock().unwrap().iter().find(|w| w.id == 2).is_some_and(|w| w.answer.is_some()), "the second call lost its answer");
     }
 
-    /// P1: a slot the hub made up high does not hide the computer's real message below it, listed later.
-    #[tokio::test]
-    async fn a_made_up_high_slot_does_not_hide_a_real_one_below_it() {
-        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
-        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
-        let looks = Arc::new(StdMutex::new(0));
+    /// A hub answering listings from `lists` in turn (the last one again after) and slots from `slots`, each slot's
+    /// bodies in turn (the last again after).
+    async fn scripted(lists: Vec<Value>, slots: Vec<(i64, Vec<Vec<u8>>)>) -> String {
+        let (lists, slots) = (Arc::new(StdMutex::new(lists)), Arc::new(StdMutex::new(slots)));
         let (url, _) = hub(Arc::new(move |_, p, _| {
-            if p.contains("?after=") {
-                let mut n = looks.lock().unwrap();
-                *n += 1;
-                return ok(if *n == 1 { json!({"max": 500, "mail": [{"seq": 500}], "more": false}) } else { json!({"max": 500, "mail": [{"seq": 3}, {"seq": 500}], "more": false}) });
-            }
-            if p.ends_with("/down/3") { (200, snap.clone()) } else { (200, b"{}".to_vec()) }
+            if p.contains("?after=") { let mut l = lists.lock().unwrap(); let v = if l.len() > 1 { l.remove(0) } else { l[0].clone() }; return ok(v); }
+            let seq: i64 = p.rsplit('/').next().unwrap().parse().unwrap();
+            let mut all = slots.lock().unwrap();
+            let Some((_, bodies)) = all.iter_mut().find(|(s, _)| *s == seq) else { return (404, b"{}".to_vec()) };
+            (200, if bodies.len() > 1 { bodies.remove(0) } else { bodies[0].clone() })
         })).await;
-        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
-        m.resume_from(2).await;
-        m.sync().await.unwrap();
-        m.sync().await.unwrap();
-        assert_eq!(m.down_seen().await, 3, "the real message under the made-up one was read");
+        url
     }
 
-    /// P1: a slot the hub served wrong is tried again once it serves it right, though a later one opened meanwhile;
-    /// the cursor the app keeps waits below it.
+    fn snap_at(me: &PhoneIdentity, desk: &PhoneIdentity, seq: i64, at: i64) -> Vec<u8> {
+        seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", seq, &json!({"kind": "snapshot", "hello": {"observed_at": at}})).unwrap()
+    }
+
+    fn listing(seqs: &[i64]) -> Value { json!({"max": seqs.iter().max(), "mail": seqs.iter().map(|s| json!({"seq": s})).collect::<Vec<_>>(), "more": false}) }
+
+    /// R4: a slot served unreadable, then right on the next look: read then.
     #[tokio::test]
-    async fn a_slot_served_wrong_for_a_while_is_read_once_it_is_right() {
+    async fn r4_phone_a_slot_unreadable_then_readable_is_read() {
         let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
-        let snap = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 3, &json!({"kind": "snapshot", "hello": {"observed_at": 1}})).unwrap();
-        let later = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 4, &json!({"kind": "receipt", "action_id": "z", "receipt": {}})).unwrap();
-        let served = Arc::new(StdMutex::new(0));
-        let (url, _) = hub(Arc::new(move |_, p, _| {
-            if p.contains("?after=") { return ok(json!({"max": 4, "mail": [{"seq": 3}, {"seq": 4}], "more": false})); }
-            if p.ends_with("/down/4") { return (200, later.clone()); }
-            let mut n = served.lock().unwrap();
-            *n += 1;
-            if *n == 1 { (200, b"{}".to_vec()) } else { (200, snap.clone()) }
-        })).await;
+        let url = scripted(vec![listing(&[3])], vec![(3, vec![b"{}".to_vec(), snap_at(&me, &desk, 3, 3)])]).await;
         let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
-        m.resume_from(2).await;
+        m.resume_handled(&[1, 2]).await;
         m.sync().await.unwrap();
-        assert_eq!(m.down_seen().await, 2, "slot 3 is not read yet: the cursor waits");
-        tokio::time::sleep(Duration::from_millis(2200)).await;
         m.sync().await.unwrap();
-        assert_eq!(m.freshness().await.snapshot_at, Some(1), "the snapshot in slot 3 was read on a later look");
-        assert_eq!(m.down_seen().await, 4);
+        assert_eq!(m.freshness().await.snapshot_at, Some(3));
+    }
+
+    /// R4: a slot missing from one listing while a later one is read, then listed again: read then.
+    #[tokio::test]
+    async fn r4_phone_a_slot_missing_from_one_listing_then_back_is_read() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let receipt = seal_mail(desk.signing_key(), &me.x25519_public(), "ph-1", "e1", "down", 4, &json!({"kind": "receipt", "action_id": "z", "receipt": {}})).unwrap();
+        let url = scripted(vec![listing(&[4]), listing(&[3, 4])], vec![(3, vec![snap_at(&me, &desk, 3, 3)]), (4, vec![receipt])]).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_handled(&[1, 2]).await;
+        m.sync().await.unwrap();
+        m.sync().await.unwrap();
+        assert_eq!(m.freshness().await.snapshot_at, Some(3));
+    }
+
+    /// R4: a slot made up high, listed every time, never hides the real ones below it.
+    #[tokio::test]
+    async fn r4_phone_a_false_high_slot_never_hides_lower_ones() {
+        let (me, desk) = (PhoneIdentity::generate().unwrap(), PhoneIdentity::generate().unwrap());
+        let url = scripted(vec![listing(&[3, 900]), listing(&[3, 5, 900])], vec![(3, vec![snap_at(&me, &desk, 3, 3)]), (5, vec![snap_at(&me, &desk, 5, 5)]), (900, vec![b"{}".to_vec()])]).await;
+        let m = Mailbox::new(&me, &url, "tok", "ph-1", "e1", &desk.pubkey(), &desk.x25519_public()).unwrap();
+        m.resume_handled(&[1, 2]).await;
+        m.sync().await.unwrap();
+        m.sync().await.unwrap();
+        assert_eq!(m.freshness().await.snapshot_at, Some(5));
     }
 }

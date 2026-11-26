@@ -27,7 +27,15 @@ const SEED_BYTES: usize = 20;
 
 /// The credentials carry the device id so two data folders on one computer (tests, `HRM_HOME`) stay apart.
 pub(crate) fn ring_target(device_id: &str) -> String { format!("{}:ring-key:{device_id}", secrets::prefix()) }
+/// Where a version before tokens were kept per hub kept this computer's one hub token.
 pub(crate) fn token_target(device_id: &str) -> String { format!("{}:hub-token:{device_id}", secrets::prefix()) }
+
+/// The token hub `hub` gave this computer, kept under that hub's own address: one write holds the token and the hub
+/// it belongs to, so a context for one hub never reads another's.
+pub(crate) fn token_target_for(device_id: &str, hub: &str) -> String { format!("{}:hub-token:{device_id}:{}", secrets::prefix(), &crate::util::sha256_hex(hub.as_bytes())[..16]) }
+
+/// A file name no version kept a token in: the per-hub tokens have no file to move from.
+const NO_FILE: &str = "hub.token.per-hub";
 
 /// `file`: where a version before the credential store on macOS and Linux kept this secret, in the data folder.
 fn read_secret(ctx: &Ctx, target: &str, file: &str) -> Option<String> {
@@ -134,10 +142,25 @@ pub fn normalize_url(u: &str) -> Result<String> {
     Ok(u)
 }
 
-pub fn token(ctx: &Ctx) -> Option<String> { read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token") }
+/// The token of the hub these settings name, and of no other.
+pub fn token(ctx: &Ctx) -> Option<String> {
+    let base = normalize_url(&ctx.settings.hub_url).ok()?;
+    if let Some(t) = read_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE) { return Some(t); }
+    // one from before tokens were kept per hub is the hub's it was written for (named, or else these settings' hub,
+    // as it always was): a join since keeps its own and removes it
+    let legacy = read_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token")?;
+    let of = ctx.db.kv_get(TOKEN_OF).ok().flatten().unwrap_or_default();
+    (of.is_empty() || of == base).then_some(legacy)
+}
 
 /// The hub the stored token was given by.
 const TOKEN_OF: &str = "hub:token_of";
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam: runs during a join, just after its credential is written.
+    pub(crate) static JOIN_SEAM: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
+}
 
 pub struct Hub {
     http: reqwest::blocking::Client,
@@ -146,15 +169,11 @@ pub struct Hub {
 }
 
 impl Hub {
-    /// This computer's hub, with its token. The token is sent only to the hub that gave it: a context still naming
-    /// another hub (a pairing begun before this computer joined a new one) gets none, and what it owed stays owed.
+    /// This computer's hub, with its token: the one that hub gave, read under that hub's address, so a context still
+    /// naming another hub (a pairing begun before this computer joined a new one) only ever sends that hub its own.
     pub fn open(ctx: &Ctx) -> Result<Hub> {
         let base = normalize_url(&ctx.settings.hub_url).context("no hub address")?;
         let token = token(ctx).context("this computer has not joined the hub yet: Join with a code… on the Computers page")?;
-        // a token from before its hub was written down belongs to the hub the settings name, as it always did
-        if let Some(of) = ctx.db.kv_get(TOKEN_OF)?.filter(|s| !s.is_empty()) {
-            if of != base { bail!("this computer's hub token is {of}'s, not {base}'s"); }
-        }
         Hub::at(&base, &token)
     }
 
@@ -235,8 +254,13 @@ pub fn join(ctx: &Ctx, url: &str, code: Option<&str>, admin_token: Option<&str>)
         if s.starts_with("the hub refused this computer") { anyhow!("the hub did not accept the {}; check it and try again", if code.is_some() { "code" } else { "admin token" }) } else { e }
     })?;
     let tok = r["token"].as_str().filter(|t| !t.is_empty()).context("the hub answered without a token")?;
-    write_secret(ctx, &token_target(&ctx.settings.device_id), "hub.token", tok)?;
-    ctx.db.kv_set(TOKEN_OF, &base)?;
+    write_secret(ctx, &token_target_for(&ctx.settings.device_id, &base), NO_FILE, tok)?;
+    #[cfg(test)]
+    if let Some(f) = JOIN_SEAM.with(|s| s.borrow_mut().take()) { f(); }
+    // the one token of a version before is not this hub's to send any more
+    let _ = secrets::delete(&token_target(&ctx.settings.device_id));
+    let _ = std::fs::remove_file(ctx.data.join("hub.token"));
+    let _ = ctx.db.kv_set(TOKEN_OF, "");
     // the first computer makes the ring; any other gets it by pairing or the recovery key, whichever way it joined:
     // with a ring of its own it could read nothing of theirs, nor they of it
     let others = r["devices"].as_array().into_iter().flatten().any(|d| split_device(d).0["id"].as_str().is_some_and(|i| i != ctx.settings.device_id));
@@ -257,6 +281,7 @@ pub fn delete_phone(ctx: &Ctx, mailbox: &str) -> Result<()> { Hub::open(ctx)?.de
 /// Leave the hub: this computer's record and token go there, the token here; the settings fall back to off.
 pub fn leave(ctx: &Ctx) -> Result<Ctx> {
     if let Ok(h) = Hub::open(ctx) { if let Err(e) = h.delete(&format!("/v1/devices/{}", ctx.settings.device_id)) { crate::log::warn(&format!("hub: leaving: {e:#}")); } }
+    if let Ok(base) = normalize_url(&ctx.settings.hub_url) { let _ = secrets::delete(&token_target_for(&ctx.settings.device_id, &base)); }
     let _ = secrets::delete(&token_target(&ctx.settings.device_id));
     let _ = ctx.db.kv_set(TOKEN_OF, "");
     let _ = std::fs::remove_file(ctx.data.join("hub.token"));
@@ -540,7 +565,11 @@ pub fn rendezvous_pairs(ctx: &Ctx, id: &str) -> Vec<(String, u16)> {
 }
 
 #[cfg(test)]
-pub(crate) fn keys_of(ctx: &Ctx) -> Vec<String> { vec![ring_target(&ctx.settings.device_id), token_target(&ctx.settings.device_id)] }
+pub(crate) fn keys_of(ctx: &Ctx) -> Vec<String> { vec![ring_target(&ctx.settings.device_id), token_target(&ctx.settings.device_id), token_target_of(ctx)] }
+
+/// Tests: where the token of `ctx`'s hub is kept.
+#[cfg(test)]
+pub(crate) fn token_target_of(ctx: &Ctx) -> String { token_target_for(&ctx.settings.device_id, &normalize_url(&ctx.settings.hub_url).unwrap_or_default()) }
 
 #[cfg(test)]
 #[path = "hub_tests.rs"]

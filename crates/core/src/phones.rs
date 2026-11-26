@@ -232,9 +232,9 @@ pub(crate) fn add_as(ctx: &Ctx, p: &PhonePayload, grants: Grants, mailbox: Optio
             on conflict(phone_id) do update set name=?2, platform=?3, cert_pem=?4, pubkey=?5, x25519=?6, grants=?7, paired_at=?8, last_seen=null, revoked_at=null, relay_handle=null, generation=?9, cut_at=null, hub_mailbox=?10, hub_gone=null, hub_pairing=?11, hub_url=?12",
             params![p.id, name, p.platform, p.cert_pem, p.pubkey, p.x25519, serde_json::to_string(&grants)?, now_ms(), generation, mailbox, decision, mailbox.map(|_| ctx.settings.hub_url.as_str())])?;
         if let Some(mb) = mailbox {
-            // the invite is now this enrollment, and the pairing's own messages are not the mailbox pass's: one step
+            // the invite is now this enrollment, and the pairing's own two messages are handled already: one step
             tx.execute("delete from phone_hub_invites where mailbox = ?", [mb])?;
-            tx.execute("insert into kv(k, v) values(?1, '2') on conflict(k) do update set v = '2'", [crate::companion::mailbox::cursor_key(mb)])?;
+            tx.execute("insert or ignore into phone_mail_seen(generation, mailbox, seq, at, reply, sent) values(?1, ?2, 1, ?3, null, 1), (?1, ?2, 2, ?3, null, 1)", params![generation, mb, now_ms()])?;
         }
         tx.commit()?;
         Ok(earlier.map(|(mb, _, _)| mb))

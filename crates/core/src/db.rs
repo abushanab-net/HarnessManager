@@ -54,7 +54,9 @@ create table if not exists phone_actions(action_id text primary key, phone_id te
   status text not null, detail text not null, at integer not null);
 create table if not exists phone_hub_deletes(hub_url text not null, mailbox text not null, phone_id text not null, generation text not null, at integer not null,
   primary key(hub_url, mailbox));
-create table if not exists phone_mail_in(mailbox text not null, seq integer not null, generation text not null, body text not null, primary key(mailbox, seq));
+drop table if exists phone_mail_in;
+create table if not exists phone_mail_seen(generation text not null, mailbox text not null, seq integer not null, at integer not null, reply text, sent integer not null default 0,
+  primary key(generation, mailbox, seq));
 create table if not exists phone_hub_invites(hub_url text not null, mailbox text primary key, expires_at integer not null);
 "#;
 
@@ -287,10 +289,9 @@ impl Db {
             ("phones", "hub_mailbox", "text"),
             ("phones", "hub_gone", "integer"),
             ("phones", "hub_pairing", "text"),
-            // the hub a phone was paired through, and a claimed message's decided reply (companion/mailbox.rs)
+            // the hub a phone was paired through (companion/mailbox.rs)
             ("phones", "hub_url", "text"),
-            ("phone_mail_in", "reply", "text"),
-            ("phone_mail_in", "sent", "integer not null default 0"),
+
             ("phone_actions", "generation", "text not null default ''"),
         ] {
             if !conn.prepare("select 1 from pragma_table_info(?1) where name = ?2")?.exists([table, col])? {
