@@ -86,6 +86,21 @@ export const accountViews = (st, x, now, pcs) => { const ids = listedTools(st).m
 export const eligible = (a) => a.kind === 'subscription' && !a.needsLogin && a.measured && a.windows.every((w) => !w.open || w.left > 0);
 export const w5of = (a) => a.windows.find((w) => w.kind === '5h');
 export const wkof = (a) => a.windows.find((w) => w.kind === 'week') || a.windows[0];
+/** The limits in the order every page draws them: the week, each model's own limit (Claude's Fable), then the 5-hour window. */
+export const orderedWindows = (a) => { const wk = wkof(a), w5 = w5of(a); return [wk, ...a.windows.filter((w) => w !== wk && w !== w5), w5].filter((w, i, l) => w && l.indexOf(w) === i); };
+/** A row's three fixed places, so a limit sits in the same column on every row: the week, the first model's limit, the
+ * 5-hour window. A place the account has no limit for is null (trailing ones are dropped); further models are `rest`. */
+export function limitSlots(a) {
+  const wk = wkof(a), w5 = w5of(a), models = a.windows.filter((w) => w !== wk && w !== w5);
+  const slots = [wk || null, models[0] || null, w5 && w5 !== wk ? w5 : null];
+  while (slots.length && !slots[slots.length - 1]) slots.pop();
+  return { slots, rest: models.slice(1) };
+}
+/** The classes that colour a limit by what is left of it (app.css, "room"): green when untouched, warming to amber at
+ * half, red under half and darker the less is left, the darkest at 1% and used up. */
+export const roomCls = (left) => `room rl${Math.max(0, Math.min(100, Math.round(left)))} ${left <= 1 ? 'out' : left < 50 ? 'lo' : 'hi'}`;
+/** The same colour on a limit's number, only under half left. */
+export const roomText = (left) => (left < 50 ? 'roomT ' + roomCls(left) : '');
 /** Most room, resets soonest, and every window running out: the Overview's deck, the Accounts finding and the tray share these. */
 export function metricsOf(accts) {
   const measured = accts.filter((a) => a.measured);
@@ -110,8 +125,7 @@ export function renderRingSvg(a, used = showUsed()) {
   }
   if (a.needsLogin || !a.measured) return ring(a.needsLogin ? 'Sign in to read its limits' : a.noPlan ? 'No plan limits' : 'Limits not read (—)', `<circle class="unread ${a.needsLogin ? 'neg' : ''}" cx="18" cy="18" r="${R}" fill="none" stroke-width="2.8" stroke-dasharray="3.4 3.4"/>`, '—');
   const wk = wkof(a), pct = used ? wk.used : wk.left;
-  const tone = wk.left === 0 ? 'neg' : wk.left <= 30 || wk.outMs != null ? 'warn' : '';
-  return ring(`${esc(a.name)}: ${esc(wk.label.toLowerCase())} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + esc(fmtAbsoluteReset(wk.resetsAt)) : ''}`, arc(pct, tone), `${pct}%`);
+  return ring(`${esc(a.name)}: ${esc(wk.label.toLowerCase())} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + esc(fmtAbsoluteReset(wk.resetsAt)) : ''}`, arc(pct, roomCls(wk.left)), `${pct}%`);
 }
 /** A room bar: the track with what is left (or used) filled, as an SVG whose width is an attribute. */
 export const winTrack = (pct, tone = '', forecastAt = null) => `<svg class="win-track" aria-hidden="true"><rect class="win-fill ${tone}" width="${Math.max(0, Math.min(100, pct))}%" height="100%" rx="3"/>${forecastAt != null ? `<line class="limit-forecast" x1="${forecastAt}%" x2="${forecastAt}%" y1="-3" y2="9"/>` : ''}</svg>`;

@@ -56,6 +56,8 @@ create table if not exists run_ask(id text primary key, run text not null, sessi
 pub fn state_of(v: &Value) -> Option<(&'static str, String)> {
     let s = |k: &str| v[k].as_str().unwrap_or("").trim().to_string();
     match v["hook_event_name"].as_str()? {
+        // a question the terminal already shows asks for permission too: it is still a question
+        "PreToolUse" | "PermissionRequest" if v["tool_name"] == "AskUserQuestion" => Some(("waiting", crate::util::truncate(&format!("Question: {}", question_text(v)), 120))),
         "PermissionRequest" => {
             let tool = s("tool_name");
             let what = v["tool_input"]["command"].as_str().or(v["tool_input"]["file_path"].as_str()).unwrap_or("").trim();
@@ -66,7 +68,6 @@ pub fn state_of(v: &Value) -> Option<(&'static str, String)> {
             "idle_prompt" => Some(("done", String::new())),
             _ => None,
         },
-        "PreToolUse" if v["tool_name"] == "AskUserQuestion" => Some(("waiting", crate::util::truncate(&format!("Question: {}", question_text(v)), 120))),
         "UserPromptSubmit" | "PostToolUse" => Some(("working", String::new())),
         "Stop" | "SessionEnd" => Some(("done", String::new())),
         _ => None,
@@ -79,10 +80,14 @@ fn question_text(v: &Value) -> String {
 }
 
 /// The request an event asks the user to decide, held for the app: "permission" or "question". None for the rest.
+/// `AskUserQuestion` is a question from either event: its PreToolUse, and the permission request Claude Code makes
+/// once the terminal shows the question (after the PreToolUse hook's short wait ran out).
 fn kind_of(v: &Value) -> Option<&'static str> {
+    let question = v["tool_name"] == "AskUserQuestion" && v["tool_input"]["questions"].as_array().is_some_and(|q| !q.is_empty());
     match v["hook_event_name"].as_str()? {
+        "PermissionRequest" if question => Some("question"),
         "PermissionRequest" => Some("permission"),
-        "PreToolUse" if v["tool_name"] == "AskUserQuestion" && v["tool_input"]["questions"].as_array().is_some_and(|q| !q.is_empty()) => Some("question"),
+        "PreToolUse" if question => Some("question"),
         _ => None,
     }
 }
@@ -118,7 +123,10 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
             state = ?4, reason = ?5, ts = ?6 where run = ?1", params![run, s("session_id"), s("cwd"), state, reason, now_ms()])?;
     }
     let Some(kind) = kind_of(v) else { return Ok(None) };
-    let wait = if kind == "question" { wait.min(Duration::from_secs(QUESTION_SECONDS.into())) } else { wait };
+    // the short wait is the PreToolUse's alone (the terminal draws the question only after that hook exits); the
+    // permission request comes with the question already on the terminal, so it waits as any permission does
+    let event = v["hook_event_name"].as_str().unwrap_or("");
+    let wait = if kind == "question" && event == "PreToolUse" { wait.min(Duration::from_secs(QUESTION_SECONDS.into())) } else { wait };
     // only for a session hrm run started, and while the app offers answers
     if wait.is_zero() || !app_is_present(c)? || c.query_row("select 1 from run_state where run = ?", [run], |_| Ok(())).optional()?.is_none() { return Ok(None); }
     let pid = std::process::id();
@@ -137,7 +145,7 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
         match row.as_ref().map(|r| r.as_ref().map(|(s, a)| (s.as_str(), a.as_str()))) {
             Ok(Some(("answered", a))) => {
                 let _ = c.execute("update run_state set state = 'working', reason = '', ts = ?2 where run = ?1", params![run, now_ms()]);
-                return Ok(Some(decision(kind, &v["tool_input"], a)));
+                return Ok(Some(decision(kind, event, &v["tool_input"], a)));
             }
             Ok(Some(("open", _))) | Err(_) => {}
             Ok(_) => return Ok(None), // closed, or gone with its run
@@ -152,11 +160,15 @@ pub fn handle(c: &Connection, run: &str, v: &Value, wait: Duration) -> Result<Op
 }
 
 /// What the hook prints for an answer, as Claude Code reads it: a permission allowed or denied (once; nothing
-/// wider), or the question's answers in `updatedInput` beside its own questions.
-pub fn decision(kind: &str, tool_input: &Value, answer: &str) -> Value {
+/// wider), or the question's answers in `updatedInput` beside its own questions, in the form of the event that
+/// asked (`event`: a PreToolUse's `permissionDecision`, a PermissionRequest's `decision`).
+pub fn decision(kind: &str, event: &str, tool_input: &Value, answer: &str) -> Value {
     if kind == "question" {
         let mut input = tool_input.clone();
         input["answers"] = serde_json::from_str(answer).unwrap_or_default();
+        if event == "PermissionRequest" {
+            return json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow", "updatedInput": input}}});
+        }
         return json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": input}});
     }
     let d = if answer == "allow" { json!({"behavior": "allow"}) } else { json!({"behavior": "deny", "message": "Denied in Harness Manager."}) };
@@ -523,6 +535,23 @@ mod tests {
             "updatedInput": {"questions": questions, "answers": {"Which colour?": "Blue", "Which sizes?": "S, L"}}}})));
         // another tool's PreToolUse is no request
         assert_eq!(handle(&conn(&ctx), &run, &json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {}}), std::time::Duration::from_secs(5)).unwrap(), None);
+    }
+
+    #[test]
+    fn a_question_that_asks_for_permission_is_still_a_question_and_waits_as_long_as_a_permission() {
+        // after the PreToolUse's short wait the terminal shows the question and Claude Code asks for permission
+        let (_d, ctx, run) = live_run();
+        let questions = json!([{"question": "Which colour?", "header": "Colour", "multiSelect": false, "options": [{"label": "Blue", "description": "calm"}, {"label": "Red", "description": "loud"}]}]);
+        let ev = json!({"hook_event_name": "PermissionRequest", "session_id": "s-1", "tool_name": "AskUserQuestion", "tool_input": {"questions": questions}}).to_string();
+        let (h, a) = hold(&ctx, &run, &ev, 20_000);
+        assert_eq!((a.kind.as_str(), a.tool.as_str(), a.what.as_str()), ("question", "AskUserQuestion", "Which colour?"));
+        assert_eq!(a.expires - a.created, 20_000);
+        assert_eq!(runs(&ctx).unwrap()[0].reason, "Question: Which colour?");
+        // allow or deny is no answer to it
+        assert!(answer(&ctx, &a.id, &json!({"behavior": "allow"})).is_err());
+        assert!(answer(&ctx, &a.id, &json!({"answers": {"Which colour?": ["Red"]}})).unwrap());
+        assert_eq!(h.join().unwrap(), Some(json!({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow",
+            "updatedInput": {"questions": questions, "answers": {"Which colour?": "Red"}}}}})));
     }
 
     #[test]

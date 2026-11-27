@@ -6,7 +6,7 @@
 
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, refreshText, shownTools, listedTools, openDialog, closeDialog, dlgHead, openMenu, action, loadState, render, pickFolder, saveFile, patch, keyStore, rectOf, windowSize, confirmDialog } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon, ic } from './lib.js';
-import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack, quotaSource, creditText, freshCredits, freshReset, resetHint } from './limits.js';
+import { TOOL, PLAN_TOOLS, money, fmtDuration, fmtAbsoluteReset, showUsed, acctView, accountViews, eligible, w5of, wkof, metricsOf, winTrack, orderedWindows, limitSlots, roomCls, roomText, quotaSource, creditText, freshCredits, freshReset, resetHint } from './limits.js';
 import './sessions.js'; // nothing of it is used here: kept so the window's modules still load in the order they did
 import { syncOn, nameOf } from './computers.js';
 import { pageHead, detailHead, seg, needsAttention, plural } from './parts.js';
@@ -48,7 +48,7 @@ function rowRing(a, used, note, px = 44) {
   if (a.needsLogin) return draw('Log in to read its limits', null, 'none');
   if (!a.measured) return draw(a.kind === 'api_key' ? 'API key: no plan limits' : a.noPlan ? 'No plan limits' : 'Limits not read', null, '');
   const wk = wkof(a);
-  return draw(`${a.name}: ${wk.label.toLowerCase()} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + fmtAbsoluteReset(wk.resetsAt) : ''}`, used ? wk.used : wk.left, wk.left === 0 ? 'neg' : wk.left <= 30 || wk.outMs != null ? 'warn' : '');
+  return draw(`${a.name}: ${wk.label.toLowerCase()} ${wk.left}% left (${wk.used}% used)${wk.open ? ', resets ' + fmtAbsoluteReset(wk.resetsAt) : ''}`, used ? wk.used : wk.left, roomCls(wk.left));
 }
 
 /** A Claude account whose limits were last read over an hour ago: use elsewhere (claude.ai, another computer) is not in them. */
@@ -83,10 +83,10 @@ function stateOf(a, now) {
 function limsLine(a, best, used, now, brief = false) {
   const out = a.windows.find((w) => w.outAt);
   const advice = best && a.id === best.id ? 'Most room of any account: start here next.' : out ? `${out.label} runs out ≈ ${fmtAbsoluteReset(out.outAt, now)} at this pace.` : '';
-  const lim = (label, title, pct, tone, zero, cls = '') => `<div class="lim ${cls}" title="${esc(title)}"><div class="t"><span>${esc(label)}</span><b class="${zero ? 'neg' : ''}">${pct}%</b></div>${winTrack(pct, tone)}</div>`;
+  const lim = (label, title, pct, tone, num, cls = '') => `<div class="lim ${cls}" title="${esc(title)}"><div class="t"><span>${esc(label)}</span><b class="${num}">${pct}%</b></div>${winTrack(pct, tone)}</div>`;
   if (a.cap) {
     const left = Math.max(0, Math.round(100 - (a.cap.spentUsd / a.cap.limitUsd) * 100));
-    return `<div class="lims">${lim(`${money(a.cap.limitUsd)} daily cap`, `Daily spend cap: ${money(a.cap.limitUsd - a.cap.spentUsd)} left of ${money(a.cap.limitUsd)} (${money(a.cap.spentUsd)} spent today), resets in ${fmtDuration(a.cap.resetMs)}`, used ? 100 - left : left, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2', left === 0, 'cap')}</div>`;
+    return `<div class="lims">${lim(`${money(a.cap.limitUsd)} daily cap`, `Daily spend cap: ${money(a.cap.limitUsd - a.cap.spentUsd)} left of ${money(a.cap.limitUsd)} (${money(a.cap.spentUsd)} spent today), resets in ${fmtDuration(a.cap.resetMs)}`, used ? 100 - left : left, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2', left === 0 ? 'neg' : '', 'cap')}</div>`;
   }
   if (a.needsLogin || !a.windows.length) {
     const [text, why, bad] = noLimits(a);
@@ -95,8 +95,9 @@ function limsLine(a, best, used, now, brief = false) {
     return `<div class="unread trunc" title="${esc(why)}"><span class="${bad ? 'neg' : ''}">— ${esc(text)}</span></div>`;
   }
   const title = (w) => `${w.label}: ${w.left}% left (${w.used}% used)${w.open ? ', resets ' + fmtAbsoluteReset(w.resetsAt, now) + ' (in ' + fmtDuration(w.resetMs) + ')' : w.resetsAt ? ', window has reset' : ''}`;
-  const rest = a.windows.slice(3);
-  return `<div class="lims ${rest.length ? 'more' : ''}" ${best && a.id === best.id ? 'data-testid="best-note"' : ''} title="${esc(advice)}">${a.windows.slice(0, 3).map((w) => lim(w.kind === '5h' ? '5h' : w.kind === 'week' ? 'Wk' : w.label.split(' · ').pop(), title(w) + (advice ? '\n' + advice : ''), used ? w.used : w.left, w.left === 0 ? 'neg' : w.left <= 30 || w.outMs != null ? 'warn' : '', w.left === 0)).join('')}${rest.length ? `<span class="lim-more" title="${esc(rest.map(title).join('\n'))}">+${rest.length}</span>` : ''}</div>`;
+  // three fixed places (week, a model's own limit, 5-hour), so each limit is in the same column on every row
+  const { slots, rest } = limitSlots(a);
+  return `<div class="lims ${rest.length ? 'more' : ''}" ${best && a.id === best.id ? 'data-testid="best-note"' : ''} title="${esc(advice)}">${slots.map((w) => (w ? lim(w.kind === '5h' ? '5h' : w.kind === 'week' ? 'Wk' : w.label.split(' · ').pop(), title(w) + (advice ? '\n' + advice : ''), used ? w.used : w.left, roomCls(w.left), roomText(w.left)) : '<div class="lim gap" aria-hidden="true"></div>')).join('')}${rest.length ? `<span class="lim-more" title="${esc(rest.map(title).join('\n'))}">+${rest.length}</span>` : ''}</div>`;
 }
 
 // ---- the week's reset, on the seven days from now ----
@@ -291,8 +292,8 @@ function acctPane(a, c) {
   if (tab !== 'overview') body = `<div class="pane-tab" data-testid="pane-tabbody">${d ? (tab === 'sessions' ? tabSessions(d, pcs) : tabProjects(d)) : `<div class="pane-sec"><p class="pane-note">${pa.busy ? 'Reading…' : 'Could not be read.'}</p></div>`}</div>`;
   else {
     // the ring with every limit window: what is left (or used, by the setting) and when it resets
-    const wins = a.windows.length ? a.windows.map((w) => { const pct = used ? w.used : w.left;
-      return `<span class="trunc" title="${esc(w.label)}">${esc(w.kind === '5h' ? '5-hour' : w.label)}</span>${winTrack(pct, w.left === 0 ? 'neg' : w.left <= 30 || w.outMs != null ? 'warn' : '')}<b class="${w.left === 0 ? 'negT' : ''}">${pct}%</b><span class="muted">${w.open ? esc(fmtDuration(w.resetMs)) : w.resetsAt ? 'has reset' : 'not started'}</span>`; }).join('')
+    const wins = a.windows.length ? orderedWindows(a).map((w) => { const pct = used ? w.used : w.left;
+      return `<span class="trunc" title="${esc(w.label)}">${esc(w.kind === '5h' ? '5-hour' : w.label)}</span>${winTrack(pct, roomCls(w.left))}<b class="${roomText(w.left)}">${pct}%</b><span class="muted">${w.open ? esc(fmtDuration(w.resetMs)) : w.resetsAt ? 'has reset' : 'not started'}</span>`; }).join('')
       : a.cap ? (() => { const left = Math.max(0, Math.round(100 - (a.cap.spentUsd / a.cap.limitUsd) * 100)), pct = used ? 100 - left : left; return `<span>Daily cap</span>${winTrack(pct, left === 0 ? 'neg' : left <= 30 ? 'warn' : 'r2')}<b>${pct}%</b><span class="muted">${esc(fmtDuration(a.cap.resetMs))}</span>`; })()
       : a.needsLogin ? ['5-hour', 'Week', 'Plan'].map((l) => `<span>${l}</span>${l === 'Plan' ? '<span></span>' : winTrack(0)}<b class="dim">—</b><span class="muted">log in</span>`).join('')
       : `<span class="wide muted" title="${esc(noLimits(a)[1])}">— ${esc(noLimits(a)[0])}</span>`;
@@ -406,7 +407,7 @@ view('account', async (sheet, params) => {
       const reset = !t.resetsAt ? 'no window open' : !t.open ? 'window has reset' : 'resets ' + (t.resetMs < 86400000 ? 'in ' + fmtDuration(t.resetMs) : fmtAbsoluteReset(t.resetsAt, now));
       const note = t.outAt ? ['≈ Runs out ' + fmtAbsoluteReset(t.outAt, now) + ' at this pace.', 'warn'] : t.forecastAtReset != null ? ['≈ Lasts until the reset at this pace.', ''] : t.left >= 60 ? ['Plenty left.', ''] : null;
       const hint = resetHint(a, t, now);
-      return `<div class="account-limit" data-key="w-${esc(t.id)}"><div class="account-limit-head"><b>${esc(t.label)}</b><span class="${t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : ''}">${t.left === 0 ? 'Used up' : `${pct}% ${used ? 'used' : 'left'}`} · ${esc(reset)}</span></div>${winTrack(pct, t.left === 0 ? 'neg' : t.left < 20 ? 'warn' : '', at)}${note || hint ? `<span class="note ${note?.[1] || ''}">${esc([note?.[0], hint].filter(Boolean).join(' '))}</span>` : ''}</div>`;
+      return `<div class="account-limit" data-key="w-${esc(t.id)}"><div class="account-limit-head"><b>${esc(t.label)}</b><span class="${roomText(t.left)}">${t.left === 0 ? 'Used up' : `${pct}% ${used ? 'used' : 'left'}`} · ${esc(reset)}</span></div>${winTrack(pct, roomCls(t.left), at)}${note || hint ? `<span class="note ${note?.[1] || ''}">${esc([note?.[0], hint].filter(Boolean).join(' '))}</span>` : ''}</div>`;
     };
     const facts = [
       ['Login', p.kind !== 'subscription' ? (p.identity.logged_in ? 'Key saved' : '<span class="negT">No key</span>') : !p.identity.logged_in ? '<span class="negT">Not logged in</span>' : p.identity.needs_login ? '<span class="negT">Expired</span>' : '<span class="acT">Valid</span>'],
@@ -426,7 +427,7 @@ view('account', async (sheet, params) => {
       : ['— Not read yet: limits show up after this account runs on this computer.', `<button class="btn" data-act="limits-refresh" data-name="${esc(name)}" data-testid="limits-fix">Refresh limits</button>`];
     body = `<section class="account-stats" aria-label="Account readouts">${stat('Tokens · 7 days', w ? fmt(w.tokens) : '—', w ? Math.round(w.hit * 100) + '% read from cache' : 'Cache share not read')}${stat('At list prices', w ? money(w.cost) : '—', p.kind === 'subscription' ? 'Subscription: not billed per token' : 'Billed per token')}${stat('First reply p95', w && w.p95 != null ? secs(w.p95) : '—', w && w.replies ? `p50 ${secs(w.p50)} · ${w.replies.toLocaleString()} replies` : 'No timed replies')}${stat('Sessions · 7 days', week.length, running ? `${running} running now` : 'None running now')}${stat('Busiest project', w && w.top_project ? Math.round(w.top_project.share * 100) + '%' : '—', w && w.top_project ? esc(w.top_project.name) : 'No usage this week')}</section>
       <div class="account-columns ${a.windows.length ? '' : 'solo'}"><section class="panel-card" data-testid="limits-card">${a.windows.length ? `<div class="panel-head"><h2 class="panel-title">Limits</h2><span class="muted">${p.quota && quotaSource(p.quota.source) ? esc(quotaSource(p.quota.source)) + ' · ' : ''}read ${agoText(a.readAt, now)}</span></div>
-          ${a.windows.map(lim).join('')}<span class="muted">Bars: % ${used ? 'used' : 'left'} · dashed mark: ≈ level at reset.</span>` : `<div class="a-unread"><h2 class="panel-title">Limits</h2><span class="muted grow">${unread[0]}</span>${unread[1]}</div>`}${quotaDetails(a, now, tool.installed)}</section>
+          ${orderedWindows(a).map(lim).join('')}<span class="muted">Bars: % ${used ? 'used' : 'left'} · dashed mark: ≈ level at reset.</span>` : `<div class="a-unread"><h2 class="panel-title">Limits</h2><span class="muted grow">${unread[0]}</span>${unread[1]}</div>`}${quotaDetails(a, now, tool.installed)}</section>
         <section class="panel-card"><h2 class="panel-title">Login and folder</h2><dl class="facts-grid">${facts.map(([t, v]) => `<dt>${t}</dt><dd>${v}</dd>`).join('')}</dl>${p.kind === 'subscription' && !a.needsLogin ? `<div><button class="btn-secondary" data-act="login" data-name="${esc(name)}">Log in again</button></div>` : ''}</section></div>
       <div class="account-columns"><section class="panel-card"><div class="panel-head"><h2 class="panel-title">Tokens per day · 30 days</h2><span class="muted">${k && per.some(Boolean) ? fmt(per.reduce((s, v) => s + v, 0)) + ' · ' + money(k.cost30) + ' at list prices' : '—'}</span></div>
           ${per.some(Boolean) ? `<div class="account-chart">${per.map((v, i) => `<div class="stack-col ${i === per.length - 1 ? 'today' : ''}" title="${esc(dayLabel(i))}: ${fmt(v)} tokens"><svg class="stack-bars" height="${Math.round((v / max) * 76)}" aria-hidden="true"><rect width="100%" height="100%" rx="2"/></svg><span class="stack-lbl">${i === 0 || i === 14 ? esc(dayLabel(i)) : i === per.length - 1 ? 'Today' : ''}</span></div>`).join('')}</div>` : '<span class="muted">No usage yet.</span>'}</section>

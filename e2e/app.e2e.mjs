@@ -429,7 +429,7 @@ try {
           tall: [...document.querySelectorAll('.ov-table tbody :is(.ov-name, .pill, .ov-lim .t span, .ov-lim .t b, .ov-verdict, .ov-unread, .ov-more)')].filter((e) => h(e) > 22).map((e) => e.className + ' ' + e.textContent),
           // and nothing reaches into the next column
           over: rows.flatMap((r) => [...r.cells].filter((td) => [...td.querySelectorAll('*')].some((e) => e.getBoundingClientRect().right > td.getBoundingClientRect().right + 0.5)).map((td) => r.dataset.name + ' col ' + td.cellIndex)),
-          lims: [...long.querySelectorAll('.ov-lim')].map((l) => l.querySelector('.t span').textContent), cut: (() => { const s = long.querySelectorAll('.ov-lim .t span')[2]; return [s.scrollWidth > s.clientWidth, s.closest('.ov-lim').title]; })(),
+          lims: [...long.querySelectorAll('.ov-lim')].map((l) => l.querySelector('.t span').textContent), cut: (() => { const s = long.querySelectorAll('.ov-lim .t span')[1]; return [s.scrollWidth > s.clientWidth, s.closest('.ov-lim').title]; })(),
           more: [long.querySelector('.ov-more').textContent, long.querySelector('.ov-more').title], name: (() => { const n = long.querySelector('.ov-name'); return n.scrollWidth > n.clientWidth; })(),
           plan: (() => { const p = long.querySelector('.ov-plan'); return [p.getBoundingClientRect().width <= 104, p.title]; })(), wide: sheet.scrollWidth > sheet.clientWidth };`, [long]);
       assert.equal(d.names.length, 9, 'one row per account');
@@ -437,7 +437,7 @@ try {
       assert.deepEqual([...new Set(d.rows)], [48], 'every row is 48 px: ' + d.rows);
       assert.deepEqual(d.tall, [], 'nothing wraps to a second line');
       assert.deepEqual(d.over, [], 'nothing reaches into the next column');
-      assert.deepEqual(d.lims, ['5h', 'Wk', 'Gemini 3 Pro High and Low thinking'], 'three limits in the line');
+      assert.deepEqual(d.lims, ['Wk', 'Gemini 3 Pro High and Low thinking', '5h'], 'three limits in the line: week, model, 5-hour');
       assert.ok(d.cut[0] && d.cut[1].startsWith('Week · Gemini 3 Pro High and Low thinking: 55% left'), 'a long label is cut with an ellipsis, whole on hover: ' + d.cut);
       assert.equal(d.more[0], '+2', 'the fourth and fifth behind +N');
       assert.ok(d.more[1].includes('Gemini 3 Flash and Flash Lite: 90% left') && d.more[1].includes('Claude models through Antigravity: 20% left'), 'listed on hover: ' + d.more[1]);
@@ -452,20 +452,20 @@ try {
     try {
       await overview();
       await $('[data-testid=lane-agy-main]');
-      const read = `const row = (r) => ({ limits: [...r.querySelectorAll('.ov-lim')].map((l) => l.textContent.trim()).join(' ') || r.cells[1].textContent.trim(), verdict: r.querySelector('.ov-verdict').textContent, tone: r.querySelector('.ov-verdict').className.replace(/ov-verdict|trunc/g, '').trim(),
+      const read = `const row = (r) => ({ limits: [...r.querySelectorAll('.ov-lim:not(.gap)')].map((l) => l.textContent.trim()).join(' ') || r.cells[1].textContent.trim(), verdict: r.querySelector('.ov-verdict').textContent, tone: r.querySelector('.ov-verdict').className.replace(/ov-verdict|trunc/g, '').trim(),
           lane: ['fill', 'warn', 'starve', 'tick'].filter((c) => r.querySelector('.ov-lane .' + c)).join(' ') || r.querySelector('.ov-lane').getAttribute('class'),
           acts: [...r.querySelectorAll('button, a')].map((b) => [b.textContent, b.dataset.act, b.disabled, b.title].join('|')) });
         return Object.fromEntries([...document.querySelectorAll('.ov-table tbody tr')].map((r) => [r.dataset.name, row(r)]));`;
       const d = await exec(read);
       const want = {
-        'work-max': ['5h64% Wk41% Fable35%', /^≈ Out \w{3} \d\d:\d\d$/, 'warnT', 'fill warn starve tick', /^Start\|start\|false\|/],
-        'claude-main': ['5h100% Wk78% Fable80%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
+        'work-max': ['Wk41% Fable35% 5h64%', /^≈ Out \w{3} \d\d:\d\d$/, 'warnT', 'fill warn starve tick', /^Start\|start\|false\|/],
+        'claude-main': ['Wk78% Fable80% 5h100%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
         'client-acme': ['—', /^Login expired$/, 'negT', 'ov-lane none', /^Log in\|login\|false\|/],
         'team-ci': ['—', /^Pay per use · ≈ \$4\.20 today$/, 'plain', 'ov-lane none', /^Start\|start\|false\|/],
-        'codex-main': ['5h90% Wk0%', /^Used up · back \d\d:\d\d$/, 'negT', 'fill warn starve tick', /^Start\|start\|true\|Used up · back \d\d:\d\d$/],
-        'codex-personal': ['5h100% Wk88%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
+        'codex-main': ['Wk0% 5h90%', /^Used up · back \d\d:\d\d$/, 'negT', 'fill warn starve tick', /^Start\|start\|true\|Used up · back \d\d:\d\d$/],
+        'codex-personal': ['Wk88% 5h100%', /^Lasts until \w{3} \d\d:\d\d$/, '', 'fill tick', /^Start\|start\|false\|/],
         'opencode-main': ['—', /^No plan limits$/, 'plain', 'ov-lane none', /^Start\|start\|false\|/],
-        'agy-main': ['5h100% Wk100%', /^Lasts until next \w{3}$/, '', 'fill tick', /^Start\|start\|false\|/],
+        'agy-main': ['Wk100% 5h100%', /^Lasts until next \w{3}$/, '', 'fill tick', /^Start\|start\|false\|/],
       };
       assert.deepEqual(Object.keys(d), Object.keys(want), 'one row per account, in the accounts\' order');
       for (const [name, [limits, verdict, tone, lane, act]] of Object.entries(want)) {
@@ -1420,9 +1420,9 @@ try {
         return { labels: lims.map((l) => l.querySelector('.t span').textContent), cut: lims.map((l) => cut(l.querySelector('.t span'))), titles: lims.map((l) => l.title.split(',')[0]),
           more: row.querySelector('.lim-more').textContent, moreTitle: row.querySelector('.lim-more').title, plan: [cut(plan), plan.title],
           fits: row.querySelector('.lims').getBoundingClientRect().right <= row.querySelector('.wk-reset').getBoundingClientRect().left };`, [row]);
-      assert.deepEqual(w.labels, ['5h', 'Wk', 'Claude and GPT models'], 'three limits, by their short names');
-      assert.deepEqual(w.cut, [false, false, true], 'the long name is cut with an ellipsis');
-      assert.deepEqual(w.titles, ['5-hour session: 64% left (36% used)', 'Week: 41% left (59% used)', 'Week · Claude and GPT models: 35% left (65% used)'], 'each bar says the whole of it in its title');
+      assert.deepEqual(w.labels, ['Wk', 'Claude and GPT models', '5h'], 'three limits, by their short names: week, model, 5-hour');
+      assert.deepEqual(w.cut, [false, true, false], 'the long name is cut with an ellipsis');
+      assert.deepEqual(w.titles, ['Week: 41% left (59% used)', 'Week · Claude and GPT models: 35% left (65% used)', '5-hour session: 64% left (36% used)'], 'each bar says the whole of it in its title');
       assert.equal(w.more, '+2', 'the other two go behind +2');
       assert.ok(w.moreTitle.includes('Week · Sonnet: 0% left (100% used)') && w.moreTitle.includes('Week · Opus: 88% left'), 'and are named in its title: ' + w.moreTitle);
       assert.deepEqual(w.plan, [true, 'Enterprise premium seat with a very long plan name'], 'a long plan name is cut too, whole in its title');
@@ -1995,8 +1995,8 @@ try {
       assert.equal((await text('[data-testid=state-codex-main]')).replace(/\s+/g, ' ').split(' back ')[0], 'Used up', 'and the row\'s state does');
       // three limit windows beside the pane: each on the row with its short name whole, each on its own line in the pane
       const lims = await exec("return [...document.querySelectorAll('[data-testid=row-codex-main] .lim .t')].map((t) => [t.textContent, t.firstElementChild.scrollWidth > t.firstElementChild.clientWidth])");
-      assert.deepEqual(lims, [['5h100%', false], ['Wk0%', false], ['Fable88%', false]], 'the row\'s three limits, no name cut');
-      assert.ok(/5-hour 100% .* Week 0% .* Week · Fable 88% /.test((await text('[data-testid=pane-limits]')).replace(/\s+/g, ' ')), 'the pane\'s three windows: ' + (await text('[data-testid=pane-limits]')).replace(/\s+/g, ' '));
+      assert.deepEqual(lims, [['Wk0%', false], ['Fable88%', false], ['5h100%', false]], 'the row\'s three limits, no name cut');
+      assert.ok(/Week 0% .* Week · Fable 88% .* 5-hour 100% /.test((await text('[data-testid=pane-limits]')).replace(/\s+/g, ' ')), 'the pane\'s three windows: ' + (await text('[data-testid=pane-limits]')).replace(/\s+/g, ' '));
       const facts = await rowFacts();
       assert.deepEqual([[...new Set(facts.heights)], facts.wrapped, facts.overlap], [[44], [], []], 'and the rows still hold: 44 px, nothing wrapped, no column into the next');
     }, `if (op === 'state') { const soon = Date.now() + 3600e3, q = r.profiles.find((x) => x.name === 'codex-main').quota, t = q.tiers.find((x) => x.id === 'week'); t.used = 100; t.resets_at = soon;

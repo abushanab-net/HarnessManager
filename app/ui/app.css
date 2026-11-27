@@ -163,6 +163,29 @@ svg.win-track { display: block; width: 100%; }
 svg.win-track { height: 6px; }
 .win-fill { fill: var(--ac); } .win-fill.warn { fill: var(--warn); } .win-fill.neg { fill: var(--neg); } .win-fill.r2 { fill: var(--r2); }
 .limit-forecast { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 2 2; }
+/* a limit's colour by what is left of it (limits.js roomCls: "room rlN hi|lo|out", N the % left): green when untouched,
+   warming to amber at half; red under half and darker the less is left; the darkest at 1% and used up. A daily cap and
+   the bars that are not limits keep their role colours. */
+html[data-theme="light"] { --room-hi: 44%; --room-hi-k: .18%; --room-lo: 20%; --room-lo-k: .58%; --room-out: #4d0a06; }
+html[data-theme="dark"] { --room-hi: 52%; --room-hi-k: .1%; --room-lo: 33%; --room-lo-k: .52%; --room-out: #7f140a; }
+.rl0 { --rl: 0; } .rl1 { --rl: 1; } .rl2 { --rl: 2; } .rl3 { --rl: 3; } .rl4 { --rl: 4; } .rl5 { --rl: 5; } .rl6 { --rl: 6; } .rl7 { --rl: 7; } .rl8 { --rl: 8; } .rl9 { --rl: 9; }
+.rl10 { --rl: 10; } .rl11 { --rl: 11; } .rl12 { --rl: 12; } .rl13 { --rl: 13; } .rl14 { --rl: 14; } .rl15 { --rl: 15; } .rl16 { --rl: 16; } .rl17 { --rl: 17; } .rl18 { --rl: 18; } .rl19 { --rl: 19; }
+.rl20 { --rl: 20; } .rl21 { --rl: 21; } .rl22 { --rl: 22; } .rl23 { --rl: 23; } .rl24 { --rl: 24; } .rl25 { --rl: 25; } .rl26 { --rl: 26; } .rl27 { --rl: 27; } .rl28 { --rl: 28; } .rl29 { --rl: 29; }
+.rl30 { --rl: 30; } .rl31 { --rl: 31; } .rl32 { --rl: 32; } .rl33 { --rl: 33; } .rl34 { --rl: 34; } .rl35 { --rl: 35; } .rl36 { --rl: 36; } .rl37 { --rl: 37; } .rl38 { --rl: 38; } .rl39 { --rl: 39; }
+.rl40 { --rl: 40; } .rl41 { --rl: 41; } .rl42 { --rl: 42; } .rl43 { --rl: 43; } .rl44 { --rl: 44; } .rl45 { --rl: 45; } .rl46 { --rl: 46; } .rl47 { --rl: 47; } .rl48 { --rl: 48; } .rl49 { --rl: 49; }
+.rl50 { --rl: 50; } .rl51 { --rl: 51; } .rl52 { --rl: 52; } .rl53 { --rl: 53; } .rl54 { --rl: 54; } .rl55 { --rl: 55; } .rl56 { --rl: 56; } .rl57 { --rl: 57; } .rl58 { --rl: 58; } .rl59 { --rl: 59; }
+.rl60 { --rl: 60; } .rl61 { --rl: 61; } .rl62 { --rl: 62; } .rl63 { --rl: 63; } .rl64 { --rl: 64; } .rl65 { --rl: 65; } .rl66 { --rl: 66; } .rl67 { --rl: 67; } .rl68 { --rl: 68; } .rl69 { --rl: 69; }
+.rl70 { --rl: 70; } .rl71 { --rl: 71; } .rl72 { --rl: 72; } .rl73 { --rl: 73; } .rl74 { --rl: 74; } .rl75 { --rl: 75; } .rl76 { --rl: 76; } .rl77 { --rl: 77; } .rl78 { --rl: 78; } .rl79 { --rl: 79; }
+.rl80 { --rl: 80; } .rl81 { --rl: 81; } .rl82 { --rl: 82; } .rl83 { --rl: 83; } .rl84 { --rl: 84; } .rl85 { --rl: 85; } .rl86 { --rl: 86; } .rl87 { --rl: 87; } .rl88 { --rl: 88; } .rl89 { --rl: 89; }
+.rl90 { --rl: 90; } .rl91 { --rl: 91; } .rl92 { --rl: 92; } .rl93 { --rl: 93; } .rl94 { --rl: 94; } .rl95 { --rl: 95; } .rl96 { --rl: 96; } .rl97 { --rl: 97; } .rl98 { --rl: 98; } .rl99 { --rl: 99; }
+.rl100 { --rl: 100; }
+.room.hi { --room: hsl(calc(28 + (var(--rl) - 50) * 2.34) calc(88% - (var(--rl) - 50) * .52%) calc(var(--room-hi) - (var(--rl) - 50) * var(--room-hi-k))); }
+.room.lo { --room: hsl(4 80% calc(var(--room-lo) + (var(--rl) - 1) * var(--room-lo-k))); }
+.room.out { --room: var(--room-out); }
+.win-fill.room, .ov-bar rect.room { fill: var(--room); } .ring-wrap svg circle.fill.room, .a-ring.room .val { stroke: var(--room); }
+.roomT { color: var(--room); } html[data-theme="dark"] .roomT { color: var(--neg); }
+/* a place in a row's limits the account has no limit for: it keeps the column, so the next limit stays in its own */
+.lim.gap, .ov-lim.gap { align-self: flex-end; height: 0; margin-bottom: 3px; border-top: 1px dashed var(--line-default); }
 svg.stack-bars { display: block; width: 100%; }
 .stack-bars rect { fill: var(--ac); }
 .stack-bars rect.c0 { fill: var(--ac); } .stack-bars rect.c1 { fill: var(--r2); } .stack-bars rect.c2 { fill: color-mix(in srgb, var(--ac) 55%, var(--r2)); } .stack-bars rect.c3 { fill: var(--sand); } .stack-bars rect.c4 { fill: color-mix(in srgb, var(--ac) 70%, transparent); } .stack-bars rect.c5 { fill: var(--pos); } .stack-bars rect.c6 { fill: var(--ink-dim); } .stack-bars rect.c7 { fill: var(--warn); }

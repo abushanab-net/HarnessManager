@@ -194,7 +194,10 @@ prompt or a question), `working` (a prompt sent, a tool ran) or `done` (the turn
 next message). For every other event it prints nothing and exits 0, so the tool behaves as without it; without
 `HRM_RUN` it does nothing.
 
-A permission request, or a `PreToolUse` of `AskUserQuestion`, is also held for an answer from the app. `hrm hook`
+A permission request, or a `PreToolUse` of `AskUserQuestion`, is also held for an answer from the app. A permission
+request for `AskUserQuestion` itself (Claude Code makes one once the terminal shows the question, after the
+`PreToolUse` hook's 15 seconds) is held as a question too, for as long as a permission, and answered with
+`decision.behavior: "allow"` and `decision.updatedInput.answers`. `hrm hook`
 stores it in `run_ask` (id, run, tool, the command or file or the questions, the tool's input, created, expires,
 state `open`) and polls the row every 250 ms. The app writes the answer into the row (`hooks::answer`, the `answer`
 operation): allow or deny once for a permission, or one of each question's own options. Nothing wider is offered

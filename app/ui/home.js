@@ -7,7 +7,7 @@
 import { S, call, view, render, attempt, loadState, action, acctName, shownTools, warmPage, keepPage, patch, openDialog, dlgHead, dialogOpen, mutate, openMenu, needsMark } from './core.js';
 import { esc, fmt, hm, dur, toolIcon } from './lib.js';
 import { accountViews, metricsOf, fmtDuration, fmtAbsoluteReset, money, TOOL, w5of, wkof, showUsed } from './accounts.js';
-import { creditText, freshCredits, freshReset, resetHint } from './limits.js';
+import { creditText, freshCredits, freshReset, resetHint, limitSlots, roomCls, roomText } from './limits.js';
 import { computersStatus, syncOn, computers, nameOf, scope, setScope } from './computers.js';
 import { pageHead, plural, seg } from './parts.js';
 
@@ -106,18 +106,19 @@ const toneOf = (w) => (w.left === 0 ? 'bad' : w.kind === '5h' ? (w.left <= 25 ? 
 /** A limit bar: what is left (or used) filled, as an SVG whose width is an attribute. */
 const bar = (pct, tone) => `<svg class="ov-bar" aria-hidden="true"><rect class="${tone}" width="${Math.max(0, Math.min(100, pct))}%" height="100%" rx="3"/></svg>`;
 
-/** Column 2: every limit in one line, three at most; a fourth and further sit behind "+N". */
+/** Column 2: the limits in one line, in three fixed places (week, a model's own, 5-hour), each coloured by what is
+ * left of it; a second model's limit and further sit behind "+N". */
 function limitsCell(a, used, now) {
-  const lim = (name, title, pct, tone, zero) => `<div class="ov-lim" title="${esc(title)}"><div class="t"><span>${esc(name)}</span><b class="${zero ? 'negT' : ''}">${pct}%</b></div>${bar(pct, tone)}</div>`;
+  const lim = (name, title, pct, tone, num) => `<div class="ov-lim" title="${esc(title)}"><div class="t"><span>${esc(name)}</span><b class="${num}">${pct}%</b></div>${bar(pct, tone)}</div>`;
   if (a.cap) {
     const leftUsd = a.cap.limitUsd - a.cap.spentUsd, left = Math.max(0, Math.round((leftUsd / a.cap.limitUsd) * 100));
-    return `<div class="ov-lims">${lim('Cap', `Daily router spend cap: ${money(leftUsd)} left of ${money(a.cap.limitUsd)}`, used ? 100 - left : left, 'r2', left === 0)}</div>`;
+    return `<div class="ov-lims">${lim('Cap', `Daily router spend cap: ${money(leftUsd)} left of ${money(a.cap.limitUsd)}`, used ? 100 - left : left, 'r2', left === 0 ? 'negT' : '')}</div>`;
   }
   if (!a.measured) return `<span class="ov-unread" title="${a.needsLogin ? 'Not read: log in to read its limits' : a.noPlan ? 'No plan limits to read' : 'Not read yet: its limits show after it runs on this computer, or after a refresh'}">—</span>`;
-  const w5 = w5of(a), wk = wkof(a), all = [w5, wk, ...a.windows].filter((w, i, l) => w && l.indexOf(w) === i);
+  // three fixed places (week, a model's own limit, 5-hour), so each limit is in the same column on every row
+  const { slots, rest: more } = limitSlots(a);
   const tip = (w) => `${w.label}: ${w.left}% left (${w.used}% used)${w.open ? ' · resets ' + fmtAbsoluteReset(w.resetsAt, now) : ''}${toneOf(w) === 'spare' ? ' · spare room before the reset' : ''}`;
-  const more = all.slice(3);
-  return `<div class="ov-lims ${more.length ? 'more' : ''}">${all.slice(0, 3).map((w) => lim(shortName(w), tip(w), used ? w.used : w.left, toneOf(w), w.left === 0)).join('')}${more.length ? `<span class="ov-more" title="${esc(more.map(tip).join('\n'))}" data-testid="more-${esc(a.id)}">+${more.length}</span>` : ''}</div>`;
+  return `<div class="ov-lims ${more.length ? 'more' : ''}">${slots.map((w) => (w ? lim(shortName(w), tip(w), used ? w.used : w.left, roomCls(w.left), roomText(w.left)) : '<div class="ov-lim gap" aria-hidden="true"></div>')).join('')}${more.length ? `<span class="ov-more" title="${esc(more.map(tip).join('\n'))}" data-testid="more-${esc(a.id)}">+${more.length}</span>` : ''}</div>`;
 }
 /** Column 3: one lane from now to +7 d (+5 h for the 5-hour window alone): filled to the reset's tick; from the
  * estimated run-out to the reset it is striped. */
