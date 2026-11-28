@@ -221,7 +221,8 @@ try {
   // every dialog and page the run draws, watched for content wider than its frame (a sideways scroll bar)
   page.on('console', (m) => { const t = m.text(); if (t.startsWith('HRM-WIDE ') && !wide.includes(t.slice(9))) wide.push(t.slice(9)); if (t.startsWith('HRM-DLG ')) dialogs.add(t.slice(8)); });
   await page.addInitScript(WIDE_WATCH);
-  await exec(WIDE_WATCH);
+  // the window may still be loading its page when it is first reached: a script run then is lost with the old page, so it is tried again
+  await waitFor(() => exec(WIDE_WATCH).then(() => true), 'the window ready for scripts', 30000);
   await waitFor(() => exec(`return !!document.querySelector('nav.nav a')`), 'the window drawn');
   await exec(`localStorage.setItem('hm.firstrun', '1'); document.querySelector('[data-testid=firstrun-later]')?.click();`);
 
