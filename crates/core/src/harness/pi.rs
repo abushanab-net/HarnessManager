@@ -224,10 +224,7 @@ impl Harness for PiLike {
         let name = Path::new(&t.source_rel).file_name().and_then(|n| n.to_str()).filter(|n| n.ends_with(".jsonl") && crate::util::safe_name(n)).unwrap_or("");
         if name.is_empty() { bail!("the session log's name is unknown") }
         let dest = self.home(ctx, p).join("sessions").join(session_dir_name(local_root, (self.id == "omp").then_some(ctx.home.as_path()))).join(name);
-        if !dest.exists() {
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            std::fs::copy(&t.path, &dest)?;
-        }
+        crate::transcripts::place(&t.path, &dest, t.replace)?;
         let args = if self.id == "pi" { vec![self.resume_flag.into(), dest.display().to_string()] } else { self.resume_args(&t.id) };
         Ok(crate::transcripts::Materialized { launch_args: args, cwd: local_root.to_path_buf(), note: format!("{} resumes the copied log in this folder; the original stays as it is.", self.label) })
     }

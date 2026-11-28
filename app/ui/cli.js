@@ -8,7 +8,7 @@ import { pageHead } from './parts.js';
 const CLI = [
   ['Accounts', [['list', 'Accounts with plan, limits, tokens and open consoles'], ['show', 'One account in detail'], ['add', 'Add an account (subscription login by default)'],
     ['login', 'Log an account in'], ['remove', 'Remove an account; --delete-home also deletes its folder'], ['key', 'API keys, kept in {store}']]],
-  ['Run', [['run', 'Run the tool as an account in this console'], ['start', 'Open a new terminal running the account'], ['resume', 'Reopen a session in its own account'], ['open', 'Open the desktop app']]],
+  ['Run', [['run', 'Run the tool as an account in this console'], ['start', 'Open a new terminal running the account'], ['resume', 'Reopen a session in its own account, or with another (--as)'], ['open', 'Open the desktop app']]],
   ['Usage and limits', [['usage', 'Token usage per account and day'], ['overview', 'Cost at list prices, requests, tokens, cache hits'], ['requests', 'Every model reply, newest first'], ['quota', 'Limits of one account; --live asks Anthropic now']]],
   ['Sessions and projects', [['sessions', 'Sessions of every tool, grouped by project, date, account, tool or tag; --open, --project, --tag'], ['session', 'Print one session as a transcript'], ['projects', 'List projects with tokens and cost, rename or merge them'], ['tag', 'Tag a session or a project'], ['tags', 'Every tag with its counts']]],
   ['Shared setup', [['sync', 'Bring every account in step'], ['mcp', 'MCP servers shared across tools'], ['skills', 'Skills shared across tools'], ['prompts', 'Prompt files per tool']]],

@@ -8,7 +8,7 @@
 import { S, call, view, go, toast, attempt, mutate, changed, acctName, acctEmail, openDialog, closeDialog, dlgHead, openMenu, action, render, saveFile, patch, drawPins, loadState, shown, needsMark, needsGroupMark, runOf, clearNotice } from './core.js';
 import { esc, fmt, hm, when, dur, toolIcon, ic, md } from './lib.js';
 import { computersStatus, syncOn, nameOf, cdot } from './computers.js';
-import { resumeData, reasonShort, canResume } from './resume.js';
+import { resumeData, reasonShort, canResume, resumeAsItems } from './resume.js';
 import { nameEl, pinBtn, area, refreshProjects, tellApart } from './projects.js';
 import './restore.js';
 import { pageHead, detailHead, seg, plural } from './parts.js';
@@ -301,7 +301,7 @@ function paneParts(s, pcs) {
   return [title, head, `<div class="pane-sec">
       <div class="pane-why ${tone}" data-testid="pane-state">${dot}<b>${state}</b><span class="grow"></span><span class="small muted">${note}</span></div>
       <div class="pane-acts">${primary}<a class="btn grow" href="${hash}" ${s.open ? `data-act="pane-transcript" data-key="${esc(key)}"` : ''} data-testid="pane-open">Open transcript</a></div>
-      ${remote ? '' : `<div class="pane-acts"><button class="btn grow" data-act="export-md" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-title="${esc(title)}" data-testid="pane-export">Export as Markdown</button><button class="btn icon" data-act="session-menu" data-path="${esc(s.source_path)}" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}" data-resume="${!s.archived && s.open ? 1 : ''}" data-terms="${s.archived ? '' : 1}" aria-label="More" aria-haspopup="menu" data-testid="pane-menu">⋯</button></div>`}</div>
+      ${remote ? '' : `<div class="pane-acts"><button class="btn grow" data-act="export-md" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-title="${esc(title)}" data-testid="pane-export">Export as Markdown</button><button class="btn icon" data-act="session-menu" data-path="${esc(s.source_path)}" data-profile="${esc(s.profile)}" data-id="${esc(s.id)}" data-cwd="${esc(s.cwd)}" data-resume="${!s.archived && s.open ? 1 : ''}" data-terms="${s.archived ? '' : 1}" data-harness="${esc(s.harness)}" data-as="${s.archived ? '' : 1}" aria-label="More" aria-haspopup="menu" data-testid="pane-menu">⋯</button></div>`}</div>
     <div class="pane-sec"><dl class="pane-kv short"><dt>Account</dt><dd class="row" data-testid="pane-account">${toolIcon(s.harness, 14)}<span class="trunc">${esc(acctName(s.profile))}</span></dd><dt>Tool</dt><dd>${esc(tool)}</dd>
       <dt>Model</dt><dd class="mono trunc">${model ? esc(model) : '<span class="dim" title="Its log names no model">—</span>'}</dd><dt>Started</dt><dd>${esc(when(s.started_at))} <span class="muted">· ${esc(span)}</span></dd></dl></div>
     <div class="pane-sec"><div class="pane-tiles">${tile('Tokens', fmt(tokens))}${tile('Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—', '', ss && ss.requests ? '' : remote || !mine || (!t && !pn.gone) ? unread : 'None of its requests is in the usage records')}${tile('Failed commands', String(failed), failed ? 'negT' : '')}${tile('Files changed', files == null ? '—' : String(files), '', files == null ? unread : '')}</div></div>
@@ -427,7 +427,7 @@ function drawSession(sheet) {
       status: `<div class="a-meta">${live ? `<span class="a-pill live"><i class="live-pulse-dot"></i>LIVE${rv.follow ? ' · following' : ''}</span>` : ''}${m.archived ? '<span class="a-pill arch" data-testid="session-archived">archived</span>' : ''}<span data-testid="session-account">${toolIcon(m.harness, 14)} ${esc(acctName(m.profile))}${!params.device && acctEmail(m.profile) ? ' · ' + esc(acctEmail(m.profile)) : ''} · ${esc(tool)}</span>${tagsHtml(m.tags, 'session', m.profile + '/' + m.id, m.title || 'this session')}${m.model ? `<span>${esc(m.model)}</span>` : ''}
         ${params.device ? `<span data-testid="session-from">${cdot(pcs, params.device, m.device_name, 'on')} ran on ${esc(m.device_name || 'another computer')}</span>` : m.continued_from ? `<span data-testid="session-from">continued from ${esc(m.continued_from)}</span>` : ''}
         <span>started ${esc(when(m.started_at))} · ${plural(t.turns.length, 'turn')}</span><span>${fmt(m.tokens)} tokens${ss && ss.cost != null ? ' · ' + money(ss.cost) + ' ≈' : ''}</span></div>`,
-      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${primary}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-resume="${local && live ? 1 : ''}" aria-label="More" aria-haspopup="menu" data-testid="session-menu">⋯</button>` })}
+      actions: `${params.device ? '' : `<button class="btn" data-testid="export-md" data-act="export-md" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}">Export as Markdown</button>`}${primary}<button class="btn icon" data-act="session-menu" data-path="${esc(m.source_path)}" data-profile="${esc(m.profile)}" data-id="${esc(m.id)}" data-cwd="${esc(m.cwd)}" data-resume="${local && live ? 1 : ''}" data-harness="${esc(m.harness)}" data-as="${local ? 1 : ''}" aria-label="More" aria-haspopup="menu" data-testid="session-menu">⋯</button>` })}
     <section class="account-stats" aria-label="Session readouts">${stat('Tokens', fmt(m.tokens))}${stat('Read from cache', ss && ss.requests ? Math.round(ss.hit * 100) + '%' : '—')}${stat('First reply p50', ss && ss.p50 != null ? (ss.p50 / 1000).toFixed(1) + ' s' : '—')}${stat('Failed commands', String(failed.length), failed.length ? 'a-neg' : '')}${stat('Files changed', String(files))}</section>
     <section class="panel-card a-conv" data-testid="conv-panel" data-tour="conversation"><div class="panel-head"><h2 class="panel-title">Conversation<span class="muted">${plural(t.turns.length, 'turn')} · ${steps.length.toLocaleString()} steps · ${files} changed ${files === 1 ? 'file' : 'files'} · ${failed.length} failed</span></h2>
         <span data-tour="modes">${seg('Show', [['all', 'All'], ['changes', 'Changes'], ['failed', 'Failed']], rv.mode, (v) => `data-act="rv-mode" data-v="${v}" data-testid="mode-${v}"`)}</span></div>
@@ -560,9 +560,11 @@ const terminals = () => [
 action('terminal-menu', (el) => openMenu(el, terminals()));
 const setTerminal = (v) => mutate(() => call('settings_set', { key: 'terminal', value: v }), 'Saved');
 // ⋯: the log file's folder; for a session running here also Resume (the head's primary is Follow live) and the terminal.
-// In the Sessions pane, whose Resume has no ▾ beside it, the terminal is chosen here for every session (`terms`)
+// In the Sessions pane, whose Resume has no ▾ beside it, the terminal is chosen here for every session (`terms`).
+// A session of this computer can also be resumed as another account of its tool (`as`)
 action('session-menu', (el) => { const d = el.dataset, win = !S.state || !S.state.os || S.state.os === 'windows'; openMenu(el, [
   ...(d.resume ? [{ label: 'Resume in ' + termName(), run: () => attempt(() => call('resume', { profile: d.profile, id: d.id, cwd: d.cwd }), 'Resumed in a new terminal') }] : []), ...((d.resume || d.terms) && win ? terminals() : []),
+  ...(d.as ? resumeAsItems(d) : []),
   { label: 'Open the log file folder', run: () => call('open_folder', { path: d.path.replace(/[\\/][^\\/]*$/, '') }) },
 ]); });
 action('export-md', async (el) => {

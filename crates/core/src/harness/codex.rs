@@ -366,10 +366,7 @@ impl Harness for Codex {
         let date = name.strip_prefix("rollout-").filter(|d| d.len() >= 10 && d.as_bytes()[4] == b'-' && d.as_bytes()[7] == b'-' && d.as_bytes()[..10].iter().filter(|b| b.is_ascii_digit()).count() == 8);
         let Some(d) = date else { bail!("the rollout's name ({name}) carries no date; Codex would not find it") };
         let dest = self.home(ctx, p).join("sessions").join(&d[..4]).join(&d[5..7]).join(&d[8..10]).join(name);
-        if !dest.exists() {
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            std::fs::copy(&t.path, &dest)?;
-        }
+        crate::transcripts::place(&t.path, &dest, t.replace)?;
         Ok(crate::transcripts::Materialized { launch_args: vec!["-C".into(), local_root.display().to_string(), "resume".into(), t.id.clone()], cwd: local_root.to_path_buf(),
             note: "Codex resumes the copied rollout in this folder; the original stays as it is.".into() })
     }

@@ -1,7 +1,8 @@
 // Resume here: a session from another computer, read here and continued here as a fork in this computer's
 // clone of its repository. The dialog says what comes across and what does not; the core does the rest.
+// Resume as: one of this computer's sessions continued with another account of the same tool.
 
-import { call, toast, attempt, changed, acctName, openDialog, closeDialog, dlgHead, action, pickFolder } from './core.js';
+import { S, call, toast, notice, attempt, changed, acctName, openDialog, closeDialog, dlgHead, action, pickFolder } from './core.js';
 import { esc, when, ic } from './lib.js';
 
 const TOOL = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', agy: 'Antigravity', pi: 'Pi', omp: 'Oh My Pi' };
@@ -50,3 +51,38 @@ export const reasonShort = (r) => String(r || '').split(':')[0];
 
 /** Resume here is offered: resumable as it is, or once a folder is chosen in the dialog. */
 export const canResume = (r) => r === true || reasonShort(r) === 'not cloned here';
+
+// ---------- resume with another account ----------
+// One of this computer's sessions continued with another account of the same tool (when the first is out of room,
+// say): the core copies the transcript into that account's folder and opens it there; the original stays as it is.
+
+/** Tools whose sessions can be copied into another account (the core's `resumes_elsewhere`). */
+const RESUMES_AS = ['claude', 'codex', 'opencode', 'pi', 'omp'];
+
+/** The other accounts of a session's tool, most room first: `[{p, left}]` (`left`: % of the tightest limit, or null). */
+export function resumeAsTargets(profile, harness) {
+  if (!RESUMES_AS.includes(harness)) return [];
+  const left = (p) => { const ts = (p.quota && p.quota.tiers) || []; return ts.length ? Math.max(0, Math.round(100 - Math.max(...ts.map((t) => t.used || 0)))) : null; };
+  return ((S.state && S.state.profiles) || []).filter((p) => p.harness === harness && p.name !== profile)
+    .map((p) => ({ p, left: left(p) })).sort((a, b) => (b.left ?? -1) - (a.left ?? -1));
+}
+
+async function resumeAs(d, to) {
+  const go = (cwd) => call('session_resume_as', { profile: d.profile, id: d.id, as: to.name, ...(cwd ? { cwd } : {}) });
+  try { await go(); } catch (e) {
+    const msg = String(e).replace(/^Error: /, '');
+    // the session's folder is gone: another one is chosen, then it is tried again
+    if (!/choose a folder/.test(msg)) return notice(msg);
+    const dir = await pickFolder();
+    if (!dir || !(await attempt(() => go(dir)))) return;
+  }
+  toast(`Resumed as ${to.label || to.name} in a new terminal`);
+  changed();
+}
+
+/** The ⋯ menu's items for a session of this computer (`d`: profile, id, harness): one per other account of its tool. */
+export const resumeAsItems = (d) => resumeAsTargets(d.profile, d.harness).map(({ p, left }) => ({
+  html: `Resume as ${esc(p.label || p.name)}${left != null ? ` <span class="muted">· ${left}% left</span>` : ''}${p.identity && p.identity.needs_login ? ' <span class="muted">· login expired</span>' : ''}`,
+  testid: `resume-as-${p.name}`,
+  run: () => resumeAs(d, p),
+}));

@@ -74,6 +74,20 @@ pub fn own_zst(ctx: &Ctx, harness_id: &str, profile: &str, id: &str) -> Result<V
     Ok(zstd::encode_all(&src.bytes[..], 3)?)
 }
 
+/// One of this computer's own transcripts, plain, as a tool on this computer can read it: `(bytes, ext, source_rel)`.
+/// For a session resumed with another account (`transcripts::resume_as`); no size cap, nothing leaves the computer.
+pub(crate) fn own_plain(ctx: &Ctx, h: &dyn Harness, p: &crate::registry::Profile, meta: &crate::model::SessionMeta) -> Result<(Vec<u8>, &'static str, String)> {
+    // a log file: read whole, whatever its size (the carry's cap is for the shared folder)
+    if matches!(h.id(), "claude" | "codex" | "pi" | "omp") {
+        let path = Path::new(&meta.source_path);
+        let bytes = if path.extension().map(|e| e == "zst").unwrap_or(false) { harness::parse::read_text(path)?.into_bytes() } else { std::fs::read(path).with_context(|| format!("read {}", path.display()))? };
+        let home = h.home(ctx, p);
+        return Ok((bytes, "jsonl", path.strip_prefix(&home).unwrap_or(path).display().to_string().replace('\\', "/")));
+    }
+    let src = source(ctx, h, p, &serde_json::to_value(meta)?)?.with_context(|| format!("{} keeps no transcript to copy", h.label()))?;
+    Ok((src.bytes, src.ext, src.source_rel))
+}
+
 /// The carry with any destination: `put(key, file, bytes)` stores a compressed transcript, `remove(key, file)` drops
 /// one at the cap (`key` is the journal key, `file` the path under this computer's folder).
 #[allow(clippy::type_complexity)]
