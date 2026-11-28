@@ -77,6 +77,7 @@ pub static OPS: &[Op] = &[
     op("stop", sessions::stop, NO_LOCK | NO_CHANGE),
     op("session_stats", sessions::session_stats, NO_LOCK | NO_CHANGE),
     op("session_resume_here", sessions::session_resume_here, NO_LOCK),
+    op("session_resume_as", sessions::session_resume_as, NO_LOCK),
     op("transcripts_status", sessions::transcripts_status, NO_LOCK | NO_CHANGE),
     op("tag_set", sessions::tag_set, NO_LOCK),
     op("tag_list", sessions::tag_list, NO_LOCK | NO_CHANGE),

@@ -101,8 +101,10 @@ enum Cmd {
     Tags { #[command(flatten)] j: Json },
     /// Print one session as a transcript
     Session { profile: String, id: String, #[command(flatten)] j: Json },
-    /// Reopen a session in a new terminal, in its own account
-    Resume { profile: String, id: String, #[arg(long)] cwd: Option<PathBuf> },
+    /// Reopen a session in a new terminal, in its own account, or with another account of the same tool (--as)
+    Resume { profile: String, id: String, #[arg(long)] cwd: Option<PathBuf>,
+        /// Continue it with this account instead: a copy goes into that account's folder, the original stays as it is
+        #[arg(long = "as", value_name = "ACCOUNT")] as_account: Option<String> },
     /// Projects: list, rename or merge
     Projects { #[command(subcommand)] cmd: ProjectCmd },
     /// Bring every account in step: shared Claude settings, MCP servers and skills
@@ -619,7 +621,11 @@ fn real_main(cli: Cli) -> Result<i32> {
             if j.json { return print_json(&list.iter().map(|(t, s, p)| serde_json::json!({"tag": t, "sessions": s, "projects": p})).collect::<Vec<_>>()).map(|_| 0); }
             for (t, s, p) in list { println!("{t:<24} {s:>4} sessions  {p:>3} projects"); }
         }
-        Cmd::Resume { profile, id, cwd } => {
+        Cmd::Resume { profile, id, cwd, as_account: Some(to) } => {
+            let r = hrm_core::transcripts::resume_as(&ctx, &profile, &id, &to, cwd.as_deref())?;
+            println!("Resumed {id} as {to} in {}: {}", r["cwd"].as_str().unwrap_or(""), r["note"].as_str().unwrap_or(""));
+        }
+        Cmd::Resume { profile, id, cwd, as_account: None } => {
             service::resume(&ctx, &profile, &id, cwd)?;
             println!("Resumed {id} in a new terminal");
         }

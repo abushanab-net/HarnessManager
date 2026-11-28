@@ -1221,8 +1221,8 @@ try {
       assert.deepEqual(live.primary, ['follow-end'], 'Follow live is the one primary');
       await hasText('#sheet .a-pill.live', 'LIVE');
       await click('[data-testid=session-menu]');
-      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …'))"),
-        ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯');
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …')).filter((x) => !x.startsWith('Resume as '))"),
+        ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯ (with Resume as …, checked where a session is read)');
       await page.keyboard.press('Escape');
     } finally { await exec('window.__TAURI__.core = window.__core'); await nav('#sessions'); }
   });
@@ -1743,7 +1743,7 @@ try {
     assert.deepEqual(await paneRules(), { small: [], low: [], wide: false, above: [] }, 'nothing under 12 px, no control under 28 px, nothing wider than the pane');
     // ⋯ holds what the session page's ⋯ holds, and Esc closes the menu, not the pane
     await click('[data-testid=pane-menu]');
-    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim())"), ['Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'the terminal and the log folder behind ⋯');
+    assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim()).filter((x) => !x.startsWith('Resume as '))"), ['Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'the terminal and the log folder behind ⋯');
     await page.keyboard.press('Escape');
     await waitFor(async () => !(await exec("return !!document.querySelector('.menu')")), 'the menu closed');
     assert.ok((await paneFacts()).pane, 'and the pane stayed');
@@ -1836,7 +1836,7 @@ try {
       assert.deepEqual((await paneFacts()).primaries, ['pane:Follow live'], 'one primary');
       assert.equal(await exec("return document.querySelector('[data-testid=pane-primary]').getAttribute('href')"), '#session?profile=claude-main&id=s-main-1', 'which opens its page, following');
       await click('[data-testid=pane-menu]');
-      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …'))"),
+      assert.deepEqual(await exec("return [...document.querySelectorAll('.menu [role=menuitem]')].map((b) => b.textContent.trim().replace(/Resume in .*/, 'Resume in …')).filter((x) => !x.startsWith('Resume as '))"),
         ['Resume in …', 'Open sessions in Windows Terminal', 'Open sessions in a console window', 'Open the log file folder'], 'Resume, the terminal and the log folder behind ⋯, as on its page');
       await page.keyboard.press('Escape');
       // from another computer, resumable here: Resume here; what the index knows is shown, the rest is said to be there, and nothing is fetched
@@ -4153,6 +4153,24 @@ description: Bulk skill ${i}
     } finally {
       for (const name of [cl, cx]) try { hrm('remove', name, '--delete-home'); } catch {}
     }
+  });
+
+  // last of the session tests: the copy it makes is a session of the other account, which the lists above do not expect
+  await test('resume as another account: ⋯ lists the other accounts of the tool, and a copy opens in the one chosen as a fork', async () => {
+    await nav('#session?profile=claude-main&id=s-main-1');
+    await hasText('[data-testid=session-title]', 'Longhorn backup target');
+    await click('[data-testid=session-menu]');
+    const items = await waitFor(() => exec("const b = [...document.querySelectorAll('.menu [data-testid^=resume-as-]')]; return b.length ? b.map((x) => [x.dataset.testid.slice(10), x.textContent.trim()]) : null"), 'Resume as items');
+    const names = items.map((x) => x[0]);
+    assert.ok(!names.includes('claude-main'), 'not the account it is in');
+    assert.ok(names.every((n) => !n.startsWith('codex') && !n.startsWith('agy')), 'only accounts of its tool: ' + names);
+    assert.ok(items.every((x) => x[1].startsWith('Resume as ')), 'each says so');
+    await shot('08b-session-resume-as');
+    const to = names[0];
+    await click(`[data-testid=resume-as-${to}]`);
+    const copy = path.join(home, '.claude-' + to, 'projects', repo.replace(/[^A-Za-z0-9]/g, '-'), 's-main-1.jsonl');
+    await waitFor(() => readLines(termLog).some((t) => t.cwd === repo && t.args.join(' ') === `run ${to} -- --resume ${copy} --fork-session`), 'resumed as ' + to);
+    assert.equal(fs.readFileSync(copy, 'utf8'), fs.readFileSync(path.join(home, '.claude', 'projects', 'p', 's-main-1.jsonl'), 'utf8'), 'the copy is the transcript, the original kept');
   });
 
   await test('layout: no dialog, page or pane the run drew was wider than its frame', async () => {

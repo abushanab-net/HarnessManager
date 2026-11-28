@@ -402,6 +402,16 @@ fn sessions_group_by_repository_across_claude_and_codex() {
     assert_eq!(e.terminals().len(), 1);
     e.ok(&["resume", "codex-main", "c1", "--cwd", &repo.display().to_string()]);
     assert_eq!(e.terminals().pop().unwrap()["cwd"], json!(repo.display().to_string()));
+    // or with another Codex account, in the session's own folder: the rollout is copied into its folder under the same name, the original kept
+    e.ok(&["add", "codex-work", "--harness", "codex", "--no-login"]);
+    let apps = repo.join("apps");
+    e.ok(&["resume", "codex-main", "c1", "--as", "codex-work"]);
+    assert_eq!(e.terminals().pop().unwrap()["args"], json!(["run", "codex-work", "--", "-C", apps.display().to_string(), "resume", "c1"]));
+    let copy = e.home.join(".codex-codex-work").join("sessions").join("2026").join("11").join("01").join("rollout-2026-11-01T10-00-00-c1.jsonl");
+    assert_eq!(std::fs::read_to_string(&copy).unwrap(), rollout);
+    assert!(dir.join("rollout-2026-11-01T10-00-00-c1.jsonl.zst").exists());
+    let err = e.fail(&["resume", "codex-main", "c1", "--as", "a1"]);
+    assert!(err.contains("a1 is a Claude Code account: a Codex session resumes only with another Codex account"), "{err}");
 
     // projects can be renamed
     e.ok(&["projects", "rename", "github.com/example/platform-gitops", "Platform"]);

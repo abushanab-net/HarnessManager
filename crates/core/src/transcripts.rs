@@ -46,6 +46,9 @@ pub struct FetchedTranscript {
     /// Where the tool kept it there, relative to the tool's home.
     pub source_rel: String,
     pub bytes: u64,
+    /// A copy already where the tool looks is replaced when this one continues it (`place`), so a session handed
+    /// to another account again later carries what was added since. Resume here keeps the copy it made.
+    pub replace: bool,
 }
 
 /// What a tool needs to resume a materialized transcript: the arguments after `hrm run <profile> --`, the
@@ -55,6 +58,24 @@ pub struct Materialized {
     pub launch_args: Vec<String>,
     pub cwd: PathBuf,
     pub note: String,
+}
+
+/// Copy a transcript to where a tool looks for it. A copy already there is kept, unless `replace` and the new one
+/// continues it (the copy is where it starts): then the new one wins. A copy that went its own way is never
+/// overwritten: it may hold turns of its own.
+pub(crate) fn place(src: &Path, dest: &Path, replace: bool) -> Result<()> {
+    if dest.exists() {
+        if !replace { return Ok(()); }
+        let (old, new) = (std::fs::read(dest)?, std::fs::read(src)?);
+        if old.starts_with(&new) { return Ok(()); }
+        if !new.starts_with(&old) { bail!("{} already holds another copy of this session that was continued there: resume that one", dest.display()); }
+    }
+    std::fs::create_dir_all(dest.parent().context("no folder")?)?;
+    // through a temporary file, so a tool never reads half a copy
+    let tmp = dest.with_extension("hrm-tmp");
+    std::fs::copy(src, &tmp).with_context(|| format!("copy the transcript to {}", dest.display()))?;
+    std::fs::rename(&tmp, dest).with_context(|| format!("copy the transcript to {}", dest.display()))?;
+    Ok(())
 }
 
 /// Where a fetched copy lives: `<data>/transcripts/<origin>/<harness>/<profile>/<file without .zst>`.
@@ -103,7 +124,7 @@ pub fn fetch(ctx: &Ctx, device: &str, harness: &str, profile: &str, id: &str) ->
         crate::log::info(&format!("transcripts: fetched {key} from {name} ({} bytes)", plain.len()));
     }
     let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes })
+    Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes, replace: false })
 }
 
 /// A transcript with no entry: computers paired directly carry none (only the folder and the hub do), so the
@@ -121,7 +142,7 @@ fn fetch_direct(ctx: &Ctx, device: &str, name: &str, harness: &str, profile: &st
     let src: String = ctx.db.read(|c| Ok(c.query_row("select coalesce(json_extract(json, '$.source_path'), '') from sessions where device=? and key=?", [device, &key], |r| r.get(0)).optional()?))?.unwrap_or_default();
     let source_rel = src.rsplit(['/', '\\']).next().unwrap_or("").trim_end_matches(".zst").to_string();
     crate::log::info(&format!("transcripts: {key} came straight from {name} ({} bytes)", plain.len()));
-    Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes: plain.len() as u64 })
+    Ok(FetchedTranscript { device: device.into(), harness: harness.into(), profile: profile.into(), id: id.into(), path, source_rel, bytes: plain.len() as u64, replace: false })
 }
 
 /// The repositories this computer has, by project key: the root of every folder its usage and sessions name.
@@ -151,12 +172,17 @@ pub fn resumable(s: &SessionMeta, roots: &HashMap<String, String>, reg: &Registr
     json!(true)
 }
 
-/// Sessions this computer continued from another: journal key -> the computer it came from.
+/// Sessions this computer continued from another computer or another account: journal key -> the computer it
+/// came from, or `account:<name>` for one continued from another account here.
 pub fn forks(ctx: &Ctx) -> HashMap<String, String> {
     ctx.db.read(|c| {
         let mut st = c.prepare("select k, v from kv where k like 'forked:%'")?;
         let v = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.flatten()
-            .filter_map(|(k, v)| Some((k[7..].to_string(), serde_json::from_str::<Value>(&v).ok()?["from"].as_str()?.to_string()))).collect();
+            .filter_map(|(k, v)| {
+                let v = serde_json::from_str::<Value>(&v).ok()?;
+                let from = v["from"].as_str().map(String::from).or_else(|| v["account"].as_str().map(|a| format!("account:{a}")))?;
+                Some((k[7..].to_string(), from))
+            }).collect();
         Ok(v)
     }).unwrap_or_default()
 }
@@ -185,6 +211,50 @@ pub fn resume_here(ctx: &Ctx, device: &str, harness_id: &str, profile: &str, id:
     let key = format!("forked:{harness_id}/{profile}/{id}");
     ctx.db.kv_set(&key, &json!({"from": device, "at": now_ms()}).to_string())?;
     Ok(json!({"ok": true, "cwd": m.cwd, "args": m.launch_args, "note": m.note}))
+}
+
+/// Copy one of this computer's sessions into another account of the same tool and say how to resume it there.
+/// Nothing is launched (`resume_as` does). `cwd`: the folder to open it in; None: the session's own folder.
+pub fn prepare_resume_as(ctx: &Ctx, profile: &str, id: &str, as_profile: &str, cwd: Option<&Path>) -> Result<Materialized> {
+    let reg = ctx.registry()?;
+    let from = reg.get(profile)?;
+    let to = reg.get(as_profile)?;
+    let h = harness::of(from);
+    if to.harness != from.harness { bail!("{as_profile} is a {} account: a {} session resumes only with another {} account", harness::of(to).label(), h.label(), h.label()); }
+    if to.name == from.name { bail!("the session is already {profile}'s: resume it as it is"); }
+    if !h.resumes_elsewhere() { bail!("resuming with another account is not available for {}", h.label()); }
+    if crate::archive::is_archived(ctx, profile, id) { bail!("{}", crate::archive::REFUSAL); }
+    let f = crate::service::SessionFilter { profile: Some(profile.into()), ..Default::default() };
+    let s = crate::service::sessions(ctx, &f)?.into_iter().find(|s| s.id == id && s.device == ctx.db.device).context("session not found")?;
+    let root = match cwd {
+        Some(c) if c.is_dir() => c.to_path_buf(),
+        Some(c) => bail!("{} is not a folder on this computer", c.display()),
+        None => Some(PathBuf::from(&s.cwd)).filter(|c| !s.cwd.is_empty() && c.is_dir()).with_context(|| format!("the session's folder {} is not here any more: choose a folder", s.cwd))?,
+    };
+    // a plain copy in this computer's data folder: the tool's own file is only read
+    let (bytes, ext, source_rel) = crate::sync::transcripts::own_plain(ctx, h, from, &s)?;
+    let path = ctx.data.join("transcripts").join("accounts").join(h.id()).join(profile).join(format!("{id}.{ext}"));
+    write_atomic(&path, &bytes)?;
+    let t = FetchedTranscript { device: ctx.db.device.clone(), harness: h.id().into(), profile: profile.into(), id: id.into(), path, source_rel, bytes: bytes.len() as u64, replace: true };
+    h.materialize(ctx, to, &root, &t)
+}
+
+/// Resume one of this computer's sessions with another account of the same tool, in a new terminal: copied into
+/// that account's folder and continued there (as a fork where the tool can); the original stays as it is.
+/// Returns `{ok, profile, cwd, args, note}`.
+pub fn resume_as(ctx: &Ctx, profile: &str, id: &str, as_profile: &str, cwd: Option<&Path>) -> Result<Value> {
+    let m = prepare_resume_as(ctx, profile, id, as_profile, cwd)?;
+    crate::service::start(ctx, as_profile, Some(m.cwd.clone()), &m.launch_args)?;
+    let reg = ctx.registry()?;
+    if let Err(e) = crate::index::refresh_profiles(ctx, &reg, &[as_profile.to_string()], false, None) { crate::log::warn(&format!("index after resume as: {e:#}")); }
+    record_account_fork(ctx, &reg.get(as_profile)?.harness, profile, as_profile, id)?;
+    crate::log::info(&format!("transcripts: {profile}/{id} resumed as {as_profile}"));
+    Ok(json!({"ok": true, "profile": as_profile, "cwd": m.cwd, "args": m.launch_args, "note": m.note}))
+}
+
+/// The session `id` of `as_profile` continues one of `profile`: the Sessions page says "continued from account …".
+fn record_account_fork(ctx: &Ctx, harness_id: &str, profile: &str, as_profile: &str, id: &str) -> Result<()> {
+    ctx.db.kv_set(&format!("forked:{harness_id}/{as_profile}/{id}"), &json!({"account": profile, "at": now_ms()}).to_string())
 }
 
 /// `{carried, bytes, cap_bytes, skipped: [{key, why}], remote, fetched}`.
@@ -376,7 +446,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let src = t.path().join("fetched.jsonl");
         std::fs::write(&src, "{}\n").unwrap();
-        let fetched = |harness: &str, id: &str, rel: &str| FetchedTranscript { device: "dev".into(), harness: harness.into(), profile: "main".into(), id: id.into(), path: src.clone(), source_rel: rel.into(), bytes: 3 };
+        let fetched = |harness: &str, id: &str, rel: &str| FetchedTranscript { device: "dev".into(), harness: harness.into(), profile: "main".into(), id: id.into(), path: src.clone(), source_rel: rel.into(), bytes: 3, replace: false };
         // Claude Code: one copy under the encoded folder, resumed by path as a fork
         assert_eq!(harness::claude::project_dir_name(Path::new("C:\\Users\\sam\\src\\my.app")), "C--Users-sam-src-my-app");
         assert_eq!(harness::claude::project_dir_name(Path::new("/home/sam/src/app")), "-home-sam-src-app");
@@ -488,7 +558,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let src = t.path().join("fetched.jsonl");
         std::fs::write(&src, "{}\n").unwrap();
-        let fetched = |harness: &str, id: &str, rel: &str| FetchedTranscript { device: "dev".into(), harness: harness.into(), profile: "main".into(), id: id.into(), path: src.clone(), source_rel: rel.into(), bytes: 3 };
+        let fetched = |harness: &str, id: &str, rel: &str| FetchedTranscript { device: "dev".into(), harness: harness.into(), profile: "main".into(), id: id.into(), path: src.clone(), source_rel: rel.into(), bytes: 3, replace: false };
         // Claude Code names the copy by the id
         assert!(harness::claude::Claude.materialize(&ctx, &profile("main", "claude"), &root, &fetched("claude", "../../evil", "")).is_err());
         assert!(!t.path().join("home").join(".claude").join("evil.jsonl").exists());
@@ -522,5 +592,79 @@ mod tests {
         let e = fetch(&b, "dev1", "claude", "work", "s1").unwrap_err();
         assert!(format!("{e:#}").contains(" MB"), "{e:#}");
         assert!(!b.data.join("transcripts").join("dev1").exists(), "nothing of it is kept");
+    }
+
+    #[test]
+    fn a_session_resumes_with_another_account_of_its_tool_and_carries_what_was_added_since() {
+        let t = tempfile::tempdir().unwrap();
+        let shared = t.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let a = computer(t.path(), "A", &shared, false);
+        add_profile(&a, "claude-main", "claude");
+        let mut reg = a.registry().unwrap();
+        reg.add_profile(Profile { main: false, label: Some("Work".into()), ..profile("work", "claude") }).unwrap();
+        reg.add_profile(Profile { main: false, ..profile("cx", "codex") }).unwrap();
+        a.save_registry(&reg).unwrap();
+        let cwd = repo(t.path(), "app");
+        let orig = claude_session(&a, "s1", &cwd, "github.com/example/app", 0);
+        let before = std::fs::read(&orig).unwrap();
+        // another tool, the same account, a folder that is not here: each says so
+        assert_eq!(prepare_resume_as(&a, "claude-main", "s1", "cx").unwrap_err().to_string(), "cx is a Codex account: a Claude Code session resumes only with another Claude Code account");
+        assert_eq!(prepare_resume_as(&a, "claude-main", "s1", "claude-main").unwrap_err().to_string(), "the session is already claude-main's: resume it as it is");
+        assert!(prepare_resume_as_in(&a, "claude-main", "s1", "work", &t.path().join("gone")).unwrap_err().to_string().ends_with("is not a folder on this computer"));
+        assert_eq!(prepare_resume_as(&a, "claude-main", "nope", "work").unwrap_err().to_string(), "session not found");
+        // copied into work's folder for the session's own folder, resumed as a fork; the original is untouched
+        let m = prepare_resume_as(&a, "claude-main", "s1", "work").unwrap();
+        let copy = a.home.join(".claude-work").join("projects").join(harness::claude::project_dir_name(&cwd)).join("s1.jsonl");
+        assert_eq!(m.launch_args, vec!["--resume".to_string(), copy.display().to_string(), "--fork-session".into()]);
+        assert_eq!(m.cwd, cwd);
+        assert_eq!(std::fs::read(&copy).unwrap(), before);
+        assert_eq!(std::fs::read(&orig).unwrap(), before);
+        // the original went on: handed over again, the copy carries the new turn
+        let more = format!("{}{}\n", String::from_utf8(before.clone()).unwrap(), json!({"type": "user", "sessionId": "s1", "message": {"role": "user", "content": "and the tests"}}));
+        std::fs::write(&orig, &more).unwrap();
+        prepare_resume_as(&a, "claude-main", "s1", "work").unwrap();
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), more);
+        // a copy that went its own way is never overwritten
+        std::fs::write(&copy, "something else\n").unwrap();
+        assert!(prepare_resume_as(&a, "claude-main", "s1", "work").unwrap_err().to_string().contains("already holds another copy of this session"));
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "something else\n");
+        std::fs::write(&copy, &more).unwrap();
+        // the copy is listed as work's session, continued from the account it came from
+        crate::index::refresh_profiles(&a, &a.registry().unwrap(), &["work".to_string()], false, None).unwrap();
+        record_account_fork(&a, "claude", "claude-main", "work", "s1").unwrap();
+        let mut reg = a.registry().unwrap();
+        reg.profiles.iter_mut().find(|p| p.name == "claude-main").unwrap().label = Some("Personal".into());
+        a.save_registry(&reg).unwrap();
+        let list = crate::service::sessions(&a, &crate::service::SessionFilter { profile: Some("work".into()), ..Default::default() }).unwrap();
+        assert_eq!(list.iter().find(|s| s.id == "s1").expect("listed under work").continued_from.as_deref(), Some("account Personal"));
+    }
+
+    fn prepare_resume_as_in(ctx: &Ctx, profile: &str, id: &str, as_profile: &str, cwd: &Path) -> Result<Materialized> {
+        super::prepare_resume_as(ctx, profile, id, as_profile, Some(cwd))
+    }
+
+    fn prepare_resume_as(ctx: &Ctx, profile: &str, id: &str, as_profile: &str) -> Result<Materialized> {
+        super::prepare_resume_as(ctx, profile, id, as_profile, None)
+    }
+
+    #[test]
+    fn place_keeps_a_copy_unless_the_new_one_continues_it() {
+        let t = tempfile::tempdir().unwrap();
+        let (src, dest) = (t.path().join("src"), t.path().join("d").join("dest"));
+        std::fs::write(&src, "ab").unwrap();
+        place(&src, &dest, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "ab");
+        std::fs::write(&src, "abc").unwrap();
+        place(&src, &dest, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "ab", "resume here keeps its copy");
+        place(&src, &dest, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "abc");
+        std::fs::write(&src, "ab").unwrap();
+        place(&src, &dest, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "abc", "a copy that has more is kept");
+        std::fs::write(&src, "xy").unwrap();
+        assert!(place(&src, &dest, true).is_err());
+        assert!(!dest.with_extension("hrm-tmp").exists());
     }
 }

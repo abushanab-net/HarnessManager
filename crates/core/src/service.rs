@@ -662,7 +662,11 @@ fn decorate(ctx: &Ctx, reg: &Registry, list: Vec<(Lite, String)>) -> Result<Vec<
         } else if m.device != *me {
             m.resumable = Some(crate::transcripts::resumable(&m, &roots, reg));
         } else {
-            m.continued_from = forks.get(&crate::db::session_key(&m)).and_then(|d| names.get(d).cloned());
+            // from another computer: its name; from another account here: that account's
+            m.continued_from = forks.get(&crate::db::session_key(&m)).and_then(|d| match d.strip_prefix("account:") {
+                Some(a) => Some(format!("account {}", reg.profiles.iter().find(|p| p.name == a).and_then(|p| p.label.clone()).unwrap_or_else(|| a.to_string()))),
+                None => names.get(d).cloned(),
+            });
         }
         out.push(m);
     }

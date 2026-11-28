@@ -99,6 +99,11 @@ pub fn session_resume_here(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> 
     hrm_core::transcripts::resume_here(ctx, &s(a, "device")?, &s(a, "harness")?, &s(a, "profile")?, &s(a, "id")?, opt(a, "cwd").map(PathBuf::from).as_deref())
 }
 
+// one of this computer's sessions continued with another account of the same tool
+pub fn session_resume_as(_: &AppState, ctx: &Ctx, a: &Value) -> Result<Value> {
+    hrm_core::transcripts::resume_as(ctx, &s(a, "profile")?, &s(a, "id")?, &s(a, "as")?, opt(a, "cwd").map(PathBuf::from).as_deref())
+}
+
 pub fn transcripts_status(_: &AppState, ctx: &Ctx, _: &Value) -> Result<Value> { hrm_core::transcripts::status(ctx) }
 
 // tags: free text on sessions ("session", key profile/id) and projects ("project", the project key)

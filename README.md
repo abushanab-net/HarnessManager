@@ -111,7 +111,8 @@ you are on. The **?** button replays the page's tour.
 - **Sessions:** every tool's sessions in one place, with one filter line, the running ones on top, and groups by
   project, date, account, tool or tag. Tag sessions and projects with your own labels. A reading view shows the
   steps, failed commands, answers and changed files, and follows a running session live. Resume reopens a
-  session in its own account.
+  session in its own account; **⋯ → Resume as** continues it with another account of the same tool (when the
+  first is out of room, say): a copy goes into that account's folder, and the original stays as it is.
 - **Needs you:** a Claude Code session started from Harness Manager says whether it is working, waiting for you
   or done, through a hook it is started with (`hrm settings session_hooks false` turns it off). The hook comes
   from a file in Harness Manager's own folder: no account's files change, and sessions started elsewhere are not
@@ -262,6 +263,7 @@ Sessions and projects
   hrm sessions [--group project|date|account|tool] [--open] [--project <key>] [--tag <tag>] [--search <text>]
   hrm session <account> <id>                 one session as a transcript
   hrm resume <account> <id> [--cwd <folder>] reopen a session in a new terminal
+  hrm resume <account> <id> --as <other>     continue it with another account of the same tool
   hrm tag session|project <key> [<tags>…]    set the tags (none clears them)
   hrm tags                                   every tag and how often it is used
   hrm projects list|rename|merge|reset       the projects and their names

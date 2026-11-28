@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use reqwest::blocking::Client;
 use serde_json::Value;
 
@@ -490,10 +490,7 @@ impl Harness for Claude {
         // the id came from another computer and names the copy
         if !crate::util::safe_name(&t.id) { bail!("this session's id cannot be used as a file name here"); }
         let dest = self.home(ctx, p).join("projects").join(project_dir_name(local_root)).join(format!("{}.jsonl", t.id));
-        if !dest.exists() {
-            std::fs::create_dir_all(dest.parent().unwrap())?;
-            std::fs::copy(&t.path, &dest).with_context(|| format!("copy the transcript to {}", dest.display()))?;
-        }
+        crate::transcripts::place(&t.path, &dest, t.replace)?;
         Ok(crate::transcripts::Materialized { launch_args: vec!["--resume".into(), dest.display().to_string(), "--fork-session".into()], cwd: local_root.to_path_buf(),
             note: "Claude Code opens a new session that continues from the transcript; the copy and the original stay as they are.".into() })
     }
